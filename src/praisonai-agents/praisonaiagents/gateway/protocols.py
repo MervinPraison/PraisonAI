@@ -25,6 +25,7 @@ from typing import (
     Optional,
     Protocol,
     Set,
+    Tuple,
     TypedDict,
     Union,
     runtime_checkable,
@@ -2628,6 +2629,57 @@ def drain_timeout_has_headroom(
     if stop <= 0:
         return True
     return stop >= drain + head
+
+
+# ---------------------------------------------------------------------------
+# Code-skew guard for hot operations (Issue #2460)
+# ---------------------------------------------------------------------------
+
+
+def detect_code_skew(
+    boot_fp: Optional[str], disk_fp: Optional[str]
+) -> Optional[Tuple[str, str]]:
+    """Return shortened ``(boot, disk)`` fingerprints if the code changed.
+
+    This is the pure, side-effect-free heart of the code-skew guard. It does
+    not read the filesystem or git; callers pass the fingerprint captured at
+    boot and a freshly-read on-disk fingerprint (see
+    :func:`read_code_fingerprint`).
+
+    The check is intentionally fail-open: if either fingerprint is unknown
+    (``None`` / empty) it returns ``None`` so the caller proceeds normally and
+    never blocks an operation just because the revision could not be read.
+
+    Args:
+        boot_fp: Fingerprint captured when the gateway started.
+        disk_fp: Fingerprint of the code currently on disk.
+
+    Returns:
+        ``(boot_short, disk_short)`` when the running code differs from disk,
+        otherwise ``None``. Git SHAs are shortened to 7 characters (including a
+        leading SHA in a combined ``"<sha>+mtime:..."`` fingerprint); other
+        fingerprints are returned unchanged.
+    """
+    if not boot_fp or not disk_fp:
+        return None
+    if boot_fp == disk_fp:
+        return None
+
+    def _is_sha(token: str) -> bool:
+        return len(token) == 40 and all(c in "0123456789abcdef" for c in token.lower())
+
+    def _short(fp: str) -> str:
+        # Shorten bare git SHAs (40 hex chars) to the conventional 7, including
+        # a leading SHA in a combined "<sha>+mtime:<ns>" fingerprint; leave
+        # other fingerprint shapes (e.g. "mtime:...") untouched.
+        if _is_sha(fp):
+            return fp[:7]
+        head, sep, tail = fp.partition("+")
+        if sep and _is_sha(head):
+            return f"{head[:7]}{sep}{tail}"
+        return fp
+
+    return (_short(boot_fp), _short(disk_fp))
 
 
 # ---------------------------------------------------------------------------

@@ -495,6 +495,258 @@ def handle_run_status_command(
         return f"Error getting status: {e}"
 
 
+def _newest_py_mtime_ns(checkout_dir: str) -> int:
+    """Return the newest ``.py`` modification time (ns) under ``checkout_dir``.
+
+    Returns ``0`` when no readable ``.py`` files are found. Best-effort: per-file
+    ``OSError`` and any walk error are swallowed so the caller can fail open.
+    """
+    import os
+
+    newest = 0
+    try:
+        for root, _dirs, files in os.walk(checkout_dir):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                try:
+                    mtime = os.stat(os.path.join(root, name)).st_mtime_ns
+                except OSError:
+                    continue
+                if mtime > newest:
+                    newest = mtime
+    except Exception:
+        return 0
+    return newest
+
+
+def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
+    """Best-effort fingerprint of a single directory (git rev + newest mtime).
+
+    * when ``checkout_dir`` is a git checkout, ``git rev-parse HEAD`` is used and
+      the newest source ``.py`` mtime is *combined* with it
+      (``"<rev>+mtime:<int_ns>"``) so an in-place file overwrite that does **not**
+      advance ``HEAD`` (e.g. an editable/source checkout patched by ``pip install
+      -U`` or a manual copy) still moves the fingerprint;
+    * otherwise the newest source ``.py`` mtime alone is used as
+      ``"mtime:<int_ns>"`` so an in-place file update still moves the
+      fingerprint, preserving nanosecond precision for rapid edits;
+    * on any error (no git, unreadable dir) ``None`` is returned so callers
+      fail open and never block normal operation.
+    """
+    if not isinstance(checkout_dir, str) or not checkout_dir:
+        return None
+
+    # Prefer a git revision when the checkout is a working tree.
+    rev = None
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        candidate = result.stdout.strip()
+        if result.returncode == 0 and candidate:
+            rev = candidate
+    except Exception:
+        rev = None
+
+    # Compute the newest .py mtime so an in-place edit registers even when git
+    # succeeds but HEAD is unchanged (dirty/source checkout). Use nanosecond
+    # precision so rapid successive edits are distinguishable.
+    newest = _newest_py_mtime_ns(checkout_dir)
+
+    if rev is not None:
+        # Combine so a same-HEAD file overwrite still moves the fingerprint.
+        if newest > 0:
+            return f"{rev}+mtime:{newest}"
+        return rev
+
+    if newest > 0:
+        return f"mtime:{newest}"
+
+    return None
+
+
+def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
+    """Return a lightweight fingerprint of the on-disk gateway code.
+
+    The gateway is a long-lived process that imports much of its surface
+    lazily. When an operator updates a *running* checkout in place (``git
+    pull`` / ``pip install -U`` / an auto-update step on a durable volume) the
+    next first-use lazy import can pick up changed code and fail cryptically.
+    Capturing this fingerprint once at boot and comparing it before a hot
+    operation lets the gateway refuse the risky operation with a clear
+    "restart required" message instead of crashing.
+
+    This is the concrete, wrapper-side implementation (subprocess + filesystem
+    walk); the pure comparison predicate lives in the core SDK as
+    :func:`praisonaiagents.gateway.detect_code_skew`.
+
+    When ``checkout_dir`` is not given, the fingerprint spans **both** packages
+    that participate in the hot ``/model`` path: the ``praisonai`` wrapper
+    (which owns the command handler) and the ``praisonaiagents`` SDK (whose
+    ``gateway.*`` surface is lazy-imported). In an installed layout these are
+    sibling packages, so an in-place update to *either* must move the
+    fingerprint. The per-package fingerprints are combined fail-open: any
+    package that resolves contributes; if none resolve, ``None`` is returned.
+
+    Args:
+        checkout_dir: Directory whose code revision to fingerprint. When given,
+            only that directory is fingerprinted. When omitted, both the
+            ``praisonai`` and ``praisonaiagents`` package directories are used.
+
+    Returns:
+        An opaque, non-secret fingerprint string, or ``None`` if it cannot be
+        determined.
+    """
+    import os
+
+    if checkout_dir is not None:
+        return _fingerprint_dir(checkout_dir)
+
+    # Fingerprint both packages on the hot path so an in-place update to either
+    # the wrapper or the lazily-imported SDK is detected. Resolve each package
+    # directory independently and fail open per package.
+    targets = []
+    try:
+        # praisonai/praisonai/ — the wrapper package that owns the /model path.
+        targets.append(
+            ("praisonai", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+    except Exception:
+        pass
+    try:
+        import praisonaiagents
+
+        agents_file = getattr(praisonaiagents, "__file__", None)
+        if agents_file:
+            targets.append(
+                ("praisonaiagents", os.path.dirname(os.path.abspath(agents_file)))
+            )
+    except Exception:
+        pass
+
+    parts = []
+    for label, directory in targets:
+        fp = _fingerprint_dir(directory)
+        if fp:
+            parts.append(f"{label}={fp}")
+
+    if not parts:
+        return None
+    return "|".join(parts)
+
+
+def capture_boot_fingerprint(session_manager) -> Optional[str]:
+    """Capture and cache the wrapper code fingerprint at gateway startup.
+
+    Call this once when the long-lived gateway/bot process boots (before any
+    hot operation can run) so :func:`check_code_skew` has a true baseline taken
+    at startup rather than on first ``/model`` use. It is idempotent: a
+    previously captured fingerprint is preserved.
+
+    Best-effort and fail-open: returns ``None`` (and stores nothing) on any
+    error so startup is never blocked. (Issue #2460)
+
+    Args:
+        session_manager: The bot/gateway session manager to cache the
+            fingerprint on (``_boot_code_fp``).
+
+    Returns:
+        The captured fingerprint, or ``None`` if it could not be determined.
+    """
+    try:
+        if session_manager is None:
+            return None
+        # Pre-resolve the pure comparison predicate now, while imports are
+        # known-good. Caching it means check_code_skew never has to import the
+        # SDK gateway surface *during* a hot operation — an in-place update that
+        # broke that import would otherwise make the guard's own import raise,
+        # fail open, and let the risky switch proceed (defeating the guard).
+        try:
+            if getattr(session_manager, "_boot_detect_code_skew", None) is None:
+                from praisonaiagents.gateway import detect_code_skew
+
+                session_manager._boot_detect_code_skew = detect_code_skew
+        except Exception:
+            pass
+        existing = getattr(session_manager, "_boot_code_fp", None)
+        if existing is not None:
+            return existing
+        boot_fp = read_code_fingerprint()
+        try:
+            session_manager._boot_code_fp = boot_fp
+        except Exception:
+            pass
+        return boot_fp
+    except Exception:
+        return None
+
+
+def check_code_skew(session_manager) -> Optional[str]:
+    """Return a "restart required" message if the gateway code changed on disk.
+
+    The gateway is a long-lived process that imports much of its surface
+    lazily. When an operator updates a *running* checkout in place, the next
+    first-use lazy import on a hot path (e.g. ``/model``) can pick up changed
+    code and crash with a cryptic ``ImportError``. This best-effort guard
+    compares the boot fingerprint (ideally captured at startup via
+    :func:`capture_boot_fingerprint`) to the current on-disk fingerprint before
+    such an operation. If no boot fingerprint was captured at startup it falls
+    back to capturing one on first use.
+
+    It is fail-open: any error, an unavailable fingerprint, or an explicit
+    ``code_skew_guard = False`` opt-out returns ``None`` so normal operation is
+    never blocked. (Issue #2460)
+
+    Args:
+        session_manager: The bot/gateway session manager. Used to cache the
+            boot fingerprint and read an optional ``code_skew_guard`` toggle.
+
+    Returns:
+        A clear, actionable message string on detected skew, otherwise ``None``.
+    """
+    try:
+        if session_manager is None:
+            return None
+        if getattr(session_manager, "code_skew_guard", True) is False:
+            return None
+
+        # Prefer the predicate resolved at boot (when imports were known-good)
+        # so a broken SDK gateway surface after an in-place update cannot make
+        # the guard's *own* import raise and fail open. Fall back to a fresh
+        # import only when no boot reference was cached.
+        detect_code_skew = getattr(session_manager, "_boot_detect_code_skew", None)
+        if detect_code_skew is None:
+            from praisonaiagents.gateway import detect_code_skew
+
+        boot_fp = getattr(session_manager, "_boot_code_fp", None)
+        if boot_fp is None:
+            # No startup baseline was captured: capture it now as a fallback so
+            # later in-place updates are still caught. Capturing at startup via
+            # capture_boot_fingerprint() additionally guards the very first call.
+            capture_boot_fingerprint(session_manager)
+            return None
+
+        disk_fp = read_code_fingerprint()
+        skew = detect_code_skew(boot_fp, disk_fp)
+        if skew:
+            return (
+                f"⚠️ Gateway code changed on disk since it started "
+                f"({skew[0]} → {skew[1]}). Restart the gateway to apply "
+                f"updates before switching models."
+            )
+    except Exception:
+        # Never let the guard itself break a hot operation.
+        return None
+    return None
+
+
 def handle_model_command(
     session_manager,
     user_id: str,
@@ -512,6 +764,14 @@ def handle_model_command(
     Returns:
         Response message
     """
+    # Pre-flight code-skew guard: if the gateway's code changed on disk since
+    # it booted, refuse the switch with a clear "restart required" message
+    # instead of risking a cryptic ImportError from a first-use lazy import.
+    if model_name:
+        skew_message = check_code_skew(session_manager)
+        if skew_message:
+            return skew_message
+
     # Resolve the storage key so the override is keyed identically to how
     # chat() looks it up (handles cross-platform identity resolution).
     storage_key = user_id
