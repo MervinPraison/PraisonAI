@@ -393,9 +393,12 @@ class DeliveryRouter:
     - "<alias>" - friendly name from the channel directory
     """
     
-    def __init__(self, botos: BotOS):
+    def __init__(self, botos: BotOS, dead_targets: Optional[Any] = None):
         self._botos = botos
         self.directory = ChannelDirectory()
+        # Optional self-healing dead-target registry (issue #2486). Default OFF:
+        # when None, delivery behaves exactly as before (no suppression).
+        self._dead_targets = dead_targets
     
     def refresh_directory(self) -> None:
         """Refresh the channel directory from the registered bots.
@@ -483,7 +486,62 @@ class DeliveryRouter:
                 logger.warning(f"DeliveryRouter: platform '{platform}' not available")
                 return False
             
-            await bot.send_message(channel_id, text)
+            # Short-circuit known-dead targets (issue #2486): the bot was
+            # kicked/blocked or the chat no longer exists, so skip the doomed
+            # API call instead of burning rate-limit budget and flooding logs.
+            # Self-healing: once the re-probe interval elapses we let a single
+            # send through so a recovered target (bot re-added, group restored)
+            # can clear itself far sooner than the long TTL would allow.
+            if self._dead_targets is not None and self._dead_targets.is_dead(
+                platform, channel_id
+            ):
+                if self._dead_targets.should_reprobe(platform, channel_id):
+                    logger.info(
+                        "DeliveryRouter: re-probing dead target %s:%s "
+                        "(target_reprobe_attempt)",
+                        platform,
+                        channel_id,
+                    )
+                else:
+                    logger.info(
+                        "DeliveryRouter: suppressing send to dead target %s:%s "
+                        "(target_unreachable_suppressed)",
+                        platform,
+                        channel_id,
+                    )
+                    return False
+            
+            try:
+                await bot.send_message(channel_id, text)
+            except Exception as send_err:
+                # On a *confirmed permanent* failure, mark the whole target dead
+                # so future cycles short-circuit. Transient errors and
+                # message-scoped 404s stay on the existing retry path.
+                if self._dead_targets is not None:
+                    try:
+                        from ._resilience import is_permanent_target_failure
+
+                        if is_permanent_target_failure(send_err, platform):
+                            self._dead_targets.mark_dead(
+                                platform, channel_id, reason=str(send_err)
+                            )
+                    except Exception:
+                        logger.debug(
+                            "DeliveryRouter: dead-target classification failed",
+                            exc_info=True,
+                        )
+                raise
+
+            # Success self-heals: any earlier dead flag is cleared so a recovered
+            # target (user re-added the bot, group restored) resumes delivery.
+            if self._dead_targets is not None:
+                try:
+                    self._dead_targets.clear(platform, channel_id)
+                except Exception:
+                    logger.debug(
+                        "DeliveryRouter: dead-target clear failed", exc_info=True
+                    )
+
             logger.info(f"DeliveryRouter: delivered to {platform}:{channel_id}")
             return True
             
