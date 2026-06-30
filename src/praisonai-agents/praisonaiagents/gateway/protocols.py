@@ -2683,6 +2683,84 @@ def detect_code_skew(
 
 
 # ---------------------------------------------------------------------------
+# Restart-intent exit-code protocol (Issue #2437)
+# ---------------------------------------------------------------------------
+#
+# When the gateway/bot process exits, its exit code is the only signal a
+# process supervisor (systemd ``Restart=on-failure``, an s6 finish script,
+# a Kubernetes restart policy) receives about whether coming back is worth
+# it. A generic ``1`` makes a transient blip and a fatal misconfiguration
+# look identical, so a misconfigured gateway crash-loops forever instead of
+# stopping and surfacing the problem.
+#
+# These constants follow the ``sysexits.h`` convention so they compose with
+# existing supervisor tooling without bespoke wrappers:
+#
+#   * ``EX_TEMPFAIL`` (75) — transient/restartable: ask the supervisor to
+#     restart (network blip, upstream 503, intentional drain-then-restart).
+#   * ``EX_CONFIG`` (78) — fatal config error: do NOT restart, fix the
+#     config (duplicate token, no platforms, malformed ``gateway.yaml``,
+#     invalid credentials at startup).
+#
+# The constants and the pure ``classify_exit_reason`` classifier live in
+# core so the wrapper CLI, the runtime entry point, and any future runtime
+# share one source of truth. The wrapper owns the actual ``sys.exit``.
+
+GATEWAY_OK_EXIT_CODE = 0
+"""Clean shutdown / success (EX_OK)."""
+
+GATEWAY_RESTART_EXIT_CODE = 75
+"""Transient/restartable failure — ask the supervisor to restart (EX_TEMPFAIL)."""
+
+GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
+"""Fatal config error — supervisor should stop restarting; fix config (EX_CONFIG)."""
+
+
+class FatalConfigError(Exception):
+    """Raised on an unrecoverable gateway/bot configuration error.
+
+    Signals that restarting the process is pointless until an operator
+    fixes the configuration — e.g. two bots sharing one token, no
+    messaging platform configured, a malformed ``gateway.yaml``, or an
+    invalid credential detected at startup. The wrapper entry point maps
+    this to :data:`GATEWAY_FATAL_CONFIG_EXIT_CODE` (78) so the supervisor
+    halts the crash-loop and the failure is terminal and visible.
+    """
+
+
+def classify_exit_reason(exc: "BaseException | None") -> int:
+    """Map an exit cause to a supervisor-friendly exit code (pure).
+
+    The single source of truth shared by the wrapper CLI and runtime
+    entry point. Side-effect free so it is provable in isolation.
+
+    Args:
+        exc: The exception that terminated the process, or ``None`` for a
+            clean shutdown.
+
+    Returns:
+        * :data:`GATEWAY_OK_EXIT_CODE` (0) when ``exc`` is ``None`` or a
+          ``KeyboardInterrupt``/``SystemExit(0)`` (clean stop).
+        * :data:`GATEWAY_FATAL_CONFIG_EXIT_CODE` (78) for
+          :class:`FatalConfigError` (do not restart — fix config).
+        * :data:`GATEWAY_RESTART_EXIT_CODE` (75) for any other exception
+          (transient — ask supervisor to restart).
+    """
+    if exc is None:
+        return GATEWAY_OK_EXIT_CODE
+    if isinstance(exc, KeyboardInterrupt):
+        return GATEWAY_OK_EXIT_CODE
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        if code is None or code == 0:
+            return GATEWAY_OK_EXIT_CODE
+        return code if isinstance(code, int) else GATEWAY_RESTART_EXIT_CODE
+    if isinstance(exc, FatalConfigError):
+        return GATEWAY_FATAL_CONFIG_EXIT_CODE
+    return GATEWAY_RESTART_EXIT_CODE
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 
