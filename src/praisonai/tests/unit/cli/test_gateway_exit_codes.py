@@ -91,3 +91,42 @@ def test_exit_codes_are_distinct():
     # The whole point of #2437: a misconfig must not look like a transient blip.
     assert GATEWAY_OK_EXIT_CODE == 0
     assert GATEWAY_FATAL_CONFIG_EXIT_CODE != GATEWAY_RESTART_EXIT_CODE
+
+
+def test_serve_gateway_command_propagates_fatal_exit_code(monkeypatch):
+    # Greptile P1: `praisonai serve gateway` discarded start()'s int return, so
+    # a fatal-config (78) start exited the Typer command with 0 — a misconfig
+    # looked like a healthy gateway to a supervisor. The command must propagate.
+    import typer
+
+    from praisonai.cli.commands import serve as serve_cmd
+
+    def fake_start(self, *, host, port, agent_file=None):
+        return GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+    monkeypatch.setattr(
+        "praisonai.cli.features.gateway.GatewayHandler.start", fake_start
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        serve_cmd.serve_gateway(
+            host="127.0.0.1", port=8765, agents_file="/missing.yaml"
+        )
+    assert excinfo.value.exit_code == GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+
+def test_serve_gateway_command_clean_shutdown_exits_zero(monkeypatch):
+    import typer
+
+    from praisonai.cli.commands import serve as serve_cmd
+
+    def fake_start(self, *, host, port, agent_file=None):
+        return GATEWAY_OK_EXIT_CODE
+
+    monkeypatch.setattr(
+        "praisonai.cli.features.gateway.GatewayHandler.start", fake_start
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        serve_cmd.serve_gateway(host="127.0.0.1", port=8765, agents_file=None)
+    assert excinfo.value.exit_code == GATEWAY_OK_EXIT_CODE
