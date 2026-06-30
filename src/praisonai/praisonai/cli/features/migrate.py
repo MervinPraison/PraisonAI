@@ -536,7 +536,7 @@ class CodeConverter:
         
         # Check if code has any framework imports that need conversion
         has_framework_imports = bool(re.search(
-            r'from\s+(?:some_framework|crewai|agno|\w+\.(?:agent|team|workflow))',
+            r'from\s+(?:some_framework|crewai|agno|google\.adk|\w+\.(?:agent|team|workflow))',
             code
         ))
         
@@ -623,6 +623,23 @@ class CodeConverter:
         for pattern, replacement in agno_replacements:
             if re.search(pattern, converted):
                 converted = re.sub(pattern, replacement, converted)
+
+        google_adk_replacements = [
+            (r'^from\s+google\.adk\.agents\s+import\s+Agent\b.*$', 'from praisonaiagents import Agent', re.MULTILINE),
+            (r'^from\s+google\.adk\s+import\s+Agent\b.*$', 'from praisonaiagents import Agent', re.MULTILINE),
+            (r'^from\s+google\.adk\.runners\s+import\s+InMemoryRunner\b.*$', '', re.MULTILINE),
+            (r'\bInMemoryRunner\s*\([^)]*\)', 'AgentTeam('),
+        ]
+
+        for item in google_adk_replacements:
+            if len(item) == 3:
+                pattern, replacement, flags = item
+            else:
+                pattern, replacement = item
+                flags = 0
+            if re.search(pattern, converted, flags):
+                converted = re.sub(pattern, replacement, converted, flags=flags)
+                imports_to_add.add("from praisonaiagents import Agent, AgentTeam")
         
         # Add imports if not already present
         if imports_to_add and "from praisonaiagents import" not in converted:

@@ -117,7 +117,7 @@ openai-agents = [
     "praisonai-tools>=0.1.0",
 ]
 agno = [
-    "praisonai-frameworks[agno]>=0.1.6",
+    "praisonai-frameworks[agno]>=0.1.7",
     "praisonai-tools>=0.1.0",
 ]
 google-adk = [
