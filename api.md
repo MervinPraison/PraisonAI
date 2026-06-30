@@ -957,6 +957,7 @@ Methods:
 * <code title="cli">praisonai flow list <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
 * <code title="cli">praisonai flow version <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
 * <code title="cli">praisonai gateway channels <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway doctor <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway install <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway logs <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
