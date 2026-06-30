@@ -134,6 +134,101 @@ description: A test skill
             assert isinstance(skills[0], SkillMetadata)
             assert skills[0].name == "test-skill"
     
+    def test_fallback_skill_hidden_when_capability_present(self):
+        """A fallback skill is hidden when its target tool is available."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "web-via-terminal"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: web-via-terminal
+description: Fetch the web via terminal when no web tool is available.
+fallback_for_tools: [web_search]
+---
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+            # Target tool present -> fallback should be hidden.
+            manager._validator._tool_cache = {"web_search"}
+
+            names = [s.name for s in manager.get_available_skills()]
+            assert "web-via-terminal" not in names
+
+    def test_fallback_skill_offered_when_capability_absent(self):
+        """A fallback skill is offered when its target tool is absent."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "web-via-terminal"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: web-via-terminal
+description: Fetch the web via terminal when no web tool is available.
+fallback_for_tools: [web_search]
+---
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+            # Target tool absent -> fallback should be offered.
+            manager._validator._tool_cache = {"terminal"}
+
+            names = [s.name for s in manager.get_available_skills()]
+            assert "web-via-terminal" in names
+
+    def test_fallback_skill_hidden_when_own_requirements_unmet(self):
+        """A fallback skill is hidden when its own requires_* gate is unmet.
+
+        Even in the default (non-strict) enforcement mode, a fallback skill
+        that needs a tool which is absent must not be offered — otherwise an
+        unusable skill leaks into the prompt.
+        """
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "web-via-terminal"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: web-via-terminal
+description: Fetch the web via terminal when no web tool is available.
+requires_tools: [terminal]
+fallback_for_tools: [web_search]
+---
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+            # Fallback target absent (good) but required terminal also absent.
+            manager._validator._tool_cache = set()
+
+            names = [s.name for s in manager.get_available_skills()]
+            assert "web-via-terminal" not in names
+
+    def test_fallback_skill_offered_when_own_requirements_met(self):
+        """A fallback skill is offered when its requires_* gate is satisfied."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "web-via-terminal"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("""---
+name: web-via-terminal
+description: Fetch the web via terminal when no web tool is available.
+requires_tools: [terminal]
+fallback_for_tools: [web_search]
+---
+""")
+
+            manager = SkillManager()
+            manager.add_skill(str(skill_dir))
+            # Required terminal present, fallback target absent -> offered.
+            manager._validator._tool_cache = {"terminal"}
+
+            names = [s.name for s in manager.get_available_skills()]
+            assert "web-via-terminal" in names
+
     def test_to_prompt(self):
         """Test generating prompt XML."""
         from praisonaiagents.skills.manager import SkillManager

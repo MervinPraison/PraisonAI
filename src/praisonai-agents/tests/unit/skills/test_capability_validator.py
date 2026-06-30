@@ -60,6 +60,31 @@ class TestSkillRequirements:
         requirements = SkillRequirements.from_frontmatter(metadata)
         assert requirements.openclaw_hints == {"version": "1.0", "compatibility": "hermes"}
         
+    def test_from_frontmatter_fallback_for_tools(self):
+        """Test parsing fallback_for_tools (graceful degradation)."""
+        metadata = {"fallback_for_tools": ["web_search", "web"]}
+        requirements = SkillRequirements.from_frontmatter(metadata)
+        assert requirements.fallback_for_tools == ["web_search", "web"]
+        assert requirements.fallback_for_servers == []
+        assert not requirements.is_empty()
+
+    def test_from_frontmatter_fallback_for_servers(self):
+        """Test parsing fallback_for_servers (graceful degradation)."""
+        metadata = {"fallback-for-servers": "mcp:filesystem"}
+        requirements = SkillRequirements.from_frontmatter(metadata)
+        assert requirements.fallback_for_servers == ["mcp:filesystem"]
+        assert not requirements.is_empty()
+
+    def test_from_frontmatter_fallback_with_requires(self):
+        """Fallback declarations compose with existing requires_* gates."""
+        metadata = {
+            "requires_tools": ["terminal"],
+            "fallback_for_tools": ["web_search", "web"],
+        }
+        requirements = SkillRequirements.from_frontmatter(metadata)
+        assert requirements.tools == ["terminal"]
+        assert requirements.fallback_for_tools == ["web_search", "web"]
+
     def test_normalize_list(self):
         """Test list normalization utility."""
         assert SkillRequirements._normalize_list("a b c") == ["a", "b", "c"]

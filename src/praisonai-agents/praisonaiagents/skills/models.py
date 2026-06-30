@@ -36,11 +36,19 @@ class SkillRequirements:
         tools: Required tool names (from tool registry)
         env_vars: Required environment variables (use sparingly)
         openclaw_hints: OpenClaw-specific metadata (passthrough)
+        fallback_for_tools: Tools this skill is a graceful fallback for. The
+            skill is offered only when *none* of these tools are present,
+            keeping capable agents free of redundant fallback guidance.
+        fallback_for_servers: MCP servers this skill is a graceful fallback
+            for. The skill is offered only when *none* of these servers are
+            present.
     """
     servers: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list) 
     env_vars: List[str] = field(default_factory=list)
     openclaw_hints: dict = field(default_factory=dict)
+    fallback_for_tools: List[str] = field(default_factory=list)
+    fallback_for_servers: List[str] = field(default_factory=list)
     
     @classmethod
     def from_frontmatter(cls, metadata: dict) -> "SkillRequirements":
@@ -61,6 +69,8 @@ class SkillRequirements:
         tools = []
         env_vars = []
         openclaw_hints = {}
+        fallback_for_tools = []
+        fallback_for_servers = []
         
         # Parse servers
         if "requires_servers" in metadata:
@@ -87,12 +97,26 @@ class SkillRequirements:
         # OpenClaw hints (passthrough)
         if "openclaw" in metadata:
             openclaw_hints = metadata["openclaw"] if isinstance(metadata["openclaw"], dict) else {}
-            
+
+        # Parse graceful-degradation fallback declarations. A fallback skill is
+        # surfaced only when its target capability is ABSENT (inverse of requires).
+        if "fallback_for_tools" in metadata:
+            fallback_for_tools = cls._normalize_list(metadata["fallback_for_tools"])
+        elif "fallback-for-tools" in metadata:
+            fallback_for_tools = cls._normalize_list(metadata["fallback-for-tools"])
+
+        if "fallback_for_servers" in metadata:
+            fallback_for_servers = cls._normalize_list(metadata["fallback_for_servers"])
+        elif "fallback-for-servers" in metadata:
+            fallback_for_servers = cls._normalize_list(metadata["fallback-for-servers"])
+
         return cls(
             servers=servers,
             tools=tools,
             env_vars=env_vars, 
-            openclaw_hints=openclaw_hints
+            openclaw_hints=openclaw_hints,
+            fallback_for_tools=fallback_for_tools,
+            fallback_for_servers=fallback_for_servers
         )
     
     @staticmethod
@@ -108,7 +132,10 @@ class SkillRequirements:
     
     def is_empty(self) -> bool:
         """Check if no requirements are specified."""
-        return not any([self.servers, self.tools, self.env_vars, self.openclaw_hints])
+        return not any([
+            self.servers, self.tools, self.env_vars, self.openclaw_hints,
+            self.fallback_for_tools, self.fallback_for_servers,
+        ])
     
     def __bool__(self) -> bool:
         """Truth value: True if any requirements are specified."""
