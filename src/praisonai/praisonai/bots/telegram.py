@@ -494,7 +494,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 stream_callback=streamer.on_event,
                                 attachments=attachments or None,
                             )
-                            
+
+                            # Consume the agent-attached portable presentation
+                            # now (the session-contract clearing step for this
+                            # turn) so a later cancel/return doesn't leave stale
+                            # buttons for the next turn. Rendered after the text.
+                            presentation = self._session.pop_last_presentation(user_id)
+
                             # Apply message hooks to final response (same as non-streaming path)
                             send_result = self.fire_message_sending(
                                 str(update.message.chat_id), str(response),
@@ -538,10 +544,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                         except Exception as e:
                                             logger.error(f"Failed to send media: {e}")
                             
-                            # Render any agent-attached portable presentation
+                            # Render the agent-attached portable presentation
                             # (buttons/menus) natively after the streamed text.
+                            # ``presentation`` was popped right after chat() above.
                             try:
-                                presentation = self._session.pop_last_presentation(user_id)
                                 if presentation is not None:
                                     await self.render_presentation(
                                         str(update.message.chat_id), presentation
@@ -594,7 +600,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 account=getattr(self.config, "account", "default"),
                                 attachments=attachments or None,
                             )
-                        
+
+                        # Consume the agent-attached portable presentation now
+                        # (session-contract clearing step) so a cancel/return
+                        # below doesn't leave stale buttons for the next turn.
+                        presentation = self._session.pop_last_presentation(user_id)
+
                         # Normal send flow for non-streaming
                         send_result = self.fire_message_sending(
                             str(update.message.chat_id), str(response),
@@ -612,8 +623,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         # keyboard. The text reply above already serves as the
                         # plain-text fallback, so a render failure degrades
                         # gracefully rather than dropping the reply.
+                        # ``presentation`` was popped right after chat() above.
                         try:
-                            presentation = self._session.pop_last_presentation(user_id)
                             if presentation is not None:
                                 await self.render_presentation(
                                     str(update.message.chat_id), presentation
@@ -1701,8 +1712,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         if not self._application:
             return None
         try:
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            from telegram import (
+                InlineKeyboardButton,
+                InlineKeyboardMarkup,
+                WebAppInfo,
+            )
             from ._presentation_renderer import TelegramPresentationRenderer
+
+            def _build_button(btn: Dict[str, Any]) -> "InlineKeyboardButton":
+                # The portable renderer emits ``web_app`` as a plain dict, but
+                # python-telegram-bot (>=20) requires a ``WebAppInfo`` object.
+                web_app = btn.get("web_app")
+                if isinstance(web_app, dict):
+                    btn = {**btn, "web_app": WebAppInfo(**web_app)}
+                return InlineKeyboardButton(**btn)
 
             rendered = TelegramPresentationRenderer.render(presentation)
             send_kwargs: Dict[str, Any] = {
@@ -1714,7 +1737,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if inline_keyboard:
                 send_kwargs["reply_markup"] = InlineKeyboardMarkup(
                     [
-                        [InlineKeyboardButton(**btn) for btn in row]
+                        [_build_button(btn) for btn in row]
                         for row in inline_keyboard
                     ]
                 )

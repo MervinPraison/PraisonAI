@@ -44,6 +44,12 @@ def _buttons_presentation():
                     type=ActionType.URL, url="https://example.com"
                 ),
             ),
+            PresentationButton(
+                label="Later",
+                action=PresentationAction(
+                    type=ActionType.CALLBACK, value="later"
+                ),
+            ),
         ]),
     ])
 
@@ -92,8 +98,47 @@ class TestTelegramSupportsPresentation:
 
         assert message_id == "42"
         assert sent["chat_id"] == 123
-        # The portable buttons must reach the channel as a native inline keyboard.
+        # The portable buttons must reach the channel as a native inline keyboard
+        # with correctly-encoded action payloads per button type.
         assert "reply_markup" in sent
+        rows = sent["reply_markup"].inline_keyboard
+        flat = [btn for row in rows for btn in row]
+        by_label = {btn.text: btn for btn in flat}
+        assert by_label["Yes"].callback_data == "cmd:/yes"
+        assert by_label["Docs"].url == "https://example.com"
+        assert by_label["Later"].callback_data == "later"
+
+
+class TestRendererPayloadEncoding:
+    def test_callback_data_truncated_to_64_bytes(self):
+        """Non-ASCII callback values must fit Telegram's 64-byte limit."""
+        from praisonai.bots._presentation_renderer import (
+            TelegramPresentationRenderer,
+        )
+        from praisonaiagents.bots.presentation import (
+            MessagePresentation,
+            PresentationBlock,
+            PresentationButton,
+            PresentationAction,
+            ActionType,
+        )
+
+        # 40 multi-byte chars => 120 UTF-8 bytes, but only 40 characters.
+        long_value = "é" * 40
+        presentation = MessagePresentation(blocks=[
+            PresentationBlock.make_buttons([
+                PresentationButton(
+                    label="Go",
+                    action=PresentationAction(
+                        type=ActionType.CALLBACK, value=long_value
+                    ),
+                ),
+            ]),
+        ])
+
+        rendered = TelegramPresentationRenderer.render(presentation)
+        cb = rendered["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+        assert len(cb.encode("utf-8")) <= 64
 
 
 class TestDeliveryPathWiring:
