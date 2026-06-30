@@ -40,6 +40,9 @@ __all__ = [
     # Discovery
     "discover_skills",
     "get_default_skill_dirs",
+    # Bundles
+    "BundleManifest",
+    "discover_bundles",
     # Loader
     "SkillLoader",
     # Manager
@@ -91,6 +94,10 @@ def __getattr__(name: str):
     
     if name in ("discover_skills", "get_default_skill_dirs"):
         from .discovery import discover_skills, get_default_skill_dirs
+        return locals()[name]
+
+    if name in ("BundleManifest", "discover_bundles"):
+        from .bundles import BundleManifest, discover_bundles
         return locals()[name]
     
     if name == "SkillLoader":

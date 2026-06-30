@@ -682,6 +682,63 @@ Format your response as:
         
         return prompt
 
+    def handle_bundle(
+        self,
+        bundle_command: Optional[str],
+        name: Optional[str] = None,
+        skill_dirs: Optional[List[str]] = None,
+    ) -> int:
+        """List or show skill bundles (named, reusable sets of skills).
+
+        Args:
+            bundle_command: 'list' or 'show'
+            name: Bundle name (required for 'show')
+            skill_dirs: Optional directories to scan
+
+        Returns:
+            Exit code (0 success, non-zero on error)
+        """
+        from praisonaiagents.skills import discover_bundles
+        from praisonaiagents.skills.bundles import strip_bundle_marker
+
+        bundles = discover_bundles(skill_dirs, include_defaults=True)
+
+        if bundle_command in (None, "list"):
+            if not bundles:
+                print("No skill bundles found.")
+                return 0
+            print(f"Skill Bundles ({len(bundles)} found):")
+            for b in bundles:
+                members = ", ".join(b.skills) if b.skills else "-"
+                desc = f" - {b.description}" if b.description else ""
+                print(f"  {b.name}: [{members}]{desc}")
+            return 0
+
+        if bundle_command == "show":
+            if not name:
+                print("Error: bundle name is required for 'show'")
+                return 1
+            target = strip_bundle_marker(name)
+            match = next((b for b in bundles if b.name == target), None)
+            if match is None:
+                print(f"Bundle not found: {name}")
+                return 1
+            print(f"{match.name}")
+            if match.description:
+                print(f"  {match.description}")
+            if match.instruction:
+                print(f"\nInstruction:\n  {match.instruction}")
+            print("\nSkills:")
+            if match.skills:
+                for s in match.skills:
+                    print(f"  - {s}")
+            else:
+                print("  (none)")
+            return 0
+
+        print(f"Unknown bundle command: {bundle_command}")
+        return 1
+
 
 def handle_skills_command(args) -> int:
     """Handle skills subcommand from CLI.
@@ -735,6 +792,14 @@ def handle_skills_command(args) -> int:
         elif args.skills_command == "prompt":
             dirs = args.dirs if hasattr(args, 'dirs') and args.dirs else None
             handler.generate_prompt(dirs, include_defaults=True)
+
+        elif args.skills_command == "bundle":
+            dirs = args.dirs if hasattr(args, 'dirs') and args.dirs else None
+            return handler.handle_bundle(
+                getattr(args, 'bundle_command', None),
+                getattr(args, 'name', None),
+                dirs,
+            )
         
         elif args.skills_command == "upload":
             if not hasattr(args, 'path') or not args.path:
@@ -852,4 +917,24 @@ def add_skills_parser(subparsers) -> None:
     upload_parser.add_argument(
         '--title',
         help='Display title for the skill'
+    )
+
+    # bundle command - inspect named sets of skills
+    bundle_parser = subparsers.add_parser(
+        'bundle',
+        help='Inspect skill bundles (named, reusable sets of skills)'
+    )
+    bundle_sub = bundle_parser.add_subparsers(
+        dest='bundle_command', help='Bundle commands'
+    )
+    bundle_list_parser = bundle_sub.add_parser('list', help='List skill bundles')
+    bundle_list_parser.add_argument(
+        '--dirs', nargs='+', help='Directories to scan for bundles'
+    )
+    bundle_show_parser = bundle_sub.add_parser(
+        'show', help='Show the members of a skill bundle'
+    )
+    bundle_show_parser.add_argument('name', help='Bundle name')
+    bundle_show_parser.add_argument(
+        '--dirs', nargs='+', help='Directories to scan for bundles'
     )
