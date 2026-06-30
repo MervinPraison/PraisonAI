@@ -50,6 +50,9 @@ class SQLiteKanbanStore:
                     board TEXT DEFAULT 'default',
                     workspace_kind TEXT DEFAULT 'default',
                     claim_lock TEXT,
+                    claim_expires TIMESTAMP,  -- Claim lease expiry (TTL)
+                    worker_pid INTEGER,  -- PID of claiming worker for liveness checks
+                    last_heartbeat_at TIMESTAMP,  -- Last heartbeat from worker
                     metadata TEXT,  -- JSON blob
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -100,6 +103,20 @@ class SQLiteKanbanStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_events_created ON task_events(created_at)")
+
+            # Migrate pre-existing databases that lack the reclamation columns.
+            self._ensure_columns(conn, "tasks", {
+                "claim_expires": "TIMESTAMP",
+                "worker_pid": "INTEGER",
+                "last_heartbeat_at": "TIMESTAMP",
+            })
+
+    def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: Dict[str, str]):
+        """Add missing columns to an existing table (idempotent migration)."""
+        existing = {row['name'] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, col_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
 
     @contextmanager
     def _get_connection(self):
@@ -633,31 +650,102 @@ class SQLiteKanbanStore:
             
             return events
 
-    def claim_task(self, task_id: str, worker_id: str) -> bool:
-        """Claim a ready task for execution (CAS operation)."""
+    def claim_task(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        ttl_seconds: int = 900,
+        worker_pid: Optional[int] = None,
+    ) -> bool:
+        """Claim a ready task for execution (CAS operation) with a lease.
+
+        Args:
+            task_id: Task to claim.
+            worker_id: Identifier of the claiming worker.
+            ttl_seconds: Lease duration; the claim is reclaimable after expiry.
+            worker_pid: PID of the worker process for liveness checks.
+
+        Returns:
+            True if the claim succeeded.
+        """
+        from datetime import timezone, timedelta
         with self._get_connection() as conn:
+            now = datetime.now(timezone.utc)
+            expires = now + timedelta(seconds=ttl_seconds)
             # Atomic claim with CAS on status and claim_lock, increment version for optimistic locking
-            from datetime import timezone
             result = conn.execute("""
                 UPDATE tasks 
-                SET claim_lock = ?, updated_at = ?, status = 'running', version = version + 1
+                SET claim_lock = ?, claim_expires = ?, worker_pid = ?,
+                    last_heartbeat_at = ?, updated_at = ?,
+                    status = 'running', version = version + 1
                 WHERE id = ? AND status = 'ready' AND (claim_lock IS NULL OR claim_lock = '')
-            """, (worker_id, datetime.now(timezone.utc).isoformat(), task_id))
+            """, (
+                worker_id, expires.isoformat(), worker_pid,
+                now.isoformat(), now.isoformat(), task_id,
+            ))
             
             if result.rowcount > 0:
-                self._log_event(conn, task_id, 'claimed', {'worker_id': worker_id})
+                self._log_event(conn, task_id, 'claimed', {
+                    'worker_id': worker_id,
+                    'worker_pid': worker_pid,
+                    'claim_expires': expires.isoformat(),
+                })
                 return True
             
             return False
+
+    def heartbeat(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        """Record a heartbeat for a claimed task, optionally extending the lease.
+
+        Args:
+            task_id: Task being worked on.
+            worker_id: Owner worker; must match the current claim_lock.
+            ttl_seconds: If provided, extends claim_expires to now + ttl_seconds.
+
+        Returns:
+            True if the heartbeat was recorded (i.e. the worker owns the claim).
+        """
+        from datetime import timezone, timedelta
+        with self._get_connection() as conn:
+            now = datetime.now(timezone.utc)
+            if ttl_seconds is not None:
+                expires = (now + timedelta(seconds=ttl_seconds)).isoformat()
+                result = conn.execute("""
+                    UPDATE tasks
+                    SET last_heartbeat_at = ?, claim_expires = ?, version = version + 1
+                    WHERE id = ? AND claim_lock = ?
+                """, (now.isoformat(), expires, task_id, worker_id))
+            else:
+                result = conn.execute("""
+                    UPDATE tasks
+                    SET last_heartbeat_at = ?, version = version + 1
+                    WHERE id = ? AND claim_lock = ?
+                """, (now.isoformat(), task_id, worker_id))
+
+            return result.rowcount > 0
 
     def release_claim(self, task_id: str, worker_id: str) -> bool:
         """Release claim on task."""
         with self._get_connection() as conn:
             # Release claim and increment version for optimistic locking
             from datetime import timezone
+            # Only revert to 'ready' when the task is still 'running'. A task
+            # that already moved on (e.g. 'done'/'blocked' after completion)
+            # must not be requeued if a later cleanup step releases the claim,
+            # so we scope the status reset to running tasks only.
             result = conn.execute("""
                 UPDATE tasks 
-                SET claim_lock = NULL, updated_at = ?, status = 'ready', version = version + 1
+                SET claim_lock = NULL, claim_expires = NULL, worker_pid = NULL,
+                    last_heartbeat_at = NULL, updated_at = ?,
+                    status = CASE WHEN status = 'running' THEN 'ready' ELSE status END,
+                    version = version + 1
                 WHERE id = ? AND claim_lock = ?
             """, (datetime.now(timezone.utc).isoformat(), task_id, worker_id))
             
@@ -666,3 +754,106 @@ class SQLiteKanbanStore:
                 return True
             
             return False
+
+    @staticmethod
+    def _pid_alive(pid: Optional[int]) -> bool:
+        """Best-effort check whether a process is alive on this host."""
+        if not pid or pid <= 0:
+            return False
+        import os
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but is owned by another user.
+            return True
+        except OSError:
+            return False
+        return True
+
+    def reclaim_stale_claims(self, *, stale_timeout_seconds: int = 1800) -> List[str]:
+        """Reclaim running tasks whose lease expired and whose worker is dead/stale.
+
+        A task is reclaimed (returned to 'ready') when its lease (claim_expires)
+        has elapsed AND either:
+          * its worker PID is no longer alive (crash/kill), or
+          * its last heartbeat is older than stale_timeout_seconds (hang),
+          * or there is no liveness signal at all.
+
+        Tasks whose lease expired but whose worker PID is still alive and
+        recently heartbeating are left untouched (the worker may extend its
+        own lease via heartbeat()).
+
+        Args:
+            stale_timeout_seconds: Heartbeat staleness threshold.
+
+        Returns:
+            List of task IDs that were reclaimed back to 'ready'.
+        """
+        from datetime import timezone, timedelta
+        reclaimed: List[str] = []
+        now = datetime.now(timezone.utc)
+
+        def _parse(value: Any) -> Optional[datetime]:
+            if not value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                return None
+            # Normalize naive timestamps (legacy rows) to UTC for comparison.
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT id, claim_lock, claim_expires, worker_pid, last_heartbeat_at, version
+                FROM tasks
+                WHERE status = 'running' AND claim_lock IS NOT NULL AND claim_lock != ''
+            """)
+            candidates = [dict(row) for row in cursor.fetchall()]
+
+            for row in candidates:
+                expires = _parse(row.get('claim_expires'))
+                # No lease recorded (legacy claim) -> treat as eligible for reclaim
+                # only when the worker is clearly gone; otherwise require expiry.
+                if expires is not None and expires > now:
+                    continue  # lease still valid
+
+                pid = row.get('worker_pid')
+                heartbeat = _parse(row.get('last_heartbeat_at'))
+
+                worker_alive = self._pid_alive(pid)
+                heartbeat_fresh = (
+                    heartbeat is not None
+                    and (now - heartbeat) < timedelta(seconds=stale_timeout_seconds)
+                )
+
+                # Keep the claim if the worker is alive and still heartbeating.
+                if worker_alive and heartbeat_fresh:
+                    continue
+
+                # Guard against a heartbeat/claim landing between the SELECT and
+                # this UPDATE: only reclaim if the row is still on the same
+                # version we evaluated. A live worker's heartbeat bumps version,
+                # so a raced update will simply skip this row (rowcount == 0).
+                result = conn.execute("""
+                    UPDATE tasks
+                    SET claim_lock = NULL, claim_expires = NULL, worker_pid = NULL,
+                        last_heartbeat_at = NULL,
+                        updated_at = ?, status = 'ready', version = version + 1
+                    WHERE id = ? AND status = 'running' AND claim_lock = ?
+                          AND version = ?
+                """, (now.isoformat(), row['id'], row['claim_lock'], row['version']))
+
+                if result.rowcount > 0:
+                    reclaimed.append(row['id'])
+                    self._log_event(conn, row['id'], 'reclaimed', {
+                        'worker_id': row['claim_lock'],
+                        'worker_pid': pid,
+                        'reason': 'dead' if not worker_alive else 'stale_heartbeat',
+                    })
+
+        return reclaimed

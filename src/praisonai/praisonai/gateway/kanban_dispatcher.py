@@ -23,16 +23,36 @@ _dispatcher_task = None
 class KanbanDispatcher:
     """Kanban task dispatcher that claims ready tasks and spawns workers."""
     
-    def __init__(self, max_concurrent: int = 3, poll_interval: float = 5.0):
+    def __init__(
+        self,
+        max_concurrent: int = 3,
+        poll_interval: float = 5.0,
+        claim_ttl_seconds: Optional[int] = None,
+        stale_timeout_seconds: Optional[int] = None,
+    ):
         """
         Initialize kanban dispatcher.
         
         Args:
             max_concurrent: Maximum concurrent task executions
             poll_interval: Seconds between task polling
+            claim_ttl_seconds: Claim lease duration; reclaimable after expiry.
+                Defaults to PRAISONAI_KANBAN_CLAIM_TTL (900s).
+            stale_timeout_seconds: Heartbeat staleness threshold for reclaim.
+                Defaults to PRAISONAI_KANBAN_STALE_TIMEOUT (1800s).
         """
         self.max_concurrent = max_concurrent
         self.poll_interval = poll_interval
+        self.claim_ttl_seconds = (
+            claim_ttl_seconds
+            if claim_ttl_seconds is not None
+            else _env_int('PRAISONAI_KANBAN_CLAIM_TTL', 900)
+        )
+        self.stale_timeout_seconds = (
+            stale_timeout_seconds
+            if stale_timeout_seconds is not None
+            else _env_int('PRAISONAI_KANBAN_STALE_TIMEOUT', 1800)
+        )
         self.running_tasks: Dict[str, subprocess.Popen] = {}
         self.worker_id = f"gateway_{os.getpid()}"
         
@@ -88,6 +108,10 @@ class KanbanDispatcher:
         
         # Clean up completed processes first
         self._cleanup_completed_tasks(store)
+
+        # Reclaim stale/crashed claims before dispatching new work so that
+        # tasks stranded by dead workers return to 'ready' and get re-dispatched.
+        self._reclaim_stale_claims(store)
         
         # Promote dependency-driven tasks before claiming so a completed
         # parent advances its children to 'ready' on the next tick.
@@ -108,30 +132,56 @@ class KanbanDispatcher:
         spawned = 0
         for task in ready_tasks[:available_slots]:
             try:
-                # Try to claim the task atomically
-                claimed = store.claim_task(task.id, self.worker_id)
+                # Try to claim the task atomically with a lease + owner PID.
+                claimed = self._claim_task(store, task)
                 if not claimed:
                     logger.debug(f"Failed to claim task {task.id} (already claimed)")
                     continue
                 
                 # Spawn worker process
                 success = await self._spawn_worker(task, store)
-                if success:
-                    spawned += 1
-                    
+                if not success:
+                    # Failed to spawn, release claim
+                    store.release_claim(task.id, self.worker_id)
+                    continue
+
+                # Worker is now running. From here on we MUST NOT release the
+                # claim on error: doing so would return the task to 'ready' and
+                # let another dispatcher spawn a duplicate while this worker is
+                # still executing. Post-spawn bookkeeping is therefore isolated.
+                spawned += 1
+                try:
+                    # Record the spawned worker's PID against the claim so the
+                    # reclaim loop can detect a crashed/killed worker.
+                    self._record_worker_pid(store, task.id)
+
                     # Fire claimed hook event
                     self._fire_hook_event('KANBAN_TASK_CLAIMED', {
                         'task_id': task.id,
                         'worker_id': self.worker_id,
                         'task': task.to_dict()
                     })
-                else:
-                    # Failed to spawn, release claim
-                    store.release_claim(task.id, self.worker_id)
-                    
+                except Exception as post_spawn_err:
+                    # Never release the claim for an already-running worker.
+                    logger.error(
+                        "Post-spawn bookkeeping failed for task %s (worker still "
+                        "running); leaving claim intact: %s",
+                        task.id, post_spawn_err,
+                        exc_info=True,
+                    )
+
             except Exception as e:
                 logger.error(f"Error processing task {task.id}: {e}")
-                # Release claim on error
+                # Only release the claim if we never spawned a worker for it.
+                # If a worker is already running, releasing would risk a
+                # duplicate run; the reclaim loop will recover it if it dies.
+                if task.id in self.running_tasks:
+                    logger.warning(
+                        "Task %s has a running worker; not releasing claim despite error",
+                        task.id,
+                    )
+                    continue
+                # Release claim on error (no worker spawned)
                 try:
                     store.release_claim(task.id, self.worker_id)
                 except Exception as release_err:
@@ -195,6 +245,61 @@ class KanbanDispatcher:
             logger.info(f"Promoted {len(promoted)} kanban task(s) to ready")
 
         return promoted
+
+    def _claim_task(self, store: Any, task: Any) -> bool:
+        """Claim a task with a lease, falling back for older stores."""
+        try:
+            return store.claim_task(
+                task.id, self.worker_id,
+                ttl_seconds=self.claim_ttl_seconds,
+                worker_pid=os.getpid(),
+            )
+        except TypeError:
+            # Backward compatibility with stores lacking the lease signature.
+            return store.claim_task(task.id, self.worker_id)
+
+    def _record_worker_pid(self, store: Any, task_id: str):
+        """Associate the spawned worker's PID with the claim for liveness checks."""
+        process = self.running_tasks.get(task_id)
+        if process is None or not hasattr(store, 'heartbeat'):
+            return
+        try:
+            self._set_worker_pid(store, task_id, process.pid)
+        except Exception as e:
+            logger.debug(f"Could not record worker PID for task {task_id}: {e}")
+
+    def _set_worker_pid(self, store: Any, task_id: str, pid: int):
+        """Best-effort direct update of worker_pid on the claim row."""
+        get_conn = getattr(store, '_get_connection', None)
+        if get_conn is None:
+            return
+        from datetime import datetime, timezone
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE tasks SET worker_pid = ?, last_heartbeat_at = ? "
+                "WHERE id = ? AND claim_lock = ?",
+                (pid, datetime.now(timezone.utc).isoformat(), task_id, self.worker_id),
+            )
+
+    def _reclaim_stale_claims(self, store: Any):
+        """Sweep running tasks and reclaim those stranded by dead/stale workers."""
+        reclaim = getattr(store, 'reclaim_stale_claims', None)
+        if reclaim is None:
+            return
+        try:
+            reclaimed = reclaim(stale_timeout_seconds=self.stale_timeout_seconds)
+        except TypeError:
+            reclaimed = reclaim()
+        except Exception as e:
+            logger.error(f"Error during stale-claim reclamation: {e}")
+            return
+
+        for task_id in reclaimed or []:
+            logger.warning(f"Reclaimed stale kanban task {task_id} back to 'ready'")
+            self._fire_hook_event('KANBAN_TASK_RECLAIMED', {
+                'task_id': task_id,
+                'worker_id': self.worker_id,
+            })
 
     async def _spawn_worker(self, task: Any, store: Any) -> bool:
         """
@@ -494,6 +599,18 @@ def is_dispatcher_running() -> bool:
 def _is_dispatcher_enabled() -> bool:
     """Check if kanban dispatcher is enabled via environment variable."""
     return os.environ.get('PRAISONAI_KANBAN_DISPATCH', '1').strip().lower() not in ('0', 'false', 'no')
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back to default."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except (ValueError, TypeError):
+        return default
 
 
 # Manual dispatch function for CLI/testing

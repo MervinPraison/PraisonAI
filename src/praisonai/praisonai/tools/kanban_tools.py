@@ -323,7 +323,18 @@ def kanban_heartbeat(task_id: str, status: str = "working") -> Dict[str, Any]:
         if not task:
             return {'error': f'Task {task_id} not found'}
         
-        # Add heartbeat comment
+        # Record the heartbeat so the dispatcher's reclaim loop can tell this
+        # worker is still alive (keeps the claim from being reclaimed).
+        import os
+        worker_id = os.environ.get('PRAISONAI_KANBAN_WORKER') or task.claim_lock
+        recorded = False
+        if worker_id and hasattr(store, 'heartbeat'):
+            try:
+                recorded = store.heartbeat(task_id, worker_id)
+            except Exception as hb_err:
+                logger.debug(f"Heartbeat update failed for task {task_id}: {hb_err}")
+
+        # Add heartbeat comment for human-visible progress
         store.add_comment(
             task_id, 
             'agent', 
@@ -332,6 +343,7 @@ def kanban_heartbeat(task_id: str, status: str = "working") -> Dict[str, Any]:
         
         return {
             'heartbeat': True,
+            'recorded': recorded,
             'task_id': task_id,
             'status': status,
             'timestamp': task.updated_at.isoformat()
