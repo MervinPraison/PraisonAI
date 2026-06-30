@@ -530,6 +530,46 @@ class TestDirectPromptToolConfig:
         assert agent._tool_timeout == 60
         assert agent._tool_retry_policy is not None
 
+    def test_direct_prompt_path_passes_tool_config_not_tool_timeout(self):
+        """End-to-end guard: handle_direct_prompt must pass tool_config to Agent
+        and never the deprecated tool_timeout/tool_retry_policy kwargs.
+
+        Catches CLI-path regressions that the constructor-only tests above miss.
+        """
+        import argparse
+        from praisonaiagents.config.feature_configs import ToolConfig
+        from praisonai.cli.main import PraisonAI
+
+        captured = {}
+
+        class _StopConstruction(Exception):
+            pass
+
+        def _capture_agent(*args, **kwargs):
+            captured.update(kwargs)
+            raise _StopConstruction()
+
+        app = PraisonAI()
+        app.args = argparse.Namespace(
+            tool_timeout=60,
+            tool_retry_attempts=3,
+            tool_retry_delay=1000,
+            tool_retry_backoff=2.0,
+            tool_retry_on="timeout,rate_limit,connection_error",
+            llm=None,
+            no_rules=True,
+        )
+
+        with patch("praisonaiagents.Agent", side_effect=_capture_agent):
+            with pytest.raises(_StopConstruction):
+                app.handle_direct_prompt("hello")
+
+        assert "tool_timeout" not in captured
+        assert "tool_retry_policy" not in captured
+        assert isinstance(captured.get("tool_config"), ToolConfig)
+        assert captured["tool_config"].timeout == 60
+        assert captured["tool_config"].retry_policy is not None
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short", "-x"])
