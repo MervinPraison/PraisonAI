@@ -52,10 +52,11 @@ class BeforeToolDefinitionsInput(HookInput):
     """Input for BeforeToolDefinitions hooks.
 
     Fired right after the advertised tool definitions are assembled for a
-    request and before they reach the LLM. Hooks may modify or filter the
-    ``tool_definitions`` list in place (or return ``modified_input`` with a
-    new ``tool_definitions`` value) to redact parameters, append usage
-    guidance to descriptions, or constrain the advertised schema per request.
+    request and before they reach the LLM. Hooks should modify or filter the
+    ``tool_definitions`` list in place (e.g. ``data.tool_definitions[:] = ...``)
+    to redact parameters, append usage guidance to descriptions, or constrain
+    the advertised schema per request. This mirrors how BEFORE_LLM mutates its
+    payload in place; only in-place mutations are adopted by the runtime.
     """
     tool_definitions: List[Dict[str, Any]] = field(default_factory=list)
     model: str = ""

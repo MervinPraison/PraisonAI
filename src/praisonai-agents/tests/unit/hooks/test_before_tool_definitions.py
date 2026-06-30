@@ -132,3 +132,63 @@ class TestAgentIntegration:
         agent = Agent(name="TestAgent", instructions="test", llm="gpt-4o")
         result = agent._apply_before_tool_definitions_hook([])
         assert result == []
+
+    def test_apply_before_tool_definitions_hook_does_not_mutate_input(self):
+        """In-place hook mutations must not leak back into the caller's list
+        (the formatted-tools cache), so repeated calls start from full tools."""
+        from praisonaiagents import Agent
+
+        registry = HookRegistry()
+
+        def drop_delete(data):
+            data.tool_definitions[:] = [
+                t for t in data.tool_definitions
+                if t["function"]["name"] != "delete_file"
+            ]
+            data.tool_definitions[0]["function"]["description"] += " (sandboxed)"
+            return HookResult.allow()
+
+        registry.register_function(
+            event=HookEvent.BEFORE_TOOL_DEFINITIONS,
+            func=drop_delete,
+        )
+
+        agent = Agent(name="TestAgent", instructions="test", llm="gpt-4o", hooks=registry)
+
+        cached = _sample_tools()
+        first = agent._apply_before_tool_definitions_hook(cached)
+        assert [t["function"]["name"] for t in first] == ["read_file"]
+        # Original (cache) list is untouched: both tools and pristine descriptions.
+        assert [t["function"]["name"] for t in cached] == ["read_file", "delete_file"]
+        assert cached[0]["function"]["description"] == "Read a file."
+
+        # A second call sees the full tool set again, proving no cache poisoning.
+        second = agent._apply_before_tool_definitions_hook(cached)
+        assert [t["function"]["name"] for t in second] == ["read_file"]
+        assert second[0]["function"]["description"] == "Read a file. (sandboxed)"
+
+    def test_aapply_before_tool_definitions_hook_runs_in_event_loop(self):
+        """Async variant must actually run the hook inside a running loop
+        (execute_sync would raise and silently fall back to unchanged tools)."""
+        import asyncio
+        from praisonaiagents import Agent
+
+        registry = HookRegistry()
+
+        def drop_delete(data):
+            data.tool_definitions[:] = [
+                t for t in data.tool_definitions
+                if t["function"]["name"] != "delete_file"
+            ]
+            return HookResult.allow()
+
+        registry.register_function(
+            event=HookEvent.BEFORE_TOOL_DEFINITIONS,
+            func=drop_delete,
+        )
+
+        agent = Agent(name="TestAgent", instructions="test", llm="gpt-4o", hooks=registry)
+        result = asyncio.run(
+            agent._aapply_before_tool_definitions_hook(_sample_tools())
+        )
+        assert [t["function"]["name"] for t in result] == ["read_file"]
