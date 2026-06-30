@@ -995,6 +995,40 @@ class AgentFlow:
             # Non-agent step, reset chain 
             self._handoff_chain.clear()
     
+    def _validate_framework(self) -> None:
+        """Validate the workflow's ``framework`` before execution.
+
+        The YAML parser may set a ``framework`` attribute on the workflow
+        (e.g. from ``framework: crewai`` in a workflow YAML). The native
+        execution engine only supports ``praisonai``, so any other value
+        must fail fast with a clear, actionable error rather than being
+        silently ignored.
+
+        Backward-compatible: when ``framework`` is unset, empty, or
+        ``"praisonai"`` (case-insensitive), this is a no-op.
+        """
+        framework = getattr(self, 'framework', None)
+        if framework is None:
+            return
+        if str(framework).strip().lower() in ("", "praisonai"):
+            return
+        # Include workflow identity (name/file) so included-recipe failures
+        # can be traced back to the exact YAML that triggered them.
+        identity_parts = []
+        name = getattr(self, 'name', None)
+        if name:
+            identity_parts.append(f"workflow '{name}'")
+        file_path = getattr(self, 'file_path', None)
+        if file_path:
+            identity_parts.append(f"file '{file_path}'")
+        identity = f" ({', '.join(identity_parts)})" if identity_parts else ""
+        raise ValueError(
+            f"Unsupported workflow framework: '{framework}'{identity}. "
+            "Workflow YAML execution only supports the native PraisonAI "
+            "engine (framework: praisonai). Remove the 'framework' field or "
+            "set it to 'praisonai'."
+        )
+
     def run(
         self,
         input: str = "",
@@ -1031,6 +1065,13 @@ class AgentFlow:
         """
         # Gap 3c: Clear handoff chain at start of new workflow run  
         self._handoff_chain.clear()
+        
+        # Fail fast if a non-praisonai framework is requested via YAML.
+        # The YAML parser stores `framework` on the workflow, but execution
+        # always uses the native PraisonAI engine. Silently ignoring a
+        # non-praisonai value (e.g. framework: crewai) is a correctness bug,
+        # so raise a clear error instead of producing misleading results.
+        self._validate_framework()
         
         # Use default LLM if not specified
         model = llm or self.llm or "gpt-4o-mini"
@@ -3762,6 +3803,11 @@ class WorkflowManager:
                 "results": []
             }
         
+        # Fail fast on unsupported frameworks. This path iterates steps
+        # directly instead of calling Workflow.run(), so re-apply the same
+        # guard here to avoid silently ignoring framework: <non-praisonai>.
+        workflow._validate_framework()
+        
         # Merge variables
         all_variables = {**workflow.variables}
         if variables:
@@ -4140,6 +4186,11 @@ class WorkflowManager:
                 "error": f"Workflow '{workflow_name}' not found",
                 "results": []
             }
+        
+        # Fail fast on unsupported frameworks. This path iterates steps
+        # directly instead of calling Workflow.run(), so re-apply the same
+        # guard here to avoid silently ignoring framework: <non-praisonai>.
+        workflow._validate_framework()
         
         # Merge variables
         all_variables = {**workflow.variables}
