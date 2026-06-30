@@ -7,7 +7,9 @@ from praisonaiagents.bots import (
     BotMessage,
     BotUser,
     BotChannel,
+    DisplayPolicy,
     MessageType,
+    resolve_display_policy,
 )
 
 
@@ -64,6 +66,86 @@ class TestBotConfig:
         config = BotConfig(token="secret-token")
         data = config.to_dict()
         assert data["token"] == "***"
+
+
+class TestDisplayPolicy:
+    """Tests for DisplayPolicy and resolve_display_policy."""
+
+    def test_default_policy(self):
+        """Built-in defaults are conservative (everything off)."""
+        policy = DisplayPolicy()
+        assert policy.streaming == "off"
+        assert policy.tool_progress == "off"
+        assert policy.interim_assistant_messages is False
+        assert policy.footer == "off"
+
+    def test_round_trip_dict(self):
+        """to_dict / from_dict round-trips."""
+        policy = DisplayPolicy(streaming="draft", footer="compact")
+        assert DisplayPolicy.from_dict(policy.to_dict()) == policy
+
+    def test_from_dict_ignores_invalid_values(self):
+        """Invalid choices fall back to defaults; unknown keys ignored."""
+        policy = DisplayPolicy.from_dict(
+            {"streaming": "bogus", "footer": "compact", "junk": 1}
+        )
+        assert policy.streaming == "off"
+        assert policy.footer == "compact"
+
+    def test_tier_defaults_telegram(self):
+        """Edit-capable personal chats stream live by default."""
+        policy = resolve_display_policy("telegram", None)
+        assert policy.streaming == "draft"
+        assert policy.tool_progress == "off"
+
+    def test_tier_defaults_slack(self):
+        """Workspace chats post discrete tool progress by default."""
+        policy = resolve_display_policy("slack", {})
+        assert policy.streaming == "off"
+        assert policy.tool_progress == "inline"
+
+    def test_tier_defaults_email(self):
+        """Batch channels send a single final message."""
+        policy = resolve_display_policy("email", None)
+        assert policy.streaming == "off"
+        assert policy.interim_assistant_messages is False
+
+    def test_unknown_platform_uses_builtin(self):
+        """Unknown platforms fall back to the built-in default."""
+        assert resolve_display_policy("carrier-pigeon", None) == DisplayPolicy()
+
+    def test_global_override_beats_tier(self):
+        """display.<setting> overrides the platform-tier default."""
+        policy = resolve_display_policy("telegram", {"footer": "compact"})
+        assert policy.footer == "compact"
+        assert policy.streaming == "draft"  # tier default preserved
+
+    def test_platform_override_beats_global(self):
+        """Explicit platform override wins over the global default."""
+        config = {
+            "footer": "compact",
+            "platforms": {"telegram": {"streaming": "off", "footer": "off"}},
+        }
+        policy = resolve_display_policy("telegram", config)
+        assert policy.streaming == "off"
+        assert policy.footer == "off"
+
+    def test_full_config_dict_with_display_key(self):
+        """Resolver accepts a full config dict containing a display block."""
+        config = {"display": {"platforms": {"slack": {"footer": "compact"}}}}
+        policy = resolve_display_policy("slack", config)
+        assert policy.footer == "compact"
+        assert policy.tool_progress == "inline"  # tier default preserved
+
+    def test_precedence_full_stack(self):
+        """All four layers resolve in the documented order."""
+        config = {
+            "tool_progress": "off",  # global beats tier (slack tier = inline)
+            "platforms": {"slack": {"streaming": "progress"}},
+        }
+        policy = resolve_display_policy("slack", config)
+        assert policy.streaming == "progress"   # platform override
+        assert policy.tool_progress == "off"    # global override
 
 
 class TestBotUser:
