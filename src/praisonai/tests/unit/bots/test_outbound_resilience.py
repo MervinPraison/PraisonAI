@@ -141,6 +141,39 @@ async def test_no_config_still_retries_without_dlq():
     assert adapter._outbound_dlq is None
 
 
+@pytest.mark.asyncio
+async def test_whatsapp_send_propagates_durable_failure():
+    """WhatsApp must not swallow an exhausted/permanent durable failure.
+
+    Regression for the partial-delivery bug: when ``deliver_outbound`` re-raises
+    after parking/exhausting retries, ``send_message`` must propagate it rather
+    than returning a success-looking ``BotMessage`` (parity with the other
+    adapters). We bind the unbound ``send_message`` to a minimal stub so no
+    network/aiohttp setup is required.
+    """
+    pytest.importorskip("aiohttp")
+    from praisonai.bots.whatsapp import WhatsAppBot
+
+    class _RateLimiter:
+        async def acquire(self, _to):
+            return None
+
+    class _Stub:
+        config = SimpleNamespace(max_message_length=4096)
+        _phone_number_id = "pid"
+        _token = "tok"
+        _http_session = None
+        _bot_user = None
+        _rate_limiter = _RateLimiter()
+
+        async def deliver_outbound(self, *args, **kwargs):
+            raise ConnectionError("connection reset by peer")
+
+    stub = _Stub()
+    with pytest.raises(ConnectionError):
+        await WhatsAppBot.send_message(stub, to="c1", content="hello")
+
+
 def test_all_shipped_adapters_use_the_mixin():
     """Regression guard: every channel adapter mixes in durable delivery."""
     from praisonai.bots.slack import SlackBot

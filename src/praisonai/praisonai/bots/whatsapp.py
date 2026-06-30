@@ -868,23 +868,25 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         raise RuntimeError(f"WhatsApp send error: {result['error']}")
                     return result
 
-            try:
-                result = await self.deliver_outbound(
-                    _post_chunk,
-                    channel_id=to,
-                    reply_text=chunk,
-                    reply_to=reply_to,
-                )
-                msg_id = result.get("messages", [{}])[0].get("id", "")
-                sent_msg = BotMessage(
-                    message_id=msg_id,
-                    content=chunk,
-                    message_type=MessageType.TEXT,
-                    sender=self._bot_user,
-                    channel=BotChannel(channel_id=to, channel_type="dm"),
-                )
-            except Exception as e:
-                logger.error(f"Failed to send WhatsApp message: {e}")
+            # Durable delivery: retry transient failures with backoff and park
+            # the chunk in the outbound DLQ on permanent failure. The original
+            # exception is allowed to propagate (parity with Telegram/Slack/
+            # Discord) so callers never treat an undelivered or partially
+            # delivered reply as successfully sent.
+            result = await self.deliver_outbound(
+                _post_chunk,
+                channel_id=to,
+                reply_text=chunk,
+                reply_to=reply_to,
+            )
+            msg_id = result.get("messages", [{}])[0].get("id", "")
+            sent_msg = BotMessage(
+                message_id=msg_id,
+                content=chunk,
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=to, channel_type="dm"),
+            )
 
         return sent_msg or BotMessage(content=text)
 
