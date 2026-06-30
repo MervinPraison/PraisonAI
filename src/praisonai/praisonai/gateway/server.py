@@ -208,6 +208,7 @@ class GatewaySession:
     _was_resumed: bool = False  # Track if session was resumed from persistence
     _sequence: int = 0  # Monotonic sequence number for gap detection
     _protocol_version: int = PROTOCOL_VERSION  # Negotiated protocol version
+    _capabilities: List[str] = field(default_factory=list)  # Client-advertised capability tokens
     
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -236,6 +237,16 @@ class GatewaySession:
     @property
     def last_activity(self) -> float:
         return self._last_activity
+    
+    @property
+    def protocol_version(self) -> int:
+        """The protocol version negotiated during the handshake."""
+        return self._protocol_version
+    
+    @property
+    def capabilities(self) -> List[str]:
+        """Capability tokens advertised by the client during the handshake."""
+        return list(self._capabilities)
     
     def get_state(self) -> Dict[str, Any]:
         return dict(self._state)
@@ -346,6 +357,7 @@ class GatewaySession:
             "event_cursor": self._event_cursor,
             "sequence": self._sequence,
             "protocol_version": self._protocol_version,
+            "capabilities": list(self._capabilities),
             "events": [e.to_dict() for e in self._events[-100:]],  # Keep last 100 events
             "pending_inbox": pending_inbox,
             "is_executing": self._is_executing,
@@ -384,6 +396,8 @@ class GatewaySession:
         session._event_cursor = data.get("event_cursor", 0)
         session._sequence = data.get("sequence", session._event_cursor)
         session._protocol_version = data.get("protocol_version", PROTOCOL_VERSION)
+        restored_caps = data.get("capabilities", [])
+        session._capabilities = list(restored_caps) if isinstance(restored_caps, list) else []
         for event_data in data.get("events", []):
             event = GatewayEvent.from_dict(event_data)
             session._events.append(event)
@@ -1698,6 +1712,12 @@ class WebSocketGateway:
             # Rebind client_id to session for correct routing
             if hasattr(session, '_client_id'):
                 session._client_id = client_id
+            
+            # Record the negotiated protocol version and the client's advertised
+            # capabilities on the session so they survive resume/persistence and
+            # can be inspected by the server when tailoring delivery.
+            session._protocol_version = negotiated_version
+            session._capabilities = list(client_caps)
             
             self._client_sessions[client_id] = session.session_id
             
