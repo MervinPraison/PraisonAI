@@ -7,11 +7,14 @@ guard consulted by the ``/model`` command handler.
 
 import os
 
+from types import SimpleNamespace
+
 from praisonai.bots._commands import (
     capture_boot_fingerprint,
     check_code_skew,
     read_code_fingerprint,
     _fingerprint_dir,
+    _resolve_package_dir,
 )
 
 
@@ -92,6 +95,53 @@ def test_read_code_fingerprint_default_changes_when_sdk_changes(monkeypatch):
     assert before != after
     assert "praisonaiagents=sdk-rev-1" in before
     assert "praisonaiagents=sdk-rev-2" in after
+
+
+def test_resolve_package_dir_prefers_file(tmp_path):
+    # A regular package with __file__ resolves to its containing directory.
+    init = tmp_path / "__init__.py"
+    init.write_text("")
+    mod = SimpleNamespace(__file__=str(init))
+    assert _resolve_package_dir(mod) == os.path.abspath(str(tmp_path))
+
+
+def test_resolve_package_dir_falls_back_to_path_when_file_missing(tmp_path):
+    # Namespace-package layout: __file__ is None but __path__ has the real dir.
+    # The SDK target must NOT be silently dropped (Greptile P1). (Issue #2460)
+    mod = SimpleNamespace(__file__=None, __path__=[str(tmp_path)])
+    assert _resolve_package_dir(mod) == os.path.abspath(str(tmp_path))
+
+
+def test_resolve_package_dir_falls_back_to_spec_search_locations(tmp_path):
+    # When neither __file__ nor __path__ is usable, the module spec's
+    # submodule_search_locations is consulted.
+    spec = SimpleNamespace(submodule_search_locations=[str(tmp_path)])
+    mod = SimpleNamespace(__file__=None, __path__=[], __spec__=spec)
+    assert _resolve_package_dir(mod) == os.path.abspath(str(tmp_path))
+
+
+def test_resolve_package_dir_none_when_unresolvable():
+    mod = SimpleNamespace(__file__=None, __path__=[], __spec__=None)
+    assert _resolve_package_dir(mod) is None
+
+
+def test_read_code_fingerprint_spans_sdk_via_namespace_path(monkeypatch, tmp_path):
+    # If praisonaiagents imports as a namespace package (no __file__), the SDK
+    # must still be fingerprinted via __path__ so an in-place SDK update is
+    # detected rather than dropped (Greptile P1: "SDK target can disappear").
+    sdk_dir = tmp_path / "praisonaiagents"
+    sdk_dir.mkdir()
+    (sdk_dir / "module.py").write_text("x = 1\n")
+    os.utime(sdk_dir / "module.py", (1_700_000_000, 1_700_000_000))
+
+    import praisonaiagents
+
+    monkeypatch.setattr(praisonaiagents, "__file__", None, raising=False)
+    monkeypatch.setattr(praisonaiagents, "__path__", [str(sdk_dir)], raising=False)
+
+    fp = read_code_fingerprint()
+    assert isinstance(fp, str) and fp
+    assert "praisonaiagents=" in fp
 
 
 def test_fingerprint_dir_explicit_dir_is_single(tmp_path):

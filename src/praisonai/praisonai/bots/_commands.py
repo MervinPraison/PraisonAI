@@ -572,6 +572,45 @@ def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
     return None
 
 
+def _resolve_package_dir(module) -> Optional[str]:
+    """Best-effort resolution of an imported package's on-disk directory.
+
+    Prefers ``module.__file__`` (a regular package's ``__init__.py``). When that
+    is unavailable — e.g. ``module`` imported as a *namespace package* or from a
+    stale site-packages artifact, where ``__file__`` can be ``None`` while the
+    import still succeeds — it falls back to the first entry of ``__path__``
+    (and then the module spec's ``submodule_search_locations``). This stops the
+    code-skew guard from silently dropping a package target and comparing two
+    wrapper-only fingerprints, which would miss an in-place SDK update.
+
+    Returns the directory path, or ``None`` if it cannot be determined.
+    """
+    import os
+
+    try:
+        mod_file = getattr(module, "__file__", None)
+        if mod_file:
+            return os.path.dirname(os.path.abspath(mod_file))
+    except Exception:
+        pass
+
+    # Namespace package (or missing __file__): use the package search path(s).
+    try:
+        search_paths = list(getattr(module, "__path__", []) or [])
+        if not search_paths:
+            spec = getattr(module, "__spec__", None)
+            search_paths = list(
+                getattr(spec, "submodule_search_locations", None) or []
+            )
+        for path in search_paths:
+            if isinstance(path, str) and os.path.isdir(path):
+                return os.path.abspath(path)
+    except Exception:
+        pass
+
+    return None
+
+
 def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
     """Return a lightweight fingerprint of the on-disk gateway code.
 
@@ -623,11 +662,9 @@ def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
     try:
         import praisonaiagents
 
-        agents_file = getattr(praisonaiagents, "__file__", None)
-        if agents_file:
-            targets.append(
-                ("praisonaiagents", os.path.dirname(os.path.abspath(agents_file)))
-            )
+        agents_dir = _resolve_package_dir(praisonaiagents)
+        if agents_dir:
+            targets.append(("praisonaiagents", agents_dir))
     except Exception:
         pass
 
