@@ -133,7 +133,7 @@ class AgentConfig(BaseModel):
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
                     }
-            except ImportError:
+            except (ImportError, AttributeError, TypeError):
                 pass
         return data
 
@@ -177,7 +177,7 @@ class AgentConfig(BaseModel):
                         backoff_factor=self.tool_retry_policy.backoff_factor,
                         max_delay=self.tool_retry_policy.max_delay_ms / 1000.0,
                     )
-            except ImportError:
+            except (ImportError, AttributeError, TypeError):
                 pass
         
         # Convert approval dict/bool to ApprovalConfig

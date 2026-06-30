@@ -109,7 +109,7 @@ langgraph = [
     "langgraph>=0.2.0,<2",
     "langgraph-prebuilt>=0.2.0,<2",
     "langchain-core>=0.3.0,<2",
-    "langchain-openai>=0.2.0",
+    "langchain-openai>=0.2.0,<2",
     "praisonai-tools>=0.1.0",
 ]
 acp = [

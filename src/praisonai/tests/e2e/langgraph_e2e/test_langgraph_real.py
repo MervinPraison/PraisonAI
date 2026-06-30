@@ -7,12 +7,9 @@ WARNING: Live tests make real API calls and may incur costs.
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../src"))
 
 
 def _write_yaml(content: str) -> str:
@@ -27,6 +24,8 @@ class TestLangGraphReal:
     """Real LangGraph tests with actual API calls."""
 
     def test_langgraph_simple_setup(self):
+        pytest.importorskip("langgraph")
+        pytest.importorskip("praisonai_frameworks")
         try:
             from praisonai import PraisonAI
         except ImportError as exc:
@@ -148,6 +147,7 @@ roles:
     @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
     def test_langgraph_adapter_direct_run(self):
         pytest.importorskip("langgraph")
+        pytest.importorskip("praisonai_frameworks")
         from praisonai_frameworks.langgraph.adapter import LangGraphAdapter
 
         config = {

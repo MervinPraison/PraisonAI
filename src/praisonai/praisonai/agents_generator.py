@@ -375,7 +375,7 @@ class AgentsGenerator:
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
                     }
-            except ImportError:
+            except (ImportError, AttributeError, TypeError):
                 pass
         
         # Handle handoff configuration - convert CLI flags into handoff dict
