@@ -21,7 +21,7 @@ console = Console()
 def tools_list(
     source: Optional[str] = typer.Option(
         None, "--source", "-s", 
-        help="Filter by source: builtin, local, external"
+        help="Filter by source: builtin, local, external, registered"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
@@ -31,6 +31,7 @@ def tools_list(
     - Built-in tools (praisonaiagents.tools)
     - Local tools.py (if present)
     - External tools (praisonai-tools package)
+    - Registered/entry-point tools (core registry plugins)
     """
     from praisonai.tool_resolver import ToolResolver
     
@@ -45,12 +46,15 @@ def tools_list(
     builtin_tools = {}
     local_tools = {}
     external_tools = {}
+    registered_tools = {}
     
     for name, desc in available.items():
         if "Local tool" in desc:
             local_tools[name] = desc
         elif "praisonai-tools" in desc:
             external_tools[name] = desc
+        elif "Registered" in desc or "entry-point" in desc:
+            registered_tools[name] = desc
         else:
             builtin_tools[name] = desc
     
@@ -61,6 +65,8 @@ def tools_list(
         available = local_tools
     elif source == "external":
         available = external_tools
+    elif source == "registered":
+        available = registered_tools
     
     # Create table
     table = Table(title="Available Tools", show_header=True, header_style="bold cyan")
@@ -76,6 +82,8 @@ def tools_list(
             src = "local"
         elif "praisonai-tools" in desc:
             src = "external"
+        elif "Registered" in desc or "entry-point" in desc:
+            src = "registered"
         else:
             src = "builtin"
         
@@ -88,7 +96,7 @@ def tools_list(
     console.print(f"\n[dim]Total: {len(available)} tools[/dim]")
     
     if not source:
-        console.print(f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | External: {len(external_tools)}[/dim]")
+        console.print(f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | External: {len(external_tools)} | Registered: {len(registered_tools)}[/dim]")
 
 
 @app.command("validate")
@@ -181,6 +189,8 @@ def tools_info(
             console.print("\n[blue]Source:[/blue] Local tools.py")
         elif "praisonai-tools" in desc:
             console.print("\n[blue]Source:[/blue] praisonai-tools package")
+        elif "Registered" in desc or "entry-point" in desc:
+            console.print("\n[blue]Source:[/blue] Registered/entry-point tool (registry)")
         else:
             console.print("\n[blue]Source:[/blue] praisonaiagents.tools (built-in)")
 

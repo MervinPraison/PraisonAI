@@ -146,3 +146,47 @@ class TestToolRegistryThreadSafety:
             t.join()
 
         assert errors == [], f"Concurrent clear/register raised: {errors}"
+
+
+class TestListAvailableSurfacesRegistry:
+    """Discovery (list_available) must match resolution for registry tools.
+
+    Regression for issue #2474: entry-point-discovered and registry-registered
+    tools resolve at run time but were invisible to ``tools list``.
+    """
+
+    def test_wrapper_registry_tool_listed(self):
+        """A tool registered in the wrapper ToolRegistry appears in list_available()."""
+        from praisonai.tool_resolver import ToolResolver
+
+        registry = ToolRegistry()
+        registry.register_function("my_wrapper_tool", lambda x: x)
+        resolver = ToolResolver(registry=registry)
+
+        available = resolver.list_available()
+        assert "my_wrapper_tool" in available
+        # And it resolves at run time too (discovery matches resolution).
+        assert resolver.resolve("my_wrapper_tool") is not None
+
+    def test_core_registry_tool_listed(self):
+        """A tool registered in the core SDK registry appears in list_available()."""
+        pytest.importorskip("praisonaiagents")
+        from praisonaiagents.tools.registry import get_registry
+        from praisonai.tool_resolver import ToolResolver
+
+        core_reg = get_registry()
+        tool_name = "issue2474_core_registry_tool"
+
+        def _sample_tool(x):
+            """Sample registry tool for discovery test."""
+            return x
+
+        core_reg.register(_sample_tool, name=tool_name)
+        try:
+            resolver = ToolResolver()
+            available = resolver.list_available()
+            assert tool_name in available
+            assert resolver.resolve(tool_name) is not None
+        finally:
+            # Avoid leaking the test tool into the process-wide singleton.
+            core_reg.unregister(tool_name)

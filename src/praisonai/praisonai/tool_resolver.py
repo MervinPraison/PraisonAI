@@ -569,7 +569,36 @@ class ToolResolver:
                         available[name] = "External tool from praisonai-tools"
             except (ImportError, AttributeError):
                 pass
-        
+
+        # 4. Add tools registered in the wrapper ToolRegistry (register_function API)
+        if self._registry is not None:
+            try:
+                names = self._registry.list_functions()
+            except Exception:
+                names = []
+            for name in names:
+                if name not in available:
+                    available[name] = "Registered tool (wrapper registry)"
+
+        # 5. Add tools from the core SDK tool registry (entry-point plugins and
+        # runtime-registered tools). These resolve at run time via the resolution
+        # chain, so discovery must surface them too. Mirror the resolution path by
+        # triggering entry-point discovery (idempotent) before listing.
+        try:
+            from praisonaiagents.tools.registry import get_registry
+            reg = get_registry()
+            try:
+                reg.discover_plugins()
+            except Exception:
+                pass
+            for name in reg.list_tools():
+                if name not in available:
+                    available[name] = "Registered/entry-point tool"
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Error listing tools from core registry: {e}")
+
         return available
     
     def validate_yaml_tools(self, yaml_config: Dict[str, Any]) -> List[str]:
