@@ -29,6 +29,8 @@ tests/e2e/
 │   └── test_langgraph_real.py  # Real LangGraph tests
 ├── openai_agents_e2e/
 │   └── test_openai_agents_real.py  # Real OpenAI Agents SDK tests
+├── agno_e2e/
+│   └── test_agno_real.py           # Real Agno tests
 ├── README.md                   # This file
 └── __init__.py
 ```
@@ -80,6 +82,16 @@ export PRAISONAI_RUN_FULL_TESTS=true
 
 # Run with real-time output to see actual execution
 python -m pytest tests/e2e/autogen/ -v -m real -s
+```
+
+**Run OpenAI Agents real tests only:**
+```bash
+python -m pytest tests/e2e/openai_agents_e2e/ -v -m real
+```
+
+**Run Agno real tests only:**
+```bash
+python -m pytest tests/e2e/agno_e2e/ -v -m real
 ```
 
 **Skip real tests (default behavior without API keys):**

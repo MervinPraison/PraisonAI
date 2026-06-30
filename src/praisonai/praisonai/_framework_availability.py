@@ -43,6 +43,19 @@ def _openai_agents_probe() -> bool:
     except ImportError:
         return False
 
+def _agno_probe() -> bool:
+    try:
+        importlib.metadata.distribution("agno")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    if importlib.util.find_spec("agno") is None:
+        return False
+    try:
+        from agno.agent import Agent  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
 _PROBES: dict[str, Callable[[], bool]] = {
     "crewai":            lambda: importlib.util.find_spec("crewai") is not None,
     "autogen":           lambda: importlib.util.find_spec("autogen") is not None,
@@ -65,6 +78,7 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "weaviate":          lambda: importlib.util.find_spec("weaviate") is not None,
     "langgraph":         _langgraph_probe,
     "openai_agents":     _openai_agents_probe,
+    "agno":              _agno_probe,
 }
 
 def is_available(name: str) -> bool:
