@@ -78,6 +78,11 @@ class Bot:
         agent: Agent, AgentTeam, or AgentFlow to power the bot.
         token: Explicit token. Falls back to env var ``{PLATFORM}_BOT_TOKEN``.
         config: Optional BotConfig override.
+        transport: Optional out-of-process relay transport (Issue #2485). When
+            provided, the platform connection is owned by a separate connector
+            process and relayed in, so the gateway needs no public inbound port
+            and no platform SDK. Must satisfy
+            ``praisonaiagents.gateway.RelayTransport``.
         **kwargs: Platform-specific arguments passed to the adapter.
     """
 
@@ -88,12 +93,19 @@ class Bot:
         token: Optional[str] = None,
         config: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        transport: Optional[Any] = None,
         **kwargs: Any,
     ):
         self._platform = platform.lower().strip()
         self._agent = agent
         self._explicit_token = token
         self._config = config
+        # Issue #2485: optional out-of-process relay transport. When provided,
+        # the platform connection lives in a separate connector process and is
+        # relayed in; the gateway needs no public inbound port and no platform
+        # SDK. Must satisfy ``praisonaiagents.gateway.RelayTransport``. The
+        # adapter build path short-circuits to a ``RelayAdapter`` in this case.
+        self._transport = transport
         # W1: optional cross-platform identity resolver. Applied to the
         # adapter's ``_session`` after construction (duck-typed; works
         # with any adapter that exposes a BotSessionManager-compatible
@@ -170,13 +182,32 @@ class Bot:
 
     def _build_adapter(self) -> Any:
         """Lazy-resolve and instantiate the platform adapter."""
+        import uuid
+
+        # Issue #2485: when a relay transport is supplied, the platform
+        # connection lives out-of-process. Wrap it in a RelayAdapter that
+        # presents the same adapter contract (start/stop/send_message) so the
+        # rest of the gateway is unchanged.
+        if self._transport is not None:
+            from ._relay_adapter import RelayAdapter
+
+            session_key = f"{self._platform}-{str(uuid.uuid4())[:8]}"
+            agent = self._apply_smart_defaults(
+                self._agent, session_key=session_key
+            )
+            return RelayAdapter(
+                transport=self._transport,
+                platform=self._platform,
+                agent=agent,
+                config=self._config,
+            )
+
         from ._registry import resolve_adapter
 
         adapter_cls = resolve_adapter(self._platform)
 
         # Apply smart defaults to agent before passing to adapter
         # Generate a session key for workspace isolation
-        import uuid
         session_key = f"{self._platform}-{str(uuid.uuid4())[:8]}"
         agent = self._apply_smart_defaults(self._agent, session_key=session_key)
 
@@ -256,6 +287,19 @@ class Bot:
         if self._adapter:
             await self._adapter.stop()
         self._is_running = False
+
+    async def go_dormant(self) -> None:
+        """Pause inbound dispatch while keeping the connection alive.
+
+        Issue #2485: forwards to a relay adapter's ``go_dormant`` so a
+        scale-to-zero controller can ask an out-of-process connector to keep
+        buffering inbound events while the gateway sleeps, rather than
+        disconnecting. A no-op for adapters that do not support dormancy.
+        """
+        adapter = self._adapter
+        go_dormant = getattr(adapter, "go_dormant", None) if adapter else None
+        if go_dormant is not None:
+            await go_dormant()
 
     def run(self) -> None:
         """Synchronous entry point — starts the bot.

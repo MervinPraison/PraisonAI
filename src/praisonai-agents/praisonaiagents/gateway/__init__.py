@@ -85,6 +85,9 @@ from .protocols import (
     ProtocolHelloOk,
     GapInfo,
     ResumeSnapshot,
+    # Out-of-process platform-connector relay (Issue #2485)
+    CapabilityDescriptor,
+    RelayTransport,
 )
 from .hooks import (
     HookAction,
@@ -219,6 +222,9 @@ __all__ = [
     "ProtocolHelloOk",
     "GapInfo",
     "ResumeSnapshot",
+    # Out-of-process platform-connector relay (Issue #2485)
+    "CapabilityDescriptor",
+    "RelayTransport",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",

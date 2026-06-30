@@ -2809,3 +2809,129 @@ class ResumeSnapshot(TypedDict, total=False):
     presence: List[Dict[str, Any]]  # Current presence information
     health: Dict[str, Any]  # Gateway health status
     session_state: Dict[str, Any]  # Session-specific state
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Relay transport (Issue #2485)
+#
+# A protocol-first seam so a thin *connector* process can own the platform
+# socket (Telegram/Discord/WhatsApp/...) and relay normalised inbound events
+# to a gateway over an authenticated transport, while accepting outbound
+# sends/interrupts back down. This decouples the *platform connection* from
+# the gateway process, enabling:
+#   * headless / NAT-friendly hosting (gateway needs no public inbound port),
+#   * one gateway fronting many remotely-hosted connectors,
+#   * lossless scale-to-zero (the connector stays connected and buffers while
+#     the gateway is dormant, draining the backlog on wake).
+#
+# These are *protocols only* — no transport (WebSocket/gRPC/message bus) and
+# no platform SDK is imported here. Concrete implementations live in the
+# praisonai wrapper.
+# ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class CapabilityDescriptor:
+    """A capability profile a relay connector attests at handshake time.
+
+    Where :class:`~praisonaiagents.bots.presentation.PlatformCapabilities`
+    declares capabilities *statically* in core, this descriptor is negotiated
+    by a remote connector at connect time so the streaming/delivery layer can
+    adapt to the actual platform the connector is fronting.
+
+    Attributes:
+        max_message_length: Maximum outbound message length the platform
+            accepts before the connector must split/truncate.
+        length_unit: How ``max_message_length`` is measured — ``"chars"``
+            (Unicode code points) or ``"utf16"`` (UTF-16 code units, as some
+            platforms count).
+        supports_edit: Whether the platform supports editing a sent message
+            (enables draft-streaming via in-place edits).
+        supports_draft_streaming: Whether the connector can stream partial
+            drafts (incremental updates) for a single turn.
+        markdown_dialect: Markdown flavour the platform renders
+            (e.g. ``"none"``, ``"markdown"``, ``"markdownv2"``, ``"html"``).
+    """
+
+    max_message_length: int
+    length_unit: str = "chars"  # "chars" | "utf16"
+    supports_edit: bool = False
+    supports_draft_streaming: bool = False
+    markdown_dialect: str = "none"
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary (for the handshake wire)."""
+        return {
+            "max_message_length": self.max_message_length,
+            "length_unit": self.length_unit,
+            "supports_edit": self.supports_edit,
+            "supports_draft_streaming": self.supports_draft_streaming,
+            "markdown_dialect": self.markdown_dialect,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CapabilityDescriptor":
+        """Reconstruct a descriptor from its serialized form."""
+        return cls(
+            max_message_length=int(data["max_message_length"]),
+            length_unit=str(data.get("length_unit", "chars")),
+            supports_edit=bool(data.get("supports_edit", False)),
+            supports_draft_streaming=bool(
+                data.get("supports_draft_streaming", False)
+            ),
+            markdown_dialect=str(data.get("markdown_dialect", "none")),
+        )
+
+
+@runtime_checkable
+class RelayTransport(Protocol):
+    """Protocol for an out-of-process platform-connector relay.
+
+    A concrete implementation (e.g. a ``WebSocketRelayTransport`` in the
+    praisonai wrapper) lets a connector that holds the platform socket
+    forward normalised inbound :class:`GatewayMessage` events to the gateway
+    and accept outbound sends/interrupts back down. The gateway treats the
+    relay like any other adapter (same inbound routing, admission control,
+    delivery) but the connection lives elsewhere.
+
+    Lifecycle::
+
+        caps = await transport.connect()            # handshake → capabilities
+        transport.set_inbound_handler(on_message)   # wire inbound events in
+        ...                                          # events relayed in/out
+        await transport.go_dormant()                 # pause, keep connection
+        await transport.disconnect()                 # tear down
+    """
+
+    async def connect(self) -> "CapabilityDescriptor":
+        """Establish the relay and complete the handshake.
+
+        Returns the :class:`CapabilityDescriptor` attested by the connector
+        for the platform it is fronting.
+        """
+        ...
+
+    def set_inbound_handler(
+        self, handler: Callable[["GatewayMessage"], Awaitable[None]]
+    ) -> None:
+        """Register the coroutine invoked for each relayed inbound message."""
+        ...
+
+    async def send_outbound(
+        self, target: "TargetInfo", message: "GatewayMessage"
+    ) -> "DeliveryResult":
+        """Relay an outbound message to ``target`` via the connector."""
+        ...
+
+    async def go_dormant(self) -> None:
+        """Pause inbound dispatch without dropping the connection.
+
+        The connector keeps the platform socket open and buffers inbound
+        events while the gateway is dormant (scale-to-zero), so they can be
+        drained losslessly on wake.
+        """
+        ...
+
+    async def disconnect(self) -> None:
+        """Tear down the relay connection."""
+        ...
