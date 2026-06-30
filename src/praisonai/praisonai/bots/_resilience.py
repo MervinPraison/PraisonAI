@@ -306,14 +306,19 @@ def is_permanent_target_failure(err: BaseException, platform: str = "") -> bool:
         if pat in msg:
             return False
 
-    # HTTP status: 403 Forbidden and 404 Not Found are the canonical
-    # permanent-target signals (after the message-scoped 404 guard above).
+    # HTTP status: 403 Forbidden / 404 Not Found / 410 Gone are the canonical
+    # whole-target permanent signals (after the message-scoped 404 guard above).
+    # NOTE: 401 Unauthorized is deliberately excluded — it signals an account-
+    # /token-level auth problem (revoked or wrong credentials), not the death of
+    # one specific channel. Condemning a channel on a 401 would suppress every
+    # target the moment a token expires, and the TTL would keep them suppressed
+    # long after the token is fixed. Auth failures stay off the dead-target path.
     status = getattr(err, "status", None)
     if status is None:
         status = getattr(err, "status_code", None)
     if status is None:
         status = getattr(err, "error_code", None)
-    if isinstance(status, int) and status in (401, 403, 404, 410):
+    if isinstance(status, int) and status in (403, 404, 410):
         return True
 
     # Text patterns from platforms that don't surface a clean status code.

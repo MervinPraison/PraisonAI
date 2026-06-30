@@ -489,16 +489,27 @@ class DeliveryRouter:
             # Short-circuit known-dead targets (issue #2486): the bot was
             # kicked/blocked or the chat no longer exists, so skip the doomed
             # API call instead of burning rate-limit budget and flooding logs.
+            # Self-healing: once the re-probe interval elapses we let a single
+            # send through so a recovered target (bot re-added, group restored)
+            # can clear itself far sooner than the long TTL would allow.
             if self._dead_targets is not None and self._dead_targets.is_dead(
                 platform, channel_id
             ):
-                logger.info(
-                    "DeliveryRouter: suppressing send to dead target %s:%s "
-                    "(target_unreachable_suppressed)",
-                    platform,
-                    channel_id,
-                )
-                return False
+                if self._dead_targets.should_reprobe(platform, channel_id):
+                    logger.info(
+                        "DeliveryRouter: re-probing dead target %s:%s "
+                        "(target_reprobe_attempt)",
+                        platform,
+                        channel_id,
+                    )
+                else:
+                    logger.info(
+                        "DeliveryRouter: suppressing send to dead target %s:%s "
+                        "(target_unreachable_suppressed)",
+                        platform,
+                        channel_id,
+                    )
+                    return False
             
             try:
                 await bot.send_message(channel_id, text)

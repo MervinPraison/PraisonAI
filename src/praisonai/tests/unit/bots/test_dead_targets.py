@@ -125,6 +125,66 @@ class TestDeadTargetBounding:
         assert reg.is_dead("p", "1") is False
         assert reg.is_dead("p", "3") is True
 
+    def test_size_prunes_expired(self, tmp_path):
+        # size() must not count TTL-expired entries (greptile P2).
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(persist_path=tmp_path / "dead.json", ttl_seconds=1)
+        reg.mark_dead("telegram", "-1001", reason="403")
+        key = ("telegram", "-1001")
+        old = reg._dead[key]
+        reg._dead[key] = type(old)(
+            platform=old.platform,
+            channel_id=old.channel_id,
+            reason=old.reason,
+            ts=time.time() - 10,
+        )
+        assert reg.size() == 0
+
+
+# ─── Self-healing re-probe ───────────────────────────────────────────
+class TestDeadTargetReprobe:
+    def test_no_reprobe_before_interval(self, tmp_path):
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(
+            persist_path=tmp_path / "dead.json", reprobe_seconds=3600
+        )
+        reg.mark_dead("telegram", "-1001", reason="403")
+        assert reg.should_reprobe("telegram", "-1001") is False
+
+    def test_reprobe_after_interval(self, tmp_path):
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(
+            persist_path=tmp_path / "dead.json", reprobe_seconds=1
+        )
+        reg.mark_dead("telegram", "-1001", reason="403")
+        key = ("telegram", "-1001")
+        old = reg._dead[key]
+        reg._dead[key] = type(old)(
+            platform=old.platform,
+            channel_id=old.channel_id,
+            reason=old.reason,
+            ts=time.time() - 10,
+        )
+        assert reg.should_reprobe("telegram", "-1001") is True
+
+    def test_reprobe_disabled_returns_false(self, tmp_path):
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(
+            persist_path=tmp_path / "dead.json", reprobe_seconds=0
+        )
+        reg.mark_dead("telegram", "-1001", reason="403")
+        assert reg.should_reprobe("telegram", "-1001") is False
+
+    def test_reprobe_unknown_target_false(self, tmp_path):
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(persist_path=tmp_path / "dead.json")
+        assert reg.should_reprobe("telegram", "-1001") is False
+
 
 # ─── Error classification ────────────────────────────────────────────
 class _StatusError(Exception):
@@ -162,6 +222,19 @@ class TestPermanentClassification:
         assert is_permanent_target_failure(_StatusError(503, "service unavailable")) is False
         assert is_permanent_target_failure(_StatusError(429, "Too Many Requests")) is False
         assert is_permanent_target_failure(Exception("connection reset by peer")) is False
+
+    def test_401_not_permanent(self):
+        # 401 is an account/token-level auth failure, not a per-channel death:
+        # condemning the channel would suppress every target on token expiry
+        # (greptile P1).
+        from praisonai.bots._resilience import is_permanent_target_failure
+
+        assert is_permanent_target_failure(_StatusError(401, "Unauthorized")) is False
+
+    def test_410_is_permanent(self):
+        from praisonai.bots._resilience import is_permanent_target_failure
+
+        assert is_permanent_target_failure(_StatusError(410, "Gone")) is True
 
     def test_message_scoped_404_not_permanent(self):
         from praisonai.bots._resilience import is_permanent_target_failure
@@ -283,3 +356,57 @@ class TestDeliveryRouterWiring:
         ok = await router.deliver("telegram", "hi")
         assert ok is True
         assert reg.size() == 0
+
+    @pytest.mark.asyncio
+    async def test_reprobe_self_heals_recovered_target(self, tmp_path):
+        # Once the re-probe interval elapses, a dead-but-recovered target is sent
+        # to and clears itself — without manual intervention or TTL expiry
+        # (greptile P1: suppressed targets must be able to self-heal).
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(
+            persist_path=tmp_path / "dead.json", reprobe_seconds=1
+        )
+        reg.mark_dead("telegram", "-1001", reason="403")
+        key = ("telegram", "-1001")
+        old = reg._dead[key]
+        reg._dead[key] = type(old)(
+            platform=old.platform,
+            channel_id=old.channel_id,
+            reason=old.reason,
+            ts=time.time() - 10,
+        )
+        bot = _FakeBot()  # recovered: send now succeeds
+        router = _make_router(bot, reg)
+
+        ok = await router.deliver("telegram", "hi")
+        assert ok is True
+        assert bot.sends == [("-1001", "hi")]  # re-probe reached the platform
+        assert reg.is_dead("telegram", "-1001") is False  # self-healed
+
+    @pytest.mark.asyncio
+    async def test_reprobe_still_dead_re_suppresses(self, tmp_path):
+        # If the re-probe fails permanently again, the target stays dead and the
+        # clock resets for another window.
+        from praisonai.bots import DeadTargetRegistry
+
+        reg = DeadTargetRegistry(
+            persist_path=tmp_path / "dead.json", reprobe_seconds=1
+        )
+        reg.mark_dead("telegram", "-1001", reason="403")
+        key = ("telegram", "-1001")
+        old = reg._dead[key]
+        reg._dead[key] = type(old)(
+            platform=old.platform,
+            channel_id=old.channel_id,
+            reason=old.reason,
+            ts=time.time() - 10,
+        )
+        bot = _FakeBot(exc=_StatusError(403, "Forbidden: bot was kicked"))
+        router = _make_router(bot, reg)
+
+        ok = await router.deliver("telegram", "hi")
+        assert ok is False
+        assert reg.is_dead("telegram", "-1001") is True
+        # Clock reset: no longer immediately re-probable.
+        assert reg.should_reprobe("telegram", "-1001") is False

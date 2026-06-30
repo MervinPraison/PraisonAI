@@ -28,6 +28,7 @@ Design constraints (per PraisonAI principles):
 Public API:
   - ``DeadTargetRegistry(persist_path=None, *, max_size=10_000, ttl_seconds=...)``
   - ``is_dead(platform, channel_id) -> bool``
+  - ``should_reprobe(platform, channel_id) -> bool``  (periodic self-heal probe)
   - ``mark_dead(platform, channel_id, reason) -> None``
   - ``clear(platform, channel_id) -> None``  (called on every success)
   - ``list_dead() -> list[DeadTarget]``
@@ -51,6 +52,12 @@ logger = logging.getLogger(__name__)
 # ago is re-probed eventually even if no traffic ever cleared it.
 _DEFAULT_TTL_SECONDS = 30 * 86400
 _DEFAULT_MAX_SIZE = 10_000
+# How long to fully suppress a dead target before allowing a single re-probe.
+# A kicked bot is rarely re-added within seconds, but waiting the full 30-day
+# TTL to retry a *recovered* target is far too long. Letting one send through
+# roughly once an hour bounds self-heal latency to ~1h while still suppressing
+# the overwhelming majority of doomed cycles.
+_DEFAULT_REPROBE_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -92,6 +99,7 @@ class DeadTargetRegistry:
         *,
         max_size: int = _DEFAULT_MAX_SIZE,
         ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+        reprobe_seconds: int = _DEFAULT_REPROBE_SECONDS,
     ) -> None:
         state_dir = Path.home() / ".praisonai" / "state"
         self._persist_path = Path(
@@ -99,6 +107,7 @@ class DeadTargetRegistry:
         ).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
+        self.reprobe_seconds = int(reprobe_seconds)
         self._lock = threading.Lock()
         # (platform, channel_id) -> DeadTarget
         self._dead: Dict[Tuple[str, str], DeadTarget] = {}
@@ -199,6 +208,25 @@ class DeadTargetRegistry:
                 return False
             return True
 
+    def should_reprobe(self, platform: str, channel_id: str) -> bool:
+        """Return True if a dead target is due for a single self-healing re-probe.
+
+        A suppressed target can only prove it has recovered by being sent to, but
+        ``is_dead`` would otherwise block every send until the (long) TTL expires.
+        To bound self-heal latency, once ``reprobe_seconds`` has elapsed since the
+        target was last marked dead we allow *one* send through. If it succeeds,
+        :meth:`clear` un-suppresses it; if it fails permanently again,
+        :meth:`mark_dead` resets the clock for another ``reprobe_seconds`` window.
+        """
+        if self.reprobe_seconds <= 0:
+            return False
+        key = self._key(platform, channel_id)
+        with self._lock:
+            entry = self._dead.get(key)
+            if entry is None:
+                return False
+            return entry.ts < time.time() - self.reprobe_seconds
+
     def mark_dead(self, platform: str, channel_id: str, reason: str) -> None:
         """Record a confirmed-permanent failure, suppressing future sends."""
         key = self._key(platform, channel_id)
@@ -239,6 +267,8 @@ class DeadTargetRegistry:
             return sorted(self._dead.values(), key=lambda d: d.ts)
 
     def size(self) -> int:
-        """Number of currently-suppressed targets."""
+        """Number of currently-suppressed targets (expired ones pruned)."""
         with self._lock:
+            if self._evict_expired_locked():
+                self._save_locked()
             return len(self._dead)
