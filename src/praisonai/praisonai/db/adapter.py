@@ -5,6 +5,7 @@ This module provides the bridge between the core Agent's db interface
 and the wrapper's persistence layer (PersistenceOrchestrator).
 """
 
+import asyncio
 import time
 import logging
 import threading
@@ -55,6 +56,9 @@ class PraisonAIDB:
         self._database_url = database_url
         self._state_url = state_url
         self._knowledge_url = knowledge_url
+        # Pop adapter-level options before forwarding the rest to the backend
+        # store factories, so they are never passed through as backend kwargs.
+        init_retry_cooldown = options.pop("init_retry_cooldown", 30.0)
         self._options = options
         
         # Lazy-loaded stores
@@ -62,46 +66,126 @@ class PraisonAIDB:
         self._state_store = None
         self._knowledge_store = None
         self._initialized = False
-        self._init_lock = threading.Lock()
-    
+        self._init_lock = threading.Lock()          # guards the sync init path
+        # Async callers use a dedicated asyncio.Lock (created lazily per loop) so
+        # the event loop is never blocked on a threading.Lock, and the blocking
+        # store construction runs off-loop via asyncio.to_thread.
+        self._ainit_lock: Optional["asyncio.Lock"] = None
+        # Remember the last init failure so a soft error (bad config / missing
+        # dep / cloud auth failure) is surfaced cleanly instead of being re-tried
+        # — and re-raised — on every subsequent callback. The failure is NOT
+        # permanent: after a short cool-down a later callback re-attempts
+        # construction, so persistence transparently recovers once a transient
+        # DB/network outage clears, while a down backend is not hammered on
+        # every call in between.
+        self._init_failed: Optional[Exception] = None
+        self._init_failed_at: float = 0.0
+        # Seconds to suppress retries after an init failure before re-attempting.
+        self._init_retry_cooldown: float = float(init_retry_cooldown)
+
+    def _build_stores(self):
+        """Construct the backing stores (blocking I/O). Caller handles locking."""
+        # Import persistence layer
+        from ..persistence.factory import (
+            create_conversation_store,
+            create_state_store,
+            create_knowledge_store,
+        )
+
+        # Initialize conversation store
+        if self._database_url:
+            backend = self._detect_backend(self._database_url)
+            self._conversation_store = create_conversation_store(
+                backend, url=self._database_url, **self._options
+            )
+
+        # Initialize state store
+        if self._state_url:
+            backend = self._detect_backend(self._state_url)
+            self._state_store = create_state_store(
+                backend, url=self._state_url, **self._options
+            )
+
+        # Initialize knowledge store
+        if self._knowledge_url:
+            backend = self._detect_backend(self._knowledge_url)
+            self._knowledge_store = create_knowledge_store(
+                backend, url=self._knowledge_url, **self._options
+            )
+
+    def _init_failure_active(self) -> Optional[Exception]:
+        """Return the cached init failure if still within the cool-down window.
+
+        A failure older than ``_init_retry_cooldown`` seconds is cleared so the
+        next caller re-attempts construction — this lets persistence recover
+        automatically after a transient DB/network outage instead of staying
+        permanently disabled for the adapter's lifetime.
+        """
+        if self._init_failed is None:
+            return None
+        if (time.monotonic() - self._init_failed_at) >= self._init_retry_cooldown:
+            self._init_failed = None
+            self._init_failed_at = 0.0
+            return None
+        return self._init_failed
+
     def _init_stores(self):
-        """Lazily initialize stores on first use."""
+        """Lazily initialize stores on first use (sync path)."""
         if self._initialized:
             return
-        
+        cached = self._init_failure_active()
+        if cached is not None:
+            raise cached
+
         with self._init_lock:
             if self._initialized:  # Double-check inside lock
                 return
-            
-            # Import persistence layer
-            from ..persistence.factory import (
-                create_conversation_store,
-                create_state_store,
-                create_knowledge_store,
-            )
-            
-            # Initialize conversation store
-            if self._database_url:
-                backend = self._detect_backend(self._database_url)
-                self._conversation_store = create_conversation_store(
-                    backend, url=self._database_url, **self._options
-                )
-            
-            # Initialize state store
-            if self._state_url:
-                backend = self._detect_backend(self._state_url)
-                self._state_store = create_state_store(
-                    backend, url=self._state_url, **self._options
-                )
-            
-            # Initialize knowledge store
-            if self._knowledge_url:
-                backend = self._detect_backend(self._knowledge_url)
-                self._knowledge_store = create_knowledge_store(
-                    backend, url=self._knowledge_url, **self._options
-                )
-            
-            self._initialized = True
+            cached = self._init_failure_active()
+            if cached is not None:
+                raise cached
+            try:
+                self._build_stores()
+                self._initialized = True
+                self._init_failed = None
+                self._init_failed_at = 0.0
+            except Exception as e:
+                # Memoize ordinary errors for a bounded cool-down window so a
+                # down backend is not hammered on every callback, but recovery
+                # is still possible (see _init_failure_active). KeyboardInterrupt
+                # /SystemExit and other BaseExceptions (e.g. CancelledError
+                # surfacing through to_thread) must NOT poison _init_failed.
+                self._init_failed = e
+                self._init_failed_at = time.monotonic()
+                raise
+
+    async def _ainit_stores(self):
+        """Lazily initialize stores on first use (async path).
+
+        Never holds a threading.Lock on the event-loop thread. The blocking
+        store construction is delegated to the same locked sync initializer
+        (``_init_stores``) via :func:`asyncio.to_thread`, so the sync and async
+        paths share a single ``_init_lock`` and can never construct stores
+        concurrently on the same adapter instance.
+        """
+        if self._initialized:
+            return
+        cached = self._init_failure_active()
+        if cached is not None:
+            raise cached
+
+        # Create the asyncio.Lock lazily so it binds to the running loop. This
+        # serialises async callers; the off-loop _init_stores serialises against
+        # sync callers via the shared threading _init_lock.
+        if self._ainit_lock is None:
+            self._ainit_lock = asyncio.Lock()
+
+        async with self._ainit_lock:
+            if self._initialized:
+                return
+            cached = self._init_failure_active()
+            if cached is not None:
+                raise cached
+            await asyncio.to_thread(self._init_stores)
     
     def _detect_backend(self, url: str) -> str:
         """Detect backend type from URL.
@@ -584,7 +668,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Async version of on_agent_start."""
-        self._init_stores()
+        await self._ainit_stores()
         
         if self._state_store:
             if hasattr(self._state_store, "async_set_agent_state"):
@@ -609,7 +693,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Async version of on_user_message."""
-        self._init_stores()
+        await self._ainit_stores()
         
         if self._conversation_store:
             from ..persistence.conversation.models import ConversationMessage
@@ -632,7 +716,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Async version of on_agent_message."""
-        self._init_stores()
+        await self._ainit_stores()
         
         if self._conversation_store:
             from ..persistence.conversation.models import ConversationMessage
@@ -657,7 +741,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Async version of on_tool_call."""
-        self._init_stores()
+        await self._ainit_stores()
         
         if self._conversation_store:
             if hasattr(self._conversation_store, "async_add_tool_call"):
@@ -679,7 +763,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Async version of on_agent_end."""
-        self._init_stores()
+        await self._ainit_stores()
         
         if self._state_store:
             if hasattr(self._state_store, "async_set_agent_state"):
@@ -712,7 +796,7 @@ class PraisonAIDB:
 
     async def __aenter__(self):
         """Async context manager entry."""
-        self._init_stores()
+        await self._ainit_stores()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

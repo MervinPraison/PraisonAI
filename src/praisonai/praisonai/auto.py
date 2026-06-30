@@ -25,6 +25,21 @@ T = TypeVar('T')
 # =============================================================================
 
 from ._lazy_cache import lazy_get
+from ._async_bridge import run_sync
+import inspect as _inspect
+
+
+async def _maybe_await(value):
+    """Await ``value`` if it is awaitable, otherwise return it unchanged.
+
+    Lets a single coroutine drive both async provider calls (which return
+    awaitables) and sync provider calls (which return plain results) without
+    duplicating the surrounding fallback ladder.
+    """
+    if _inspect.isawaitable(value):
+        return await value
+    return value
+
 
 # Module-level cache for lazily constructed Pydantic workflow models.
 # Populated on first call to _get_workflow_models() / _get_job_workflow_models().
@@ -460,36 +475,63 @@ class BaseAutoGenerator:
         return False
 
     
-    def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
+    def _get_async_openai_client(self):
+        """Get or create the async OpenAI client for this instance.
+
+        Lazy-init AND snapshot the client under the same lock so the returned
+        local reference survives a concurrent aclose() that nulls the attribute,
+        closing the shutdown-during-request race (mirrors the sync path).
         """
-        Make a structured LLM completion with provider fallback.
-        
-        Priority:
-        1. LiteLLM (if available) - supports 100+ LLM providers
-        2. OpenAI SDK (fallback) - uses beta.chat.completions.parse
-        
-        Args:
-            response_model: Pydantic model class for structured output
-            messages: List of message dicts for the LLM
-            **kwargs: Additional arguments passed to the LLM
-            
-        Returns:
-            Instance of response_model with parsed response
-            
-        Raises:
-            ImportError: If neither litellm nor openai is installed
+        with self._client_lock:
+            client = self._async_openai_client
+            if client is None:
+                try:
+                    from openai import AsyncOpenAI
+                except ImportError as e:
+                    raise ImportError("Install with: pip install openai") from e
+                cfg = self.config_list[0]
+                client = self._async_openai_client = AsyncOpenAI(
+                    api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                    base_url=cfg.get("base_url"),
+                )
+            return client
+
+    async def _completion_impl(
+        self,
+        response_model: Type[T],
+        messages: List[Dict],
+        *,
+        is_async: bool,
+        **kwargs,
+    ) -> T:
+        """Single source of truth for the structured-completion fallback ladder.
+
+        Drives the same LiteLLM -> OpenAI ladder for both the sync and async
+        entry points; the ONLY divergence is whether the provider call is
+        awaited (async) or run directly (sync), and which OpenAI client cache is
+        used. This collapses the previously byte-for-byte duplicated sync/async
+        paths into one place so the ladder can only ever be changed once.
         """
         model_name = self.config_list[0]['model']
-        
+
         # Try LiteLLM first (preferred - supports 100+ providers)
         if is_available("litellm"):
             try:
                 litellm = _get_litellm()
-                response = litellm.completion(
+                call = litellm.acompletion if is_async else litellm.completion
+                call_kwargs = dict(
                     model=model_name,
                     messages=messages,
                     response_format=response_model,
-                    **kwargs
+                    **kwargs,
+                )
+                # The async path awaits the provider coroutine directly. The sync
+                # path offloads the blocking provider call via asyncio.to_thread
+                # so it never blocks the bridge event loop this coroutine runs on.
+                response = (
+                    await _maybe_await(call(**call_kwargs))
+                    if is_async
+                    else await asyncio.to_thread(lambda: call(**call_kwargs))
                 )
                 content = response.choices[0].message.content
                 return response_model.model_validate_json(content)
@@ -504,97 +546,114 @@ class BaseAutoGenerator:
                     "LiteLLM structured completion failed (%s); "
                     "falling back to OpenAI SDK.", e
                 )
-        
+
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
         if is_available("openai"):
-            client = self._get_openai_client()
-            response = client.beta.chat.completions.parse(
+            client = (
+                self._get_async_openai_client() if is_async
+                else self._get_openai_client()
+            )
+            parse = client.beta.chat.completions.parse
+            parse_kwargs = dict(
                 model=model_name,
                 messages=messages,
                 response_format=response_model,
-                **kwargs
+                **kwargs,
+            )
+            # As above: await directly when async, otherwise offload the blocking
+            # sync parse() so the bridge event loop is never blocked.
+            response = (
+                await _maybe_await(parse(**parse_kwargs))
+                if is_async
+                else await asyncio.to_thread(lambda: parse(**parse_kwargs))
             )
             return response.choices[0].message.parsed
-        
+
         # Neither available - raise helpful error
         raise ImportError(
             "Structured output requires either litellm or openai. "
             "Install with: pip install litellm  OR  pip install openai"
         )
-    
-    async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
+
+    def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
-        Make an async structured LLM completion with provider fallback.
-        
+        Make a structured LLM completion with provider fallback.
+
         Priority:
-        1. LiteLLM async (if available) - supports 100+ LLM providers
-        2. OpenAI AsyncSDK (fallback) - uses beta.chat.completions.parse
-        
+        1. LiteLLM (if available) - supports 100+ LLM providers
+        2. OpenAI SDK (fallback) - uses beta.chat.completions.parse
+
         Args:
             response_model: Pydantic model class for structured output
             messages: List of message dicts for the LLM
             **kwargs: Additional arguments passed to the LLM
-            
+
         Returns:
             Instance of response_model with parsed response
-            
+
         Raises:
             ImportError: If neither litellm nor openai is installed
         """
-        model_name = self.config_list[0]['model']
-        
-        # Try LiteLLM async first (preferred - supports 100+ providers)
-        if is_available("litellm"):
-            try:
-                litellm = _get_litellm()
-                response = await litellm.acompletion(
-                    model=model_name,
-                    messages=messages,
-                    response_format=response_model,
-                    **kwargs
-                )
-                content = response.choices[0].message.content
-                return response_model.model_validate_json(content)
-            except Exception as e:
-                # Graceful execution-level fallback (see _structured_completion).
-                if not is_available("openai"):
-                    raise
-                logger.warning(
-                    "LiteLLM async structured completion failed (%s); "
-                    "falling back to OpenAI SDK.", e
-                )
-        
-        # Fallback to OpenAI AsyncSDK (uses beta.chat.completions.parse)
-        if is_available("openai"):
-            # Lazy-init AND snapshot the client under the same lock. The local
-            # reference survives a concurrent aclose() that nulls the attribute,
-            # closing the shutdown-during-request race.
-            with self._client_lock:
-                if self._async_openai_client is None:
-                    try:
-                        from openai import AsyncOpenAI
-                    except ImportError as e:
-                        raise ImportError("Install with: pip install openai") from e
-                    cfg = self.config_list[0]
-                    self._async_openai_client = AsyncOpenAI(
-                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                        base_url=cfg.get("base_url"),
-                    )
-                client = self._async_openai_client
-            
-            response = await client.beta.chat.completions.parse(
-                model=model_name,
-                messages=messages,
-                response_format=response_model,
-                **kwargs
+        # Backward compatibility: the historical sync path called the blocking
+        # provider clients directly, so it worked even when invoked from inside a
+        # running event loop (FastAPI handler, Jupyter, async test). run_sync()
+        # rejects that case, so when a loop is already running we drive the sync
+        # ladder on a dedicated worker thread (with its own loop) instead of
+        # raising. The provider calls still execute off the caller's loop.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if not running_loop:
+            return run_sync(
+                self._completion_impl(response_model, messages, is_async=False, **kwargs)
             )
-            return response.choices[0].message.parsed
-        
-        # Neither available - raise helpful error
-        raise ImportError(
-            "Structured output requires either litellm or openai. "
-            "Install with: pip install litellm  OR  pip install openai"
-        )
+
+        result: List[Any] = []
+        error: List[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result.append(
+                    asyncio.run(
+                        self._completion_impl(
+                            response_model, messages, is_async=False, **kwargs
+                        )
+                    )
+                )
+            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
+                error.append(e)
+
+        thread = threading.Thread(target=_runner, name="praisonai-sync-completion")
+        thread.start()
+        thread.join()
+        if error:
+            raise error[0]
+        return result[0]
+
+    async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
+        """
+        Make an async structured LLM completion with provider fallback.
+
+        Priority:
+        1. LiteLLM async (if available) - supports 100+ LLM providers
+        2. OpenAI AsyncSDK (fallback) - uses beta.chat.completions.parse
+
+        Args:
+            response_model: Pydantic model class for structured output
+            messages: List of message dicts for the LLM
+            **kwargs: Additional arguments passed to the LLM
+
+        Returns:
+            Instance of response_model with parsed response
+
+        Raises:
+            ImportError: If neither litellm nor openai is installed
+        """
+        return await self._completion_impl(response_model, messages, is_async=True, **kwargs)
     
     @staticmethod
     def get_available_tools() -> List[str]:
