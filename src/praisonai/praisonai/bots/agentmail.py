@@ -31,11 +31,12 @@ from praisonaiagents.bots import (
 )
 
 from ._email_utils import is_auto_reply, is_blocked_sender, extract_email_address
+from ._outbound_resilience import OutboundResilienceMixin
 
 logger = logging.getLogger(__name__)
 
 
-class AgentMailBot(ChatCommandMixin, MessageHookMixin):
+class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Agent-native email bot using AgentMail API.
     
     Zero-config email for agents — no IMAP/SMTP setup required.
@@ -59,6 +60,8 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         AGENTMAIL_INBOX_ID: Optional existing inbox ID to reuse
         AGENTMAIL_DOMAIN: Optional custom domain for inbox creation
     """
+    
+    _outbound_platform = "agentmail"
     
     def __init__(
         self,
@@ -751,22 +754,33 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         # Send via AgentMail API
         # SDK v0.4.7: uses text= (not body=); reply_to= is Reply-To header
         # For replying to a message, use messages.reply() method
-        try:
+        def _do_send() -> Any:
             if reply_to:
                 # reply_to contains the original message_id — use reply() method
-                result = client.inboxes.messages.reply(
+                return client.inboxes.messages.reply(
                     self._inbox_id,
                     reply_to,  # message_id of original message
                     text=body,
                     subject=subject,
                 )
-            else:
-                result = client.inboxes.messages.send(
-                    self._inbox_id,
-                    to=channel_id,
-                    subject=subject,
-                    text=body,
-                )
+            return client.inboxes.messages.send(
+                self._inbox_id,
+                to=channel_id,
+                subject=subject,
+                text=body,
+            )
+        
+        try:
+            # Durable delivery: retry transient API failures with backoff and
+            # park the reply in the outbound DLQ on permanent failure instead of
+            # dropping it. The blocking SDK call runs in a thread.
+            result = await self.deliver_outbound(
+                lambda: asyncio.to_thread(_do_send),
+                channel_id=channel_id,
+                reply_text=body,
+                thread_id=thread_id,
+                reply_to=reply_to,
+            )
             # SendMessageResponse has .message_id
             message_id = getattr(result, 'message_id', str(uuid.uuid4()))
             

@@ -38,11 +38,12 @@ from praisonaiagents.bots import (
 
 from ._session import BotSessionManager
 from ._email_utils import is_auto_reply, is_blocked_sender
+from ._outbound_resilience import OutboundResilienceMixin
 
 logger = logging.getLogger(__name__)
 
 
-class EmailBot(ChatCommandMixin, MessageHookMixin):
+class EmailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Email bot runtime for PraisonAI agents.
     
     Connects an agent to email via IMAP/SMTP, handling incoming emails
@@ -69,6 +70,8 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         EMAIL_IMAP_SERVER: IMAP server (default: imap.gmail.com)
         EMAIL_SMTP_SERVER: SMTP server (default: smtp.gmail.com)
     """
+    
+    _outbound_platform = "email"
     
     def __init__(
         self,
@@ -517,9 +520,17 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         msg["X-Auto-Reply"] = "yes"
         msg["Auto-Submitted"] = "auto-replied"
         
-        # Send via SMTP
+        # Send via SMTP with durable delivery: retry transient SMTP failures
+        # with backoff and park the reply in the outbound DLQ on permanent
+        # failure instead of dropping it.
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._send_smtp, msg, all_recipients)
+        await self.deliver_outbound(
+            lambda: loop.run_in_executor(None, self._send_smtp, msg, all_recipients),
+            channel_id=channel_id,
+            reply_text=body,
+            thread_id=thread_id,
+            reply_to=reply_to,
+        )
         
         # Create BotMessage for return
         bot_message = BotMessage(

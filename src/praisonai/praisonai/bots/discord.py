@@ -46,12 +46,13 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ._outbound_resilience import OutboundResilienceMixin
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
 
-class DiscordBot(ChatCommandMixin, MessageHookMixin):
+class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Discord bot runtime for PraisonAI agents.
     
     Connects an agent to Discord, handling messages, slash commands,
@@ -72,6 +73,8 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
     
     Requires: pip install discord.py
     """
+    
+    _outbound_platform = "discord"
     
     def __init__(
         self,
@@ -479,7 +482,15 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             if thread:
                 channel = thread
         
-        sent = await channel.send(text)
+        # Durable delivery: retry transient failures with backoff and park the
+        # reply in the outbound DLQ on permanent failure instead of dropping it.
+        sent = await self.deliver_outbound(
+            lambda: channel.send(text),
+            channel_id=channel_id,
+            reply_text=text,
+            thread_id=thread_id,
+            reply_to=reply_to,
+        )
         
         return BotMessage(
             message_id=str(sent.id),
