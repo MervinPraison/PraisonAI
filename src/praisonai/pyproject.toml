@@ -116,6 +116,10 @@ openai-agents = [
     "praisonai-frameworks[openai-agents]>=0.1.3",
     "praisonai-tools>=0.1.0",
 ]
+agno = [
+    "praisonai-frameworks[agno]>=0.1.6",
+    "praisonai-tools>=0.1.0",
+]
 acp = [
     "agent-client-protocol>=0.7.0",
 ]

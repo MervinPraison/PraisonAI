@@ -178,6 +178,19 @@ class RuntimeCompatibilityChecker:
             supports_handoff=True,
             supports_tool_loop=True
         )
+
+        runtimes['agno'] = RuntimeInfo(
+            id='agno',
+            name='Agno',
+            available=_runtime_usable('agno', 'agno'),
+            capabilities=[
+                RuntimeCapability('agent_creation', 'Create and manage agents'),
+                RuntimeCapability('tool_execution', 'Execute tools and functions'),
+                RuntimeCapability('sequential_execution', 'Sequential task execution'),
+            ],
+            supports_handoff=False,
+            supports_tool_loop=True
+        )
         
         return runtimes
     

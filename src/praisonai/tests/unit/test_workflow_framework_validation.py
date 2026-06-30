@@ -30,6 +30,16 @@ def test_validate_workflow_framework_rejects_openai_agents(caplog):
     assert any("openai_agents" in r.message for r in caplog.records)
 
 
+def test_validate_workflow_framework_rejects_agno(caplog):
+    import logging
+    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="not supported for workflow execution"):
+            validate_workflow_framework("agno", source="workflow.yaml")
+    assert any("agno" in r.message for r in caplog.records)
+
+
 def test_framework_from_config_defaults_praisonai():
     from praisonai.framework_adapters.workflow_framework import framework_from_config
 
