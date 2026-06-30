@@ -483,20 +483,27 @@ Methods:
 * <code title="class SkillLoader">SkillLoader.<a href="./src/praisonai-agents/praisonaiagents/skills/loader.py">load_scripts</a>(skill: LoadedSkill) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">activate</a>(skill: LoadedSkill) -> bool</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">activate_by_name</a>(name: str) -> bool</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">add_bundle</a>(manifest: 'BundleManifest') -> None</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">add_skill</a>(skill_path: str) -> Optional[LoadedSkill]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">add_skill_by_name</a>(name: str, skill_dirs: Optional[List[str]] = None, include_defaults: bool = True) -> Optional[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">approve</a>(identifier: str) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">archive_skill</a>(name: str) -> dict</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">bundle_names</a>() -> List[str]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">bundles</a>() -> List['BundleManifest']</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">clear</a>() -> None</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">create</a>(name: str, content: str, category: Optional[str] = None, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">create_skill</a>(name: str, content: str, category: str = None, agent_created: bool = True, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">delete</a>(name: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">delete_skill</a>(name: str, hard: bool = False, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">discover</a>(skill_dirs: Optional[List[str]] = None, include_defaults: bool = True) -> int</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">discover_bundles</a>(skill_dirs: Optional[List[str]] = None, include_defaults: bool = True) -> int</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">edit</a>(name: str, content: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">edit_skill</a>(name: str, content: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_allowed_tools</a>(name: str) -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills</a>() -> List[SkillMetadata]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills_by_state</a>(state: SkillState) -> List[LoadedSkill]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_bundle</a>(name: str) -> Optional['BundleManifest']</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_bundle_instructions</a>() -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_instructions</a>(name: str) -> Optional[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skill</a>(name: str) -> Optional[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skills_diagnostics</a>() -> Dict[str, ValidationResult]</code>
@@ -510,6 +517,7 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">reject</a>(identifier: str) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">remove_file</a>(name: str, file_path: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">remove_skill_file</a>(name: str, file_path: str, propose: Optional[bool] = None) -> dict</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">resolve</a>(selectors: List[str]) -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">restore_skill</a>(name: str, skill_dir: Optional[str] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">rollback_skill</a>(name: str) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">skill_names</a>() -> List[str]</code>
@@ -1186,6 +1194,7 @@ Methods:
 * <code title="cli">praisonai skills learn <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills list <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills search <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
+* <code title="cli">praisonai skills show <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai skills validate <a href="./src/praisonai/praisonai/cli/commands/skills.py">--help</a></code>
 * <code title="cli">praisonai standardise check <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai standardise fix <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
