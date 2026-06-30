@@ -306,6 +306,22 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
         if self._llm_instance is not None:
             return self._llm_instance
+        if self._panel_descriptor is not None:
+            try:
+                from ..llm.panel import create_panel_llm
+                # Forward the same Agent-level connection/execution settings a
+                # normal model selection preserves (base_url, api_key, auth,
+                # metrics, max_iter, web_search, web_fetch, prompt_caching,
+                # claude_memory) so the panel aggregator behaves identically.
+                self._llm_instance = create_panel_llm(
+                    self._panel_descriptor, **self._panel_llm_kwargs
+                )
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+            return self._llm_instance
         if self._llm_init_params:
             try:
                 from ..llm.llm import LLM
@@ -1578,6 +1594,8 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self._using_custom_llm = False
         self._llm_instance = None
         self._llm_init_params = None
+        self._panel_descriptor = None
+        self._panel_llm_kwargs = {}
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
         
@@ -1645,8 +1663,38 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self.base_url = base_url
         self.api_key = api_key
 
+        # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
+        # Resolved lazily into a PanelLLM; composes with the normal tool loop.
+        # Detected inline (no heavy import) to keep Agent() construction lazy.
+        _is_panel = (
+            (isinstance(llm, str) and llm.startswith("panel:"))
+            or (isinstance(llm, dict) and llm.get("provider") == "panel")
+        )
+        if _is_panel:
+            self._panel_descriptor = llm
+            self._using_custom_llm = True
+            self.llm = llm if isinstance(llm, str) else "panel"
+            # Capture the same connection/execution options the normal LLM paths
+            # forward, so the panel aggregator (and references) behave identically
+            # to a regular model selection. Stored now because some (e.g. auth)
+            # are not retained as Agent attributes.
+            self._panel_llm_kwargs = {
+                k: v
+                for k, v in (
+                    ("base_url", base_url),
+                    ("api_key", api_key),
+                    ("auth", auth),
+                    ("metrics", metrics),
+                    ("max_iter", max_iter),
+                    ("web_search", web_search),
+                    ("web_fetch", web_fetch),
+                    ("prompt_caching", prompt_caching),
+                    ("claude_memory", claude_memory),
+                )
+                if v is not None
+            }
         # If base_url is provided, defer custom LLM instance creation
-        if base_url:
+        elif base_url:
             if isinstance(llm, dict):
                 llm_config = llm.copy()
                 llm_config['base_url'] = base_url
