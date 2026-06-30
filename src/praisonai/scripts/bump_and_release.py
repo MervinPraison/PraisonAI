@@ -24,6 +24,7 @@ This script:
 9. Creates GitHub release (latest)
 """
 
+import os
 import re
 import sys
 import time
@@ -220,7 +221,11 @@ def validate_dependencies(
                 time.sleep(retry_interval)
             continue
 
-        base = run(["uv", "pip", "install", "--system", "--dry-run", "-e", "."], cwd=praisonai_dir, check=False)
+        pip_cmd = ["uv", "pip", "install"]
+        if not (os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX")):
+            pip_cmd.append("--system")
+        pip_cmd.extend(["--dry-run", "-e", "."])
+        base = run(pip_cmd, cwd=praisonai_dir, check=False)
         if base.returncode == 0:
             print("  ✅ Dependencies validated successfully")
             return True
