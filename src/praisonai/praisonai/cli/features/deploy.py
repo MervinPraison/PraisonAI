@@ -458,6 +458,94 @@ class DeployHandler:
         print(json.dumps(data, indent=2))
 
 
+def handle_deploy_command(args):
+    """
+    Entry point for Typer deploy subcommands.
+
+    Builds an args namespace, dispatches to the canonical ``DeployHandler``
+    and returns an exit code, mirroring ``handle_serve_command``. This avoids
+    importing the legacy ``cli/main.py`` module or mutating ``sys.argv``.
+
+    Args:
+        args: List of CLI tokens, e.g. ``["docker", "agents.yaml", "--tag", "v1"]``.
+
+    Returns:
+        Exit code (0 on success, non-zero on failure).
+    """
+    import argparse as ap
+
+    handler = DeployHandler()
+
+    if not args:
+        print("Deploy commands:")
+        print("  praisonai deploy docker [FILE] [--tag TAG]")
+        print("  praisonai deploy aws [FILE] [--region REGION]")
+        print("  praisonai deploy gcp [FILE] [--project PROJECT]")
+        print("  praisonai deploy azure [FILE] [--resource-group GROUP]")
+        return 1
+
+    subcommand = args[0]
+    sub_args = args[1:]
+
+    deploy_args = ap.Namespace()
+    deploy_args.file = 'agents.yaml'
+    deploy_args.json = False
+    deploy_args.all = False
+    deploy_args.verbose = False
+    deploy_args.background = False
+    deploy_args.yes = False
+    deploy_args.force = False
+    deploy_args.provider = None
+    deploy_args.type = None
+    deploy_args.tag = None
+    deploy_args.region = None
+    deploy_args.project_id = None
+    deploy_args.resource_group = None
+
+    value_flags = {
+        '--file': 'file', '-f': 'file',
+        '--tag': 'tag', '-t': 'tag',
+        '--region': 'region', '-r': 'region',
+        '--project': 'project_id', '-p': 'project_id',
+        '--resource-group': 'resource_group', '-g': 'resource_group',
+    }
+
+    i = 0
+    while i < len(sub_args):
+        arg = sub_args[i]
+        if arg in value_flags:
+            if i + 1 >= len(sub_args):
+                print(f"Error: option '{arg}' requires a value")
+                return 1
+            setattr(deploy_args, value_flags[arg], sub_args[i + 1])
+            i += 2
+        elif arg == '--json':
+            deploy_args.json = True
+            i += 1
+        elif not arg.startswith('-'):
+            deploy_args.file = arg
+            i += 1
+        else:
+            print(f"Error: unknown option '{arg}'")
+            return 1
+
+    if subcommand == 'docker':
+        deploy_args.type = 'docker'
+    elif subcommand in ['aws', 'gcp', 'azure']:
+        deploy_args.type = 'cloud'
+        deploy_args.provider = subcommand
+    else:
+        print(f"Unknown deploy subcommand: {subcommand}")
+        print("Available: docker, aws, gcp, azure")
+        return 1
+
+    try:
+        handler.handle_deploy(deploy_args)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    return 0
+
+
 def add_deploy_subcommands(subparsers):
     """
     Add deploy subcommands to CLI parser.
