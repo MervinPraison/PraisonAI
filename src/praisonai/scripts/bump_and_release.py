@@ -220,7 +220,7 @@ def validate_dependencies(
                 time.sleep(retry_interval)
             continue
 
-        base = run(["uv", "pip", "install", "--dry-run", "-e", "."], cwd=praisonai_dir, check=False)
+        base = run(["uv", "pip", "install", "--system", "--dry-run", "-e", "."], cwd=praisonai_dir, check=False)
         if base.returncode == 0:
             print("  ✅ Dependencies validated successfully")
             return True
