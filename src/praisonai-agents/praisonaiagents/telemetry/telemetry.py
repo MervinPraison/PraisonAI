@@ -246,7 +246,7 @@ class MinimalTelemetry:
             success: Whether the execution was successful
             async_mode: If True, defer PostHog capture to prevent blocking in streaming scenarios
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return
             
         with self._metrics_lock:
@@ -301,7 +301,7 @@ class MinimalTelemetry:
             task_name: Name of the task (not logged, just for counting)
             success: Whether the task completed successfully
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return
             
         with self._metrics_lock:
@@ -330,7 +330,7 @@ class MinimalTelemetry:
             success: Whether the tool call was successful
             execution_time: Time in seconds the tool took to execute (optional)
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return
             
         with self._metrics_lock:
@@ -384,7 +384,7 @@ class MinimalTelemetry:
         Args:
             error_type: Type of error (not the full message)
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return
             
         with self._metrics_lock:
@@ -437,7 +437,7 @@ class MinimalTelemetry:
         Returns:
             Dictionary of current metrics
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return {"enabled": False}
             
         with self._metrics_lock:
@@ -456,7 +456,7 @@ class MinimalTelemetry:
         
         In a real implementation, this would send data to a backend.
         """
-        if not self.enabled:
+        if not self.enabled or self._metrics_lock is None:
             return
             
         metrics = self.get_metrics()
@@ -504,7 +504,7 @@ class MinimalTelemetry:
         Shutdown telemetry and ensure all events are sent.
         Forces proper cleanup of background threads to prevent hanging.
         """
-        if not self.enabled:
+        if not self.enabled or self._shutdown_lock is None:
             return
         
         # Use lock to prevent concurrent shutdown calls
@@ -739,17 +739,24 @@ def force_shutdown_telemetry():
 
 def enable_telemetry():
     """Programmatically enable telemetry (if not disabled by environment)."""
-    global _telemetry_instance, _MONITORING_OVERRIDE
+    global _telemetry_instance, _MONITORING_OVERRIDE, _TELEMETRY_DISABLED_CACHE
     with _telemetry_instance_lock:
-        if not _is_telemetry_explicitly_disabled():
-            # Flip the monitoring gate so instrumentation paths that check
-            # _is_monitoring_disabled() (e.g. instrument_agent/instrument_workflow)
-            # actually install their hooks even in the default (no env var) case.
-            _MONITORING_OVERRIDE = False
-            if _telemetry_instance:
-                _telemetry_instance.enabled = True
-            else:
-                _telemetry_instance = MinimalTelemetry(enabled=True)
+        if _is_telemetry_explicitly_disabled():
+            return
+        # Flip the monitoring gate so instrumentation paths that check
+        # _is_monitoring_disabled() (e.g. instrument_agent/instrument_workflow)
+        # actually install their hooks even in the default (no env var) case.
+        _MONITORING_OVERRIDE = False
+        _TELEMETRY_DISABLED_CACHE = False
+        needs_init = (
+            _telemetry_instance is None
+            or getattr(_telemetry_instance, "_metrics_lock", None) is None
+        )
+        if needs_init:
+            _telemetry_instance = MinimalTelemetry(enabled=True)
+        else:
+            _telemetry_instance.enabled = True
+            _telemetry_instance._shutdown_complete = False
 
 # For backward compatibility with existing code
 class TelemetryCollector:

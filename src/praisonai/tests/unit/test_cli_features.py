@@ -160,9 +160,9 @@ class TestTelemetryHandler:
         from praisonai.cli.features.telemetry import TelemetryHandler
         handler = TelemetryHandler()
         
-        with patch('praisonai.cli.features.telemetry.enable_telemetry'):
+        with patch('praisonaiagents.telemetry.enable_telemetry') as mock_enable:
             handler.enable()
-            # Should attempt to enable telemetry
+            mock_enable.assert_called_once()
 
 
 class TestMCPHandler:
