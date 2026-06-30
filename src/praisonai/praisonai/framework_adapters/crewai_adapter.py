@@ -137,6 +137,12 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                             task.callback = task_callback
 
                         tasks.append(task)
+                        if task_spec.name in tasks_dict:
+                            raise ValueError(
+                                f"Duplicate CrewAI task name: {task_spec.name!r}. "
+                                "Task names must be unique across roles so context "
+                                "wiring resolves to the correct task."
+                            )
                         tasks_dict[task_spec.name] = task
 
                 # Set up task contexts

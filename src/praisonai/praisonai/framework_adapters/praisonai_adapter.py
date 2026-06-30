@@ -325,11 +325,16 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 tasks.append(task)
             else:
                 for task_spec in spec.tasks:
-                    task = PraisonTask(
-                        description=task_spec.description,
-                        expected_output=task_spec.expected_output,
-                        agent=agent,
-                    )
+                    task_kwargs = {
+                        'description': task_spec.description,
+                        'expected_output': task_spec.expected_output,
+                        'agent': agent,
+                    }
+                    # Forward task-level tools so per-task YAML tools are honored
+                    # consistently with the CrewAI adapter.
+                    if task_spec.tools:
+                        task_kwargs['tools'] = task_spec.tools
+                    task = PraisonTask(**task_kwargs)
                     
                     if task_callback:
                         task.callback = task_callback

@@ -295,7 +295,9 @@ class AgentsGenerator:
                     max_workers=_resolve_tool_timeout_workers(),
                     thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
                 )
-        return self._tool_timeout_executor
+            # Capture the reference inside the lock so a concurrent close() can
+            # never null the attribute out between the check and the return.
+            return self._tool_timeout_executor
 
     def _wrap_tool_with_timeout(self, tool, timeout_seconds):
         """Wrap a tool with this generator's instance-owned timeout executor."""
@@ -303,9 +305,10 @@ class AgentsGenerator:
 
     def close(self):
         """Release the owned tool-timeout executor; safe to call repeatedly."""
-        if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
-            self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
-            self._tool_timeout_executor = None
+        with self._tool_timeout_executor_lock:
+            if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
+                self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._tool_timeout_executor = None
 
     def __enter__(self):
         return self

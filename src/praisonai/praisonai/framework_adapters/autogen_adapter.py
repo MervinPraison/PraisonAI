@@ -129,13 +129,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
             
-            # Register tools if specified
-            if tools_dict and spec.extras.get('tools'):
-                for tool_name in spec.extras['tools']:
-                    if tool_name in tools_dict:
-                        # Register tool with the agent
-                        # This is a simplified approach - actual implementation may vary
-                        pass
+            # NOTE: AutoGen v0.2 tool/function registration (register_for_llm /
+            # register_for_execution) is intentionally not wired here yet — the
+            # resolved callables live on ``spec.tools``. Tracked separately so we
+            # don't ship a half-registration that silently no-ops.
             
             # Prepare tasks
             for task_spec in spec.tasks:
