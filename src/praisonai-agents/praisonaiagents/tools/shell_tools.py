@@ -18,6 +18,21 @@ import platform
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
+# Minimum grace period (seconds) always granted for stdout/stderr reader threads
+# to flush already-written output after the process exits, even when the command
+# consumed nearly all of its timeout budget.
+_DRAIN_GRACE_SECONDS = 1.0
+
+
+class _StreamDrainTimeout(Exception):
+    """Raised when the direct child has already exited but a reader thread is
+    still blocked draining an inherited pipe past the timeout budget.
+
+    Distinct from ``subprocess.TimeoutExpired`` because the direct child is gone:
+    the caller must report a timeout WITHOUT trying to kill an already-exited
+    process.
+    """
+
 class ShellTools:
     """Tools for executing shell commands safely."""
     
@@ -100,9 +115,11 @@ class ShellTools:
             )
             
             try:
-                # Wait for process with timeout
-                stdout, stderr = process.communicate(timeout=timeout)
-                
+                # Read stdout/stderr incrementally so a progress channel (when
+                # active) can surface output live while the command runs. Falls
+                # back to fully-buffered behaviour when no sink is listening.
+                stdout, stderr = self._communicate_streaming(process, timeout)
+
                 # Truncate output if too large (use smart format)
                 if len(stdout) > max_output_size:
                     tail_size = min(max_output_size // 5, 500)
@@ -119,6 +136,19 @@ class ShellTools:
                     'execution_time': time.time() - start_time
                 }
             
+            except _StreamDrainTimeout:
+                # The direct child already exited; only an inherited pipe kept a
+                # reader blocked. Report a timeout but do NOT kill — the direct
+                # child's PID is gone (and may have been recycled), so killing it
+                # would be unsafe and misleading.
+                return {
+                    'stdout': '',
+                    'stderr': f'Command output streaming timed out after {timeout} seconds',
+                    'exit_code': -1,
+                    'success': False,
+                    'execution_time': timeout
+                }
+
             except subprocess.TimeoutExpired:
                 # Kill process on timeout
                 try:
@@ -131,6 +161,9 @@ class ShellTools:
                 except ImportError:
                     # Fallback: kill without psutil
                     process.kill()
+                except psutil.NoSuchProcess:
+                    # Process already gone — nothing to kill.
+                    pass
                 
                 return {
                     'stdout': '',
@@ -151,6 +184,117 @@ class ShellTools:
                 'execution_time': 0
             }
     
+    def _communicate_streaming(self, process, timeout):
+        """Read stdout/stderr line-buffered, emitting live progress.
+
+        Reads both streams concurrently in background threads so a line on
+        either stream is surfaced via ``emit_tool_progress`` as soon as it
+        arrives. Preserves ``subprocess.communicate`` semantics: returns the
+        full ``(stdout, stderr)`` strings and raises ``TimeoutExpired`` on
+        timeout. When no progress sink is active, this still buffers the full
+        output identically to the previous behaviour (the emit call is a cheap
+        no-op).
+        """
+        import threading
+
+        # Capture the active progress sink (set by the agent's tool-execution
+        # loop via a contextvar) in THIS thread, then emit to it directly from
+        # the reader threads. Capturing the sink up-front avoids relying on
+        # contextvar propagation into the spawned threads.
+        _sink = None
+        try:
+            from ..streaming import events as _stream_events
+            _sink = _stream_events._tool_progress_sink.get()
+        except Exception:  # streaming module unavailable — no streaming
+            _sink = None
+
+        # Stop forwarding progress once the tool has returned (e.g. on timeout),
+        # so a still-draining reader thread can never emit after the result.
+        stop_emitting = threading.Event()
+
+        def _emit(line, stream_name):
+            if _sink is None or stop_emitting.is_set():
+                return
+            try:
+                _sink(_stream_events.StreamEvent(
+                    type=_stream_events.StreamEventType.TOOL_PROGRESS,
+                    content=line,
+                    metadata={"stream": stream_name},
+                ))
+            except Exception as exc:  # never break command execution on a progress failure
+                logging.debug("Tool progress emission failed: %s", exc, exc_info=True)
+
+        stdout_chunks: List[str] = []
+        stderr_chunks: List[str] = []
+        read_errors: List[BaseException] = []
+
+        def _pump(stream, sink_list, stream_name):
+            if stream is None:
+                return
+            try:
+                for line in iter(stream.readline, ''):
+                    if line == '':
+                        break
+                    sink_list.append(line)
+                    _emit(line, stream_name)
+            except Exception as exc:
+                # Surface a failed read (e.g. UnicodeDecodeError) so the caller's
+                # error path reports it instead of silently returning a partial
+                # prefix as if the command had succeeded.
+                read_errors.append(exc)
+                logging.debug("Error reading %s stream: %s", stream_name, exc, exc_info=True)
+            finally:
+                try:
+                    stream.close()
+                except Exception as exc:
+                    logging.debug("Failed to close %s stream: %s", stream_name, exc, exc_info=True)
+
+        t_out = threading.Thread(target=_pump, args=(process.stdout, stdout_chunks, "stdout"), daemon=True)
+        t_err = threading.Thread(target=_pump, args=(process.stderr, stderr_chunks, "stderr"), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # The direct child is still running. Disable any further emission and
+            # re-raise TimeoutExpired so the caller's timeout path KILLS the
+            # process before returning — a recorded read error must not short-
+            # circuit that cleanup (otherwise the still-running child leaks with
+            # its pipes open).
+            stop_emitting.set()
+            raise
+
+        # Wait for the readers to drain the pipe buffers before returning,
+        # preserving subprocess.communicate()'s "all captured output" semantics.
+        # A bounded join keeps the overall call within the original timeout
+        # budget: if a background child inherited stdout/stderr and keeps the
+        # pipe open after the direct child exits, a reader can stay blocked in
+        # readline(). Rather than hang indefinitely, fall back to the configured
+        # timeout result once the remaining budget is exhausted. A small minimum
+        # grace is always allowed so a command that used most of its timeout can
+        # still flush its already-written output.
+        for reader in (t_out, t_err):
+            if deadline is None:
+                remaining = None
+            else:
+                remaining = max(_DRAIN_GRACE_SECONDS, deadline - time.monotonic())
+            reader.join(timeout=remaining)
+
+        if t_out.is_alive() or t_err.is_alive():
+            # Readers still blocked on a leaked (inherited) pipe past the budget,
+            # but the DIRECT child has already exited (process.wait() returned).
+            # Stop emitting and signal a drain-timeout so the caller reports a
+            # timeout WITHOUT trying to kill an already-exited process.
+            stop_emitting.set()
+            raise _StreamDrainTimeout()
+
+        if read_errors:
+            raise read_errors[0]
+
+        return "".join(stdout_chunks), "".join(stderr_chunks)
+
     def list_processes(self) -> List[Dict[str, Union[int, str, float]]]:
         """List running processes with their details.
         

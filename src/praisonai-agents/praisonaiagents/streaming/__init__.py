@@ -25,6 +25,8 @@ __all__ = [
     "AsyncStreamCallback",
     "create_text_printer_callback",
     "create_metrics_callback",
+    "emit_tool_progress",
+    "tool_progress_channel",
     "StreamLogger",
     "create_logging_callback",
 ]
@@ -37,7 +39,8 @@ def __getattr__(name: str):
         if name in (
             "StreamEvent", "StreamEventType", "StreamMetrics", 
             "StreamEventEmitter", "StreamCallback", "AsyncStreamCallback",
-            "create_text_printer_callback", "create_metrics_callback"
+            "create_text_printer_callback", "create_metrics_callback",
+            "emit_tool_progress", "tool_progress_channel"
         ):
             from .events import (
                 StreamEvent,
@@ -48,6 +51,8 @@ def __getattr__(name: str):
                 AsyncStreamCallback,
                 create_text_printer_callback,
                 create_metrics_callback,
+                emit_tool_progress,
+                tool_progress_channel,
             )
             
             _events_exports = {
@@ -59,6 +64,8 @@ def __getattr__(name: str):
                 "AsyncStreamCallback": AsyncStreamCallback,
                 "create_text_printer_callback": create_text_printer_callback,
                 "create_metrics_callback": create_metrics_callback,
+                "emit_tool_progress": emit_tool_progress,
+                "tool_progress_channel": tool_progress_channel,
             }
             return _events_exports.get(name)
         

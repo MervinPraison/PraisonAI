@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import contextvars
 import concurrent.futures
+import threading
 import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
@@ -457,7 +458,7 @@ class ToolExecutionMixin:
         """
         from ..tools.injected import with_injection_context
         from ..trace.context_events import get_context_emitter
-        from ..streaming.events import StreamEvent, StreamEventType
+        from ..streaming.events import StreamEvent, StreamEventType, tool_progress_channel
         import time as _time
         
         # Emit tool call start event (zero overhead when not set)
@@ -480,6 +481,17 @@ class ToolExecutionMixin:
                 },
                 agent_id=self.name,
             ))
+
+        # Build a progress sink so tools can stream incremental output while they
+        # run (e.g. line-buffered stdout from a long shell command). The sink
+        # forwards TOOL_PROGRESS events to the stream emitter; it is only active
+        # when callbacks are registered, so there is zero overhead otherwise.
+        _progress_sink = None
+        if _stream_emitter is not None and _stream_emitter.has_callbacks:
+            def _progress_sink(_event):  # noqa: ANN001 — StreamEvent forwarder
+                _event.tool_call = {"name": function_name, "id": tool_call_id}
+                _event.agent_id = self.name
+                _stream_emitter.emit(_event)
         
         try:
             # Check for steering messages before tool execution
@@ -583,28 +595,46 @@ class ToolExecutionMixin:
                         # P8/G11: Apply tool timeout if configured
                         tool_timeout = getattr(self, '_tool_timeout', None)
                         if tool_timeout and tool_timeout > 0:
-                            # Use copy_context to preserve injection context in executor thread
-                            ctx = contextvars.copy_context()
-                            
-                            def execute_with_context():
-                                with with_injection_context(state):
-                                    return self._execute_tool_with_circuit_breaker(function_name, arguments)
-                            
-                            # Use reusable executor to prevent resource leaks
-                            if not hasattr(self, '_tool_executor'):
-                                self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                    max_workers=2, thread_name_prefix=f"tool-{self.name}"
-                                )
-                            
-                            future = self._tool_executor.submit(ctx.run, execute_with_context)
-                            try:
-                                result = future.result(timeout=tool_timeout)
-                            except concurrent.futures.TimeoutError:
-                                future.cancel()
-                                logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                                result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                            # Guard the sink so a tool that keeps running after a
+                            # timeout (future.cancel() cannot stop a started thread)
+                            # can no longer emit progress once the result is decided.
+                            _attempt_sink = _progress_sink
+                            _progress_active = None
+                            if _progress_sink is not None:
+                                _progress_active = threading.Event()
+                                _progress_active.set()
+
+                                def _attempt_sink(_event, _src=_progress_sink, _flag=_progress_active):  # noqa: ANN001
+                                    if _flag.is_set():
+                                        _src(_event)
+
+                            # Activate the progress channel BEFORE copy_context so the
+                            # sink propagates into the executor thread via contextvars.
+                            with tool_progress_channel(_attempt_sink):
+                                # Use copy_context to preserve injection context in executor thread
+                                ctx = contextvars.copy_context()
+
+                                def execute_with_context():
+                                    with with_injection_context(state):
+                                        return self._execute_tool_with_circuit_breaker(function_name, arguments)
+
+                                # Use reusable executor to prevent resource leaks
+                                if not hasattr(self, '_tool_executor'):
+                                    self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                                        max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                                    )
+
+                                future = self._tool_executor.submit(ctx.run, execute_with_context)
+                                try:
+                                    result = future.result(timeout=tool_timeout)
+                                except concurrent.futures.TimeoutError:
+                                    if _progress_active is not None:
+                                        _progress_active.clear()
+                                    future.cancel()
+                                    logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                                    result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
                         else:
-                            with with_injection_context(state):
+                            with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)
                         
                         # Check if the result indicates a retryable error
