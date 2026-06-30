@@ -54,8 +54,62 @@ class KanbanDispatcher:
             else _env_int('PRAISONAI_KANBAN_STALE_TIMEOUT', 1800)
         )
         self.running_tasks: Dict[str, subprocess.Popen] = {}
+        self._task_runs: Dict[str, int] = {}  # task_id -> open run_id
         self.worker_id = f"gateway_{os.getpid()}"
+
+    def _close_run_safe(self, store, run_id, outcome, *, summary=None, metadata=None, error=None) -> bool:
+        """Close a run, swallowing errors so dispatch stays resilient.
+
+        Returns True when the run was closed, False on a transient store error
+        so the caller can keep tracking the open run id and retry the close
+        on a later cycle instead of leaving stale active-run state behind.
+        """
+        try:
+            store.close_run(run_id, outcome, summary=summary, metadata=metadata, error=error)
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to close run {run_id} ({outcome}): {e}")
+            return False
+
+    def _record_failure_safe(self, store, task_id, *, error=None):
+        """Record a failure / circuit-breaker check, swallowing errors.
+
+        Returns a tri-state:
+            True  -> task was auto-blocked (circuit broken)
+            False -> below the retry limit; safe to release for retry
+            None  -> failure accounting did NOT persist; do not blindly retry
+        """
+        try:
+            return store.record_failure(task_id, error=error)
+        except Exception as e:
+            logger.warning(f"Failed to record failure for task {task_id}: {e}")
+            return None
         
+    def _retry_pending_run_closes(self, store):
+        """Retry closing runs whose close failed transiently on a prior cycle.
+
+        A run id stays in ``_task_runs`` after its task leaves ``running_tasks``
+        only when ``_close_run_safe`` returned False (transient store error).
+        Those entries would otherwise never be revisited until shutdown, leaving
+        the run open and ``tasks.current_run_id`` stale. Close them as failed
+        (the worker already exited) and forget the id once the close persists.
+        """
+        if not self._task_runs:
+            return
+        for task_id in list(self._task_runs.keys()):
+            if task_id in self.running_tasks:
+                # Still active; its close is handled by the per-process loop.
+                continue
+            run_id = self._task_runs.get(task_id)
+            if run_id is None:
+                self._task_runs.pop(task_id, None)
+                continue
+            if self._close_run_safe(
+                store, run_id, 'failed',
+                error='Run close retried after a prior transient store error',
+            ):
+                self._task_runs.pop(task_id, None)
+
     def _get_kanban_store(self):
         """Get kanban store instance."""
         try:
@@ -138,11 +192,38 @@ class KanbanDispatcher:
                     logger.debug(f"Failed to claim task {task.id} (already claimed)")
                     continue
                 
+                # Open a run (attempt) for this claim so failures/retries
+                # have a durable, structured record. If we cannot create the
+                # run row, do not spawn: release the claim and skip so the
+                # attempt is never left without durable history.
+                try:
+                    run_id = store.start_run(task.id, profile=self.worker_id)
+                except Exception as run_err:
+                    logger.warning(f"Failed to start run for task {task.id}: {run_err}")
+                    try:
+                        store.release_claim(task.id, self.worker_id)
+                    except Exception as release_err:
+                        logger.error(
+                            "Failed to release claim after run-start failure for %s: %s",
+                            task.id, release_err, exc_info=True,
+                        )
+                    continue
+
                 # Spawn worker process
                 success = await self._spawn_worker(task, store)
                 if not success:
-                    # Failed to spawn, release claim
-                    store.release_claim(task.id, self.worker_id)
+                    # Failed to spawn: close run as failed, count it, and only
+                    # release the claim for retry when the failure was recorded
+                    # AND the task was not circuit-broken.
+                    self._close_run_safe(
+                        store, run_id, 'failed',
+                        error='Failed to spawn worker process'
+                    )
+                    circuit_broken = self._record_failure_safe(
+                        store, task.id, error='Failed to spawn worker process'
+                    )
+                    if circuit_broken is False:
+                        store.release_claim(task.id, self.worker_id)
                     continue
 
                 # Worker is now running. From here on we MUST NOT release the
@@ -150,6 +231,7 @@ class KanbanDispatcher:
                 # let another dispatcher spawn a duplicate while this worker is
                 # still executing. Post-spawn bookkeeping is therefore isolated.
                 spawned += 1
+                self._task_runs[task.id] = run_id
                 try:
                     # Record the spawned worker's PID against the claim so the
                     # reclaim loop can detect a crashed/killed worker.
@@ -159,6 +241,7 @@ class KanbanDispatcher:
                     self._fire_hook_event('KANBAN_TASK_CLAIMED', {
                         'task_id': task.id,
                         'worker_id': self.worker_id,
+                        'run_id': run_id,
                         'task': task.to_dict()
                     })
                 except Exception as post_spawn_err:
@@ -169,7 +252,6 @@ class KanbanDispatcher:
                         task.id, post_spawn_err,
                         exc_info=True,
                     )
-
             except Exception as e:
                 logger.error(f"Error processing task {task.id}: {e}")
                 # Only release the claim if we never spawned a worker for it.
@@ -389,6 +471,12 @@ class KanbanDispatcher:
         Args:
             store: Kanban store instance
         """
+        # Retry any run closes that did not persist on a previous cycle. Those
+        # run ids are retained in _task_runs but their task is no longer in
+        # running_tasks, so the per-process loop below would never revisit them
+        # and the open run / stale current_run_id would linger until shutdown.
+        self._retry_pending_run_closes(store)
+
         completed = []
         
         for task_id, process in self.running_tasks.items():
@@ -414,10 +502,31 @@ class KanbanDispatcher:
                     else:
                         stdout_data = "<no log available>"
                     
+                    # Peek (do not pop) the open run id. We only forget it once
+                    # the run is durably closed so a transient close failure does
+                    # not leave a stale current_run_id we can no longer retry.
+                    run_id = self._task_runs.get(task_id)
+                    
                     # Update task based on exit code
                     if return_code == 0:
-                        # Success - mark as done
+                        # Success - mark as done FIRST so the terminal transition
+                        # is the durable commit. If move_task fails the task stays
+                        # claimed (not released for retry), avoiding a duplicate
+                        # run of an already-successful worker.
+                        # move_task to a terminal status clears the claim_lock
+                        # so the finished task is no longer shown as owned.
                         store.move_task(task_id, 'done')
+                        # Now record the completed run. Forget the run id only
+                        # when the close persists; otherwise retry on next cycle.
+                        if run_id is not None:
+                            if self._close_run_safe(
+                                store, run_id, 'completed',
+                                summary=stdout_data[:500].strip(),
+                                metadata={'return_code': return_code},
+                            ):
+                                self._task_runs.pop(task_id, None)
+                        else:
+                            self._task_runs.pop(task_id, None)
                         store.add_comment(
                             task_id, 
                             self.worker_id, 
@@ -430,18 +539,61 @@ class KanbanDispatcher:
                             'task_id': task_id,
                             'worker_id': self.worker_id,
                             'return_code': return_code,
+                            'run_id': run_id,
                             'task': task.to_dict() if task else {}
                         })
                         
                         logger.info(f"Task {task_id} completed successfully")
                     else:
-                        # Failed - mark as blocked
-                        store.move_task(task_id, 'blocked')
-                        store.add_comment(
-                            task_id,
-                            self.worker_id,
-                            f"Task failed with exit code {return_code}\n\nOutput:\n{stdout_data[:500]}"
+                        # Failed - close run as failed, count it, circuit-break.
+                        # Forget the run id only once the close persists so a
+                        # transient store error is retried on a later cycle.
+                        error_text = f"exit code {return_code}: {stdout_data[:500]}"
+                        if run_id is not None:
+                            if self._close_run_safe(
+                                store, run_id, 'failed',
+                                metadata={'return_code': return_code},
+                                error=error_text,
+                            ):
+                                self._task_runs.pop(task_id, None)
+                        else:
+                            self._task_runs.pop(task_id, None)
+                        circuit_broken = self._record_failure_safe(
+                            store, task_id, error=error_text
                         )
+                        if circuit_broken is True:
+                            # Task already auto-blocked by record_failure
+                            store.add_comment(
+                                task_id,
+                                self.worker_id,
+                                f"Auto-blocked after repeated failures (exit code "
+                                f"{return_code})\n\nLast output:\n{stdout_data[:500]}"
+                            )
+                        elif circuit_broken is False:
+                            # Below the retry limit: release so it can be retried
+                            store.add_comment(
+                                task_id,
+                                self.worker_id,
+                                f"Task attempt failed with exit code {return_code} "
+                                f"(will retry)\n\nOutput:\n{stdout_data[:500]}"
+                            )
+                            try:
+                                store.release_claim(task_id, self.worker_id)
+                            except Exception as release_err:
+                                logger.warning(
+                                    f"Failed to release claim for retry of {task_id}: {release_err}"
+                                )
+                        else:
+                            # Failure accounting did not persist: do NOT blindly
+                            # release for retry, which could bypass the circuit
+                            # breaker indefinitely. Leave the claim in place.
+                            store.add_comment(
+                                task_id,
+                                self.worker_id,
+                                f"Task attempt failed with exit code {return_code}, "
+                                f"but failure accounting did not persist; not "
+                                f"auto-releasing for retry.\n\nOutput:\n{stdout_data[:500]}"
+                            )
                         
                         # Fire failure hook
                         task = store.get_task(task_id)
@@ -450,10 +602,15 @@ class KanbanDispatcher:
                             'worker_id': self.worker_id,
                             'return_code': return_code,
                             'error': stdout_data[:500],
+                            'run_id': run_id,
+                            'circuit_broken': circuit_broken,
                             'task': task.to_dict() if task else {}
                         })
                         
-                        logger.warning(f"Task {task_id} failed with code {return_code}")
+                        logger.warning(
+                            f"Task {task_id} failed with code {return_code} "
+                            f"(circuit_broken={circuit_broken})"
+                        )
                 
                 except Exception as e:
                     logger.error(f"Error processing completed task {task_id}: {e}")
@@ -518,6 +675,7 @@ class KanbanDispatcher:
                 await asyncio.sleep(1)
             
             # Force terminate remaining tasks
+            store = self._get_kanban_store()
             for task_id, process in self.running_tasks.items():
                 logger.warning(f"Force terminating task {task_id}")
                 try:
@@ -536,8 +694,18 @@ class KanbanDispatcher:
                     except OSError as kill_err:
                         logger.error(f"Failed to kill task {task_id}: {kill_err}")
                 # KeyboardInterrupt, SystemExit, CancelledError now propagate as intended
-            
+
+                # Close any open run for the interrupted attempt so we do not
+                # leave dangling task_runs rows / stale current_run_id pointers.
+                run_id = self._task_runs.pop(task_id, None)
+                if store is not None and run_id is not None:
+                    self._close_run_safe(
+                        store, run_id, 'failed',
+                        error='Dispatcher shutdown terminated worker before completion',
+                    )
+
             self.running_tasks.clear()
+            self._task_runs.clear()
         
         logger.info("Kanban dispatcher shutdown complete")
 

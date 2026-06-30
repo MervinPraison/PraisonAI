@@ -36,7 +36,9 @@ def kanban_create(
     assignee: str = "",
     status: str = "todo",
     priority: int = 0,
-    board: str = "default"
+    board: str = "default",
+    max_retries: Optional[int] = None,
+    idempotency_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create a kanban task for multi-agent coordination.
@@ -48,6 +50,12 @@ def kanban_create(
         status: Task status (todo, ready, running, blocked, done)
         priority: Task priority (higher number = higher priority)
         board: Board name to create task on
+        max_retries: Per-task circuit-breaker limit; after this many
+            consecutive failed attempts the task is auto-blocked. Defaults to
+            the board default when omitted.
+        idempotency_key: Optional dedup key. Repeating a create with the same
+            key on the same board returns the existing task instead of a
+            duplicate (safe for retrying automation/webhooks).
         
     Returns:
         Dict containing the created task details including task ID
@@ -67,8 +75,10 @@ def kanban_create(
             'priority': priority,
             'board': board
         }
+        if max_retries is not None:
+            task_data['max_retries'] = max_retries
         
-        task = store.create_task(task_data)
+        task = store.create_task(task_data, idempotency_key=idempotency_key)
         return task.to_dict()
         
     except Exception as e:
@@ -163,39 +173,110 @@ def kanban_show(task_id: str) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-def kanban_complete(task_id: str, comment: str = "") -> Dict[str, Any]:
+def kanban_complete(
+    task_id: str,
+    summary: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+    comment: str = ""
+) -> Dict[str, Any]:
     """
-    Mark a task as completed.
+    Mark a task as completed with a structured handoff.
     
     Args:
         task_id: The task ID to complete
-        comment: Optional completion comment
+        summary: Structured summary of what was done (surfaced to linked
+            children and retrying workers instead of free-text prose)
+        metadata: Structured handoff fields, e.g.
+            {"changed_files": [...], "tests_run": 14, "residual_risk": "..."}
+        comment: Optional free-text completion comment (kept for back-compat)
         
     Returns:
-        Dict containing the updated task
+        Dict containing the updated task and the recorded run
     
     Example:
-        >>> kanban_complete("task_abc123", "Authentication system working")
-        {'task': {...}, 'status': 'done'}
+        >>> kanban_complete("task_abc123",
+        ...     summary="token-bucket limiter; 14 tests pass",
+        ...     metadata={"changed_files": ["limiter.py"], "tests_run": 14})
+        {'task': {...}, 'status': 'done', 'run': {...}}
     """
     try:
         store = _get_kanban_store()
-        
-        # Move to done status
+
+        existing_task = store.get_task(task_id)
+        if existing_task is None:
+            raise ValueError(f"Task {task_id} not found; create it before completing it")
+
+        # Transition the task to done FIRST so the terminal status is the
+        # durable commit. If move_task fails (task deleted concurrently, DB
+        # locked, etc.) we never record a completed run for a task that is
+        # not actually done, avoiding split/inconsistent completion state.
         task = store.move_task(task_id, 'done')
+
+        # Now persist the structured handoff. Close the active attempt if the
+        # dispatcher opened one; otherwise record a fresh completed run. A
+        # failure here surfaces to the caller but the task is already durably
+        # done, so the handoff can be re-applied without re-running work.
+        current_run_id = getattr(existing_task, 'current_run_id', None)
+        if current_run_id:
+            run = store.close_run(
+                current_run_id,
+                'completed',
+                summary=summary,
+                metadata=metadata or {},
+            )
+        else:
+            run = store.record_run(
+                task_id,
+                'completed',
+                summary=summary,
+                metadata=metadata or {},
+            )
         
-        # Add completion comment if provided
+        # Preserve free-text comment behaviour for back-compat
         if comment:
             store.add_comment(task_id, 'agent', f"Completed: {comment}")
+        elif summary:
+            store.add_comment(task_id, 'agent', f"Completed: {summary}")
         
         return {
             'task': task.to_dict(),
             'status': 'done',
-            'completed': True
+            'completed': True,
+            'run': run.to_dict() if run else None
         }
         
     except Exception as e:
         logger.error(f"Failed to complete kanban task {task_id}: {e}")
+        return {'error': str(e)}
+
+
+def kanban_runs(task_id: str) -> Dict[str, Any]:
+    """
+    Get the attempt (run) history for a task.
+    
+    Use this on a retry to read prior attempts' outcomes/summaries/errors so
+    you can avoid repeating known-failed paths.
+    
+    Args:
+        task_id: The task ID to read run history for
+        
+    Returns:
+        Dict containing the list of runs (oldest first) and a count
+    
+    Example:
+        >>> kanban_runs("task_abc123")
+        {'runs': [{'outcome': 'crashed', 'error': '...'}, ...], 'count': 2}
+    """
+    try:
+        store = _get_kanban_store()
+        runs = store.get_runs(task_id)
+        return {
+            'task_id': task_id,
+            'runs': [run.to_dict() for run in runs],
+            'count': len(runs)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get runs for kanban task {task_id}: {e}")
         return {'error': str(e)}
 
 
@@ -360,6 +441,7 @@ KANBAN_TOOLS = [
     kanban_list,
     kanban_show,
     kanban_complete,
+    kanban_runs,
     kanban_block,
     kanban_comment,
     kanban_link,

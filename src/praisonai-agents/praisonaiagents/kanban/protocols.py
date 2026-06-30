@@ -48,6 +48,27 @@ class KanbanTaskProtocol(TypedDict, total=False):
     claim_expires: str | None
     worker_pid: int | None
     last_heartbeat_at: str | None
+    # Retry / run-history fields (optional).
+    max_retries: int | None
+    consecutive_failures: int
+    current_run_id: int | None
+
+
+class KanbanRunProtocol(TypedDict, total=False):
+    """Typed dict shape for a single task attempt (run).
+
+    One row per attempt: outcome plus a structured summary/metadata handoff and
+    any error. Surfaced to retrying workers and linked children.
+    """
+    id: int
+    task_id: str
+    profile: str
+    outcome: str | None  # completed/blocked/crashed/failed/gave_up
+    summary: str
+    metadata: dict
+    error: str
+    started_at: str | None  # ISO-8601 string (matches TaskRun.to_dict())
+    ended_at: str | None    # ISO-8601 string; None while the run is open
 
 
 @runtime_checkable
@@ -297,5 +318,63 @@ class KanbanPromotionProtocol(Protocol):
 
         Returns:
             List of task IDs promoted to 'ready' in this pass.
+        """
+        ...
+
+
+@runtime_checkable
+class KanbanRunsProtocol(Protocol):
+    """Extension protocol for per-task attempt (run) history and retry.
+
+    Implemented separately from KanbanStoreProtocol so stores can optionally
+    support durable attempt history, structured handoff and a per-task
+    circuit-breaker without breaking isinstance checks on the core protocol.
+    """
+
+    def record_run(
+        self,
+        task_id: str,
+        outcome: str,
+        *,
+        profile: str = "",
+        summary: str | None = None,
+        metadata: dict | None = None,
+        error: str | None = None,
+    ) -> dict:
+        """Record a completed attempt (open + close in one call).
+
+        Args:
+            task_id: Task that was attempted.
+            outcome: One of completed/blocked/crashed/failed/gave_up.
+            profile: Optional worker/profile identifier.
+            summary: Structured summary of what was done (handoff).
+            metadata: Structured handoff fields (e.g. changed_files, tests_run).
+            error: Error text for failed/crashed attempts.
+
+        Returns:
+            The recorded run data.
+        """
+        ...
+
+    def get_runs(self, task_id: str) -> list[dict]:
+        """Return all attempts for a task, oldest first.
+
+        Args:
+            task_id: Task identifier.
+
+        Returns:
+            List of run data (KanbanRunProtocol shape).
+        """
+        ...
+
+    def record_failure(self, task_id: str, *, error: str | None = None) -> bool:
+        """Increment the consecutive-failure counter; auto-block at the limit.
+
+        Args:
+            task_id: Task that just failed an attempt.
+            error: Optional last error to attach when auto-blocking.
+
+        Returns:
+            True if the task was circuit-broken (auto-blocked) by this call.
         """
         ...

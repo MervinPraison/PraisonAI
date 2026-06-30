@@ -5,6 +5,7 @@ import pytest
 pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import tempfile
 import shutil
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -557,3 +558,208 @@ class TestClaimReclamation:
         # Lease was extended by the heartbeat -> not reclaimed.
         assert task.id not in reclaimed
         assert store.get_task(task.id).status == TaskStatus.RUNNING
+
+
+class TestTaskRunsAndRetry:
+    """Tests for attempt history, structured handoff and circuit-breaker."""
+
+    def test_idempotent_create_returns_existing(self, store):
+        """Repeat create with same idempotency_key returns the same task."""
+        first = store.create_task({'title': 'Audit auth'}, idempotency_key='audit-1')
+        second = store.create_task({'title': 'Different title'}, idempotency_key='audit-1')
+
+        assert first.id == second.id
+        assert second.title == 'Audit auth'  # original is returned unchanged
+
+    def test_idempotent_create_different_keys(self, store):
+        """Different idempotency keys create distinct tasks."""
+        a = store.create_task({'title': 'A'}, idempotency_key='k-a')
+        b = store.create_task({'title': 'B'}, idempotency_key='k-b')
+        assert a.id != b.id
+
+    def test_start_and_close_run(self, store):
+        """A run captures profile/outcome/summary/metadata/error."""
+        task = store.create_task({'title': 'Runnable'})
+
+        run_id = store.start_run(task.id, profile='worker-1')
+        assert isinstance(run_id, int)
+
+        # current_run_id points at the active run
+        assert store.get_task(task.id).current_run_id == run_id
+
+        closed = store.close_run(
+            run_id, 'crashed',
+            summary='tried path A', metadata={'changed_files': ['a.py']},
+            error='boom',
+        )
+        assert closed.outcome == 'crashed'
+        assert closed.summary == 'tried path A'
+        assert closed.metadata == {'changed_files': ['a.py']}
+        assert closed.error == 'boom'
+        assert closed.ended_at is not None
+        # Closing the run clears the active-attempt pointer
+        assert store.get_task(task.id).current_run_id is None
+
+    def test_get_runs_ordered(self, store):
+        """get_runs returns all attempts oldest first."""
+        task = store.create_task({'title': 'Multi attempt'})
+        store.record_run(task.id, 'failed', error='e1')
+        store.record_run(task.id, 'completed', summary='done')
+
+        runs = store.get_runs(task.id)
+        assert len(runs) == 2
+        assert [r.outcome for r in runs] == ['failed', 'completed']
+
+    def test_record_failure_circuit_breaker(self, store):
+        """Auto-block when consecutive failures reach max_retries."""
+        task = store.create_task({'title': 'Flaky', 'max_retries': 2})
+
+        assert store.record_failure(task.id, error='e1') is False
+        assert store.record_failure(task.id, error='e2') is True
+
+        blocked = store.get_task(task.id)
+        assert blocked.status == TaskStatus.BLOCKED
+        assert blocked.consecutive_failures == 2
+
+    def test_completion_resets_failure_counter(self, store):
+        """A completed run resets consecutive_failures to zero."""
+        task = store.create_task({'title': 'Recovers', 'max_retries': 5})
+        store.record_failure(task.id, error='e1')
+        assert store.get_task(task.id).consecutive_failures == 1
+
+        store.record_run(task.id, 'completed', summary='ok')
+        assert store.get_task(task.id).consecutive_failures == 0
+
+    def test_default_max_retries_used_when_unset(self, store):
+        """Tasks without max_retries fall back to the board default."""
+        from praisonai.kanban.sqlite_store import DEFAULT_MAX_RETRIES
+        task = store.create_task({'title': 'Default breaker'})
+
+        blocked = False
+        for i in range(DEFAULT_MAX_RETRIES):
+            blocked = store.record_failure(task.id, error=f'e{i}')
+        assert blocked is True
+        assert store.get_task(task.id).status == TaskStatus.BLOCKED
+
+    def test_get_retry_context(self, store):
+        """Retry context exposes prior outcomes/summaries/errors."""
+        task = store.create_task({'title': 'Retryable'})
+        store.record_run(task.id, 'crashed', error='segfault', summary='path A')
+
+        ctx = store.get_retry_context(task.id)
+        assert len(ctx) == 1
+        assert ctx[0]['outcome'] == 'crashed'
+        assert ctx[0]['error'] == 'segfault'
+        assert ctx[0]['summary'] == 'path A'
+
+    def test_idempotent_create_scoped_by_tenant(self, store):
+        """Same idempotency key under different tenants creates distinct tasks."""
+        a = store.create_task(
+            {'title': 'Tenant A task', 'tenant': 'tenant-a'},
+            idempotency_key='shared-key',
+        )
+        b = store.create_task(
+            {'title': 'Tenant B task', 'tenant': 'tenant-b'},
+            idempotency_key='shared-key',
+        )
+        assert a.id != b.id
+        assert a.tenant == 'tenant-a'
+        assert b.tenant == 'tenant-b'
+
+    def test_invalid_max_retries_falls_back_to_default(self, store):
+        """Non-positive / invalid max_retries must not auto-block on first fail."""
+        for bad in (0, -1, 'oops'):
+            task = store.create_task({'title': f'Bad {bad}', 'max_retries': bad})
+            # First failure should NOT circuit-break (falls back to default)
+            assert store.record_failure(task.id, error='e1') is False
+            assert store.get_task(task.id).status != TaskStatus.BLOCKED
+
+    def test_move_to_done_clears_claim(self, store):
+        """A task moved to a terminal status no longer carries a claim_lock."""
+        task = store.create_task({'title': 'Claimed', 'status': 'ready'})
+        assert store.claim_task(task.id, 'worker-1') is True
+        assert store.get_task(task.id).claim_lock == 'worker-1'
+
+        store.move_task(task.id, 'done')
+        done = store.get_task(task.id)
+        assert done.status == TaskStatus.DONE
+        assert not done.claim_lock
+
+    def test_close_run_rejects_already_finalized(self, store):
+        """A finalized run cannot be re-closed with a different outcome."""
+        task = store.create_task({'title': 'Finalize once'})
+        run_id = store.start_run(task.id, profile='worker-1')
+        store.close_run(run_id, 'failed', error='boom', summary='attempt A')
+
+        # A stale caller trying to mark the same run completed must NOT rewrite
+        # the already-finalized outcome/summary/error.
+        result = store.close_run(run_id, 'completed', summary='now done')
+        assert result.outcome == 'failed'
+        assert result.summary == 'attempt A'
+        assert result.error == 'boom'
+
+        runs = store.get_runs(task.id)
+        assert len(runs) == 1
+        assert runs[0].outcome == 'failed'
+
+    def test_legacy_zero_max_retries_does_not_block_on_first_failure(self, store):
+        """A persisted max_retries=0 (legacy/migrated) falls back to default."""
+        task = store.create_task({'title': 'Legacy breaker'})
+        # Simulate a row written before create-path validation existed.
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET max_retries = 0 WHERE id = ?", (task.id,)
+            )
+
+        assert store.record_failure(task.id, error='e1') is False
+        assert store.get_task(task.id).status != TaskStatus.BLOCKED
+
+    def test_record_failure_noop_on_terminal_task(self, store):
+        """A stale process-exit must not re-fail an already-completed task."""
+        task = store.create_task({'title': 'Done already', 'status': 'ready'})
+        store.move_task(task.id, 'done')
+
+        # A late, non-zero worker exit handler calling record_failure must not
+        # increment the counter or re-block a task that already finished.
+        assert store.record_failure(task.id, error='stale exit') is False
+        refreshed = store.get_task(task.id)
+        assert refreshed.status == TaskStatus.DONE
+        assert refreshed.consecutive_failures == 0
+
+    def test_migration_replaces_global_idempotency_index(self, tmp_path):
+        """A legacy non-tenant-scoped idempotency index is replaced on init."""
+        import praisonai.kanban.sqlite_store
+        legacy_path = tmp_path / 'legacy_kanban.db'
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("""
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, title TEXT, body TEXT, status TEXT,
+                assignee TEXT, priority INTEGER, tenant TEXT, board TEXT,
+                workspace_kind TEXT, metadata TEXT, idempotency_key TEXT,
+                claim_lock TEXT, version INTEGER DEFAULT 1,
+                created_at TEXT, updated_at TEXT
+            )
+        """)
+        # Old, board-only (non-tenant-scoped) idempotency index.
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_tasks_idempotency "
+            "ON tasks(board, idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
+        conn.commit()
+        conn.close()
+
+        # Re-opening through the store should migrate the index to be
+        # tenant-scoped so two tenants on the same board no longer collide.
+        original = praisonai.kanban.sqlite_store.get_kanban_db_path
+        praisonai.kanban.sqlite_store.get_kanban_db_path = lambda board=None: legacy_path
+        try:
+            migrated = SQLiteKanbanStore()
+            a = migrated.create_task(
+                {'title': 'A', 'tenant': 'tenant-a'}, idempotency_key='shared'
+            )
+            b = migrated.create_task(
+                {'title': 'B', 'tenant': 'tenant-b'}, idempotency_key='shared'
+            )
+            assert a.id != b.id
+        finally:
+            praisonai.kanban.sqlite_store.get_kanban_db_path = original
