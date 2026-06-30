@@ -47,7 +47,6 @@ def test_autogen_family_is_router_skips_run_validation():
 
 
 def test_ag2_not_in_default_builtins():
-    from praisonai.framework_adapters.registry import get_default_registry
+    from praisonai.framework_adapters import registry as registry_module
 
-    registry = get_default_registry()
-    assert "ag2" not in registry.list_names()
+    assert "ag2" not in registry_module._BUILTIN_ADAPTERS

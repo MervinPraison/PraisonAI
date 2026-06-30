@@ -25,6 +25,10 @@ tests/e2e/
 │   └── test_autogen_real.py    # Real AutoGen tests
 ├── crewai/
 │   └── test_crewai_real.py     # Real CrewAI tests
+├── langgraph_e2e/
+│   └── test_langgraph_real.py  # Real LangGraph tests
+├── openai_agents_e2e/
+│   └── test_openai_agents_real.py  # Real OpenAI Agents SDK tests
 ├── README.md                   # This file
 └── __init__.py
 ```

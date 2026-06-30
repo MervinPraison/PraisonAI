@@ -153,9 +153,10 @@ class AgentConfig(BaseModel):
             normalized_tasks = {}
             for task_name, task_config in self.tasks.items():
                 if isinstance(task_config, dict):
-                    # Add the agent field if not present (use self.role)
+                    # Add the agent field if not present (validator-safe identifier)
                     if 'agent' not in task_config:
-                        task_config['agent'] = self.role
+                        safe_name = re.sub(r'[^a-zA-Z0-9_-]+', '_', self.role.strip()).strip('_')
+                        task_config['agent'] = safe_name or 'agent'
                     normalized_tasks[task_name] = TaskConfig(**task_config)
                 else:
                     normalized_tasks[task_name] = task_config
