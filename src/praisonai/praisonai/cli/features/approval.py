@@ -13,7 +13,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Valid backend names for CLI help text
-VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "secure", "auto", "none", "plan", "accept-edits", "bypass"]
+VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "secure", "presentation", "auto", "none", "plan", "accept-edits", "bypass"]
 
 
 def resolve_approval_backend(value: Optional[str], non_interactive: bool = False, permissions_config: Optional[dict] = None) -> Optional[Any]:
@@ -118,12 +118,16 @@ def resolve_approval_backend(value: Optional[str], non_interactive: bool = False
         state_dir = (Path(base) if base else Path.home() / ".praisonai") / "state"
         store = ApprovalStore(path=state_dir / "approvals.sqlite")
 
+        # Fail closed: the secure path's whole point is actor authorisation, so
+        # refuse to start it without an allowlist rather than silently letting
+        # any actor approve (an unset allowlist means "unrestricted").
         actors_env = os.environ.get("PRAISONAI_APPROVAL_ACTORS", "").strip()
-        allowed_actors = (
-            {a.strip() for a in actors_env.split(",") if a.strip()}
-            if actors_env
-            else None
-        )
+        allowed_actors = {a.strip() for a in actors_env.split(",") if a.strip()}
+        if not allowed_actors:
+            raise ValueError(
+                "PRAISONAI_APPROVAL_ACTORS must list at least one actor id "
+                "for --approval secure/presentation (comma-separated)."
+            )
         return PresentationApprovalBackend(
             store=store,
             allowed_actors=allowed_actors,

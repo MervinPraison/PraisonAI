@@ -82,9 +82,12 @@ class PresentationApprovalBackend:
         """Restore outstanding pending approvals from the durable store.
 
         Call once on startup so a late "Allow"/"Deny" tap that arrives after a
-        restart still resolves. Returns the number re-hydrated (0 with no store).
+        restart still resolves. The backend's configured ``allowed_actors`` are
+        re-applied to every rehydrated approval so a restart does not silently
+        drop the actor authorisation that secured the original request.
+        Returns the number re-hydrated (0 with no store).
         """
-        return await self._handler.rehydrate()
+        return await self._handler.rehydrate(allowed_actors=self._allowed_actors)
 
     async def handle_callback(
         self,
