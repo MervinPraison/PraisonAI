@@ -200,7 +200,9 @@ def validate_dependencies(
     elif agents_version:
         # Patch releases only bump praisonaiagents — avoid re-resolving every optional
         # extra together (crewai/flow/langfuse have known cross-extra conflicts).
-        lock_cmd = ["uv", "lock", "--frozen", "--upgrade-package", "praisonaiagents"]
+        # Use --dry-run (not --frozen) so the targeted upgrade can be simulated without
+        # writing the lockfile; --frozen would forbid the upgrade entirely.
+        lock_cmd = ["uv", "lock", "--dry-run", "--upgrade-package", f"praisonaiagents=={agents_version}"]
     else:
         lock_cmd = ["uv", "lock", "--dry-run"]
 
@@ -255,7 +257,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
     if use_frozen_lock:
         run(["uv", "lock", "--frozen"], cwd=praisonai_dir)
     else:
-        run(["uv", "lock", "--frozen", "--upgrade-package", "praisonaiagents"], cwd=praisonai_dir)
+        # Targeted upgrade must WRITE uv.lock so the refreshed resolution can be committed
+        # and published. Do not pass --frozen here — it would block the lockfile update.
+        run(["uv", "lock", "--upgrade-package", "praisonaiagents"], cwd=praisonai_dir)
     
     # 3. uv build
     print("\n🔨 Running uv build...")
