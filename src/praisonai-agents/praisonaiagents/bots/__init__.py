@@ -59,7 +59,7 @@ from .agent_reply import (
     AgentReply,
     extract_presentation,
 )
-from .config import BotConfig, BotOSConfig
+from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
 
 __all__ = [
     "BotProtocol",
@@ -70,6 +70,8 @@ __all__ = [
     "BotUser",
     "BotChannel",
     "BotConfig",
+    "DisplayPolicy",
+    "resolve_display_policy",
     "MessageType",
     "ChatCommandInfo",
     "ChatCommandProtocol",

@@ -198,6 +198,225 @@ class BotConfig:
         return channel_id in self.allowed_channels
 
 
+# ---------------------------------------------------------------------------
+# Display / verbosity policy
+# ---------------------------------------------------------------------------
+
+# Allowed values for each DisplayPolicy field.
+_DISPLAY_STREAMING = {"off", "draft", "progress"}
+_DISPLAY_TOOL_PROGRESS = {"off", "inline"}
+_DISPLAY_FOOTER = {"off", "compact"}
+
+# Platform → tier mapping. Tiers describe the rendering surface so sensible
+# defaults can be applied without per-platform configuration.
+#   edit   — edit-capable personal chats (stream live, hide tool spam)
+#   work   — workspace chats (post discrete progress steps)
+#   noedit — no-edit chats (single final message)
+#   batch  — batch-only channels (one final message, no interim)
+_PLATFORM_TIERS: Dict[str, str] = {
+    "telegram": "edit",
+    "discord": "edit",
+    "whatsapp": "noedit",
+    "slack": "work",
+    "teams": "work",
+    "mattermost": "work",
+    "email": "batch",
+    "sms": "batch",
+}
+
+
+@dataclass
+class DisplayPolicy:
+    """Per-platform display / verbosity policy.
+
+    Describes the operator's *policy* for how output should be presented on a
+    channel (as opposed to ``PlatformCapabilities`` which describes what a
+    platform *can* render).
+
+    Attributes:
+        streaming: Reply streaming mode.
+            ``"off"`` (single final message) | ``"draft"`` (edit in place) |
+            ``"progress"`` (compact status then final).
+        tool_progress: Whether tool execution progress is surfaced.
+            ``"off"`` (hidden) | ``"inline"`` (inline progress bubbles).
+        interim_assistant_messages: Show partial assistant messages, or only
+            the final reply.
+        footer: Runtime footer / status-line appended to replies.
+            ``"off"`` | ``"compact"`` (e.g. ``model · ctx% · cwd``).
+    """
+
+    streaming: str = "off"
+    tool_progress: str = "off"
+    interim_assistant_messages: bool = False
+    footer: str = "off"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "streaming": self.streaming,
+            "tool_progress": self.tool_progress,
+            "interim_assistant_messages": self.interim_assistant_messages,
+            "footer": self.footer,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DisplayPolicy":
+        """Create a policy from a (partial) dict, ignoring unknown keys."""
+        base = cls()
+        return cls(
+            streaming=_coerce_choice(
+                data.get("streaming", base.streaming), _DISPLAY_STREAMING, base.streaming
+            ),
+            tool_progress=_coerce_choice(
+                data.get("tool_progress", base.tool_progress),
+                _DISPLAY_TOOL_PROGRESS,
+                base.tool_progress,
+            ),
+            interim_assistant_messages=_coerce_bool(
+                data.get(
+                    "interim_assistant_messages", base.interim_assistant_messages
+                ),
+                base.interim_assistant_messages,
+            ),
+            footer=_coerce_choice(
+                data.get("footer", base.footer), _DISPLAY_FOOTER, base.footer
+            ),
+        )
+
+
+# Built-in per-tier defaults. Most operators configure nothing and still get
+# correct UX on every channel.
+_TIER_DEFAULTS: Dict[str, DisplayPolicy] = {
+    # edit-capable personal chats: stream live, hide tool spam, no footer
+    "edit": DisplayPolicy(streaming="draft", tool_progress="off", footer="off"),
+    # workspace chats: post discrete progress steps
+    "work": DisplayPolicy(streaming="off", tool_progress="inline", footer="off"),
+    # no-edit chats: single final message
+    "noedit": DisplayPolicy(streaming="off", tool_progress="off", footer="off"),
+    # batch-only channels: one final message, no interim
+    "batch": DisplayPolicy(
+        streaming="off",
+        tool_progress="off",
+        interim_assistant_messages=False,
+        footer="off",
+    ),
+}
+
+
+def _coerce_choice(value: Any, allowed: set, default: str) -> str:
+    """Return ``value`` if it is an allowed choice, else ``default``."""
+    if isinstance(value, str) and value in allowed:
+        return value
+    return default
+
+
+# String tokens treated as booleans for text-backed config (YAML/JSON/env).
+_TRUE_TOKENS = {"true", "1", "yes", "on"}
+_FALSE_TOKENS = {"false", "0", "no", "off"}
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Coerce ``value`` to a bool without ``bool("false") is True`` surprises.
+
+    Real booleans pass through. Strings are matched against known truthy/falsy
+    tokens (case-insensitive). Anything else falls back to ``default``.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
+    return default
+
+
+def resolve_display_policy(platform: str, config: Optional[Dict[str, Any]]) -> DisplayPolicy:
+    """Resolve the effective :class:`DisplayPolicy` for a platform.
+
+    Precedence (highest first):
+        1. explicit ``display.platforms.<platform>.<setting>``
+        2. ``display.<setting>`` global default
+        3. platform-tier default (edit / work / noedit / batch)
+        4. built-in :class:`DisplayPolicy` default
+
+    Args:
+        platform: Platform name, e.g. ``"telegram"``.
+        config: A ``display`` config dict (the value of the ``display:`` block),
+            or a full config dict containing a ``display`` key. ``None`` is
+            treated as empty.
+
+    Returns:
+        The resolved :class:`DisplayPolicy`.
+    """
+    display = _extract_display(config)
+
+    # Layer 4: built-in default.
+    policy = DisplayPolicy()
+
+    # Layer 3: platform-tier default.
+    tier = _PLATFORM_TIERS.get((platform or "").lower())
+    if tier and tier in _TIER_DEFAULTS:
+        policy = _merge_policy(policy, _TIER_DEFAULTS[tier].to_dict())
+
+    # Layer 2: global default (display.<setting>).
+    global_overrides = {
+        k: v for k, v in display.items() if k != "platforms"
+    }
+    policy = _merge_policy(policy, global_overrides)
+
+    # Layer 1: explicit platform override.
+    platforms = display.get("platforms") or {}
+    if isinstance(platforms, dict):
+        platform_overrides = _lookup_platform(platforms, platform)
+        if isinstance(platform_overrides, dict):
+            policy = _merge_policy(policy, platform_overrides)
+
+    return policy
+
+
+def _lookup_platform(platforms: Dict[str, Any], platform: str) -> Any:
+    """Look up a platform's overrides, tolerating key casing differences.
+
+    Tries the exact key, then the lower-cased key, then a case-insensitive
+    scan so natural config keys (e.g. ``Telegram``) still match ``telegram``.
+    """
+    if platform in platforms:
+        return platforms[platform]
+    normalized = (platform or "").lower()
+    if normalized in platforms:
+        return platforms[normalized]
+    for key, value in platforms.items():
+        if isinstance(key, str) and key.lower() == normalized:
+            return value
+    return None
+
+
+def _extract_display(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return the ``display`` mapping from ``config``.
+
+    Accepts either the ``display`` block directly or a full config dict
+    containing a ``display`` key.
+    """
+    if not isinstance(config, dict):
+        return {}
+    if "display" in config and isinstance(config.get("display"), dict):
+        return config["display"]
+    return config
+
+
+def _merge_policy(policy: DisplayPolicy, overrides: Dict[str, Any]) -> DisplayPolicy:
+    """Return a new policy with valid ``overrides`` applied over ``policy``."""
+    if not isinstance(overrides, dict):
+        return policy
+    data = policy.to_dict()
+    for key in data:
+        if key in overrides:
+            data[key] = overrides[key]
+    return DisplayPolicy.from_dict(data)
+
+
 @dataclass
 class BotOSConfig:
     """Configuration for BotOS — multi-platform bot orchestrator.
