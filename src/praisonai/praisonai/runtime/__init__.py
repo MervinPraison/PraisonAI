@@ -14,11 +14,11 @@ import sys as _sys
 import praisonai_code.runtime as _runtime
 
 # Alias submodules so ``praisonai.runtime.<sub>`` resolves to the moved module.
+# These submodules always exist in ``praisonai_code``; let any real import
+# error surface here (with its original traceback) instead of being swallowed
+# and re-raised later as a confusing missing-submodule error on the old path.
 for _name in ("descriptor", "client", "server", "__main__"):
-    try:
-        _mod = __import__(f"praisonai_code.runtime.{_name}", fromlist=[_name])
-    except Exception:  # pragma: no cover - optional submodule
-        continue
+    _mod = __import__(f"praisonai_code.runtime.{_name}", fromlist=[_name])
     _sys.modules[f"{__name__}.{_name}"] = _mod
 
 del _sys, _name
