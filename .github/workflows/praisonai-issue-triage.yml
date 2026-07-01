@@ -49,10 +49,12 @@ jobs:
           git config --local user.name "PraisonAI Bot"
           
       - name: Install PraisonAI
-        run: |
-          pip install uv
-          cd src/praisonai-agents && uv pip install --system -e ".[all]"
-          cd ../praisonai && uv pip install --system -e ".[all]"
+        run: pip install uv
+      - uses: ./.github/actions/install-monorepo-packages
+        with:
+          use-uv: "true"
+          agents-extras: ".[all]"
+          wrapper-extras: ".[all]"
         
       - name: Run PraisonAI Issue Triage
         env:

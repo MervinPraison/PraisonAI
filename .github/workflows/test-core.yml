@@ -44,10 +44,13 @@ jobs:
     - name: Install dependencies
       run: |
         cd src/praisonai
-        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
         uv pip install --system "praisonaiagents[knowledge]"
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        use-uv: "true"
+        wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
     - name: Set environment variables
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
@@ -134,10 +137,13 @@ jobs:
     - name: Install dependencies
       run: |
         cd src/praisonai
-        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
         uv pip install --system "praisonaiagents[knowledge]"
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        use-uv: "true"
+        wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
     - name: Set environment variables
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
@@ -199,11 +205,13 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        cd src/praisonai
-        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-timeout
         uv pip install --system "praisonaiagents[knowledge]"
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        use-uv: "true"
+        wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
     - name: Set environment variables
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV

@@ -64,12 +64,11 @@ jobs:
     - name: Install minimal dependencies
       run: |
         pip install --upgrade pip
-        # Install praisonai-agents with all deps (required for tests)
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[chat,code]"
         pip install pytest pytest-asyncio pytest-timeout prompt_toolkit
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[chat,code]"
     
     - name: Run Smoke Tests
       env:
@@ -125,12 +124,11 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
-        # Install praisonai-agents with all deps (required for tests)
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[crewai,autogen,ui,chat]"
         pip install pytest pytest-asyncio pytest-timeout pytest-cov pytest-xdist
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[crewai,autogen,ui,chat]"
     
     - name: Run Main Tests
       env:
@@ -214,11 +212,12 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[openai]"
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[openai]"
     
     - name: Run OpenAI Live Tests
       if: steps.check-key.outputs.has_key == 'true'
@@ -277,11 +276,12 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[anthropic]"
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[anthropic]"
     
     - name: Run Anthropic Tests
       if: steps.check-key.outputs.has_key == 'true'
@@ -336,11 +336,12 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[google]"
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[google]"
     
     - name: Run Google/Gemini Tests
       if: steps.check-key.outputs.has_key == 'true'
@@ -395,11 +396,11 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
     
     - name: Run Groq Tests
       if: steps.check-key.outputs.has_key == 'true'
@@ -454,11 +455,11 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e .
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
     
     - name: Run xAI/Grok Tests
       if: steps.check-key.outputs.has_key == 'true'
@@ -513,11 +514,12 @@ jobs:
       if: steps.check-key.outputs.has_key == 'true'
       run: |
         pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e ".[all]"
-        cd ../praisonai
-        pip install -e ".[cohere]"
         pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      if: steps.check-key.outputs.has_key == 'true'
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[cohere]"
     
     - name: Run Cohere Tests
       if: steps.check-key.outputs.has_key == 'true'
