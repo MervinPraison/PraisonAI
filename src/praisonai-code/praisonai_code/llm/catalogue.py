@@ -73,6 +73,7 @@ FALLBACK_MODELS = [
         max_output=100000,
         supports_reasoning=True,
         supports_tools=False,
+        supports_streaming=False,
         notes="No streaming, tools, or system messages",
     ),
     ModelInfo(
@@ -83,6 +84,7 @@ FALLBACK_MODELS = [
         max_output=65536,
         supports_reasoning=True,
         supports_tools=False,
+        supports_streaming=False,
         notes="No streaming, tools, or system messages",
     ),
     
@@ -392,6 +394,17 @@ class ModelCatalogue:
         for model in models:
             if model.id.lower() == model_id_lower:
                 return model.to_dict()
+        
+        # Try provider-qualified IDs (e.g. "groq/llama-3.3-70b-versatile")
+        # against bare IDs stored in the fallback catalogue.
+        if "/" in model_id_lower:
+            requested_provider, requested_bare = model_id_lower.split("/", 1)
+            for model in models:
+                if (
+                    model.provider.lower() == requested_provider
+                    and model.id.lower() == requested_bare
+                ):
+                    return model.to_dict()
         
         return None
     
