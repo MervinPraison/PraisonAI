@@ -813,7 +813,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run, run_integrated_gateway
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, __version__, arun, run, run_integrated_gateway
 ```
 
 # CLI
