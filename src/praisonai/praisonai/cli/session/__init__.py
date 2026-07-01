@@ -1,16 +1,7 @@
-"""
-Unified Session Management for PraisonAI CLI.
-
-Provides persistent session storage shared between TUI and --interactive mode.
+"""Backward-compatibility shim: ``praisonai.cli.session`` moved to
+``praisonai_code.cli.session``.
 """
 
-from .resume import RehydratedSession, rehydrate_session
-from .unified import UnifiedSession, UnifiedSessionStore, get_session_store
+from praisonai.cli._shim import alias_package as _alias_package
 
-__all__ = [
-    "UnifiedSession",
-    "UnifiedSessionStore",
-    "get_session_store",
-    "RehydratedSession",
-    "rehydrate_session",
-]
+_alias_package(__name__, "praisonai_code.cli.session")

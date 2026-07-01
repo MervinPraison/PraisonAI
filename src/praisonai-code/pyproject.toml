@@ -38,3 +38,6 @@ version = {attr = "praisonai_code.__version__"}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonai_code*"]
+
+[tool.setuptools.package-data]
+"praisonai_code.cli.configuration" = ["*.json"]
