@@ -47,6 +47,16 @@ os = [
     "PyJWT>=2.8.0",
     "sse-starlette>=1.6.0"
 ]
+gateway = [
+    # Gateway runtime with event-driven config hot-reload (Issue #2533).
+    # `watchdog` enables inotify/FSEvents-based watching of gateway.yaml;
+    # without it the gateway gracefully falls back to mtime polling.
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "sse-starlette>=1.6.0",
+    "websockets>=12.0",
+    "watchdog>=3.0.0",
+]
 agentops = ["agentops>=0.3.12"]
 langfuse = ["langfuse>=3.0.0"]
 langextract = ["langextract>=1.0.0"]
@@ -155,6 +165,7 @@ all = [
     "uvicorn>=0.34.0",
     "sse-starlette>=1.6.0",
     "websockets>=12.0",
+    "watchdog>=3.0.0",  # Event-driven gateway.yaml hot-reload (falls back to polling)
     # Browser + search tools (agent defaults)
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",

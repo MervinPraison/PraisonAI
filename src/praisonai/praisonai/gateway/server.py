@@ -671,6 +671,21 @@ class WebSocketGateway:
         
         # Store last loaded config for diff-driven reload
         self._loaded_config: Optional[Dict[str, Any]] = None
+
+        # Issue #2533: bounded drain window applied when a hot-reload restarts
+        # a channel, so in-flight turns on that channel finish before it is
+        # bounced. Populated from gateway.yaml / CLI in ``start_with_config``.
+        # ``None``/0 preserves the prior immediate-restart behaviour.
+        self._reload_drain_timeout: Optional[float] = None
+        # Issue #2533: serialize reloads. The file watcher, SIGHUP handler, and
+        # concurrent SIGHUPs all funnel through ``reload_config``; without a
+        # lock two reloads can interleave across drain/stop/start awaits and
+        # clobber ``_loaded_config`` / channel state. This lock guarantees one
+        # reload finishes before the next begins. Created lazily on the running
+        # loop so it binds to the correct loop (Issue #2533).
+        self._reload_lock: Optional[asyncio.Lock] = None
+        # Background config-watch task handle (event-driven or polling).
+        self._config_watch_task: Optional[asyncio.Task] = None
         
         # Session cleanup background task
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -4271,15 +4286,46 @@ class WebSocketGateway:
         
         return plan
     
-    async def _restart_channel(self, channel_name: str, channels_cfg: Dict[str, Any]) -> None:
+    async def _restart_channel(
+        self,
+        channel_name: str,
+        channels_cfg: Dict[str, Any],
+        drain_timeout: Optional[float] = None,
+    ) -> None:
         """Restart a single channel with new configuration.
         
         Args:
             channel_name: Name of the channel to restart
             channels_cfg: Full channels configuration
+            drain_timeout: Issue #2533 — optional bounded drain window. When
+                set and > 0, the channel's bot is first asked to quiesce
+                ingress and let in-flight agent turns finish (reusing the
+                bot's ``drain`` coroutine) before its task is cancelled.
+                ``None``/0 preserves the prior immediate-restart behaviour.
         """
         logger.info(f"Restarting channel '{channel_name}'...")
-        
+
+        # Issue #2533: drain in-flight turns on this channel before tearing it
+        # down, so a reload-driven restart doesn't cut active work. Best-effort
+        # and bounded; failures here never block the restart.
+        if drain_timeout and drain_timeout > 0:
+            bot = self._channel_bots.get(channel_name)
+            drain = getattr(bot, "drain", None) if bot is not None else None
+            if callable(drain):
+                try:
+                    abandoned = await drain(drain_timeout)
+                    if abandoned:
+                        logger.warning(
+                            "Drain timeout for channel '%s' during reload: "
+                            "%d turn(s) abandoned",
+                            channel_name, abandoned,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Error draining channel '%s' during reload: %s",
+                        channel_name, e,
+                    )
+
         # Cancel the existing task first
         if channel_name in self._channel_tasks:
             task = self._channel_tasks[channel_name]
@@ -4423,9 +4469,22 @@ class WebSocketGateway:
         - Agent changes: recreate agents only
         - Single channel changes: restart that channel only
         - Structural changes: full restart (fallback)
-        
+
         The WebSocket server itself is never restarted.
+
+        Issue #2533: serialized behind ``_reload_lock`` so overlapping triggers
+        (file watcher, SIGHUP, back-to-back SIGHUPs) apply one at a time and
+        cannot interleave channel/agent mutations across await points.
         """
+        # Bind the lock to the running loop lazily; ``__init__`` may run before
+        # a loop exists.
+        if self._reload_lock is None:
+            self._reload_lock = asyncio.Lock()
+        async with self._reload_lock:
+            await self._reload_config_locked(config_path)
+
+    async def _reload_config_locked(self, config_path: str) -> None:
+        """Perform the actual hot-reload. Callers must hold ``_reload_lock``."""
         logger.info(f"Hot-reloading gateway config from {config_path}...")
         try:
             new_cfg = self.load_gateway_config(config_path)
@@ -4477,7 +4536,8 @@ class WebSocketGateway:
         # Execute reload plan
         if plan.full_restart:
             logger.info("Performing full restart due to structural changes")
-            await self.stop_channels()
+            # Issue #2533: drain in-flight turns before bouncing all channels.
+            await self.stop_channels(drain_timeout=self._reload_drain_timeout)
             
             # Recreate agents
             agents_cfg = new_cfg.get("agents", {})
@@ -4516,11 +4576,34 @@ class WebSocketGateway:
             # Restart specific channels
             channels_cfg = new_cfg.get("channels", {})
             for channel_name in plan.restart_channels:
-                await self._restart_channel(channel_name, channels_cfg)
+                # Issue #2533: drain in-flight turns on this channel first.
+                await self._restart_channel(
+                    channel_name,
+                    channels_cfg,
+                    drain_timeout=self._reload_drain_timeout,
+                )
             
             # Apply hot-reload paths (future enhancement)
             if plan.hot_reload_paths:
                 logger.info(f"Hot-reload paths (no-op for now): {plan.hot_reload_paths}")
+
+        # Surface a concise summary of what the reload did (Issue #2533).
+        if plan.full_restart:
+            logger.info("reload applied: full restart")
+        else:
+            summary_parts = []
+            if plan.reload_agents:
+                summary_parts.append("agents")
+            if plan.restart_channels:
+                summary_parts.append(
+                    "restart[" + ",".join(sorted(plan.restart_channels)) + "]"
+                )
+            if plan.hot_reload_paths:
+                summary_parts.append(
+                    "hot[" + ",".join(sorted(plan.hot_reload_paths)) + "]"
+                )
+            if summary_parts:
+                logger.info("reload applied: " + "; ".join(summary_parts))
         
         # Refresh inbound trigger hooks (Issue #2281) so removed hooks and
         # rotated hook secrets take effect without a full process restart.
@@ -4531,6 +4614,139 @@ class WebSocketGateway:
         logger.info("Hot-reload complete")
 
     async def _watch_config(self, config_path: str, poll_interval: float = 5.0, debounce: float = 1.0) -> None:
+        """Watch the config file for changes and trigger hot-reload.
+
+        Issue #2533: prefer event-driven watching via ``watchdog`` (inotify /
+        FSEvents / ReadDirectoryChangesW) so config changes apply promptly.
+        ``watchdog`` is an optional, lazily-imported dependency; when it is
+        unavailable — or inotify watches are exhausted — this degrades
+        gracefully to the previous mtime-polling loop.
+
+        Args:
+            config_path: Path to the config file
+            poll_interval: How often to check for changes when polling (seconds)
+            debounce: Wait time after detecting change before reloading (seconds)
+        """
+        if await self._watch_config_event_driven(config_path, debounce=debounce):
+            return
+        logger.info(
+            "Config watcher: event-driven watching unavailable, "
+            "falling back to %.1fs polling", poll_interval,
+        )
+        await self._watch_config_polling(
+            config_path, poll_interval=poll_interval, debounce=debounce
+        )
+
+    async def _config_settled(self, config_path: str, debounce: float = 1.0) -> bool:
+        """Return ``True`` once the config file's mtime has stopped changing.
+
+        Issue #2533: the event-driven watcher can wake mid-write. We sample the
+        mtime, wait a short quiet window, then re-sample; a stable mtime means
+        the write has completed and the file is safe to parse. A missing file
+        (mid ``rename``/truncate) counts as not-yet-settled so the caller re-arms
+        rather than treating it as a hard failure.
+        """
+        try:
+            first = os.path.getmtime(config_path)
+        except OSError:
+            return False
+        await asyncio.sleep(min(debounce, 0.5))
+        try:
+            second = os.path.getmtime(config_path)
+        except OSError:
+            return False
+        return first == second
+
+    async def _watch_config_event_driven(self, config_path: str, debounce: float = 1.0) -> bool:
+        """Event-driven config watch using the optional ``watchdog`` package.
+
+        Returns ``True`` when it ran an event-driven watch loop (until the task
+        is cancelled), or ``False`` immediately when ``watchdog`` is not
+        installed / could not start an observer, so the caller can fall back to
+        polling.
+        """
+        try:
+            from watchdog.observers import Observer  # type: ignore
+            from watchdog.events import FileSystemEventHandler  # type: ignore
+        except Exception:
+            return False
+
+        loop = asyncio.get_event_loop()
+        change_event = asyncio.Event()
+        watch_path = os.path.abspath(config_path)
+        watch_dir = os.path.dirname(watch_path) or "."
+
+        class _ConfigChangeHandler(FileSystemEventHandler):  # pragma: no cover - thin adapter
+            def _notify(self, event):
+                try:
+                    src = getattr(event, "src_path", "") or ""
+                    dest = getattr(event, "dest_path", "") or ""
+                    if os.path.abspath(src) == watch_path or (
+                        dest and os.path.abspath(dest) == watch_path
+                    ):
+                        loop.call_soon_threadsafe(change_event.set)
+                except Exception:
+                    pass
+
+            def on_modified(self, event):
+                self._notify(event)
+
+            def on_created(self, event):
+                self._notify(event)
+
+            def on_moved(self, event):
+                self._notify(event)
+
+        observer = Observer()
+        try:
+            observer.schedule(_ConfigChangeHandler(), watch_dir, recursive=False)
+            observer.start()
+        except Exception as e:
+            logger.debug("Could not start watchdog observer: %s", e)
+            try:
+                observer.stop()
+            except Exception:
+                pass
+            return False
+
+        logger.info(
+            "Config watcher active (event-driven) for %s", config_path
+        )
+        try:
+            while True:
+                await change_event.wait()
+                change_event.clear()
+                # Debounce rapid consecutive writes: coalesce a burst of events
+                # by waiting for a quiet window before reloading.
+                await asyncio.sleep(debounce)
+                change_event.clear()
+                # Issue #2533: guard against partial/slow writes. A single slow
+                # write can still be in progress after the debounce window, so
+                # verify the file's mtime has settled before parsing. If it is
+                # still changing, skip this cycle and re-arm the event so the
+                # completed write is applied on the next quiet window rather
+                # than dropped after a parse failure.
+                if not await self._config_settled(config_path, debounce):
+                    change_event.set()
+                    continue
+                try:
+                    self.load_gateway_config(config_path)
+                    await self.reload_config(config_path)
+                except Exception as e:
+                    logger.error(
+                        "Config reload failed, keeping last-known-good: %s", e
+                    )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            try:
+                observer.stop()
+                observer.join(timeout=2.0)
+            except Exception:
+                pass
+        return True
+
+    async def _watch_config_polling(self, config_path: str, poll_interval: float = 5.0, debounce: float = 1.0) -> None:
         """Poll the config file for changes and trigger hot-reload.
         
         Args:
@@ -4700,6 +4916,30 @@ class WebSocketGateway:
                 )
                 drain_timeout_cfg = None
 
+        # Issue #2533: bounded drain window for reload-driven channel restarts.
+        # A dedicated ``gateway.reload_drain_timeout`` (or CLI override) wins;
+        # otherwise fall back to the shutdown ``drain_timeout`` so reloads are
+        # drain-coordinated by default when a shutdown drain is configured.
+        reload_drain_cfg = getattr(self, "_reload_drain_timeout_override", None)
+        if reload_drain_cfg is None:
+            reload_drain_cfg = gw_cfg.get("reload_drain_timeout")
+        if reload_drain_cfg is None:
+            reload_drain_cfg = drain_timeout_cfg
+        if reload_drain_cfg is not None:
+            try:
+                import math as _math
+                reload_drain_cfg = float(reload_drain_cfg)
+                if not _math.isfinite(reload_drain_cfg) or reload_drain_cfg < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid gateway.reload_drain_timeout %r; disabling "
+                    "reload drain",
+                    reload_drain_cfg,
+                )
+                reload_drain_cfg = None
+        self._reload_drain_timeout = reload_drain_cfg
+
         # Issue #2454: gateway-wide inbound admission control. Build a single
         # shared admission gate from the gateway config (CLI overrides win over
         # YAML) and stamp it onto each channel bot in ``start_channels`` so the
@@ -4795,7 +5035,7 @@ class WebSocketGateway:
         channels_cfg = cfg.get("channels", {})
 
         # Start config file watcher for hot-reload
-        self._config_watch_task: Optional[asyncio.Task] = None
+        self._config_watch_task = None
 
         async def _run_all():
             if channels_cfg:
@@ -4920,6 +5160,26 @@ class WebSocketGateway:
                     )
                 except (OSError, ValueError):
                     pass
+
+        # Issue #2533: operator-triggered reload. SIGHUP triggers the same
+        # diff-driven reload path as the file watcher, giving operators and
+        # service managers (``systemctl reload``) a deterministic "reload now"
+        # that never shuts the process down. SIGHUP does not exist on Windows,
+        # so this is best-effort and skipped when unavailable.
+        # ``reload_config`` serializes itself behind ``_reload_lock``, so a
+        # SIGHUP that arrives mid-reload (from the watcher or a prior SIGHUP)
+        # is queued and applied after the in-flight reload finishes rather
+        # than interleaving channel mutations (Issue #2533).
+        def _request_reload():
+            logger.info("Received SIGHUP, reloading gateway config...")
+            asyncio.ensure_future(self.reload_config(config_path))
+
+        sighup = getattr(signal, "SIGHUP", None)
+        if sighup is not None:
+            try:
+                loop.add_signal_handler(sighup, _request_reload)
+            except (NotImplementedError, OSError, ValueError):
+                pass
 
         try:
             await _run_all()
