@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 394 | **Rust Features:** 667 | **Parity:** 73.1%
+> **Python Features:** 395 | **Rust Features:** 667 | **Parity:** 72.9%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 394 |
+| Python Core Features | 395 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **106** |
+| **Actual Gap Count** | **107** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **73.1%** |
+| **Parity** | **72.9%** |
 
 ## Implemented Features
 
@@ -765,6 +765,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolValidationError`
 - ❌ `ToolsetRegistry`
 - ❌ `ToolsetSpec`
+- ❌ `WorkflowHooksConfig`
 - ❌ `YAMLWorkflowParser`
 - ❌ `__version__`
 - ❌ `add_memory_adapter`

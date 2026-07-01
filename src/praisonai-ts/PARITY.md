@@ -1,13 +1,13 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-30
+> **Version:** 1.5.87 | **Last Updated:** 2026-07-01
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 394 |
+| Python Core Features | 395 |
 | Python Wrapper Features | 97 |
 | TypeScript Features | 1190 |
 | **Gap Count** | **101** |
@@ -77,7 +77,7 @@
 | `tool` | ✅ | ✅ | low | ✅ DONE |
 | `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 
-### P1_Persistence (20 done, 5 todo)
+### P1_Persistence (21 done, 5 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -100,6 +100,7 @@
 | `StepResult` | ✅ | ✅ | low | ✅ DONE |
 | `Workflow` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowContext` | ✅ | ✅ | high | ✅ DONE |
+| `WorkflowHooksConfig` | ✅ | ✅ | low | ✅ DONE |
 | `db` | ✅ | ✅ | low | ✅ DONE |
 | `loop` | ✅ | ✅ | low | ✅ DONE |
 | `parallel` | ✅ | ✅ | low | ✅ DONE |
@@ -698,7 +699,7 @@ from praisonaiagents import A2A, A2UI, AGUI
 </details>
 
 <details>
-<summary><strong>workflows</strong> (20 exports)</summary>
+<summary><strong>workflows</strong> (21 exports)</summary>
 
 ```python
 from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Parallel, Pipeline, Repeat, Route, StepResult...

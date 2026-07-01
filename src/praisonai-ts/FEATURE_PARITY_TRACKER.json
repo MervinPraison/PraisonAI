@@ -1,10 +1,10 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-30",
+  "lastUpdated": "2026-07-01",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 394,
+    "pythonCoreFeatures": 395,
     "pythonWrapperFeatures": 97,
     "typescriptFeatures": 1190,
     "gapCount": 101,
@@ -296,6 +296,7 @@
       "WebSearchProvider",
       "Workflow",
       "WorkflowContext",
+      "WorkflowHooksConfig",
       "YAMLWorkflowParser",
       "__version__",
       "add_memory_adapter",
@@ -857,6 +858,7 @@
         "StepResult",
         "Workflow",
         "WorkflowContext",
+        "WorkflowHooksConfig",
         "YAMLWorkflowParser",
         "if_",
         "include",
@@ -3613,6 +3615,15 @@
         "typescript": true,
         "priority": "P1",
         "effort": "high",
+        "status": "DONE",
+        "category": "workflows"
+      },
+      {
+        "feature": "WorkflowHooksConfig",
+        "python": true,
+        "typescript": true,
+        "priority": "P1",
+        "effort": "low",
         "status": "DONE",
         "category": "workflows"
       },
