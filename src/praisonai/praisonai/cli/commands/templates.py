@@ -1,54 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.templates`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.templates` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.templates import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.templates.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Templates command group for PraisonAI CLI.
 
-Provides template management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import templates as _impl
 
-app = typer.Typer(help="Template management")
-
-
-@app.command("list")
-def templates_list():
-    """List available templates."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['templates', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("create")
-def templates_create(
-    name: str = typer.Argument(..., help="Template name"),
-    source: str = typer.Option(None, "--source", "-s", help="Source file to create template from"),
-):
-    """Create a new template."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['templates', 'create', name]
-    if source:
-        argv.extend(['--source', source])
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

@@ -1,51 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.endpoints`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.endpoints` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.endpoints import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.endpoints.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Endpoints command group for PraisonAI CLI.
 
-Provides API endpoint management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import endpoints as _impl
 
-app = typer.Typer(help="API endpoint management")
-
-
-@app.command("list")
-def endpoints_list():
-    """List available endpoints."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['endpoints', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("test")
-def endpoints_test(
-    endpoint: str = typer.Argument(..., help="Endpoint to test"),
-):
-    """Test an endpoint."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['endpoints', 'test', endpoint]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

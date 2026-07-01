@@ -1,47 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.commit`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.commit` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.commit import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.commit.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Commit command group for PraisonAI CLI.
 
-Provides git commit commands with AI assistance.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import commit as _impl
 
-app = typer.Typer(help="AI-assisted git commits")
-
-
-@app.callback(invoke_without_command=True)
-def commit_main(
-    ctx: typer.Context,
-    message: str = typer.Option(None, "--message", "-m", help="Commit message (auto-generated if not provided)"),
-    all_files: bool = typer.Option(False, "--all", "-a", help="Stage all changes"),
-    push: bool = typer.Option(False, "--push", "-p", help="Push after commit"),
-):
-    """
-    Create AI-assisted git commits.
-    
-    Examples:
-        praisonai commit
-        praisonai commit -m "Fix bug"
-        praisonai commit --all --push
-    """
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['commit']
-    if message:
-        argv.extend(['--message', message])
-    if all_files:
-        argv.append('--all')
-    if push:
-        argv.append('--push')
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

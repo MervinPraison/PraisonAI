@@ -1,74 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.todo`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.todo` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.todo import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.todo.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Todo command group for PraisonAI CLI.
 
-Provides todo/task management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import todo as _impl
 
-app = typer.Typer(help="Todo/task management")
-
-
-@app.command("list")
-def todo_list():
-    """List todos."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['todo', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("add")
-def todo_add(
-    task: str = typer.Argument(..., help="Task description"),
-    priority: str = typer.Option("medium", "--priority", "-p", help="Priority (low, medium, high)"),
-):
-    """Add a todo."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['todo', 'add', task]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("done")
-def todo_done(
-    task_id: str = typer.Argument(..., help="Task ID to mark as done"),
-):
-    """Mark a todo as done."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['todo', 'done', task_id]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

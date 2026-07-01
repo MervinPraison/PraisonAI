@@ -1,71 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.deploy`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.deploy` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.deploy import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.deploy.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Deploy command group for PraisonAI CLI.
 
-Provides deployment commands.
-"""
+import sys as _sys
 
-from typing import Optional
+from praisonai_code.cli.commands import deploy as _impl
 
-import typer
-
-app = typer.Typer(help="Deployment management")
-
-
-@app.command("docker")
-def deploy_docker(
-    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
-    tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Docker image tag"),
-):
-    """Deploy as Docker container."""
-    from ..features.deploy import handle_deploy_command
-
-    args = ["docker", file]
-    if tag is not None:
-        args.extend(["--tag", tag])
-
-    raise typer.Exit(handle_deploy_command(args))
-
-
-@app.command("aws")
-def deploy_aws(
-    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
-    region: Optional[str] = typer.Option(None, "--region", "-r", help="AWS region"),
-):
-    """Deploy to AWS."""
-    from ..features.deploy import handle_deploy_command
-
-    args = ["aws", file]
-    if region is not None:
-        args.extend(["--region", region])
-
-    raise typer.Exit(handle_deploy_command(args))
-
-
-@app.command("gcp")
-def deploy_gcp(
-    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="GCP project"),
-):
-    """Deploy to Google Cloud."""
-    from ..features.deploy import handle_deploy_command
-
-    args = ["gcp", file]
-    if project is not None:
-        args.extend(["--project", project])
-
-    raise typer.Exit(handle_deploy_command(args))
-
-
-@app.command("azure")
-def deploy_azure(
-    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
-    resource_group: Optional[str] = typer.Option(None, "--resource-group", "-g", help="Azure resource group"),
-):
-    """Deploy to Azure."""
-    from ..features.deploy import handle_deploy_command
-
-    args = ["azure", file]
-    if resource_group is not None:
-        args.extend(["--resource-group", resource_group])
-
-    raise typer.Exit(handle_deploy_command(args))
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

@@ -1,76 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.package`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.package` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.package import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.package.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Package command group for PraisonAI CLI.
 
-Provides package management commands (pip-like).
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import package as _impl
 
-app = typer.Typer(help="Package management")
-
-
-@app.command("install")
-def package_install(
-    package: str = typer.Argument(..., help="Package to install"),
-    upgrade: bool = typer.Option(False, "--upgrade", "-U", help="Upgrade if already installed"),
-):
-    """Install a package."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['package', 'install', package]
-    if upgrade:
-        argv.append('--upgrade')
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("uninstall")
-def package_uninstall(
-    package: str = typer.Argument(..., help="Package to uninstall"),
-):
-    """Uninstall a package."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['package', 'uninstall', package]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("list")
-def package_list():
-    """List installed packages."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['package', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

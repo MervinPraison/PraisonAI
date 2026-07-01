@@ -1,80 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.agents`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.agents` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.agents import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.agents.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Agents command group for PraisonAI CLI.
 
-Provides agent management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import agents as _impl
 
-app = typer.Typer(help="Agent management")
-
-
-@app.command("list")
-def agents_list(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
-):
-    """List available agents."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['agents', 'list']
-    if verbose:
-        argv.append('--verbose')
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("create")
-def agents_create(
-    name: str = typer.Argument(..., help="Agent name"),
-    template: str = typer.Option(None, "--template", "-t", help="Template to use"),
-):
-    """Create a new agent."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['agents', 'create', name]
-    if template:
-        argv.extend(['--template', template])
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("info")
-def agents_info(
-    name: str = typer.Argument(..., help="Agent name"),
-):
-    """Show agent information."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['agents', 'info', name]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

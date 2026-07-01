@@ -1,71 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.rules`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.rules` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.rules import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.rules.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Rules command group for PraisonAI CLI.
 
-Provides rules management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import rules as _impl
 
-app = typer.Typer(help="Rules management")
-
-
-@app.command("list")
-def rules_list():
-    """List active rules."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['rules', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("add")
-def rules_add(
-    rule: str = typer.Argument(..., help="Rule to add"),
-):
-    """Add a rule."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['rules', 'add', rule]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("clear")
-def rules_clear():
-    """Clear all rules."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['rules', 'clear']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

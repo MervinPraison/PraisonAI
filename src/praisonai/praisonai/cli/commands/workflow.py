@@ -1,97 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.workflow`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.workflow` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.workflow import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.workflow.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Workflow command group for PraisonAI CLI.
 
-Provides workflow management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import workflow as _impl
 
-app = typer.Typer(help="Workflow management")
-
-
-@app.command("run", context_settings={"allow_extra_args": True, "allow_interspersed_args": True, "ignore_unknown_options": True})
-def workflow_run(
-    ctx: typer.Context,
-    file: str = typer.Argument(..., help="Workflow file path"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview steps without executing (job workflows only)"),
-):
-    """Run a workflow.
-    
-    Use --var key=value to pass variables to YAML workflows.
-    Use --dry-run to preview job workflows without executing.
-    Can be specified multiple times.
-    
-    Example:
-        praisonai workflow run my_workflow.yaml --var topic="AI Tools"
-        praisonai workflow run publish-pypi.yaml --dry-run
-    """
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['workflow', 'run', file]
-    # Pass through extra args (includes --var arguments and custom flags)
-    argv.extend(ctx.args)
-    if model:
-        argv.extend(['--model', model])
-    if verbose:
-        argv.append('--verbose')
-    if dry_run:
-        argv.append('--dry-run')
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("list")
-def workflow_list():
-    """List available workflows."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['workflow', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("create")
-def workflow_create(
-    name: str = typer.Argument(..., help="Workflow name"),
-    template: str = typer.Option(None, "--template", "-t", help="Template to use"),
-):
-    """Create a new workflow."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['workflow', 'create', name]
-    if template:
-        argv.extend(['--template', template])
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl
