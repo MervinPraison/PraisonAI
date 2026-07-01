@@ -66,9 +66,25 @@ Approval resolves locally via `_approval_bridge` (channel bots delegate to the
 wrapper). Wrapper-only (optional via `_wrapper_bridge`): observability sinks,
 framework adapters, bots, gateway, train, capabilities.
 
+## Shim migration checklist
+
+When moving a module from `praisonai` to `praisonai_code`:
+
+1. Copy the **full implementation** into `praisonai_code/…` first.
+2. Replace the wrapper file with a thin `sys.modules[__name__] = _impl` shim.
+3. Update `praisonai_code` call sites to import locally (not via shim).
+4. Add module-identity pair to `test_c5_backward_compat.py` if applicable.
+5. Run `bash scripts/check_c7_imports.sh`.
+
+## C7.1 backlog (out of scope for hot-path sign-off)
+
+- `cli/main.py` legacy argparse paths (auto, agents_generator, framework adapters)
+- `capabilities`, `train`, `n8n`, `templates`, `recipe`, `replay`
+- `bots`, `gateway`, `serve`, observability sink implementations
+
 ## Sign-off
 
-- [ ] Standalone smoke commands pass
-- [ ] Hot-path import gate passes
-- [ ] C5 backward-compat tests pass
-- [ ] CI smoke job includes standalone block
+- [x] Standalone smoke commands pass
+- [x] Hot-path import gate passes (`scripts/check_c7_imports.sh`)
+- [x] C5 backward-compat tests pass
+- [x] CI smoke job includes standalone block + import regression gate

@@ -123,6 +123,18 @@ jobs:
           fi
         done
         echo "C7 hot-path import gate ok"
+        bash scripts/check_c7_imports.sh
+        # Standalone run must not fail on wrapper ImportError (API auth failure is OK)
+        set +e
+        RUN_OUT=$(/tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
+        RUN_CODE=$?
+        set -e
+        echo "$RUN_OUT" | tail -20
+        if echo "$RUN_OUT" | grep -qE 'ImportError|ModuleNotFoundError: No module named .praisonai'; then
+          echo "FAIL: standalone run hit wrapper import error"
+          exit 1
+        fi
+        echo "standalone run import gate ok (exit $RUN_CODE)"
     
     - name: Smoke Test Summary
       if: always()

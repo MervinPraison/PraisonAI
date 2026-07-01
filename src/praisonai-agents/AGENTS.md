@@ -192,7 +192,7 @@ C6 is the **sign-off step** after C0–C5 file moves: no further moves, only reg
 wrapper at module level. Remaining lazy wrapper imports (~300+) are optional commands
 and features (train, capabilities, bots, framework adapters) — use
 `praisonai_code._wrapper_bridge` or `pip install praisonai`. See
-`src/praisonai/tests/C7_VERIFICATION.md`.
+`src/praisonai/tests/C7_VERIFICATION.md`. CI gate: `scripts/check_c7_imports.sh`.
 
 ---
 
