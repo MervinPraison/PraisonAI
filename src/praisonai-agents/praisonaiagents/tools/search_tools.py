@@ -92,6 +92,9 @@ def _load_gitignore_spec(root: str):
     def _matches(relpath: str, is_dir: bool) -> bool:
         name = os.path.basename(relpath)
         posix = relpath.replace(os.sep, "/")
+        # Last matching pattern wins so re-includes (``!important.log``) can
+        # override an earlier broad exclude, mirroring Git's own semantics.
+        ignored = False
         for pat in patterns:
             neg = pat.startswith("!")
             p = pat[1:] if neg else pat
@@ -99,22 +102,48 @@ def _load_gitignore_spec(root: str):
             p = p.rstrip("/")
             if dir_only and not is_dir:
                 continue
+            hit = False
             if "/" in p:
                 candidate = p[1:] if p.startswith("/") else p
                 if fnmatch.fnmatch(posix, candidate) or fnmatch.fnmatch(posix, candidate + "/*"):
-                    if not neg:
-                        return True
+                    hit = True
             else:
-                if fnmatch.fnmatch(name, p):
-                    if not neg:
-                        return True
-        return False
+                # A bare name matches the entry itself or any path segment,
+                # so ``build/`` also ignores ``build/foo.py``.
+                if fnmatch.fnmatch(name, p) or any(
+                    fnmatch.fnmatch(seg, p) for seg in posix.split("/")
+                ):
+                    hit = True
+            if hit:
+                ignored = not neg
+        return ignored
 
     return _matches
 
 
+def _matches_glob(fname: str, rel: str, glob: Optional[str]) -> bool:
+    """True when *glob* is empty or matches the filename or workspace-relative path."""
+    if not glob:
+        return True
+    posix = rel.replace(os.sep, "/")
+    return (
+        fnmatch.fnmatch(fname, glob)
+        or fnmatch.fnmatch(rel, glob)
+        or fnmatch.fnmatch(posix, glob)
+    )
+
+
 def _iter_files(root: str, glob: Optional[str], ignore_matcher):
-    """Yield files under *root*, skipping noise dirs and ``.gitignore`` matches."""
+    """Yield files under *root*, skipping noise dirs and ``.gitignore`` matches.
+
+    When *root* is a single file it is yielded directly (subject to *glob*), so
+    callers work identically whether given a directory or a file path.
+    """
+    if os.path.isfile(root):
+        rel = os.path.basename(root)
+        if _matches_glob(rel, rel, glob):
+            yield root
+        return
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
@@ -127,13 +156,21 @@ def _iter_files(root: str, glob: Optional[str], ignore_matcher):
             rel = os.path.relpath(full, root)
             if ignore_matcher and ignore_matcher(rel, False):
                 continue
-            if glob and not (fnmatch.fnmatch(fname, glob) or fnmatch.fnmatch(rel, glob)):
+            if not _matches_glob(fname, rel, glob):
                 continue
             yield full
 
 
+_MAX_PATTERN_LEN = 1000
+
+
 def _python_grep(pattern, root, glob, case_insensitive, max_results):
     """Pure-Python fallback content search (regex/literal)."""
+    # Python's backtracking ``re`` engine has no execution-time bound, so cap
+    # the pattern length to reduce catastrophic-backtracking (ReDoS) exposure
+    # on this fallback path (ripgrep's RE2-style engine is linear-time).
+    if len(pattern) > _MAX_PATTERN_LEN:
+        return f"Error: pattern too long (>{_MAX_PATTERN_LEN} chars); please narrow it."
     flags = re.IGNORECASE if case_insensitive else 0
     try:
         regex = re.compile(pattern, flags)
@@ -229,8 +266,10 @@ def grep(
 
     rg = shutil.which("rg")
     if rg:
-        argv = [rg, "--line-number", "--with-filename", "--color=never",
-                f"--max-count={max_results}"]
+        # NOTE: no ``--max-count`` — that caps *per file*, which diverges from
+        # the pure-Python fallback's total cap. We cap the total afterwards so
+        # both paths return identical truncated results.
+        argv = [rg, "--line-number", "--with-filename", "--color=never"]
         if case_insensitive:
             argv.append("-i")
         if glob:
@@ -289,16 +328,31 @@ def glob(
 
     ignore_matcher = _load_gitignore_spec(safe)
     root = Path(safe)
+
+    def _ignored(rel: str, parts: List[str]) -> bool:
+        # Skip noise dirs and any file whose own path OR an ancestor directory
+        # matches ``.gitignore`` (so directory-only rules like ``build/`` also
+        # exclude ``build/foo.py``).
+        if any(part in _SKIP_DIRS for part in parts):
+            return True
+        if not ignore_matcher:
+            return False
+        if ignore_matcher(rel, False):
+            return True
+        ancestor = ""
+        for part in parts[:-1]:
+            ancestor = os.path.join(ancestor, part) if ancestor else part
+            if ignore_matcher(ancestor, True):
+                return True
+        return False
+
     try:
         matches = []
         for p in root.glob(pattern):
             if not p.is_file():
                 continue
             rel = os.path.relpath(p, safe)
-            parts = rel.split(os.sep)
-            if any(part in _SKIP_DIRS for part in parts):
-                continue
-            if ignore_matcher and ignore_matcher(rel, False):
+            if _ignored(rel, rel.split(os.sep)):
                 continue
             matches.append(p)
     except (OSError, ValueError) as exc:

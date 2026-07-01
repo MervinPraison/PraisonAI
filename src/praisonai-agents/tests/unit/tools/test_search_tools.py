@@ -36,13 +36,16 @@ def test_grep_and_glob_are_registered():
 
 def test_grep_finds_matches_relative_paths(sample_tree):
     from praisonaiagents.tools import grep
-    out = grep("needle", path=".")
+    # Force the pure-Python fallback so this test is deterministic regardless of
+    # whether ripgrep is installed on the machine/CI image running it.
+    with patch("shutil.which", return_value=None):
+        out = grep("needle", path=".")
     assert "a.py:2:" in out
     assert "src/d.py:1:" in out or os.path.join("src", "d.py") + ":1:" in out
     # match line content present
     assert "needle" in out
-    # no absolute paths leaked
-    assert not out.startswith("/")
+    # no absolute paths leaked on any output line
+    assert not any(line.startswith("/") for line in out.splitlines())
 
 
 def test_grep_python_fallback_when_no_ripgrep(sample_tree):
@@ -135,3 +138,47 @@ def test_glob_honours_gitignore(sample_tree):
     out = glob("*.py", path=".")
     assert "a.py" in out
     assert "b.py" not in out
+
+
+def test_grep_single_file_path_fallback(sample_tree):
+    from praisonaiagents.tools import grep
+    # A single file path must work on the pure-Python fallback (regression:
+    # os.walk on a file yielded nothing -> silent "No matches found.").
+    with patch("shutil.which", return_value=None):
+        out = grep("needle", path="a.py")
+    assert "a.py:2:" in out
+
+
+def test_grep_uses_ripgrep_branch_when_available(sample_tree):
+    from praisonaiagents.tools import grep
+    from unittest.mock import MagicMock
+    fake = MagicMock(returncode=0, stdout="a.py:2: return needle\n", stderr="")
+    with patch("shutil.which", return_value="/usr/bin/rg"), \
+            patch("subprocess.run", return_value=fake) as run:
+        out = grep("needle", path=".")
+    assert run.called
+    # no per-file --max-count (diverges from fallback total cap)
+    argv = run.call_args[0][0]
+    assert not any(str(a).startswith("--max-count") for a in argv)
+    assert "a.py:2:" in out
+
+
+def test_glob_gitignore_directory_only_rule(sample_tree):
+    from praisonaiagents.tools import glob
+    gen = sample_tree / "generated"
+    gen.mkdir()
+    (gen / "e.py").write_text("x = 1\n")
+    (sample_tree / ".gitignore").write_text("generated/\n")
+    out = glob("**/*.py", path=".")
+    assert "a.py" in out
+    assert "generated" not in out  # dir-only rule excludes files beneath it
+
+
+def test_glob_gitignore_negation_reinclude(sample_tree):
+    from praisonaiagents.tools import glob
+    (sample_tree / "keep.log").write_text("x\n")
+    (sample_tree / "drop.log").write_text("y\n")
+    (sample_tree / ".gitignore").write_text("*.log\n!keep.log\n")
+    out = glob("*.log", path=".")
+    assert "keep.log" in out  # re-included by the negation rule
+    assert "drop.log" not in out
