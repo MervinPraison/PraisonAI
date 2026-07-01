@@ -61,6 +61,11 @@ from .protocols import (
     GatewayConcurrencyPolicyProtocol,
     GatewayConcurrencyPolicy,  # backward-compat alias
     ConcurrencyLimitPolicy,
+    # Gateway rate-limit admission (Issue #2532)
+    RateLimitDecision,
+    RateLimitPolicyProtocol,
+    RateLimitPolicy,  # backward-compat alias
+    SlidingWindowRateLimitPolicy,
     # Port-less, restart-safe external drain trigger (Issue #2390)
     current_epoch,
     DrainMarkerPolicy,
@@ -198,6 +203,11 @@ __all__ = [
     "GatewayConcurrencyPolicyProtocol",
     "GatewayConcurrencyPolicy",
     "ConcurrencyLimitPolicy",
+    # Gateway rate-limit admission (Issue #2532)
+    "RateLimitDecision",
+    "RateLimitPolicyProtocol",
+    "RateLimitPolicy",
+    "SlidingWindowRateLimitPolicy",
     # Port-less, restart-safe external drain trigger (Issue #2390)
     "current_epoch",
     "DrainMarkerPolicy",
