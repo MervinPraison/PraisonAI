@@ -122,11 +122,19 @@ class ToolSourceRegistry(PluginRegistry["ToolSource"]):
     are appended after it so third parties extend rather than replace it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, discover_entry_points: bool = True) -> None:
         # No builtins: the historical chain is constructed by ToolResolver and
         # bound to the resolver instance. This registry only carries pluggable,
         # instance-independent third-party sources discovered via entry points.
-        super().__init__(entry_point_group="praisonai.tool_sources", builtins=None)
+        #
+        # Pass ``discover_entry_points=False`` for a guaranteed-empty registry
+        # (opt out of third-party sources, or make tests deterministic
+        # regardless of what is installed in the environment).
+        super().__init__(
+            entry_point_group="praisonai.tool_sources",
+            builtins=None,
+            discover_entry_points=discover_entry_points,
+        )
 
     def create_sources(self) -> List["ToolSource"]:
         """Instantiate every registered entry-point source, skipping failures.
@@ -144,6 +152,14 @@ class ToolSourceRegistry(PluginRegistry["ToolSource"]):
         return sources
 
 
+def _is_tool_source(candidate: Any) -> bool:
+    """True if ``candidate`` satisfies the :class:`ToolSource` protocol."""
+    return (
+        callable(getattr(candidate, "lookup", None))
+        and isinstance(getattr(candidate, "name", None), str)
+    )
+
+
 def _coerce_source(obj: Any) -> "ToolSource":
     """Turn a resolved entry-point object into a :class:`ToolSource` instance.
 
@@ -151,18 +167,31 @@ def _coerce_source(obj: Any) -> "ToolSource":
     instance is used as-is. Classes are always instantiated even though the
     class itself carries ``name`` / ``lookup`` attributes, because a class'
     ``lookup`` is an unbound function that would receive ``name`` as ``self``.
+
+    Raises:
+        TypeError: If the resolved object is not (and does not produce) a valid
+            :class:`ToolSource`. Raising here lets :meth:`create_sources` skip a
+            misbehaving plugin instead of appending a broken source that would
+            raise on every lookup and disable negative caching.
     """
     if inspect.isclass(obj):
-        return obj()
-    lookup = getattr(obj, "lookup", None)
-    name = getattr(obj, "name", None)
-    if callable(lookup) and isinstance(name, str):
+        candidate = obj()
+    elif _is_tool_source(obj):
         # Already a ToolSource instance.
-        return obj
-    if callable(obj):
+        candidate = obj
+    elif callable(obj):
         # A factory function returning a ToolSource.
-        return obj()
-    return obj
+        candidate = obj()
+    else:
+        candidate = obj
+
+    if _is_tool_source(candidate):
+        return candidate
+
+    raise TypeError(
+        "Tool source plugin must resolve to a ToolSource "
+        "(an object with a str 'name' and callable 'lookup')"
+    )
 
 
 class ToolResolver:
