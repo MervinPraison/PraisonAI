@@ -696,7 +696,176 @@ class BotOS:
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
-    
+
+    @staticmethod
+    def _summarize_job_result(result: Any) -> Optional[str]:
+        """Extract a human-readable summary from a background job's result.
+
+        Background subagents return a dict shaped like
+        ``{"success": bool, "output": ..., "error": ...}`` (see
+        ``subagent_tool._run_subagent``). Prefer ``output`` on success and
+        ``error`` on failure; fall back to ``str(result)`` for anything else.
+        Returns ``None`` when there is nothing meaningful to deliver.
+        """
+        if result is None:
+            return None
+        if isinstance(result, dict):
+            if result.get("success") and result.get("output") is not None:
+                text = result["output"]
+            elif result.get("error"):
+                text = f"Task failed: {result['error']}"
+            else:
+                text = result.get("output") or result.get("error")
+            return str(text) if text is not None else None
+        text = str(result)
+        return text or None
+
+    def on_background_job_complete(self, job_info: Any) -> bool:
+        """Route a completed background job's result back to its origin chat.
+
+        Registered as the ``on_complete`` callback on ``spawn_subagent(
+        ..., background=True, deliver=...)`` so a finished background job
+        delivers itself into the originating conversation with no active
+        turn — the defining capability of a persistent gateway. Reuses the
+        SAME ``DeliveryRouter`` the scheduler uses. Fires the ``JOB_COMPLETED``
+        hook for observability. Best-effort: any failure is logged, never
+        raised (it runs on the background worker thread).
+
+        Args:
+            job_info: The terminal ``JobInfo`` carrying ``origin`` context
+                captured at spawn time (``deliver``/``platform``/``chat_id``/
+                ``thread_id``/``session_id``).
+
+        Returns:
+            True if the result was delivered, False otherwise.
+        """
+        try:
+            origin = dict(getattr(job_info, "origin", {}) or {})
+            job_id = str(getattr(job_info, "job_id", "") or "")
+            status = getattr(getattr(job_info, "status", ""), "value", None) or str(
+                getattr(job_info, "status", "")
+            )
+            error = getattr(job_info, "error", None)
+            result = getattr(job_info, "result", None)
+            deliver = origin.get("deliver", "")
+
+            # Fire the observability hook regardless of whether we can deliver.
+            try:
+                from ._protocol_mixin import fire_job_completed
+                fire_job_completed(
+                    self._get_hook_runner(),
+                    job_id=job_id,
+                    status=status,
+                    result=result,
+                    error=error,
+                    deliver=deliver,
+                    platform=origin.get("platform", ""),
+                    chat_id=origin.get("chat_id", ""),
+                    thread_id=origin.get("thread_id", ""),
+                    session_id=origin.get("session_id", ""),
+                )
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(f"JOB_COMPLETED emit error (non-fatal): {e}")
+
+            if not deliver:
+                return False
+
+            # Build the delivery text: success summary or failure notice.
+            if error:
+                text = f"Background task failed: {error}"
+            else:
+                text = self._summarize_job_result(result)
+            if not text:
+                logger.debug(
+                    "Background job %s completed with no deliverable text", job_id
+                )
+                return False
+
+            origin_source = None
+            platform = origin.get("platform", "")
+            chat_id = origin.get("chat_id", "")
+            if platform and chat_id:
+                origin_source = SessionSource(
+                    platform=platform,
+                    channel_id=chat_id,
+                    thread_id=origin.get("thread_id") or None,
+                )
+
+            delivered = self._run_coroutine_sync(
+                self._deliver_job_text(deliver, text, origin_source)
+            )
+            if delivered:
+                logger.info(
+                    "Delivered background job %s result to %s", job_id, deliver
+                )
+            else:
+                logger.warning(
+                    "Background job %s ran but delivery to %s failed",
+                    job_id, deliver,
+                )
+            return bool(delivered)
+        except Exception as e:  # pragma: no cover — must never crash worker
+            logger.warning(f"on_background_job_complete error (non-fatal): {e}")
+            return False
+
+    async def _deliver_job_text(
+        self, target: str, text: str, origin: Optional[Any]
+    ) -> bool:
+        """Deliver ``text`` to ``target``, resolving the ``"all"`` broadcast token.
+
+        ``DeliveryRouter`` resolves ``"origin"``, ``"platform"``, aliases and
+        ``"platform:channel"`` but not the documented ``"all"`` fan-out token.
+        Mirror the gateway's ``all`` semantics here by fanning out to every
+        reachable home channel; anything else routes straight through the
+        shared router (the scheduler's path). A send is considered delivered
+        if it reaches at least one target.
+        """
+        if target == "all":
+            directory = getattr(self._delivery_router, "directory", None)
+            targets = directory.describe_targets() if directory is not None else []
+            homes = [t for t in targets if t.get("kind") == "home"]
+            if not homes:
+                logger.warning("Background job deliver='all' has no home channels")
+                return False
+            delivered_any = False
+            for t in homes:
+                try:
+                    ok = await self._delivery_router.deliver(
+                        target=f"{t['platform']}:{t['channel_id']}",
+                        text=text,
+                        origin=origin,
+                    )
+                    delivered_any = delivered_any or bool(ok)
+                except Exception as e:  # pragma: no cover — best-effort fan-out
+                    logger.warning(
+                        "Background job deliver='all' to %s:%s failed: %s",
+                        t.get("platform"), t.get("channel_id"), e,
+                    )
+            return delivered_any
+        return await self._delivery_router.deliver(
+            target=target, text=text, origin=origin
+        )
+
+    @staticmethod
+    def _run_coroutine_sync(coro: Any) -> Any:
+        """Run an awaitable to completion from a (possibly sync) context.
+
+        The background job runner invokes ``on_complete`` on a plain worker
+        thread with no running event loop, while ``DeliveryRouter.deliver`` is
+        a coroutine. If a loop is already running on this thread we schedule
+        the coroutine thread-safely onto it; otherwise we run it directly.
+        """
+        if not asyncio.iscoroutine(coro):
+            return coro
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result()
+        return asyncio.run(coro)
+
     @staticmethod
     def _find_session_manager(bot: Bot) -> Optional[Any]:
         """Locate a bot's ``BotSessionManager`` across the adapter variants.

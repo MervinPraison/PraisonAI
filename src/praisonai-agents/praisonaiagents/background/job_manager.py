@@ -13,6 +13,10 @@ from typing import Any, Callable, Dict, Optional
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, Future
 
+from praisonaiagents._logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class JobStatus(str, Enum):
     """Status of a background job."""
@@ -33,6 +37,11 @@ class JobInfo:
     completed_at: Optional[float] = None
     result: Any = None
     error: Optional[str] = None
+    # Optional origin/delivery context captured at spawn time so a gateway
+    # can route the result back to the originating conversation on completion
+    # (mirrors the scheduler's ``deliver="origin"`` grammar). Empty by default,
+    # preserving the pull-only behaviour when no delivery target is set.
+    origin: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def duration(self) -> Optional[float]:
@@ -87,6 +96,8 @@ class BackgroundJobManager:
         self,
         func: Callable[[], Any],
         job_id: Optional[str] = None,
+        on_complete: Optional[Callable[["JobInfo"], None]] = None,
+        origin: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Start a new background job.
@@ -94,6 +105,18 @@ class BackgroundJobManager:
         Args:
             func: The function to execute in the background
             job_id: Optional custom job ID (auto-generated if not provided)
+            on_complete: Optional callback invoked with the terminal
+                :class:`JobInfo` once the job reaches a terminal state
+                (completed or failed). This is the observable completion
+                signal a gateway subscribes to in order to proactively
+                deliver a background result back to the originating chat
+                without an active turn. Best-effort — any exception it
+                raises is swallowed so a delivery failure never crashes the
+                worker thread. Defaults to ``None`` (pull-only behaviour).
+            origin: Optional origin/delivery context (e.g. ``platform``,
+                ``chat_id``, ``thread_id``, ``session_id``, ``deliver``)
+                stored on the :class:`JobInfo` so ``on_complete`` can route
+                the result. Empty/omitted preserves today's behaviour.
             
         Returns:
             The job ID
@@ -103,11 +126,27 @@ class BackgroundJobManager:
         job_info = JobInfo(
             job_id=job_id,
             status=JobStatus.PENDING,
+            origin=dict(origin) if origin else {},
         )
         
         with self._lock:
             self._jobs[job_id] = job_info
         
+        def _fire_complete() -> None:
+            if on_complete is None:
+                return
+            with self._lock:
+                info = self._jobs.get(job_id)
+            if info is None:
+                return
+            try:
+                on_complete(info)
+            except Exception as e:  # noqa: BLE001 — delivery must never crash worker
+                logger.debug(
+                    "on_complete callback for job %s raised (non-fatal): %s",
+                    job_id, e,
+                )
+
         def _run_job():
             with self._lock:
                 self._jobs[job_id].status = JobStatus.RUNNING
@@ -119,12 +158,14 @@ class BackgroundJobManager:
                     self._jobs[job_id].status = JobStatus.COMPLETED
                     self._jobs[job_id].completed_at = time.time()
                     self._jobs[job_id].result = result
+                _fire_complete()
                 return result
             except Exception as e:
                 with self._lock:
                     self._jobs[job_id].status = JobStatus.FAILED
                     self._jobs[job_id].completed_at = time.time()
                     self._jobs[job_id].error = str(e)
+                _fire_complete()
                 raise
         
         future = self._executor.submit(_run_job)

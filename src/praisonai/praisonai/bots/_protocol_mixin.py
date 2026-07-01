@@ -508,6 +508,52 @@ def fire_schedule_trigger(
         logger.debug(f"SCHEDULE_TRIGGER hook error (non-fatal): {e}")
 
 
+def fire_job_completed(
+    runner: Any,
+    job_id: str,
+    status: str,
+    *,
+    result: Any = None,
+    error: Optional[str] = None,
+    deliver: str = "",
+    platform: str = "",
+    chat_id: str = "",
+    thread_id: str = "",
+    session_id: str = "",
+    agent_name: str = "background",
+) -> None:
+    """Fire JOB_COMPLETED hook when a background job reaches a terminal state.
+
+    Best-effort and non-fatal: an observability/delivery plugin may subscribe
+    to this to react to background completion, but delivery itself is routed by
+    the gateway's ``on_job_complete`` callback (see :class:`BotOS`).
+    """
+    if runner is None:
+        return
+    try:
+        from praisonaiagents.hooks.types import HookEvent
+        from praisonaiagents.hooks.events import JobCompletedInput
+
+        event_input = JobCompletedInput(
+            session_id=session_id,
+            cwd=os.getcwd(),
+            event_name=HookEvent.JOB_COMPLETED,
+            timestamp=str(time.time()),
+            agent_name=agent_name,
+            job_id=job_id,
+            status=status,
+            result=result,
+            error=error,
+            deliver=deliver,
+            platform=platform,
+            chat_id=chat_id,
+            thread_id=thread_id,
+        )
+        _emit(runner, HookEvent.JOB_COMPLETED, event_input)
+    except Exception as e:
+        logger.debug(f"JOB_COMPLETED hook error (non-fatal): {e}")
+
+
 def fire_session_start(
     runner: Any,
     session_id: str,
