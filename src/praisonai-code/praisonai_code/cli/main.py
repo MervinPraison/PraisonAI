@@ -2063,7 +2063,7 @@ class PraisonAI:
                     try:
                         import inspect
                         from praisonai_code._safe_loader import load_user_module
-                        module = load_user_module(rewrite_tools, name="rewrite_tools_module")
+                        module = load_user_module(rewrite_tools, name="rewrite_tools_module", allow_outside_cwd=True)
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2152,7 +2152,7 @@ class PraisonAI:
                     try:
                         import inspect
                         from praisonai_code._safe_loader import load_user_module
-                        module = load_user_module(expand_tools, name="expand_tools_module")
+                        module = load_user_module(expand_tools, name="expand_tools_module", allow_outside_cwd=True)
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2234,7 +2234,7 @@ class PraisonAI:
             try:
                 import inspect
                 from praisonai_code._safe_loader import load_user_module
-                module = load_user_module(tools_path, name="tools_module")
+                module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
                 if module is not None:
                     for name, obj in inspect.getmembers(module):
                         if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2895,7 +2895,7 @@ class PraisonAI:
             if tools_file.exists():
                 try:
                     from praisonai_code._safe_loader import load_user_module
-                    tools_module = load_user_module(str(tools_file), name="recipe_tools")
+                    tools_module = load_user_module(str(tools_file), name="recipe_tools", allow_outside_cwd=True)
                     if tools_module is not None:
                         import inspect
                         # Build registry from public functions only
@@ -5789,7 +5789,7 @@ Now, {final_instruction.lower()}:"""
                     try:
                         import inspect
                         from praisonai_code._safe_loader import load_user_module
-                        module = load_user_module(tools_path, name="tools_module")
+                        module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
                         if module is not None:
                             # Get all callable functions from the module
                             for name, obj in inspect.getmembers(module):

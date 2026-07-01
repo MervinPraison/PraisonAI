@@ -1049,7 +1049,9 @@ class ToolResolver:
     def load_functions_from_module(self, module_path: str) -> Dict[str, Callable]:
         """Public replacement for AgentsGenerator.load_tools_from_module."""
         from praisonai_code._safe_loader import load_user_module
-        module = load_user_module(module_path, name="tools_module")
+        # module_path is an explicit caller-provided path; allow absolute files
+        # outside CWD (still gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
+        module = load_user_module(module_path, name="tools_module", allow_outside_cwd=True)
         return {} if module is None else {
             name: obj for name, obj in inspect.getmembers(module)
             if inspect.isfunction(obj) or callable(obj)
@@ -1060,7 +1062,9 @@ class ToolResolver:
         """Public replacement for AgentsGenerator.load_tools_from_module_class.
         Promotes _extract_tool_classes from private to public."""
         from praisonai_code._safe_loader import load_user_module
-        module = load_user_module(module_path, name="tools_module")
+        # module_path is an explicit caller-provided path; allow absolute files
+        # outside CWD (still gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
+        module = load_user_module(module_path, name="tools_module", allow_outside_cwd=True)
         return {} if module is None else self._extract_tool_classes(module)
 
 
