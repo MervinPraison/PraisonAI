@@ -22,7 +22,7 @@ from datetime import datetime
 # Branding - Import from unified source
 # ============================================================================
 
-from praisonai.cli.branding import get_logo, get_version
+from praisonai_code.cli.branding import get_logo, get_version
 
 
 # ============================================================================

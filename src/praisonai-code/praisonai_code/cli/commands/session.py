@@ -435,7 +435,7 @@ def session_import(
     
     # Use InteractiveCore to import
     try:
-        from praisonai.cli.interactive import InteractiveCore
+        from praisonai_code.cli.interactive import InteractiveCore
         
         core = InteractiveCore()
         session_id = core.import_session(data)

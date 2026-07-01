@@ -167,7 +167,7 @@ def check_acp_config(config=None) -> CheckResult:
 def check_acp_runtime(config=None) -> CheckResult:
     """Check if ACP runtime can start."""
     try:
-        from praisonai.cli.features.interactive_runtime import create_runtime
+        from praisonai_code.cli.features.interactive_runtime import create_runtime
         
         async def _check():
             runtime = create_runtime(

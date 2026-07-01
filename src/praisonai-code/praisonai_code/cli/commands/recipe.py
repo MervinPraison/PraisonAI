@@ -28,7 +28,7 @@ def recipe_create(
         praisonai recipe create "Research AI" --agents "researcher:role=AI Researcher,goal=Find papers"
         praisonai recipe create "Research AI" --tools "researcher:internet_search,arxiv"
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['recipe', 'create', goal]
@@ -62,7 +62,7 @@ def recipe_create(
 @app.command("list")
 def recipe_list():
     """List available recipes."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['recipe', 'list']
@@ -103,7 +103,7 @@ def recipe_run(
         praisonai recipe run ai-wordpress-post-generator --save --verbose
         praisonai recipe run ai-topic-gatherer --save --name my-test-run --var topic="AI"
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['recipe', 'run', name]
@@ -308,7 +308,7 @@ def recipe_install(
     source: str = typer.Argument(..., help="Recipe source (path or URL)"),
 ):
     """Install a recipe."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['recipe', 'install', source]
@@ -471,7 +471,7 @@ def recipe_optimize(
         print(f"   Target: {target}")
     
     try:
-        from praisonai.cli.features.recipe_optimizer import RecipeOptimizer
+        from praisonai_code.cli.features.recipe_optimizer import RecipeOptimizer
         
         # Create custom judge if criteria provided
         custom_judge = None

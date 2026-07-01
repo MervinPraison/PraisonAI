@@ -58,7 +58,7 @@ if os.environ.get("PRAISON_DEBUG", "").lower() in ("1", "true", "yes"):
 # Branding - Import from unified source
 # ============================================================================
 
-from praisonai.cli.branding import get_logo, get_version
+from praisonai_code.cli.branding import get_logo, get_version
 
 
 # ============================================================================
@@ -260,7 +260,7 @@ class AsyncTUI:
         
         logger.debug("Starting runtime...")
         try:
-            from praisonai.cli.features.interactive_runtime import create_runtime
+            from praisonai_code.cli.features.interactive_runtime import create_runtime
             
             self._runtime = create_runtime(
                 workspace=self.config.workspace or ".",
@@ -301,7 +301,7 @@ class AsyncTUI:
         
         # Try to load all interactive tools (basic + ACP + LSP)
         try:
-            from praisonai.cli.features.interactive_tools import get_interactive_tools
+            from praisonai_code.cli.features.interactive_tools import get_interactive_tools
             tools = get_interactive_tools(
                 groups=["basic", "acp", "lsp"],  # All tool groups
                 workspace=self.config.workspace,

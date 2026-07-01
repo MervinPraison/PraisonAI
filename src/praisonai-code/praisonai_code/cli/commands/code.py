@@ -55,7 +55,7 @@ def code_main(
     
     # Validate --thinking up front so an unknown value fails closed before any
     # work is done (consistent with MODE_RULES validation on custom agents).
-    from praisonai.cli.features.thinking import thinking_to_budget
+    from praisonai_code.cli.features.thinking import thinking_to_budget
     try:
         thinking_budget = thinking_to_budget(thinking)
     except ValueError as exc:
@@ -68,7 +68,7 @@ def code_main(
     # across `code`, `run`, and the Python Agent(...) constructor.
     agent_profile = None
     if agent:
-        from praisonai.cli.features.custom_definitions import load_agent_from_name
+        from praisonai_code.cli.features.custom_definitions import load_agent_from_name
         agent_profile = load_agent_from_name(agent)
         if not agent_profile:
             typer.echo(f"Error: Agent '{agent}' not found", err=True)
@@ -147,7 +147,7 @@ def code_main(
     if agent_profile:
         permission_config = agent_profile.get("permissions")
         if permission_config:
-            from praisonai.cli.features.approval import resolve_approval_config
+            from praisonai_code.cli.features._approval_bridge import resolve_approval_config
             has_ask_rules = any(
                 str(action).strip().lower() == "ask"
                 for action in permission_config.values()
@@ -162,7 +162,7 @@ def code_main(
             args.llm = agent_profile["llm"]
     
     # Import and run the terminal-native interactive mode
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     
     praison = PraisonAI()
     
@@ -182,7 +182,7 @@ def _run_profiled_code(
     thinking_budget: Optional[int] = None,
 ):
     """Run code assistant with profiling enabled."""
-    from praisonai.cli.features.cli_profiler import (
+    from praisonai_code.cli.features.cli_profiler import (
         CLIProfileConfig,
         CLIProfiler,
     )
@@ -246,7 +246,7 @@ def _revert_workspace(ref: str, workspace: str, verbose: bool = False) -> None:
     import asyncio
 
     from praisonai.cli.commands.checkpoint import _resolve_checkpoint_id
-    from praisonai.cli.features.checkpoints import CheckpointsHandler
+    from praisonai_code.cli.features.checkpoints import CheckpointsHandler
 
     # Honor a configured checkpoints.storage_dir so this one-shot restore reads
     # from the same store the interactive session writes to.

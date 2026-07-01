@@ -15,7 +15,7 @@ def memory_show(
     limit: int = typer.Option(10, "--limit", "-l", help="Number of memories to show"),
 ):
     """Show stored memories."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['memory', 'show']
@@ -40,7 +40,7 @@ def memory_add(
     user_id: str = typer.Option(None, "--user-id", help="User ID for memory isolation"),
 ):
     """Add a memory."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['memory', 'add', content]
@@ -65,7 +65,7 @@ def memory_search(
     user_id: str = typer.Option(None, "--user-id", help="User ID for memory isolation"),
 ):
     """Search memories."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['memory', 'search', query]
@@ -90,7 +90,7 @@ def memory_clear(
     force: bool = typer.Option(False, "--force", "-f", help="Force clear without confirmation"),
 ):
     """Clear all memories."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['memory', 'clear']

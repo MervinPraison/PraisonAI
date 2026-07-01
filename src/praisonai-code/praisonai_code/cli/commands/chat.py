@@ -188,19 +188,22 @@ def chat_main(
     
     # Wire --approval backend via global registry (TUI creates agents internally)
     if approval:
-        from praisonai.cli.features.approval import resolve_approval_backend
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_backend
         try:
             backend = resolve_approval_backend(approval)
             if backend is not None:
                 from praisonaiagents.approval import get_approval_registry
                 get_approval_registry().set_backend(backend)
                 typer.echo(f"Approval backend: {approval}")
+        except ImportError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
         except ValueError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
     
     # Use the async TUI (non-blocking, scrollable output)
-    from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+    from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
     # Resolve a provider-aware default when no model was given:
     # explicit --model > most-recently-used > provider credentials present.
@@ -240,7 +243,7 @@ def _run_profiled_chat(
     profile_deep: bool = False,
 ):
     """Run chat with profiling enabled."""
-    from praisonai.cli.features.cli_profiler import (
+    from praisonai_code.cli.features.cli_profiler import (
         CLIProfileConfig,
         CLIProfiler,
     )
@@ -320,7 +323,7 @@ def _run_legacy_terminal_chat(
     args.no_lsp = no_lsp
     
     # Import and run the terminal-native interactive mode
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     
     praison = PraisonAI()
     

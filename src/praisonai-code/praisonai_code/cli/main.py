@@ -167,7 +167,7 @@ def _provider_preflight_message():
     )
 
 # Use centralized availability detection
-from praisonai._framework_availability import is_available
+from praisonai_code._framework_availability import is_available
 
 # Optional-dependency availability flags are resolved lazily so that merely
 # importing this module (e.g. for `praisonai --help`) does not walk the
@@ -2056,7 +2056,7 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
+                        from praisonai_code._safe_loader import load_user_module
                         module = load_user_module(rewrite_tools, name="rewrite_tools_module")
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
@@ -2072,7 +2072,7 @@ class PraisonAI:
                     # Treat as comma-separated tool names
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in rewrite_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
@@ -2145,7 +2145,7 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
+                        from praisonai_code._safe_loader import load_user_module
                         module = load_user_module(expand_tools, name="expand_tools_module")
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
@@ -2161,7 +2161,7 @@ class PraisonAI:
                     # Treat as comma-separated tool names
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in expand_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
@@ -2227,7 +2227,7 @@ class PraisonAI:
             # Load from file
             try:
                 import inspect
-                from praisonai._safe_loader import load_user_module
+                from praisonai_code._safe_loader import load_user_module
                 module = load_user_module(tools_path, name="tools_module")
                 if module is not None:
                     for name, obj in inspect.getmembers(module):
@@ -2241,7 +2241,7 @@ class PraisonAI:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
             # Comma-separated names: use the unified resolver so CLI == YAML == Python
-            from praisonai.tool_resolver import ToolResolver
+            from praisonai_code.tool_resolver import ToolResolver
             resolver = ToolResolver()
             tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
             for tool_name in tool_names:
@@ -2273,7 +2273,7 @@ class PraisonAI:
             return tools_list
         
         try:
-            from praisonai.tool_resolver import resolve_toolsets
+            from praisonai_code.tool_resolver import resolve_toolsets
             tools_list = resolve_toolsets(toolset_names)
             
             if tools_list:
@@ -2888,7 +2888,7 @@ class PraisonAI:
             
             if tools_file.exists():
                 try:
-                    from praisonai._safe_loader import load_user_module
+                    from praisonai_code._safe_loader import load_user_module
                     tools_module = load_user_module(str(tools_file), name="recipe_tools")
                     if tools_module is not None:
                         import inspect
@@ -5782,7 +5782,7 @@ Now, {final_instruction.lower()}:"""
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
+                        from praisonai_code._safe_loader import load_user_module
                         module = load_user_module(tools_path, name="tools_module")
                         if module is not None:
                             # Get all callable functions from the module
@@ -5799,7 +5799,7 @@ Now, {final_instruction.lower()}:"""
                     # Treat as comma-separated tool names (e.g., "internet_search,wiki_search")
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
                         for tool_name in tool_names:

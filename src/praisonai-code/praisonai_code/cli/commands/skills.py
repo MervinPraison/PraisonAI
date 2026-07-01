@@ -98,7 +98,7 @@ def skills_list(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
     """List available skills."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['skills', 'list']
@@ -122,7 +122,7 @@ def skills_validate(
     path: str = typer.Argument(..., help="Skill directory path"),
 ):
     """Validate a skill."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['skills', 'validate', path]
@@ -144,7 +144,7 @@ def skills_create(
     name: str = typer.Argument(..., help="Skill name"),
 ):
     """Create a new skill."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['skills', 'create', name]

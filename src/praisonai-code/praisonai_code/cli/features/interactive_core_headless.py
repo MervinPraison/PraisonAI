@@ -223,7 +223,7 @@ class HeadlessInteractiveCore:
         
         # Use the SAME tool loading path as interactive TUI
         # This is from: praisonai/cli/features/interactive_tools.py
-        from praisonai.cli.features.interactive_tools import (
+        from praisonai_code.cli.features.interactive_tools import (
             get_interactive_tools,
             ToolConfig,
         )

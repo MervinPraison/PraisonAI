@@ -21,7 +21,7 @@ def list_commands(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.custom_definitions import CustomDefinitionsDiscovery
+        from praisonai_code.cli.features.custom_definitions import CustomDefinitionsDiscovery
         
         discovery = CustomDefinitionsDiscovery()
         discovery.discover()
@@ -74,7 +74,7 @@ def show(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.custom_definitions import CustomDefinitionsDiscovery, TemplateInterpolator
+        from praisonai_code.cli.features.custom_definitions import CustomDefinitionsDiscovery, TemplateInterpolator
         
         discovery = CustomDefinitionsDiscovery()
         cmd = discovery.get_command(name)

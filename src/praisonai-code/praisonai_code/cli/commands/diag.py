@@ -38,7 +38,7 @@ def diag_export(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.diag import run_diag_command
+        from praisonai_code.cli.features.diag import run_diag_command
         exit_code = run_diag_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:

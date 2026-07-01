@@ -363,7 +363,7 @@ async def _run_ai_with_runtime(parsed, config, slug):
     # Start ACP/LSP runtime for context gathering
     runtime = None
     try:
-        from praisonai.cli.features.interactive_runtime import create_runtime
+        from praisonai_code.cli.features.interactive_runtime import create_runtime
         runtime = create_runtime(
             workspace=str(config.sdk_root or config.project_root or "."),
             lsp=True,

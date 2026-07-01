@@ -311,7 +311,7 @@ def serve_acp(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.acp import ACPHandler
+        from praisonai_code.cli.features.acp import ACPHandler
         args_list = ["--workspace", workspace, "--agent", agent]
         if model:
             args_list.extend(["--model", model])
@@ -343,7 +343,7 @@ def serve_lsp(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.lsp_cli import handle_lsp_command
+        from praisonai_code.cli.features.lsp_cli import handle_lsp_command
         import argparse
         args = argparse.Namespace(lsp_command="start", language=language)
         handle_lsp_command(args)
@@ -454,7 +454,7 @@ def serve_registry(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.registry import RegistryHandler
+        from praisonai_code.cli.features.registry import RegistryHandler
         handler = RegistryHandler()
         args = ["--host", host, "--port", str(port)]
         if token:

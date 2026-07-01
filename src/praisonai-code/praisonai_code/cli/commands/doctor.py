@@ -17,7 +17,7 @@ app = typer.Typer(help="Health checks and diagnostics")
 def _run_doctor(args: list) -> int:
     """Run doctor command with args."""
     try:
-        from praisonai.cli.features.doctor.handler import DoctorHandler
+        from praisonai_code.cli.features.doctor.handler import DoctorHandler
         handler = DoctorHandler()
         # DoctorHandler uses execute(action, action_args) pattern
         action = args[0] if args else None

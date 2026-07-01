@@ -715,7 +715,7 @@ def github_triage(
     success = True
     error_msg = ""
     try:
-        from praisonai.cli.main import PraisonAI
+        from praisonai_code.cli.main import PraisonAI
 
         original_argv = sys.argv[:]
         sys.argv = ["praisonai", "workflow", "run", agent_file, "--var", f"ISSUE_NUMBER={issue}"]

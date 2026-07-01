@@ -71,7 +71,7 @@ def acp_main(
         args.extend(["--profile", profile])
     
     try:
-        from praisonai.cli.features.acp import run_acp_command
+        from praisonai_code.cli.features.acp import run_acp_command
         exit_code = run_acp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:

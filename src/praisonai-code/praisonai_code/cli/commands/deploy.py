@@ -17,7 +17,7 @@ def deploy_docker(
     tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Docker image tag"),
 ):
     """Deploy as Docker container."""
-    from praisonai.cli.features.deploy import handle_deploy_command
+    from praisonai_code.cli.features.deploy import handle_deploy_command
 
     args = ["docker", file]
     if tag is not None:
@@ -32,7 +32,7 @@ def deploy_aws(
     region: Optional[str] = typer.Option(None, "--region", "-r", help="AWS region"),
 ):
     """Deploy to AWS."""
-    from praisonai.cli.features.deploy import handle_deploy_command
+    from praisonai_code.cli.features.deploy import handle_deploy_command
 
     args = ["aws", file]
     if region is not None:
@@ -47,7 +47,7 @@ def deploy_gcp(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="GCP project"),
 ):
     """Deploy to Google Cloud."""
-    from praisonai.cli.features.deploy import handle_deploy_command
+    from praisonai_code.cli.features.deploy import handle_deploy_command
 
     args = ["gcp", file]
     if project is not None:
@@ -62,7 +62,7 @@ def deploy_azure(
     resource_group: Optional[str] = typer.Option(None, "--resource-group", "-g", help="Azure resource group"),
 ):
     """Deploy to Azure."""
-    from praisonai.cli.features.deploy import handle_deploy_command
+    from praisonai_code.cli.features.deploy import handle_deploy_command
 
     args = ["azure", file]
     if resource_group is not None:

@@ -163,7 +163,7 @@ def env_doctor(
     
     # Delegate to doctor command
     try:
-        from praisonai.cli.features.doctor.handler import DoctorHandler
+        from praisonai_code.cli.features.doctor.handler import DoctorHandler
         handler = DoctorHandler()
         
         # Run env checks

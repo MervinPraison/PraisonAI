@@ -5,7 +5,7 @@ This module provides unified branding assets (logo, version, product name)
 for all interactive UIs. All frontends should import from here.
 
 Usage:
-    from praisonai.cli.branding import get_logo, get_version, PRODUCT_NAME
+    from praisonai_code.cli.branding import get_logo, get_version, PRODUCT_NAME
 """
 
 # Product name

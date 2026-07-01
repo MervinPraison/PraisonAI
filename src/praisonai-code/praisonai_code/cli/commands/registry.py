@@ -12,7 +12,7 @@ app = typer.Typer(help="Registry management")
 @app.command("list")
 def registry_list():
     """List registry entries."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['registry', 'list']
@@ -37,7 +37,7 @@ def registry_serve(
     
     DEPRECATED: Use `praisonai serve registry` instead.
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     # Print deprecation warning

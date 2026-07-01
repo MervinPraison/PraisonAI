@@ -43,7 +43,7 @@ def _resolve_storage_dir() -> Optional[str]:
 
 def _handler(workspace: Optional[str] = None, verbose: bool = False):
     """Build a CheckpointsHandler for the current workspace."""
-    from praisonai.cli.features.checkpoints import CheckpointsHandler
+    from praisonai_code.cli.features.checkpoints import CheckpointsHandler
 
     return CheckpointsHandler(
         workspace_dir=workspace or os.getcwd(),

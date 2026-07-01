@@ -28,7 +28,7 @@ def lsp_start(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.lsp_cli import run_lsp_command
+        from praisonai_code.cli.features.lsp_cli import run_lsp_command
         exit_code = run_lsp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -47,7 +47,7 @@ def lsp_stop(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.lsp_cli import run_lsp_command
+        from praisonai_code.cli.features.lsp_cli import run_lsp_command
         exit_code = run_lsp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -67,7 +67,7 @@ def lsp_status(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.lsp_cli import run_lsp_command
+        from praisonai_code.cli.features.lsp_cli import run_lsp_command
         exit_code = run_lsp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -87,7 +87,7 @@ def lsp_logs(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.lsp_cli import run_lsp_command
+        from praisonai_code.cli.features.lsp_cli import run_lsp_command
         exit_code = run_lsp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
