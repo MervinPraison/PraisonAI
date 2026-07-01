@@ -34,13 +34,19 @@ class PluginRegistry(Generic[T]):
         self, 
         *,
         entry_point_group: str,
-        builtins: Optional[Dict[str, Callable[[], Type[T]]]] = None
+        builtins: Optional[Dict[str, Callable[[], Type[T]]]] = None,
+        discover_entry_points: bool = True
     ) -> None:
         """Initialize the registry.
         
         Args:
             entry_point_group: Entry points group name for plugin discovery
             builtins: Dict of name -> loader function for built-in plugins
+            discover_entry_points: When True (default) the registry scans the
+                ``entry_point_group`` for third-party plugins on construction.
+                Pass False to build an isolated registry that only contains the
+                supplied builtins / explicitly registered plugins (useful for
+                opt-out and deterministic tests).
         """
         self._entry_point_group = entry_point_group
         self._loaders: Dict[str, Callable[[], Type[T]]] = {}  # lazy loaders
@@ -53,7 +59,8 @@ class PluginRegistry(Generic[T]):
             for name, loader in builtins.items():
                 self._add_loader(name, loader)
         
-        self._discover_entry_points()
+        if discover_entry_points:
+            self._discover_entry_points()
 
     def _add_loader(self, name: str, loader: Callable[[], Type[T]]) -> None:
         """Add a loader with normalized name."""

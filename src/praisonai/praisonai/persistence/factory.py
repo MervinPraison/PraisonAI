@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict, Literal, Optional
 
 from .config import PersistenceConfig
-from .registry import CONVERSATION_STORES, KNOWLEDGE_STORES, STATE_STORES
+from .registry import StoreRegistry, get_default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ def create_conversation_store(
     backend: str,
     url: Optional[str] = None,
     mode: Literal["sync", "async", "auto"] = "auto", 
+    *,
+    registry: Optional[StoreRegistry] = None,
     **options: Any
 ):
     """
@@ -63,12 +65,15 @@ def create_conversation_store(
     else:
         backend_name = backend
     
-    return CONVERSATION_STORES.create(backend_name, url=url, **options)
+    registry = registry or get_default_registry("conversation")
+    return registry.create(backend_name, url=url, **options)
 
 
 def create_knowledge_store(
     backend: str,
     url: Optional[str] = None,
+    *,
+    registry: Optional[StoreRegistry] = None,
     **options: Any
 ):
     """
@@ -88,12 +93,15 @@ def create_knowledge_store(
             url="http://localhost:6333"
         )
     """
-    return KNOWLEDGE_STORES.create(backend, url=url, **options)
+    registry = registry or get_default_registry("knowledge")
+    return registry.create(backend, url=url, **options)
 
 
 def create_state_store(
     backend: str,
     url: Optional[str] = None,
+    *,
+    registry: Optional[StoreRegistry] = None,
     **options: Any
 ):
     """
@@ -113,7 +121,8 @@ def create_state_store(
             url="redis://localhost:6379"
         )
     """
-    return STATE_STORES.create(backend, url=url, **options)
+    registry = registry or get_default_registry("state")
+    return registry.create(backend, url=url, **options)
 
 
 def create_stores_from_config(config: PersistenceConfig) -> Dict[str, Any]:
