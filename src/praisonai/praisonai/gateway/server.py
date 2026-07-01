@@ -677,6 +677,13 @@ class WebSocketGateway:
         # bounced. Populated from gateway.yaml / CLI in ``start_with_config``.
         # ``None``/0 preserves the prior immediate-restart behaviour.
         self._reload_drain_timeout: Optional[float] = None
+        # Issue #2533: serialize reloads. The file watcher, SIGHUP handler, and
+        # concurrent SIGHUPs all funnel through ``reload_config``; without a
+        # lock two reloads can interleave across drain/stop/start awaits and
+        # clobber ``_loaded_config`` / channel state. This lock guarantees one
+        # reload finishes before the next begins. Created lazily on the running
+        # loop so it binds to the correct loop (Issue #2533).
+        self._reload_lock: Optional[asyncio.Lock] = None
         # Background config-watch task handle (event-driven or polling).
         self._config_watch_task: Optional[asyncio.Task] = None
         
@@ -4462,9 +4469,22 @@ class WebSocketGateway:
         - Agent changes: recreate agents only
         - Single channel changes: restart that channel only
         - Structural changes: full restart (fallback)
-        
+
         The WebSocket server itself is never restarted.
+
+        Issue #2533: serialized behind ``_reload_lock`` so overlapping triggers
+        (file watcher, SIGHUP, back-to-back SIGHUPs) apply one at a time and
+        cannot interleave channel/agent mutations across await points.
         """
+        # Bind the lock to the running loop lazily; ``__init__`` may run before
+        # a loop exists.
+        if self._reload_lock is None:
+            self._reload_lock = asyncio.Lock()
+        async with self._reload_lock:
+            await self._reload_config_locked(config_path)
+
+    async def _reload_config_locked(self, config_path: str) -> None:
+        """Perform the actual hot-reload. Callers must hold ``_reload_lock``."""
         logger.info(f"Hot-reloading gateway config from {config_path}...")
         try:
             new_cfg = self.load_gateway_config(config_path)
@@ -4617,6 +4637,26 @@ class WebSocketGateway:
             config_path, poll_interval=poll_interval, debounce=debounce
         )
 
+    async def _config_settled(self, config_path: str, debounce: float = 1.0) -> bool:
+        """Return ``True`` once the config file's mtime has stopped changing.
+
+        Issue #2533: the event-driven watcher can wake mid-write. We sample the
+        mtime, wait a short quiet window, then re-sample; a stable mtime means
+        the write has completed and the file is safe to parse. A missing file
+        (mid ``rename``/truncate) counts as not-yet-settled so the caller re-arms
+        rather than treating it as a hard failure.
+        """
+        try:
+            first = os.path.getmtime(config_path)
+        except OSError:
+            return False
+        await asyncio.sleep(min(debounce, 0.5))
+        try:
+            second = os.path.getmtime(config_path)
+        except OSError:
+            return False
+        return first == second
+
     async def _watch_config_event_driven(self, config_path: str, debounce: float = 1.0) -> bool:
         """Event-driven config watch using the optional ``watchdog`` package.
 
@@ -4680,6 +4720,15 @@ class WebSocketGateway:
                 # by waiting for a quiet window before reloading.
                 await asyncio.sleep(debounce)
                 change_event.clear()
+                # Issue #2533: guard against partial/slow writes. A single slow
+                # write can still be in progress after the debounce window, so
+                # verify the file's mtime has settled before parsing. If it is
+                # still changing, skip this cycle and re-arm the event so the
+                # completed write is applied on the next quiet window rather
+                # than dropped after a parse failure.
+                if not await self._config_settled(config_path, debounce):
+                    change_event.set()
+                    continue
                 try:
                     self.load_gateway_config(config_path)
                     await self.reload_config(config_path)
@@ -5089,6 +5138,10 @@ class WebSocketGateway:
         # service managers (``systemctl reload``) a deterministic "reload now"
         # that never shuts the process down. SIGHUP does not exist on Windows,
         # so this is best-effort and skipped when unavailable.
+        # ``reload_config`` serializes itself behind ``_reload_lock``, so a
+        # SIGHUP that arrives mid-reload (from the watcher or a prior SIGHUP)
+        # is queued and applied after the in-flight reload finishes rather
+        # than interleaving channel mutations (Issue #2533).
         def _request_reload():
             logger.info("Received SIGHUP, reloading gateway config...")
             asyncio.ensure_future(self.reload_config(config_path))
