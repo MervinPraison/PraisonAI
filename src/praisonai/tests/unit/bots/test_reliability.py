@@ -106,3 +106,56 @@ def test_botos_explicit_drain_overrides_reliability():
 
     os_ = BotOS(bots=[], reliability="production", drain_timeout=30.0)
     assert os_._drain_timeout == 30.0
+
+
+def _run_no_config_gateway_start(**start_kwargs):
+    """Drive ``GatewayHandler.start`` down the no-config path with a fake
+    gateway, returning the ``drain_timeout`` passed to ``stop()`` on Ctrl+C.
+
+    Skips when the gateway's optional deps (starlette/websockets) are absent.
+    """
+    from unittest import mock
+
+    try:
+        from praisonai.cli.features.gateway import GatewayHandler
+        from praisonai.gateway import WebSocketGateway  # noqa: F401
+        from praisonaiagents.gateway import GatewayConfig  # noqa: F401
+    except Exception:  # pragma: no cover - optional deps missing
+        pytest.skip("gateway optional deps not installed")
+
+    captured = {}
+
+    class _FakeGateway:
+        def __init__(self, *a, **k):
+            self._admission_gate = None
+
+        async def start(self):
+            raise KeyboardInterrupt
+
+        async def stop(self, drain_timeout=None):
+            captured["drain_timeout"] = drain_timeout
+
+    handler = GatewayHandler()
+    with mock.patch(
+        "praisonai.gateway.WebSocketGateway", _FakeGateway
+    ):
+        handler.start(**start_kwargs)
+    return captured.get("drain_timeout", "UNSET")
+
+
+def test_cli_no_config_reliability_production_drains():
+    """`--reliability production` (no config) drains with the preset window."""
+    assert _run_no_config_gateway_start(reliability="production") == 15.0
+
+
+def test_cli_no_config_explicit_drain_overrides_reliability():
+    """Explicit `--drain-timeout` still wins over the preset (no config)."""
+    assert (
+        _run_no_config_gateway_start(reliability="production", drain_timeout=30.0)
+        == 30.0
+    )
+
+
+def test_cli_no_config_reliability_off_immediate_teardown():
+    """`--reliability off` (no config) tears down immediately (drain 0)."""
+    assert _run_no_config_gateway_start(reliability="off") == 0.0

@@ -228,6 +228,11 @@ class GatewayHandler:
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
         self._gateway = WebSocketGateway(config=config)
+        # Resolved graceful-drain window for this no-config run. Defaults to the
+        # explicit ``--drain-timeout`` (``None`` → gateway default) and is
+        # replaced below by the ``--reliability`` preset's drain when a preset
+        # is selected, so the shutdown path honours the preset window (#2531).
+        resolved_drain_timeout: Optional[float] = drain_timeout
         # CLI admission-control flags also apply in no-config mode (#2454):
         # build a shared gate directly so `--max-concurrent-runs` is honoured
         # even without a gateway.yaml. A ``--reliability`` preset (#2531) can
@@ -238,13 +243,17 @@ class GatewayHandler:
                 from praisonai.bots._admission import build_admission_gate
                 from praisonai.bots._reliability import resolve_reliability
 
+                # Pass the explicit ``--drain-timeout`` through so it still wins
+                # over the preset; capture the resolved window for shutdown so
+                # ``--reliability production`` actually drains (#2531).
                 _resolved = resolve_reliability(
                     reliability,
-                    drain_timeout=None,
+                    drain_timeout=drain_timeout,
                     max_concurrent_runs=max_concurrent_runs or 0,
                     queue_depth=queue_depth or 0,
                     overflow_policy=overflow_policy or "reject",
                 )
+                resolved_drain_timeout = _resolved.drain_timeout
                 self._gateway._admission_gate = build_admission_gate(
                     max_concurrent_runs=_resolved.max_concurrent_runs,
                     queue_depth=_resolved.queue_depth,
@@ -275,7 +284,13 @@ class GatewayHandler:
             asyncio.run(self._gateway.start())
         except KeyboardInterrupt:
             print("\nStopping gateway...")
-            asyncio.run(self._gateway.stop())
+            # Honour the resolved graceful-drain window (explicit --drain-timeout
+            # or the --reliability preset) so a no-config restart doesn't cut
+            # in-flight turns (#2531). ``None`` falls back to the stop default.
+            if resolved_drain_timeout is not None:
+                asyncio.run(self._gateway.stop(drain_timeout=resolved_drain_timeout))
+            else:
+                asyncio.run(self._gateway.stop())
             return GATEWAY_OK_EXIT_CODE
         except FatalConfigError as e:
             print(f"Fatal config error: {e}")
