@@ -348,3 +348,36 @@ class ScheduleTriggerInput(HookInput):
             "message": self.message[:500] if self.message else "",
         })
         return base
+
+
+@dataclass
+class JobCompletedInput(HookInput):
+    """Input for JOB_COMPLETED hooks (a background job finished).
+
+    Emitted when a background subagent/job launched via
+    ``spawn_subagent(background=True)`` reaches a terminal state
+    (completed or failed). Carries the optional origin/delivery context
+    captured at spawn time so a gateway can route the result back to the
+    originating conversation without an active turn.
+    """
+    job_id: str = ""
+    status: str = ""
+    result: Any = None
+    error: Optional[str] = None
+    deliver: str = ""
+    platform: str = ""
+    chat_id: str = ""
+    thread_id: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "job_id": self.job_id,
+            "status": self.status,
+            "error": self.error,
+            "deliver": self.deliver,
+            "platform": self.platform,
+            "chat_id": self.chat_id,
+            "thread_id": self.thread_id,
+        })
+        return base

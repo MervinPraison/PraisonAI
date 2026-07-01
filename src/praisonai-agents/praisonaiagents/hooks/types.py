@@ -69,6 +69,9 @@ class HookEvent(str, Enum):
     SCHEDULE_REMOVE = "schedule_remove"
     SCHEDULE_TRIGGER = "schedule_trigger"
 
+    # Background job lifecycle
+    JOB_COMPLETED = "job_completed"  # A background job finished (ok or error)
+
     # Kanban task lifecycle (wrapper dispatcher + tools emit these)
     KANBAN_TASK_CREATED = "kanban_task_created"
     KANBAN_TASK_CLAIMED = "kanban_task_claimed"

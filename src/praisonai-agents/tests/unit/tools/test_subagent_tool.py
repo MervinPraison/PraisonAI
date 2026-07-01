@@ -256,6 +256,158 @@ class TestSubagentTool:
         assert captured["llm"] == "gpt-4o-mini"
 
 
+    def test_subagent_deliver_echoed_and_origin_captured(self):
+        """deliver is echoed on the handle and origin is captured on the job."""
+        from praisonaiagents.background.job_manager import get_job_manager
+
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+
+            def chat(self, prompt):
+                return f"Executed: {prompt}"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs)
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(
+            task="deep research",
+            background=True,
+            deliver="telegram:12345",
+            platform="telegram",
+            chat_id="12345",
+        )
+        assert handle["deliver"] == "telegram:12345"
+
+        # Wait for completion so the origin is inspectable.
+        collect(handle["job_id"], wait=True)
+        info = get_job_manager().get_job_info(handle["job_id"])
+        assert info.origin["deliver"] == "telegram:12345"
+        assert info.origin["platform"] == "telegram"
+        assert info.origin["chat_id"] == "12345"
+
+    def test_subagent_on_job_complete_invoked_with_deliver(self):
+        """on_job_complete fires when a delivering background job finishes."""
+        seen = []
+
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+
+            def chat(self, prompt):
+                return f"Executed: {prompt}"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs),
+            on_job_complete=lambda job_info: seen.append(job_info),
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(task="research", background=True, deliver="origin")
+        collect(handle["job_id"], wait=True)
+
+        assert len(seen) == 1
+        assert seen[0].origin["deliver"] == "origin"
+        assert seen[0].result["success"] is True
+
+    def test_subagent_on_job_complete_not_invoked_without_deliver(self):
+        """No delivery target → callback never fires (pull-only unchanged)."""
+        seen = []
+
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+
+            def chat(self, prompt):
+                return "ok"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs),
+            on_job_complete=lambda job_info: seen.append(job_info),
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(task="research", background=True)
+        collect(handle["job_id"], wait=True)
+
+        assert seen == []
+        assert "deliver" not in handle
+
+
+class TestJobManagerCompletion:
+    """Tests for BackgroundJobManager on_complete + origin (core signal)."""
+
+    def test_on_complete_fires_on_success(self):
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager,
+            JobStatus,
+        )
+
+        mgr = BackgroundJobManager()
+        fired = []
+        job_id = mgr.start_job(
+            lambda: "result-value",
+            on_complete=lambda info: fired.append(info),
+            origin={"deliver": "origin", "platform": "telegram"},
+        )
+        mgr.get_result(job_id)
+        # Callback runs inside the worker; give the future a moment isn't
+        # needed because get_result blocks until the worker returns, but the
+        # callback runs before return so it's already recorded.
+        assert len(fired) == 1
+        assert fired[0].status == JobStatus.COMPLETED
+        assert fired[0].result == "result-value"
+        assert fired[0].origin["deliver"] == "origin"
+
+    def test_on_complete_fires_on_failure(self):
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager,
+            JobStatus,
+        )
+
+        mgr = BackgroundJobManager()
+        fired = []
+
+        def boom():
+            raise RuntimeError("kaboom")
+
+        job_id = mgr.start_job(boom, on_complete=lambda info: fired.append(info))
+        try:
+            mgr.get_result(job_id)
+        except Exception:
+            pass
+        assert len(fired) == 1
+        assert fired[0].status == JobStatus.FAILED
+        assert "kaboom" in fired[0].error
+
+    def test_on_complete_exception_swallowed(self):
+        """A raising on_complete must not crash the worker/get_result."""
+        from praisonaiagents.background.job_manager import BackgroundJobManager
+
+        mgr = BackgroundJobManager()
+
+        def bad_callback(info):
+            raise ValueError("callback exploded")
+
+        job_id = mgr.start_job(lambda: "ok", on_complete=bad_callback)
+        # get_result should still return the job's real result.
+        assert mgr.get_result(job_id) == "ok"
+
+    def test_origin_defaults_empty(self):
+        """No origin → empty dict, preserving prior behaviour."""
+        from praisonaiagents.background.job_manager import BackgroundJobManager
+
+        mgr = BackgroundJobManager()
+        job_id = mgr.start_job(lambda: "ok")
+        mgr.get_result(job_id)
+        assert mgr.get_job_info(job_id).origin == {}
+
+
 class TestBatchTool:
     """Tests for the batch tool."""
     

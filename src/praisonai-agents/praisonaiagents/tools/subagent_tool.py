@@ -18,6 +18,7 @@ def create_subagent_tool(
     max_depth: int = 3,
     default_llm: Optional[str] = None,
     default_permission_mode: Optional[str] = None,
+    on_job_complete: Optional[Callable[[Any], None]] = None,
 ) -> Dict[str, Any]:
     """
     Create a subagent tool for task delegation.
@@ -31,6 +32,14 @@ def create_subagent_tool(
         max_depth: Maximum nesting depth for subagents
         default_llm: Default LLM model for subagents (Claude Code parity)
         default_permission_mode: Default permission mode for subagents (Claude Code parity)
+        on_job_complete: Optional callback invoked with the terminal
+            ``JobInfo`` when a ``background=True`` subagent that carries a
+            ``deliver`` target finishes. This is the observable completion
+            signal a gateway (e.g. ``BotOS``) subscribes to in order to
+            route the result back to the originating chat without an active
+            turn. When ``None`` (the default) background jobs remain strictly
+            pull-only via ``subagent_result`` — byte-for-byte the prior
+            behaviour.
         
     Returns:
         Tool definition dictionary
@@ -119,6 +128,11 @@ def create_subagent_tool(
         llm: Optional[str] = None,
         permission_mode: Optional[str] = None,
         background: bool = False,
+        deliver: str = "",
+        platform: str = "",
+        chat_id: str = "",
+        thread_id: str = "",
+        session_id: str = "",
     ) -> Dict[str, Any]:
         """
         Spawn a subagent to handle a specific task.
@@ -133,11 +147,24 @@ def create_subagent_tool(
             background: When True, run the subagent on the background job
                 runner and return immediately with a ``job_id`` instead of
                 blocking until completion. Defaults to False (synchronous).
+            deliver: Optional delivery token mirroring ``schedule_add`` —
+                e.g. ``"origin"``, ``"all"`` or ``"platform:chat_id[:thread_id]"``.
+                Only meaningful with ``background=True``: it captures where the
+                result should be routed when the job finishes, so a gateway can
+                proactively deliver it back to chat with no active turn. Empty
+                (the default) keeps background jobs pull-only via
+                ``subagent_result`` — byte-for-byte the prior behaviour.
+            platform: Origin platform (e.g. "telegram") captured for
+                ``deliver="origin"``. Usually supplied by the gateway context.
+            chat_id: Origin chat/channel id captured for ``deliver="origin"``.
+            thread_id: Optional origin thread id.
+            session_id: Optional origin session id to preserve context.
             
         Returns:
             Result from the subagent execution. When ``background=True`` a
             ``{"success": True, "job_id": ..., "status": "running"}`` handle
             is returned instead; use ``subagent_result(job_id)`` to collect.
+            When ``deliver`` is set the handle also echoes ``"deliver"``.
         """
         # Check depth limit (per-thread; captured for background workers below)
         parent_depth = _get_depth()
@@ -181,8 +208,30 @@ def create_subagent_tool(
                     parent_depth=parent_depth,
                 )
 
-            job_id = job_manager.start_job(_job)
-            return {
+            # Capture origin/delivery context so a gateway can route the
+            # result back to the originating conversation when the job
+            # finishes. Only populated when a ``deliver`` target is set;
+            # otherwise the job stays pull-only (unchanged behaviour).
+            origin: Dict[str, Any] = {}
+            job_on_complete = None
+            if deliver:
+                origin = {
+                    "deliver": deliver,
+                    "platform": platform,
+                    "chat_id": chat_id,
+                    "thread_id": thread_id,
+                    "session_id": session_id,
+                    "task": task,
+                }
+                if on_job_complete is not None:
+                    job_on_complete = on_job_complete
+
+            job_id = job_manager.start_job(
+                _job,
+                on_complete=job_on_complete,
+                origin=origin,
+            )
+            handle = {
                 "success": True,
                 "job_id": job_id,
                 "status": "running",
@@ -191,6 +240,9 @@ def create_subagent_tool(
                 "llm": effective_llm,
                 "permission_mode": effective_permission_mode,
             }
+            if deliver:
+                handle["deliver"] = deliver
+            return handle
 
         return _run_subagent(
             task=task,
@@ -321,6 +373,10 @@ def create_subagent_tool(
                     "type": "boolean",
                     "description": "When true, run the subagent in the background (fire-and-forget) and return a job_id immediately instead of blocking. Use subagent_result to collect the result.",
                     "default": False,
+                },
+                "deliver": {
+                    "type": "string",
+                    "description": "Optional delivery target for a background job's result when it finishes (e.g. 'origin', 'all', 'telegram:12345'). When set, the completed result is proactively delivered back to that chat with no active turn required. Empty means pull-only via subagent_result.",
                 },
             },
             "required": ["task"],
