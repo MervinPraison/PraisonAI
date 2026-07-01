@@ -23,7 +23,6 @@ dependencies = [
     "textual>=0.47.0",
     "pydantic>=2.0.0",
     "toml>=0.10.2",
-    "praisonai-code",
 ]
 
 [project.scripts]
