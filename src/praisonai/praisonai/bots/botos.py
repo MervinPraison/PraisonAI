@@ -746,14 +746,14 @@ class BotOS:
             platform = origin.get("platform", "")
             chat_id = origin.get("chat_id", "")
             if platform and chat_id:
-                origin_source = SessionSource(platform=platform, channel_id=chat_id)
+                origin_source = SessionSource(
+                    platform=platform,
+                    channel_id=chat_id,
+                    thread_id=origin.get("thread_id") or None,
+                )
 
             delivered = self._run_coroutine_sync(
-                self._delivery_router.deliver(
-                    target=deliver,
-                    text=text,
-                    origin=origin_source,
-                )
+                self._deliver_job_text(deliver, text, origin_source)
             )
             if delivered:
                 logger.info(
@@ -768,6 +768,44 @@ class BotOS:
         except Exception as e:  # pragma: no cover — must never crash worker
             logger.warning(f"on_background_job_complete error (non-fatal): {e}")
             return False
+
+    async def _deliver_job_text(
+        self, target: str, text: str, origin: Optional[Any]
+    ) -> bool:
+        """Deliver ``text`` to ``target``, resolving the ``"all"`` broadcast token.
+
+        ``DeliveryRouter`` resolves ``"origin"``, ``"platform"``, aliases and
+        ``"platform:channel"`` but not the documented ``"all"`` fan-out token.
+        Mirror the gateway's ``all`` semantics here by fanning out to every
+        reachable home channel; anything else routes straight through the
+        shared router (the scheduler's path). A send is considered delivered
+        if it reaches at least one target.
+        """
+        if target == "all":
+            directory = getattr(self._delivery_router, "directory", None)
+            targets = directory.describe_targets() if directory is not None else []
+            homes = [t for t in targets if t.get("kind") == "home"]
+            if not homes:
+                logger.warning("Background job deliver='all' has no home channels")
+                return False
+            delivered_any = False
+            for t in homes:
+                try:
+                    ok = await self._delivery_router.deliver(
+                        target=f"{t['platform']}:{t['channel_id']}",
+                        text=text,
+                        origin=origin,
+                    )
+                    delivered_any = delivered_any or bool(ok)
+                except Exception as e:  # pragma: no cover — best-effort fan-out
+                    logger.warning(
+                        "Background job deliver='all' to %s:%s failed: %s",
+                        t.get("platform"), t.get("channel_id"), e,
+                    )
+            return delivered_any
+        return await self._delivery_router.deliver(
+            target=target, text=text, origin=origin
+        )
 
     @staticmethod
     def _run_coroutine_sync(coro: Any) -> Any:

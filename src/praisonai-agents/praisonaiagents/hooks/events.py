@@ -374,6 +374,7 @@ class JobCompletedInput(HookInput):
         base.update({
             "job_id": self.job_id,
             "status": self.status,
+            "result": self.result,
             "error": self.error,
             "deliver": self.deliver,
             "platform": self.platform,
