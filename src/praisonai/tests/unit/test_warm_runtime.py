@@ -7,7 +7,6 @@ stdlib HTTP runtime server using a stubbed warm agent.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import os
 import threading
 import time

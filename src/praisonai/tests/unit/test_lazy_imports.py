@@ -2,7 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 """
 Unit tests for lazy import behavior in architectural fixes.
 
@@ -25,7 +24,7 @@ class TestLazyImports(unittest.TestCase):
         """Smoke test: trainer module imports quickly without heavy deps."""
         # Remove any cached imports to get fresh import time
         modules_to_remove = [
-            'praisonai.praisonai.train.llm.trainer',
+            'praisonai.train.llm.trainer',
             'torch', 'transformers', 'unsloth', 'trl', 'datasets', 'psutil'
         ]
         for module in modules_to_remove:
@@ -35,7 +34,7 @@ class TestLazyImports(unittest.TestCase):
         start_time = time.time()
         
         # Import should be fast without triggering heavy deps
-        from praisonai.praisonai.train.llm.trainer import TrainModel
+        from praisonai.train.llm.trainer import TrainModel
         
         import_time = time.time() - start_time
         
@@ -44,7 +43,7 @@ class TestLazyImports(unittest.TestCase):
             f"Import took {import_time:.3f}s, exceeds 200ms target")
         
         # Heavy deps should NOT be in globals yet
-        import praisonai.praisonai.train.llm.trainer as trainer_module
+        import praisonai.train.llm.trainer as trainer_module
         trainer_globals = dir(trainer_module)
         
         # These should not be available until _lazy_import_training_deps() is called
@@ -57,7 +56,7 @@ class TestLazyImports(unittest.TestCase):
         """Smoke test: upload_vision module imports quickly without heavy deps."""
         # Remove any cached imports
         modules_to_remove = [
-            'praisonai.praisonai.upload_vision',
+            'praisonai.upload_vision',
             'torch', 'unsloth'
         ]
         for module in modules_to_remove:
@@ -67,7 +66,7 @@ class TestLazyImports(unittest.TestCase):
         start_time = time.time()
         
         # Import should be fast
-        from praisonai.praisonai.upload_vision import UploadVisionModel
+        from praisonai.upload_vision import UploadVisionModel
         
         import_time = time.time() - start_time
         
@@ -98,7 +97,7 @@ class TestLazyImports(unittest.TestCase):
                 # Mock yaml.safe_load to avoid needing actual config file
                 with mock.patch('yaml.safe_load', return_value={'model_name': 'test'}):
                     with mock.patch('builtins.open', mock.mock_open(read_data='model_name: test')):
-                        from praisonai.praisonai.train.llm.trainer import TrainModel
+                        from praisonai.train.llm.trainer import TrainModel
                         
                         # Creating instance should trigger lazy import
                         trainer = TrainModel()
@@ -119,7 +118,7 @@ class TestLazyImports(unittest.TestCase):
         }):
             # Mock the specific classes that would be imported
             with mock.patch('unsloth.FastVisionModel', mock_FastVisionModel):
-                from praisonai.praisonai.upload_vision import UploadVisionModel
+                from praisonai.upload_vision import UploadVisionModel
                 
                 # Creating instance should trigger lazy import and succeed
                 vision_model = UploadVisionModel()
@@ -130,7 +129,7 @@ class TestLazyImports(unittest.TestCase):
         # Mock missing dependencies
         with mock.patch.dict('sys.modules', {}, clear=True):
             with mock.patch('builtins.__import__', side_effect=ImportError("torch not found")):
-                from praisonai.praisonai.train.llm.trainer import TrainModel
+                from praisonai.train.llm.trainer import TrainModel
                 
                 with mock.patch('yaml.safe_load', return_value={'model_name': 'test'}):
                     with mock.patch('builtins.open', mock.mock_open(read_data='model_name: test')):
@@ -150,7 +149,7 @@ class TestLazyImports(unittest.TestCase):
         # Mock missing dependencies
         with mock.patch.dict('sys.modules', {}, clear=True):
             with mock.patch('builtins.__import__', side_effect=ImportError("unsloth not found")):
-                from praisonai.praisonai.upload_vision import UploadVisionModel
+                from praisonai.upload_vision import UploadVisionModel
                 
                 # Should raise ImportError with helpful message
                 with self.assertRaises(ImportError) as context:

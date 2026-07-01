@@ -2,7 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 """
 Agent Integration Test for Human Approval System
 

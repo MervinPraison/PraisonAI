@@ -2,7 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import tempfile
 import shutil
 import sqlite3

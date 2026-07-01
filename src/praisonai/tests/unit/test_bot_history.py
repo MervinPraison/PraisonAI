@@ -7,7 +7,6 @@ so agents automatically get conversation context across turns.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 class TestBotHistoryInjection:
     """Tests for Bot._apply_smart_defaults() history wiring."""
 

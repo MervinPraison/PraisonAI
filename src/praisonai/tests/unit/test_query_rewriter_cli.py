@@ -6,7 +6,6 @@ Run with: python -m pytest tests/unit/test_query_rewriter_cli.py -v
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 from unittest.mock import patch, MagicMock
 import argparse
 

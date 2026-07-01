@@ -4,12 +4,15 @@ Real API Key Smoke Tests for PraisonAI.
 These tests validate end-to-end behavior using real API keys.
 They are gated by environment variables and use minimal tokens.
 
-Run with:
-    RUN_REAL_KEY_TESTS=1 pytest tests/integration/test_real_key_smoke.py -v
+Run with (source ~/.bashrc or ~/.zshrc for API keys first):
+    RUN_REAL_KEY_TESTS=1 PRAISONAI_ALLOW_NETWORK=1 PRAISONAI_TEST_PROVIDERS=all \\
+        pytest tests/integration/test_real_key_smoke.py -v
 
 Required environment variables:
     - OPENAI_API_KEY: For OpenAI provider tests
     - RUN_REAL_KEY_TESTS=1: Gate to enable these tests
+    - PRAISONAI_ALLOW_NETWORK=1: Allow network calls (conftest gating)
+    - PRAISONAI_TEST_PROVIDERS=all: File mentions multiple providers
 """
 
 import os
@@ -65,7 +68,6 @@ from praisonaiagents import Agent
 agent = Agent(
     instructions="Reply with exactly one word: OK",
     llm="gpt-4o-mini",
-    verbose=False
 )
 
 # Minimal prompt
@@ -93,7 +95,6 @@ agent = Agent(
     instructions="You have access to get_time tool. Use it and report the time briefly.",
     llm="gpt-4o-mini",
     tools=[get_time],
-    verbose=False
 )
 
 response = agent.chat("What time is it?")
@@ -191,7 +192,6 @@ from praisonaiagents import Agent
 agent = Agent(
     instructions="Reply with exactly: ANTHROPIC_OK",
     llm="claude-3-haiku-20240307",
-    verbose=False
 )
 response = agent.chat("Respond")
 print("SUCCESS" if "ANTHROPIC_OK" in response or response else "FAIL")
@@ -213,7 +213,6 @@ from praisonaiagents import Agent
 agent = Agent(
     instructions="Reply with exactly: GOOGLE_OK",
     llm="gemini/gemini-1.5-flash",
-    verbose=False
 )
 response = agent.chat("Respond")
 print("SUCCESS" if response else "FAIL")

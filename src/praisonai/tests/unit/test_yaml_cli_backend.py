@@ -7,7 +7,6 @@ exercising unrelated framework code paths.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import logging
 import yaml
 from unittest.mock import MagicMock, patch

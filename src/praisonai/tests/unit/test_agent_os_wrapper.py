@@ -4,7 +4,6 @@ TDD tests for AgentOS exports from praisonai wrapper.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 
 
 class TestAgentOSWrapperExports:

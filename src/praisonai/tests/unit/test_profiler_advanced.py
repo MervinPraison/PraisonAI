@@ -13,7 +13,6 @@ TDD: Tests written first for new profiling capabilities:
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import time
 import asyncio
 import pytest
