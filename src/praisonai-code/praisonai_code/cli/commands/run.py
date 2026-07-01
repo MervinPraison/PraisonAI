@@ -528,7 +528,7 @@ def run_main(
 
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
-        from praisonai.llm.credentials import is_configured
+        from praisonai_code.llm.credentials import is_configured
         import sys
         
         # Check if credentials are configured (use model if provided, else check general)

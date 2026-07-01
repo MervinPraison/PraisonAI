@@ -137,7 +137,7 @@ def resolve_default_model(
         return env_model
 
     try:
-        from ...llm.env import default_model_for_available_provider
+        from praisonai_code.llm.env import default_model_for_available_provider
         model = default_model_for_available_provider()
     except Exception:
         model = "gpt-4o-mini"

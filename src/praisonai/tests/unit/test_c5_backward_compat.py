@@ -82,6 +82,8 @@ class TestImportPathAliases:
             ("praisonai.cli._warnings", "praisonai_code.cli._warnings"),
             ("praisonai.runtime.descriptor", "praisonai_code.runtime.descriptor"),
             ("praisonai.cli_backends.registry", "praisonai_code.cli_backends.registry"),
+            ("praisonai.llm.env", "praisonai_code.llm.env"),
+            ("praisonai.llm.credentials", "praisonai_code.llm.credentials"),
         ],
     )
     def test_module_identity(self, old_path: str, new_path: str):

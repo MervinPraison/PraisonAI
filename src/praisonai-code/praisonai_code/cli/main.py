@@ -131,7 +131,7 @@ def _provider_preflight_message():
         so it can never block a properly configured user.
     """
     try:
-        from praisonai.llm.credentials import (
+        from praisonai_code.llm.credentials import (
             inject_credentials_into_env,
             is_configured,
         )

@@ -20,7 +20,9 @@ from .state.identifiers import create_context
 def _setup_langfuse_observability(*, verbose: bool = False) -> None:
     """Set up Langfuse observability by wiring TraceSink to action emitter."""
     try:
-        from praisonai.observability.langfuse import LangfuseSink
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        langfuse = import_wrapper_module("praisonai.observability.langfuse")
+        LangfuseSink = langfuse.LangfuseSink
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
         from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
         import atexit
@@ -59,7 +61,10 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
                 typer.echo("Warning: langextract is not installed. Install with: pip install 'praisonai[langextract]'", err=True)
             return
         
-        from praisonai.observability.langextract import LangextractSink, LangextractSinkConfig
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        langextract_mod = import_wrapper_module("praisonai.observability.langextract")
+        LangextractSink = langextract_mod.LangextractSink
+        LangextractSinkConfig = langextract_mod.LangextractSinkConfig
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
         import os
         import atexit
@@ -688,7 +693,7 @@ def main_callback(
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
         # Check for credentials before starting TUI
-        from praisonai.llm.credentials import is_configured
+        from praisonai_code.llm.credentials import is_configured
         import sys
         
         if not is_configured():  # Check for any configured credentials

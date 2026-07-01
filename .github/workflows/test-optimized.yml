@@ -99,8 +99,10 @@ jobs:
         import praisonai_code
         from praisonai_code.cli.configuration.resolver import ConfigResolver
         from praisonai_code._version import get_package_version
+        from praisonai_code.llm.credentials import is_configured
         import toml
         assert hasattr(ConfigResolver, '__name__')
+        assert callable(is_configured)
         print('standalone ok', get_package_version(), 'toml', toml.__version__)
         "
         /tmp/praisonai-code-standalone/bin/praisonai-code --version

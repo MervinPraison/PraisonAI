@@ -46,6 +46,7 @@ Completed C7 steps so far:
 - `praisonai_code._version` / `runtime/descriptor.py` — version from `praisonai-code`
 - `praisonai_code.__main__` + `praisonai-code` console script — standalone entry
 - `praisonai_code._logging` — CLI logging without wrapper dependency
+- `praisonai_code.llm.env` / `llm.credentials` — credential gate without wrapper import
 
 Backward compatibility is preserved via PEP 562 shims at the old
 `praisonai.*` import paths, so `pip install praisonai` and
