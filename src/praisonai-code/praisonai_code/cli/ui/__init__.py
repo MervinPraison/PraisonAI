@@ -12,7 +12,10 @@ based on environment, or explicitly via --ui flag.
 
 import os
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .config import UIConfig
 
 __all__ = [
     'UIConfig',
@@ -55,11 +58,6 @@ def __getattr__(name: str):
         from .mg_backend import MiddleGroundBackend
         _lazy_cache[name] = MiddleGroundBackend
         return MiddleGroundBackend
-    
-    if name == 'select_backend':
-        from .selector import select_backend
-        _lazy_cache[name] = select_backend
-        return select_backend
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
