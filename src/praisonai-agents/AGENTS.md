@@ -166,6 +166,30 @@ unittest.mock.patch("praisonai.cli.commands.run.X")   # same module object
 
 **PyPI publish order:** `praisonaiagents` → `praisonai-code` → `praisonai` (see `src/praisonai/scripts/bump_and_release.py` and `.github/workflows/pypi-release.yml`). Gateway/bots changes release via wrapper only; agentic CLI changes also bump `praisonai-code`.
 
+#### C6 integration gate (#2519)
+
+C6 is the **sign-off step** after C0–C5 file moves: no further moves, only regression verification and release wiring.
+
+| Check | Command / artefact |
+|-------|-------------------|
+| Smoke `--help` | `praisonai`, `praisonai run/chat/code/daemon/attach/gateway/bot/doctor --help` |
+| Compat regression | `pytest src/praisonai/tests/unit/test_c5_backward_compat.py` |
+| CLI shard | `pytest src/praisonai/tests/unit/cli/` |
+| Warm runtime | `pytest src/praisonai/tests/unit/test_warm_runtime.py` |
+| Doctor shard | `pytest src/praisonai/tests/unit/doctor/` |
+| Import perf | `pytest src/praisonai/tests/unit/test_performance_benchmarks.py` (< 500ms) |
+| Real LLM smoke | `RUN_REAL_KEY_TESTS=1 PRAISONAI_ALLOW_NETWORK=1 PRAISONAI_TEST_PROVIDERS=all pytest src/praisonai/tests/integration/test_real_key_smoke.py` |
+| Verification log | `src/praisonai/tests/C6_VERIFICATION.md` |
+
+**Command split (wrapper vs code):**
+
+| Install target | Agentic CLI (`run`, `chat`, `code`, …) | Bot/gateway (`bot`, `gateway`, `pairing`, …) |
+|----------------|----------------------------------------|---------------------------------------------|
+| `pip install praisonai` | Yes (via `praisonai-code` dep + shims) | Yes |
+| `pip install praisonai-code` only | Partial — requires wrapper for ~170 reverse imports | No — wrapper-only commands hidden when `praisonai` absent |
+
+**v1 decision:** Wrapper-required install is acceptable. Standalone `praisonai-code` without `praisonai` is deferred to **C7** (reverse-import elimination).
+
 ---
 
 ## 3. Core SDK Architecture (praisonaiagents)

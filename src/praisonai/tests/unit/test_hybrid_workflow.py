@@ -6,7 +6,6 @@ Tests the HybridWorkflowExecutor that combines job and agent workflow capabiliti
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch

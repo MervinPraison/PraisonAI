@@ -8,19 +8,18 @@ Agentic terminal CLI for PraisonAI — the terminal-native agent product
 
 ## Status
 
-Migration in progress. `runtime/` and `cli_backends/` have moved into
-`praisonai_code` (step C1); the remaining terminal-agent modules follow
-incrementally in steps C2–C6 (see issue #2512):
+**C0–C5 complete.** C6 integration gate verified — see
+`src/praisonai/tests/C6_VERIFICATION.md`.
 
-| Step | Scope |
-|------|-------|
-| C0 | Scaffold |
-| C1 | `runtime/` + `cli_backends/` |
-| C2 | `interactive/`, `execution/`, `ui/`, `output/`, `state/` |
-| C3 | Agentic commands |
-| C4 | Agentic features |
-| C5 | `main.py`, `app.py`, config/session/utils + shims |
-| C6 | Integration gate |
+| Step | Scope | Status |
+|------|-------|--------|
+| C0 | Scaffold | Done |
+| C1 | `runtime/` + `cli_backends/` | Done |
+| C2 | `interactive/`, `execution/`, `ui/`, `output/`, `state/` | Done |
+| C3 | Agentic commands | Done |
+| C4 | Agentic features | Done |
+| C5 | `main.py`, `app.py`, config/session/utils + shims | Done |
+| C6 | Integration gate + sign-off | Done |
 
 - `praisonai_code.runtime` — warm local runtime (daemon + thin client).
 - `praisonai_code.cli_backends` — CLI backend implementations (e.g. Claude Code).
@@ -36,24 +35,32 @@ praisonai-code    →  depends on  praisonaiagents (core SDK)
 click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
 `pyproject.toml`). The rules above govern the **inter-package** direction.
 
-> **Migration note (C1):** `cli_backends/registry.py` still imports
-> `PluginRegistry` from the `praisonai` main package (same "keep main-package
-> import" pattern as `runtime/descriptor.py`'s `from praisonai.version`).
-> `praisonai-code` is wired via an editable path dependency and `praisonai` is
-> always present at runtime during migration, so this residual back-import is a
-> deliberate C1 tradeoff to be removed in a later step — not a standalone-publish
-> guarantee yet.
+> **C7 note:** Some modules still import the `praisonai` wrapper at runtime
+> (~170 files). **Standalone `pip install praisonai-code` without `praisonai`
+> is not fully supported yet.** Use `pip install praisonai` for production.
+> Residual C1 back-imports: `runtime/descriptor.py` → `praisonai.version`;
+> `cli_backends/registry.py` → `praisonai._registry`.
 
 Backward compatibility is preserved via PEP 562 shims at the old
 `praisonai.*` import paths, so `pip install praisonai` and
 `from praisonai.cli.main import PraisonAI` keep working unchanged.
 
-## Install (development)
+## Install
+
+**Recommended (includes wrapper + bots/gateway):**
 
 ```bash
+pip install praisonai
+```
+
+**Development / monorepo:**
+
+```bash
+pip install -e src/praisonai-agents
 pip install -e src/praisonai-code
+pip install -e src/praisonai
 python -c "import praisonai_code; print(praisonai_code.__version__)"
 ```
 
-`praisonai-code` is **not** published standalone to PyPI during migration;
-`praisonai` remains the user-facing install.
+**PyPI:** Published as `praisonai-code` after `praisonaiagents` in the
+three-package release order (see `pypi-release.yml`).

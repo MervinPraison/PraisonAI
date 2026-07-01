@@ -14,14 +14,18 @@ Usage:
 
 This script:
 1. Validates pre-flight conditions (clean git state, versions)
-2. Optionally waits for praisonaiagents to be available on PyPI
-3. Bumps version in all required files
+2. Optionally waits for praisonaiagents and/or praisonai-code on PyPI
+3. Bumps version in all required files (agents, code, wrapper)
 4. Copies root README.md to package dir
 5. Runs uv lock & uv build
 6. Commits changes
 7. Creates git tag
 8. Pushes to GitHub (with rebase if needed)
 9. Creates GitHub release (latest)
+
+Three-package publish order: praisonaiagents → praisonai-code → praisonai
+Use --code to bump code package; --code-pin to pin wrapper after code publish.
+Use --wait for agents PyPI propagation; --wait-code for praisonai-code.
 """
 
 import re
@@ -228,19 +232,19 @@ def validate_dependencies(
     retry_interval: int = 60,
     use_frozen: bool = False,
     agents_version: Optional[str] = None,
+    code_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
     if use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
-    elif agents_version:
-        # Patch releases only bump praisonaiagents — avoid re-resolving every optional
-        # extra together (crewai/flow/langfuse have known cross-extra conflicts).
-        # --dry-run still universal-resolves all requires-python splits (e.g. py3.14
-        # win32) and fails even when the wheel is on PyPI; --frozen --upgrade-package
-        # validates the targeted bump without a full lock regeneration.
-        lock_cmd = ["uv", "lock", "--frozen", "--upgrade-package", f"praisonaiagents=={agents_version}"]
+    elif agents_version or code_version:
+        lock_cmd = ["uv", "lock", "--frozen"]
+        if agents_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
+        if code_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-code=={code_version}"])
     else:
         lock_cmd = ["uv", "lock", "--dry-run"]
 
@@ -406,6 +410,11 @@ Examples:
         help="Wait for the specified agents version to be available on PyPI"
     )
     parser.add_argument(
+        "--wait-code",
+        action="store_true",
+        help="Wait for the specified praisonai-code version to be available on PyPI"
+    )
+    parser.add_argument(
         "--max-wait",
         type=int,
         default=300,
@@ -492,6 +501,11 @@ Examples:
             print("\n💡 Tip: Check if the package was published successfully")
             print("💡 Tip: You can retry without --wait if the package is confirmed published")
             sys.exit(1)
+
+    if args.wait_code and code_version:
+        if not wait_for_pypi_version("praisonai-code", code_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-code was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -508,6 +522,7 @@ Examples:
         max_retries=args.retries,
         use_frozen=not patch_release,
         agents_version=args.agents,
+        code_version=code_version if args.code and not args.code_pin else None,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

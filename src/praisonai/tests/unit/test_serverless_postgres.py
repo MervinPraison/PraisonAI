@@ -7,7 +7,6 @@ These are mock-based — no live database needed.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import sys
 import os
 import time

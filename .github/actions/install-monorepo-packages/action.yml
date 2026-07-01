@@ -1,5 +1,5 @@
 name: Install PraisonAI monorepo packages
-description: Install praisonai-agents, praisonai-code, and praisonai wrapper from local paths (praisonai-code is not on PyPI yet).
+description: Install praisonai-agents, praisonai-code, and praisonai wrapper from local paths (mirrors PyPI three-package install order).
 
 inputs:
   repo-root:

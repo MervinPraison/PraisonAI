@@ -6,7 +6,6 @@ Tests the fixes for PraisonAIUI gateway integration gaps.
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch

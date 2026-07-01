@@ -63,6 +63,7 @@ import cProfile
 import pstats
 import io
 import statistics
+from pathlib import Path
 from collections import OrderedDict
 from collections import deque
 from contextvars import ContextVar
@@ -430,7 +431,186 @@ class _ProfilerImpl:
         """Get flow records."""
         with self._lock:
             return list(self._flow)
-    
+
+    def get_api_calls(self) -> List[APICallRecord]:
+        """Get API call records."""
+        with self._lock:
+            return list(self._api_calls)
+
+    def get_streaming_records(self) -> List[StreamingRecord]:
+        """Get streaming records."""
+        with self._lock:
+            return list(self._streaming)
+
+    def get_memory_records(self) -> List[MemoryRecord]:
+        """Get memory records."""
+        with self._lock:
+            return list(self._memory)
+
+    def get_line_profile_data(self) -> Dict[str, Any]:
+        """Get line-level profiling data."""
+        with self._lock:
+            return dict(self._line_profile_data)
+
+    def set_line_profile_data(self, name: str, data: Any) -> None:
+        """Store line-level profiling output for a function."""
+        with self._lock:
+            self._line_profile_data[name] = data
+
+    def record_streaming(
+        self,
+        name: str,
+        ttft_ms: float,
+        total_ms: float,
+        chunk_count: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        """Record a streaming operation."""
+        if not self.is_enabled():
+            return
+        with self._lock:
+            self._streaming.append(
+                StreamingRecord(
+                    name=name,
+                    ttft_ms=ttft_ms,
+                    total_ms=total_ms,
+                    chunk_count=chunk_count,
+                    total_tokens=total_tokens,
+                )
+            )
+
+    def record_memory(self, name: str, current_kb: float, peak_kb: float) -> None:
+        """Record memory usage snapshot."""
+        if not self.is_enabled():
+            return
+        with self._lock:
+            self._memory.append(
+                MemoryRecord(name=name, current_kb=current_kb, peak_kb=peak_kb)
+            )
+
+    def get_statistics(self, category: Optional[str] = None) -> Dict[str, float]:
+        """Return percentile statistics for timing records."""
+        import statistics
+
+        timings = self.get_timings(category=category)
+        values = [t.duration_ms for t in timings]
+        if not values:
+            return {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "mean": 0.0,
+                "std_dev": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+            }
+        values.sort()
+        n = len(values)
+
+        def _pct(p: float) -> float:
+            idx = min(n - 1, max(0, int(round((p / 100.0) * (n - 1)))))
+            return float(values[idx])
+
+        return {
+            "p50": _pct(50),
+            "p95": _pct(95),
+            "p99": _pct(99),
+            "mean": float(statistics.mean(values)),
+            "std_dev": float(statistics.pstdev(values)) if n > 1 else 0.0,
+            "min": float(values[0]),
+            "max": float(values[-1]),
+        }
+
+    def get_flamegraph_data(self) -> List[Dict[str, Any]]:
+        """Return simplified flamegraph nodes from flow records."""
+        with self._lock:
+            return [
+                {
+                    "name": record.name,
+                    "value": record.duration_ms,
+                    "file": record.file,
+                    "line": record.line,
+                }
+                for record in self._flow
+            ]
+
+    @contextmanager
+    def cprofile(self, name: str):
+        """Profile a block with cProfile when available."""
+        import cProfile
+        import pstats
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+            yield profiler
+        finally:
+            profiler.disable()
+            stats = pstats.Stats(profiler)
+            with self._lock:
+                self._cprofile_stats.append((name, stats))
+
+    @contextmanager
+    def memory(self, name: str):
+        """Profile memory usage for a block when tracemalloc is available."""
+        import tracemalloc
+
+        tracemalloc.start()
+        try:
+            yield
+        finally:
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            self.record_memory(
+                name=name,
+                current_kb=current / 1024.0,
+                peak_kb=peak / 1024.0,
+            )
+
+    def memory_snapshot(self) -> Dict[str, float]:
+        """Return current process memory snapshot in KB."""
+        import tracemalloc
+
+        tracemalloc.start()
+        try:
+            current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        return {"current_kb": current / 1024.0, "peak_kb": peak / 1024.0}
+
+    def export_json(self) -> str:
+        """Export profiling summary as JSON."""
+        import json
+
+        return json.dumps(self.get_summary(), default=str)
+
+    def export_html(self) -> str:
+        """Export a minimal HTML profiling report."""
+        summary = self.get_summary()
+        rows = "".join(
+            f"<tr><td>{name}</td><td>{duration:.2f}</td></tr>"
+            for name, duration in summary.get("slowest_operations", [])
+        )
+        return (
+            "<html><body><h1>PraisonAI Profiler</h1>"
+            f"<p>Total time: {summary.get('total_time_ms', 0):.2f}ms</p>"
+            f"<table>{rows}</table></body></html>"
+        )
+
+    def export_to_file(self, filepath: str, format: str = "json") -> None:
+        """Export report to a file."""
+        content = self.export_json() if format == "json" else self.export_html()
+        Path(filepath).write_text(content, encoding="utf-8")
+
+    def export_flamegraph(self, filepath: str) -> None:
+        """Export a minimal SVG flamegraph placeholder from flow data."""
+        data = self.get_flamegraph_data()
+        svg = (
+            '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg">'
+            f'<text x="10" y="20">nodes={len(data)}</text></svg>'
+        )
+        Path(filepath).write_text(svg, encoding="utf-8")
+
     def get_files_accessed(self) -> Dict[str, int]:
         """Get files accessed with counts."""
         with self._lock:
@@ -554,6 +734,12 @@ class ProfilerCompat:
     Delegates all calls to the current profiler instance via get_profiler().
     This maintains backward compatibility while enabling per-agent isolation.
     """
+    _instance: Optional["ProfilerCompat"] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     @staticmethod
     def enable() -> None:
@@ -643,6 +829,90 @@ class ProfilerCompat:
     def api_call(endpoint: str, method: str = "GET"):
         """Context manager for profiling API calls."""
         return get_profiler().api_call(endpoint, method)
+
+    @staticmethod
+    def get_api_calls():
+        """Get API call records."""
+        return get_profiler().get_api_calls()
+
+    @staticmethod
+    def get_streaming_records():
+        """Get streaming records."""
+        return get_profiler().get_streaming_records()
+
+    @staticmethod
+    def get_memory_records():
+        """Get memory records."""
+        return get_profiler().get_memory_records()
+
+    @staticmethod
+    def get_statistics(category: Optional[str] = None):
+        """Get timing statistics."""
+        return get_profiler().get_statistics(category=category)
+
+    @staticmethod
+    def get_flamegraph_data():
+        """Get flamegraph-compatible data."""
+        return get_profiler().get_flamegraph_data()
+
+    @staticmethod
+    def get_line_profile_data():
+        """Get line-level profiling data."""
+        return get_profiler().get_line_profile_data()
+
+    @staticmethod
+    def set_line_profile_data(name: str, data: Any) -> None:
+        """Store line-level profiling output."""
+        get_profiler().set_line_profile_data(name, data)
+
+    @staticmethod
+    def record_streaming(
+        name: str,
+        ttft_ms: float,
+        total_ms: float,
+        chunk_count: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        """Record a streaming operation."""
+        get_profiler().record_streaming(
+            name, ttft_ms, total_ms, chunk_count=chunk_count, total_tokens=total_tokens
+        )
+
+    @staticmethod
+    def record_memory(name: str, current_kb: float, peak_kb: float) -> None:
+        """Record memory usage."""
+        get_profiler().record_memory(name, current_kb, peak_kb)
+
+    @staticmethod
+    def cprofile(name: str):
+        """Context manager for cProfile."""
+        return get_profiler().cprofile(name)
+
+    @staticmethod
+    def memory(name: str):
+        """Context manager for memory profiling."""
+        return get_profiler().memory(name)
+
+    @staticmethod
+    def memory_snapshot():
+        """Return current memory snapshot."""
+        return get_profiler().memory_snapshot()
+
+    @staticmethod
+    def export_json() -> str:
+        return get_profiler().export_json()
+
+    @staticmethod
+    def export_html() -> str:
+        return get_profiler().export_html()
+
+    @staticmethod
+    def export_to_file(filepath: str, format: str = "json") -> None:
+        get_profiler().export_to_file(filepath, format=format)
+
+    @staticmethod
+    def export_flamegraph(filepath: str) -> None:
+        get_profiler().export_flamegraph(filepath)
 
 # Create compatibility instance that acts like old singleton
 # This allows existing code to work: Profiler.enable(), etc.

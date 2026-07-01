@@ -9,7 +9,6 @@ These tests verify that:
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import sys
 import time
 
