@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-code"
-dynamic = ["version"]
+version = "0.0.0"
 description = "Agentic terminal CLI for PraisonAI — the terminal-native agent (run, chat, code, runtime, cli backends) extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
@@ -31,9 +31,6 @@ praisonaiagents = { path = "../praisonai-agents" }
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.dynamic]
-version = {attr = "praisonai_code.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
