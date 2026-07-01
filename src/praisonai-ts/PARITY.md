@@ -8,7 +8,7 @@
 | Metric | Count |
 |--------|-------|
 | Python Core Features | 395 |
-| Python Wrapper Features | 97 |
+| Python Wrapper Features | 5 |
 | TypeScript Features | 1190 |
 | **Gap Count** | **101** |
 | P0 (Critical) | 2 |
