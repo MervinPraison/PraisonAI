@@ -1,36 +1,35 @@
-"""
-Warm local runtime for PraisonAI.
+"""Backward-compatible shim for ``praisonai.runtime``.
 
-An opt-in, long-lived local process that keeps provider clients, MCP
-connections and recent session/context warm so repeated ``praisonai run``
-invocations don't pay cold-start cost.
+The warm local runtime moved to :mod:`praisonai_code.runtime` (parent tracking
+issue, step C1). This shim re-exports the public surface and aliases the
+submodules so existing imports keep working:
 
-The thin CLI attaches to a running runtime when present (via a loopback
-HTTP transport described by a lockfile) and falls back to in-process
-execution when it is not. Nothing here is imported eagerly by the core
-SDK — it is wrapper-layer deployment/UX infrastructure.
-
-Public surface:
-- :class:`RuntimeDescriptor` — lockfile read/write for an active runtime.
-- :func:`get_runtime_descriptor` — load the descriptor for this project.
-- :class:`RuntimeClient` — thin client used by ``run`` to forward a prompt.
+    from praisonai.runtime import RuntimeDescriptor, RuntimeClient
+    from praisonai.runtime.descriptor import get_runtime_descriptor
+    python -m praisonai.runtime
 """
 
-from .descriptor import (
-    RuntimeDescriptor,
-    get_runtime_descriptor,
-    get_runtime_lock_path,
-    get_runtime_version,
-    versions_compatible,
-)
-from .client import RuntimeClient, RuntimeUnavailable
+import sys as _sys
 
-__all__ = [
-    "RuntimeDescriptor",
-    "get_runtime_descriptor",
-    "get_runtime_lock_path",
-    "get_runtime_version",
-    "versions_compatible",
-    "RuntimeClient",
-    "RuntimeUnavailable",
-]
+import praisonai_code.runtime as _runtime
+
+# Alias submodules so ``praisonai.runtime.<sub>`` resolves to the moved module.
+for _name in ("descriptor", "client", "server", "__main__"):
+    try:
+        _mod = __import__(f"praisonai_code.runtime.{_name}", fromlist=[_name])
+    except Exception:  # pragma: no cover - optional submodule
+        continue
+    _sys.modules[f"{__name__}.{_name}"] = _mod
+
+del _sys, _name
+
+
+def __getattr__(name: str):
+    return getattr(_runtime, name)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(dir(_runtime)))
+
+
+__all__ = getattr(_runtime, "__all__", [])

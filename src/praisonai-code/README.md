@@ -8,19 +8,22 @@ Agentic terminal CLI for PraisonAI — the terminal-native agent product
 
 ## Status
 
-C0 scaffold. No runtime code has moved into `praisonai_code` yet; this
-package currently only exposes `__version__`. Migration proceeds
-incrementally in steps C1–C6 (see issue #2512):
+Migration in progress. `runtime/` and `cli_backends/` have moved into
+`praisonai_code` (step C1); the remaining terminal-agent modules follow
+incrementally in steps C2–C6 (see issue #2512):
 
 | Step | Scope |
 |------|-------|
-| C0 | Scaffold (this) |
+| C0 | Scaffold |
 | C1 | `runtime/` + `cli_backends/` |
 | C2 | `interactive/`, `execution/`, `ui/`, `output/`, `state/` |
 | C3 | Agentic commands |
 | C4 | Agentic features |
 | C5 | `main.py`, `app.py`, config/session/utils + shims |
 | C6 | Integration gate |
+
+- `praisonai_code.runtime` — warm local runtime (daemon + thin client).
+- `praisonai_code.cli_backends` — CLI backend implementations (e.g. Claude Code).
 
 ## Dependency rules
 

@@ -8,7 +8,7 @@ Plugin registry for CLI backend implementations following AGENTS.md patterns:
 
 import threading
 from typing import Dict, Callable, Any, Optional, Union
-from .._registry import PluginRegistry
+from praisonai._registry import PluginRegistry
 
 # CLI Backend Registry using canonical PluginRegistry
 def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:

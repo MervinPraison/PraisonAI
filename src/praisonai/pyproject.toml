@@ -13,6 +13,7 @@ dependencies = [
     "markdown>=3.5",
     "pyparsing>=3.0.0",
     "praisonaiagents>=1.6.101",
+    "praisonai-code",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -281,8 +282,8 @@ Repository = "https://github.com/mervinpraison/PraisonAI"
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }
 # praisonai-code hosts the agentic terminal CLI (extracted incrementally,
-# see issue #2512). Editable path dep during migration; no code has moved
-# yet at C0 so this is a no-op for runtime behaviour.
+# see issue #2512). Editable path dep during migration; runtime/ and
+# cli_backends/ have moved here (C1), old praisonai.* paths kept via shims.
 praisonai-code = { path = "../praisonai-code", editable = true }
 
 [tool.uv]
