@@ -187,8 +187,9 @@ class RuntimeCompatibilityChecker:
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
                 RuntimeCapability('sequential_execution', 'Sequential task execution'),
+                RuntimeCapability('handoff_support', 'Agent-to-agent handoffs via Team route', required=False),
             ],
-            supports_handoff=False,
+            supports_handoff=True,
             supports_tool_loop=True
         )
 
@@ -200,8 +201,9 @@ class RuntimeCompatibilityChecker:
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
                 RuntimeCapability('sequential_execution', 'Sequential task execution'),
+                RuntimeCapability('handoff_support', 'Agent-to-agent handoffs via sub_agents', required=False),
             ],
-            supports_handoff=False,
+            supports_handoff=True,
             supports_tool_loop=True
         )
         
@@ -482,7 +484,13 @@ class RuntimeCompatibilityChecker:
         handoff_agents = [a for a in agents if a.handoff_targets]
         if handoff_agents:
             handoff_runtimes = {a.resolved_runtime for a in handoff_agents}
-            incompatible_handoff_runtimes = handoff_runtimes - {'praisonai', 'autogen_v4', 'openai_agents'}
+            incompatible_handoff_runtimes = handoff_runtimes - {
+                'praisonai',
+                'autogen_v4',
+                'openai_agents',
+                'agno',
+                'google_adk',
+            }
             
             if incompatible_handoff_runtimes:
                 yield CheckResult(
@@ -491,8 +499,8 @@ class RuntimeCompatibilityChecker:
                     category=CheckCategory.CONFIG,
                     status=CheckStatus.FAIL,
                     message=f"Handoffs configured with incompatible runtimes: {', '.join(incompatible_handoff_runtimes)}",
-                    details="Only praisonai, autogen_v4, and openai_agents runtimes support handoffs",
-                    remediation="Use praisonai, autogen_v4, or openai_agents for agents that need handoff capabilities",
+                    details="Only praisonai, autogen_v4, openai_agents, agno, and google_adk runtimes support handoffs",
+                    remediation="Use praisonai, autogen_v4, openai_agents, agno, or google_adk for agents that need handoff capabilities",
                     severity=CheckSeverity.HIGH
                 )
 
