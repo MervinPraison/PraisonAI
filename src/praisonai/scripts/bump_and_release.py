@@ -46,6 +46,11 @@ def get_praisonai_dir() -> Path:
     return get_project_root() / "src/praisonai"
 
 
+def get_praisonai_code_dir() -> Path:
+    """Get the praisonai-code package directory."""
+    return get_project_root() / "src/praisonai-code"
+
+
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
     """Run a command and print it."""
     if not silent:
@@ -124,10 +129,16 @@ def update_file(filepath: Path, patterns: list[tuple[str, str]], root: Path) -> 
         return False
 
 
-def bump_version(new_version: str, agents_version: Optional[str] = None):
+def bump_version(
+    new_version: str,
+    agents_version: Optional[str] = None,
+    code_version: Optional[str] = None,
+    code_pin_only: bool = False,
+):
     """Bump version in all required files."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
+    code_dir = get_praisonai_code_dir()
     
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
@@ -180,6 +191,32 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
         update_file(
             praisonai_dir / "pyproject.toml",
             [(r'praisonaiagents>=[0-9.]+', f'praisonaiagents>={agents_version}')],
+            root
+        )
+
+    if code_version:
+        if code_pin_only:
+            print(f"\n📦 Pinning praisonai-code dependency to >={code_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-code to {code_version}:")
+            update_file(
+                code_dir / "pyproject.toml",
+                [(r'^version = "[^"]+"', f'version = "{code_version}"')],
+                root
+            )
+            update_file(
+                code_dir / "praisonai_code/__init__.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{code_version}"')],
+                root
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-code(?:>=[0-9.]+)?"',
+                    f'"praisonai-code>={code_version}"',
+                )
+            ],
             root
         )
     
@@ -281,7 +318,10 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai/uv.lock",
         "src/praisonai/README.md",
         "src/praisonai-agents/pyproject.toml",
-        "src/praisonai-agents/uv.lock"
+        "src/praisonai-agents/uv.lock",
+        "src/praisonai-code/pyproject.toml",
+        "src/praisonai-code/praisonai_code/__init__.py",
+        "src/praisonai-code/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -378,6 +418,16 @@ Examples:
         help="Number of retries for dependency validation (default: 3)"
     )
     parser.add_argument(
+        "--code", "-c",
+        help="Bump praisonai-code version (pyproject + __init__) and pin wrapper dep",
+        default=None
+    )
+    parser.add_argument(
+        "--code-pin",
+        help="Pin praisonai-code>= in wrapper pyproject only (after CI code publish)",
+        default=None
+    )
+    parser.add_argument(
         "--force", "-f",
         action="store_true",
         help="Skip pre-flight checks (use with caution)"
@@ -412,6 +462,16 @@ Examples:
         print("   Expected format: X.Y.Z (e.g., 0.11.8)")
         sys.exit(1)
     
+    if args.code and args.code_pin:
+        print("❌ Use only one of --code or --code-pin")
+        sys.exit(1)
+
+    code_version = args.code or args.code_pin
+    if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
+        print(f"❌ Invalid code version format: {code_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.3)")
+        sys.exit(1)
+    
     # Pre-flight checks
     print("\n🔍 Pre-flight checks...")
     
@@ -434,7 +494,12 @@ Examples:
             sys.exit(1)
     
     # Run bump version
-    bump_version(args.version, args.agents)
+    bump_version(
+        args.version,
+        args.agents,
+        code_version=code_version,
+        code_pin_only=bool(args.code_pin and not args.code),
+    )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
     # Full releases: regenerate lock from scratch.

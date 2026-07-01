@@ -94,13 +94,17 @@ jobs:
             core.setOutput('head_sha', result.headSha || headSha);
             core.setOutput('last_tag', result.lastTag || '');
             core.setOutput('target_agents', result.targetAgents || '');
+            core.setOutput('target_code', result.targetCode || '');
             core.setOutput('target_wrapper', result.targetWrapper || '');
 
             core.summary.addRaw('## Release gate preflight\n');
             core.summary.addRaw(`Ready: ${result.ready}\n`);
             core.summary.addRaw(`Reason: ${result.reasons.join('; ')}\n`);
             if (result.targetAgents) {
-              core.summary.addRaw(`Targets: praisonaiagents==${result.targetAgents}, praisonai==${result.targetWrapper}\n`);
+              core.summary.addRaw(
+                `Targets: praisonaiagents==${result.targetAgents}, `
+                + `praisonai-code==${result.targetCode}, praisonai==${result.targetWrapper}\n`
+              );
             }
             await core.summary.write();
 

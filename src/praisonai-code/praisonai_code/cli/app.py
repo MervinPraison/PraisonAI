@@ -126,6 +126,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "diag": (".commands.diag", "app", "Diagnostics export"),
     "doctor": (".commands.doctor", "app", "Health checks and diagnostics"),
     "setup": (".commands.setup", "app", "Interactive onboarding / configuration wizard"),
+    "onboard": (".commands.onboard", "app", "Messaging bot onboarding wizard"),
     "obs": (".commands.obs", "app", "Observability diagnostics and management"),
     "validate": (".commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
@@ -182,7 +183,19 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "github": (".commands.github", "app", "GitHub native context tracking and Issue triage"),
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
     "models": (".commands.models", "app", "List and describe available models"),
-    
+
+    # Bot/channel commands — see ``_WRAPPER_COMMANDS`` below. These entries keep
+    # relative ``.commands.*`` paths so they are advertised in ``--help``, but
+    # ``get_command()`` re-routes them to the absolute ``praisonai.cli.commands.*``
+    # path at invocation time (the modules live in the main wrapper).
+    "bot": (".commands.bot", "app", "Messaging bots with full agent capabilities"),
+    "gateway": (".commands.gateway", "app", "Multi-bot WebSocket gateway server"),
+    "pairing": (".commands.pairing", "app", "Manage bot user pairing"),
+    "identity": (".commands.identity", "app", "Manage cross-platform user identity links"),
+    "kanban": (".commands.kanban", "app", "Kanban task management"),
+    "claw": (".commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
+    "dashboard": (".commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
+
     "browser": (".commands.browser", "app", "Browser control for agent automation"),
     "plugins": (".commands.plugins", "app", "Plugin management and inspection"),
     "sandbox": (".commands.sandbox", "app", "Sandbox container management"),
@@ -194,20 +207,23 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
 }
 
 # Bot/channel commands that intentionally stay in the main ``praisonai``
-# package (they import ``praisonai.bots`` / ``praisonai.gateway``). They are
-# resolved with *absolute* module paths so ``praisonai_code`` never carries a
-# static dependency on ``praisonai`` — the import happens lazily at command
-# invocation time only.
-_BOT_COMMANDS: Dict[str, Tuple[str, str, str]] = {
-    "bot": ("praisonai.cli.commands.bot", "app", "Messaging bots with full agent capabilities"),
-    "gateway": ("praisonai.cli.commands.gateway", "app", "Multi-bot WebSocket gateway server"),
-    "onboard": ("praisonai.cli.commands.onboard", "app", "Messaging bot onboarding wizard"),
-    "pairing": ("praisonai.cli.commands.pairing", "app", "Manage bot user pairing"),
-    "identity": ("praisonai.cli.commands.identity", "app", "Manage cross-platform user identity links"),
-    "kanban": ("praisonai.cli.commands.kanban", "app", "Kanban task management"),
-    "claw": ("praisonai.cli.commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
-    "dashboard": ("praisonai.cli.commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
-}
+# wrapper (they import ``praisonai.bots`` / ``praisonai.gateway``). Their
+# entries remain in ``_LAZY_COMMANDS`` above (so ``--help`` and command
+# discovery advertise them), but ``get_command()`` intercepts these names and
+# imports them via the *absolute* ``praisonai.cli.commands.*`` path — the
+# relative ``.commands.*`` path would resolve to ``praisonai_code`` where the
+# modules do not live. The import happens lazily at invocation time only, so
+# ``praisonai_code`` keeps no static dependency on ``praisonai``.
+_WRAPPER_COMMANDS = frozenset({
+    "bot",
+    "gateway",
+    "pairing",
+    "identity",
+    "onboard",
+    "kanban",
+    "dashboard",
+    "claw",
+})
 
 # Special commands that need custom handling
 _SPECIAL_COMMANDS = {
@@ -226,7 +242,6 @@ class LazyCommandGroup(TyperGroup):
         
         # Add lazy-loaded commands
         commands.update(_LAZY_COMMANDS.keys())
-        commands.update(_BOT_COMMANDS.keys())
         commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add special inline commands
@@ -251,7 +266,13 @@ class LazyCommandGroup(TyperGroup):
         if name in _LAZY_COMMANDS:
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
-                module = importlib.import_module(module_path, __package__)
+                if name in _WRAPPER_COMMANDS:
+                    import importlib.util as _importlib_util
+                    if _importlib_util.find_spec("praisonai") is None:
+                        return None
+                    module = importlib.import_module(f"praisonai.cli.commands.{name}")
+                else:
+                    module = importlib.import_module(module_path, __package__)
                 sub_app = getattr(module, attr_name)
                 if isinstance(sub_app, click.Command):
                     return sub_app
@@ -260,21 +281,6 @@ class LazyCommandGroup(TyperGroup):
                 typer.echo(f"Error loading command '{name}': {e}", err=True)
                 return None
 
-        # Check bot/channel commands that stayed in the main ``praisonai``
-        # package. These use absolute module paths and are imported lazily so
-        # ``praisonai_code`` keeps no static dependency on ``praisonai``.
-        if name in _BOT_COMMANDS:
-            module_path, attr_name, _ = _BOT_COMMANDS[name]
-            try:
-                module = importlib.import_module(module_path)
-                sub_app = getattr(module, attr_name)
-                if isinstance(sub_app, click.Command):
-                    return sub_app
-                return typer_get_command(sub_app)
-            except (ImportError, AttributeError) as e:
-                typer.echo(f"Error loading command '{name}': {e}", err=True)
-                return None
-        
         # Check special commands
         if name in _SPECIAL_COMMANDS:
             module_path, func_name, _ = _SPECIAL_COMMANDS[name]
@@ -746,8 +752,8 @@ def get_command_names():
     commands that are not in ``_LAZY_COMMANDS`` are added explicitly.
     """
     names = set(_LAZY_COMMANDS.keys())
-    # Bot/channel commands that stayed in the main ``praisonai`` package
-    names.update(_BOT_COMMANDS.keys())
+    # Bot/channel commands are already part of ``_LAZY_COMMANDS`` (re-routed to
+    # the main wrapper at invocation time via ``_WRAPPER_COMMANDS``).
     # Special commands with custom handling (tui, queue)
     names.update(_SPECIAL_COMMANDS.keys())
     # Inline special commands handled outside the registries

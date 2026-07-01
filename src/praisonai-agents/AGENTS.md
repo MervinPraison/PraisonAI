@@ -42,7 +42,11 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │   │   └── pyproject.toml         # Package config
 │   │
 │   ├── praisonai/                 # Wrapper (praisonai)
-│   │   ├── praisonai/             # CLI, integrations, heavy impls
+│   │   ├── praisonai/             # Bot/channel CLI, integrations, heavy impls
+│   │   └── pyproject.toml
+│   │
+│   ├── praisonai-code/            # Agentic terminal CLI (praisonai_code)
+│   │   ├── praisonai_code/        # run, chat, code, runtime, cli_backends
 │   │   └── pyproject.toml
 │   │
 │   └── praisonai-ts/              # TypeScript SDK
@@ -80,7 +84,10 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      praisonai (Wrapper)                        │
-│  CLI • Integrations • Heavy Implementations • Optional Deps     │
+│  Bot/channel CLI • Gateway • Integrations • Heavy impls         │
+├─────────────────────────────────────────────────────────────────┤
+│                    praisonai-code (Terminal agent)              │
+│  run • chat • code • doctor • runtime • cli_backends • Typer    │
 ├─────────────────────────────────────────────────────────────────┤
 │                    praisonaiagents (Core SDK)                   │
 │  Protocols • Hooks • Adapters • Base Classes • Decorators       │
@@ -89,6 +96,75 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │  Optional Tools • Plugins • Community Extensions                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### 2.3 `praisonai-code` — Agentic Terminal CLI Split (C5/C6)
+
+The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends, Typer app) lives in the separate **`praisonai-code`** PyPI package (`praisonai_code`). The **`praisonai`** wrapper keeps bot/channel orchestration, gateway, and heavy integrations. **`pip install praisonai`** still installs everything; old import paths are preserved via shims.
+
+| Product | Location | Stays out of |
+|---------|----------|--------------|
+| Agentic terminal CLI | `src/praisonai-code/praisonai_code/` | Must **not** depend on `praisonai` (PyPI cycle) |
+| Bot/channel runtime | `src/praisonai/praisonai/` | Gateway, BotOS, onboarding, dashboard |
+| Core SDK | `src/praisonai-agents/praisonaiagents/` | Heavy CLI / integrations |
+
+**Moved into `praisonai_code` (~304 modules):**
+
+| Step | Content |
+|------|---------|
+| C1 | `runtime/`, `cli_backends/` |
+| C2 | `cli/interactive/`, `execution/`, `ui/`, `output/`, `state/` |
+| C3 | `cli/commands/*` (80 Typer command modules) |
+| C4 | `cli/features/*` (158 feature handlers; bot features excepted) |
+| C5 | `cli/main.py`, `app.py`, `configuration/`, `session/`, `utils/`, schema modules |
+
+**Intentionally retained in the wrapper (not shims):**
+
+- **Commands:** `gateway`, `bot`, `pairing`, `identity`, `onboard`, `kanban`, `dashboard`, `claw`
+- **Features:** `gateway`, `bots_cli`, `onboard`, `approval`, `serve`
+- **Domains:** `praisonai.gateway.*`, `praisonai.bots.*`, integrations, endpoints
+
+**Backward-compat shim patterns** (old `praisonai.*` paths must keep working):
+
+| Pattern | Used for | Module identity |
+|---------|----------|-----------------|
+| `sys.modules[__name__] = _impl` | `cli/main`, `cli/app`, each moved `cli/commands/*`, schema modules | Same object as `praisonai_code.*` |
+| `alias_package()` + `_AliasFinder` | `cli/output`, `interactive`, `execution`, `ui`, `state`, `session`, `configuration`, `utils` | Same submodule objects |
+| Package `__getattr__` + submodule alias | `runtime/`, `cli_backends/` | Submodules identical; package object differs |
+| `features/__init__.py` `__path__` extension | Extracted features; five bot features stay local | Handler imports via `__getattr__` |
+
+**Typer lazy-load:** `praisonai_code.cli.app._WRAPPER_COMMANDS` lists bot/channel commands that resolve via **`praisonai.cli.commands.*`** (wrapper), not `praisonai_code.cli.commands.*`.
+
+**Monorepo bootstrap:** `praisonai._bootstrap.ensure_praisonai_code()` adds sibling `src/praisonai-code` to `sys.path` so `PYTHONPATH=src/praisonai-agents:src/praisonai` works without an explicit code entry.
+
+**Install order (CI and local dev):** `praisonai-agents` → `praisonai-code` → `praisonai` (see `.github/actions/install-monorepo-packages`).
+
+**Invocation paths that must remain valid:**
+
+```bash
+praisonai …                          # console script → praisonai.__main__
+python -m praisonai …
+python -m praisonai.cli.main …
+python -m praisonai.runtime …
+from praisonai.cli.main import PraisonAI
+from praisonai.cli.commands.run import …
+unittest.mock.patch("praisonai.cli.commands.run.X")   # same module object
+```
+
+**Regression gate:** `src/praisonai/tests/unit/test_c5_backward_compat.py` (also run in optimised CI smoke). Standalone `pip install praisonai-code` requires declared deps (e.g. `toml` for config resolver).
+
+**Key files:**
+
+| What | Where |
+|------|-------|
+| Typer app + lazy commands | `praisonai_code/cli/app.py` |
+| Shim helper | `praisonai/cli/_shim.py` |
+| Bootstrap | `praisonai/_bootstrap.py` |
+| CLI main shim | `praisonai/cli/main.py` |
+| Runtime / backends shims | `praisonai/runtime/`, `praisonai/cli_backends/` |
+
+**Do not** recreate `src/praisonai/praisonai_code/` — it shadows the real package.
+
+**PyPI publish order:** `praisonaiagents` → `praisonai-code` → `praisonai` (see `src/praisonai/scripts/bump_and_release.py` and `.github/workflows/pypi-release.yml`). Gateway/bots changes release via wrapper only; agentic CLI changes also bump `praisonai-code`.
 
 ---
 
@@ -178,15 +254,14 @@ mongodb = ["pymongo>=4.6.3", "motor>=3.4.0"]
 ### 4.1 Protocol-Driven Core (MUST)
 
 ```
-Core SDK (praisonaiagents)          Wrapper (praisonai)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━         ━━━━━━━━━━━━━━━━━━━
-✅ Protocols                        ✅ Heavy implementations
-✅ Hooks                            ✅ CLI commands
-✅ Adapters                         ✅ External integrations
-✅ Base classes                     ✅ Optional deps
-✅ Decorators                       ✅ UI components
-✅ Dataclasses                      ✅ Database adapters
-❌ Heavy implementations            ❌ Core logic
+Core SDK (praisonaiagents)     praisonai-code (terminal CLI)    Wrapper (praisonai)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    ━━━━━━━━━━━━━━━━━━━
+✅ Protocols                   ✅ run/chat/code/doctor/setup      ✅ Bot/gateway CLI
+✅ Hooks                        ✅ runtime, cli_backends           ✅ Integrations
+✅ Adapters                     ✅ Typer app, moved commands       ✅ Heavy implementations
+✅ Base classes                 ✅ Depends on agents only           ✅ Optional deps
+✅ Decorators                   ❌ Must not import praisonai        ✅ UI, DB adapters
+❌ Heavy implementations        ❌ Bot/channel commands             ❌ Core logic
 ```
 
 ### 4.2 No Performance Impact (MUST)
@@ -739,6 +814,12 @@ from praisonaiagents import Workflow, Route, Parallel, Loop
 | Policy engine | `praisonaiagents/policy/engine.py` |
 | Scheduler module | `praisonaiagents/scheduler/` |
 | Schedule tools | `praisonaiagents/tools/schedule_tools.py` |
+| Agentic CLI (Typer) | `praisonai_code/cli/app.py` |
+| CLI main / run | `praisonai_code/cli/main.py` |
+| Warm runtime | `praisonai_code/runtime/` |
+| CLI backends | `praisonai_code/cli_backends/` |
+| Back-compat shims | `praisonai/cli/_shim.py`, `praisonai/cli/main.py` |
+| C5 regression tests | `praisonai/tests/unit/test_c5_backward_compat.py` |
 
 ---
 

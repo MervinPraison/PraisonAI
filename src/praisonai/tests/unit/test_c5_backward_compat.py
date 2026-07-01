@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,20 +17,50 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_LEGACY_PYTHONPATH = os.pathsep.join(
+    [
+        str(REPO_ROOT / "src" / "praisonai-agents"),
+        str(REPO_ROOT / "src" / "praisonai"),
+    ]
+)
+
+
+def _legacy_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env["PYTHONPATH"] = _LEGACY_PYTHONPATH
+    return env
 
 
 def _run_legacy_cli(*args: str) -> subprocess.CompletedProcess[str]:
-    env = {k: v for k, v in __import__("os").environ.items() if not k.startswith("PYTEST_")}
-    env["PYTHONPATH"] = str(REPO_ROOT / "src" / "praisonai-agents") + ":" + str(
-        REPO_ROOT / "src" / "praisonai"
-    )
     return subprocess.run(
         [sys.executable, "-m", "praisonai.cli.main", *args],
         capture_output=True,
         text=True,
         timeout=30,
         cwd=str(REPO_ROOT),
-        env=env,
+        env=_legacy_env(),
+    )
+
+
+def _run_typer_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "praisonai", *args],
+        capture_output=True,
+        text=True,
+        timeout=25,
+        cwd=str(REPO_ROOT),
+        env=_legacy_env(),
+    )
+
+
+def _run_runtime_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "praisonai.runtime", *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(REPO_ROOT),
+        env=_legacy_env(),
     )
 
 
@@ -45,6 +76,10 @@ class TestImportPathAliases:
             ("praisonai.cli.commands.doctor", "praisonai_code.cli.commands.doctor"),
             ("praisonai.cli.output.console", "praisonai_code.cli.output.console"),
             ("praisonai.cli.configuration.resolver", "praisonai_code.cli.configuration.resolver"),
+            ("praisonai.cli.unified_schema", "praisonai_code.cli.unified_schema"),
+            ("praisonai.cli.schema_provider", "praisonai_code.cli.schema_provider"),
+            ("praisonai.cli.fallback_schema", "praisonai_code.cli.fallback_schema"),
+            ("praisonai.cli._warnings", "praisonai_code.cli._warnings"),
             ("praisonai.runtime.descriptor", "praisonai_code.runtime.descriptor"),
             ("praisonai.cli_backends.registry", "praisonai_code.cli_backends.registry"),
         ],
@@ -101,6 +136,36 @@ class TestCliEntryPoints:
         from praisonai.__main__ import main
 
         assert callable(main)
+
+    @pytest.mark.parametrize("command,marker", [("gateway", "Gateway"), ("bot", "bot")])
+    def test_typer_wrapper_commands_help(self, command: str, marker: str):
+        result = _run_typer_cli(command, "--help")
+        assert result.returncode == 0, result.stderr
+        assert marker.lower() in (result.stdout + result.stderr).lower()
+
+    def test_python_m_praisonai_runtime_help(self):
+        result = _run_runtime_cli("--help")
+        assert result.returncode == 0
+        assert "--host" in result.stdout or "host" in result.stdout.lower()
+
+    def test_bootstrap_resolves_praisonai_code_on_legacy_pythonpath(self):
+        script = (
+            "import praisonai; "
+            "from praisonai.cli.unified_schema import rag_schema_provider; "
+            "import praisonai_code; "
+            "assert rag_schema_provider is not None; "
+            "print(praisonai_code.__version__)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(REPO_ROOT),
+            env=_legacy_env(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip()
 
 
 class TestBotLayerUnchanged:
