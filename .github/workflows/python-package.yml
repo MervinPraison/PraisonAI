@@ -30,10 +30,12 @@ jobs:
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
     - name: Install dependencies
+      run: python -m pip install --upgrade pip
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+    - name: Install test tools
       run: |
-        cd src/praisonai
-        python -m pip install --upgrade pip
-        python -m pip install ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         python -m pip install duckduckgo_search pytest pytest-asyncio pytest-cov
         python -m pip install "praisonaiagents[knowledge]"
 

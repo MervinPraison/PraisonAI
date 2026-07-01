@@ -7,12 +7,14 @@ on:
       - 'src/**'
       - 'pyproject.toml'
       - '.github/workflows/test-windows.yml'
+      - '.github/actions/install-monorepo-packages/**'
   pull_request:
     branches: [main, develop]
     paths:
       - 'src/**'
       - 'pyproject.toml'
       - '.github/workflows/test-windows.yml'
+      - '.github/actions/install-monorepo-packages/**'
   workflow_dispatch:
 
 jobs:
@@ -33,18 +35,10 @@ jobs:
       with:
         python-version: "3.11"
     
-    - name: Install praisonaiagents
-      run: |
-        python -m pip install --upgrade pip
-        cd src/praisonai-agents
-        pip install -e .
+    - name: Install monorepo packages
+      run: python -m pip install --upgrade pip
       shell: bash
-    
-    - name: Install praisonai wrapper
-      run: |
-        cd src/praisonai
-        pip install -e .
-      shell: bash
+    - uses: ./.github/actions/install-monorepo-packages
 
     # ==================== CORE IMPORTS ====================
     - name: Test core imports

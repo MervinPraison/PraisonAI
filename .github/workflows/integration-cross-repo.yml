@@ -7,12 +7,18 @@ on:
       - 'src/praisonai/praisonai/integration/**'
       - 'src/praisonai/tests/integration/test_aiui_*'
       - 'src/praisonai/pyproject.toml'
+      - 'src/praisonai-code/**'
+      - '.github/workflows/integration-cross-repo.yml'
+      - '.github/actions/install-monorepo-packages/**'
   pull_request:
     branches: [ main ]
     paths:
       - 'src/praisonai/praisonai/integration/**'
       - 'src/praisonai/tests/integration/test_aiui_*'
       - 'src/praisonai/pyproject.toml'
+      - 'src/praisonai-code/**'
+      - '.github/workflows/integration-cross-repo.yml'
+      - '.github/actions/install-monorepo-packages/**'
   workflow_dispatch:
 
 jobs:
@@ -40,15 +46,14 @@ jobs:
         python-version: '3.11'
         
     - name: Install dependencies
+      run: python -m pip install --upgrade pip
+    - uses: PraisonAI/.github/actions/install-monorepo-packages
+      with:
+        repo-root: PraisonAI/
+        wrapper-extras: ".[ui,dev]"
+    - name: Install PraisonAIUI
       run: |
-        python -m pip install --upgrade pip
-        # Install PraisonAI packages in development mode
-        cd PraisonAI/src/praisonai-agents
-        pip install -e .
-        cd ../praisonai
-        pip install -e ".[ui,dev]"
-        # Install PraisonAIUI in development mode (pytest-cov required by pyproject addopts)
-        cd ../../../PraisonAIUI
+        cd PraisonAIUI
         pip install -e .
         pip install pytest pytest-cov
         
@@ -138,13 +143,14 @@ jobs:
         python-version: '3.11'
         
     - name: Install dependencies
+      run: python -m pip install --upgrade pip
+    - uses: PraisonAI/.github/actions/install-monorepo-packages
+      with:
+        repo-root: PraisonAI/
+        wrapper-extras: ".[ui,dev]"
+    - name: Install PraisonAIUI
       run: |
-        python -m pip install --upgrade pip
-        cd PraisonAI/src/praisonai-agents
-        pip install -e .
-        cd ../praisonai
-        pip install -e ".[ui,dev]"
-        cd ../../../PraisonAIUI
+        cd PraisonAIUI
         pip install -e .
         
     - name: Run agentic integration test

@@ -1,0 +1,66 @@
+name: Install PraisonAI monorepo packages
+description: Install praisonai-agents, praisonai-code, and praisonai wrapper from local paths (praisonai-code is not on PyPI yet).
+
+inputs:
+  repo-root:
+    description: Path prefix to monorepo root (e.g. PraisonAI/ for cross-repo checkout)
+    required: false
+    default: ""
+  use-uv:
+    description: Use uv pip instead of pip
+    required: false
+    default: "false"
+  agents-extras:
+    description: Optional extras for praisonaiagents (e.g. .[all] or [all])
+    required: false
+    default: ""
+  wrapper-extras:
+    description: Optional extras for praisonai wrapper (e.g. .[chat,code] or [chat,code])
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install monorepo packages
+      shell: bash
+      run: |
+        set -euo pipefail
+        WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
+        ROOT="${{ inputs.repo-root }}"
+        if [ -n "$ROOT" ]; then
+          BASE="${WORKSPACE%/}/${ROOT%/}/"
+        else
+          BASE="${WORKSPACE%/}/"
+        fi
+        AGENTS_PKG="${BASE}src/praisonai-agents"
+        CODE_PKG="${BASE}src/praisonai-code"
+        WRAPPER_PKG="${BASE}src/praisonai"
+
+        normalise_extras() {
+          local value="${1#.}"
+          if [ -n "$value" ]; then
+            printf '.%s' "$value"
+          else
+            printf '.'
+          fi
+        }
+
+        AGENTS_SUFFIX="$(normalise_extras "${{ inputs.agents-extras }}")"
+        WRAPPER_SUFFIX="$(normalise_extras "${{ inputs.wrapper-extras }}")"
+
+        if [ "${{ inputs.use-uv }}" = "true" ]; then
+          cd "$AGENTS_PKG"
+          uv pip install --system -e "${AGENTS_SUFFIX}"
+          cd "$CODE_PKG"
+          uv pip install --system -e .
+          cd "$WRAPPER_PKG"
+          uv pip install --system "${WRAPPER_SUFFIX}"
+        else
+          cd "$AGENTS_PKG"
+          pip install -e "${AGENTS_SUFFIX}"
+          cd "$CODE_PKG"
+          pip install -e .
+          cd "$WRAPPER_PKG"
+          pip install -e "${WRAPPER_SUFFIX}"
+        fi

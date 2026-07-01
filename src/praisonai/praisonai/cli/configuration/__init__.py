@@ -1,27 +1,7 @@
-"""
-PraisonAI CLI Configuration Module.
-
-Provides configuration management with TOML support and precedence handling.
+"""Backward-compatibility shim: ``praisonai.cli.configuration`` moved to
+``praisonai_code.cli.configuration``.
 """
 
-from .loader import ConfigLoader, get_config, load_config
-from .schema import ConfigSchema
-from .paths import (
-    get_config_paths,
-    get_user_config_path,
-    get_project_config_path,
-    get_project_config_dir,
-    find_project_root,
-)
+from praisonai.cli._shim import alias_package as _alias_package
 
-__all__ = [
-    'ConfigLoader',
-    'ConfigSchema',
-    'get_config',
-    'load_config',
-    'get_config_paths',
-    'get_user_config_path',
-    'get_project_config_path',
-    'get_project_config_dir',
-    'find_project_root',
-]
+_alias_package(__name__, "praisonai_code.cli.configuration")
