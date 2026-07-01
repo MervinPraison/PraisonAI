@@ -68,12 +68,11 @@ _PROVIDER_DEFAULTS = (
 
 
 def _load_model_catalogue():
-    """Optional model catalogue (wrapper); skipped when standalone."""
+    """Load model catalogue for optional validation."""
     try:
-        from praisonai_code._wrapper_bridge import optional_wrapper_attr
+        from praisonai_code.llm.catalogue import ModelCatalogue
 
-        catalogue_cls = optional_wrapper_attr("praisonai.llm.catalogue", "ModelCatalogue")
-        return catalogue_cls() if catalogue_cls is not None else None
+        return ModelCatalogue()
     except Exception:
         return None
 
