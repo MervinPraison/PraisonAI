@@ -174,7 +174,8 @@ class ProfileSuiteRunner:
         """Collect system metadata."""
         import platform
         try:
-            from praisonai.version import __version__ as praisonai_version
+            from praisonai_code._version import get_package_version
+            praisonai_version = get_package_version()
         except ImportError:
             praisonai_version = "unknown"
         

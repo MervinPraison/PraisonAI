@@ -160,7 +160,12 @@ class TestApprovalFlowAsync:
                 if poll_count["n"] <= 1:
                     return []
                 return [
-                    {"content": "yes", "author": {"id": "u1", "username": "tester", "bot": False}, "id": "r1"},
+                    {
+                        "content": "yes",
+                        "author": {"id": "u1", "username": "tester", "bot": False},
+                        "id": "r1",
+                        "message_reference": {"message_id": "msg123"},
+                    },
                 ]
             return {}
 
@@ -183,7 +188,12 @@ class TestApprovalFlowAsync:
                 return {"id": "msg123"}
             if "messages" in path and method == "GET":
                 return [
-                    {"content": "deny", "author": {"id": "u1", "username": "tester", "bot": False}, "id": "r1"},
+                    {
+                        "content": "deny",
+                        "author": {"id": "u1", "username": "tester", "bot": False},
+                        "id": "r1",
+                        "message_reference": {"message_id": "msg123"},
+                    },
                 ]
             return {}
 
@@ -251,7 +261,12 @@ class TestApprovalFlowAsync:
                 poll_count["n"] += 1
                 if poll_count["n"] <= 2:
                     return [{"content": "yes", "author": {"id": "b1", "bot": True}, "id": "r1"}]
-                return [{"content": "yes", "author": {"id": "u1", "username": "human", "bot": False}, "id": "r2"}]
+                return [{
+                    "content": "yes",
+                    "author": {"id": "u1", "username": "human", "bot": False},
+                    "id": "r2",
+                    "message_reference": {"message_id": "msg123"},
+                }]
             return {}
 
         async def mock_update(*a, **kw):

@@ -232,10 +232,7 @@ _SPECIAL_COMMANDS = {
 }
 
 
-def _wrapper_available() -> bool:
-    """Return True when the ``praisonai`` wrapper package is importable."""
-    import importlib.util as _importlib_util
-    return _importlib_util.find_spec("praisonai") is not None
+from praisonai_code._wrapper_bridge import wrapper_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -249,7 +246,7 @@ class LazyCommandGroup(TyperGroup):
         # Add lazy-loaded commands. Wrapper-only commands are advertised only when
         # the ``praisonai`` wrapper is installed, so a standalone ``praisonai-code``
         # install does not surface commands it cannot resolve.
-        wrapper_ok = _wrapper_available()
+        wrapper_ok = wrapper_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if wrapper_ok or name not in _WRAPPER_COMMANDS
@@ -279,7 +276,7 @@ class LazyCommandGroup(TyperGroup):
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
                 if name in _WRAPPER_COMMANDS:
-                    if not _wrapper_available():
+                    if not wrapper_available():
                         return None
                     module = importlib.import_module(f"praisonai.cli.commands.{name}")
                 else:
@@ -570,8 +567,8 @@ state = GlobalState()
 def version_callback(value: bool):
     """Show version and exit."""
     if value:
-        from praisonai.version import __version__
-        typer.echo(f"PraisonAI version {__version__}")
+        from praisonai_code._version import get_package_version
+        typer.echo(f"PraisonAI Code version {get_package_version()}")
         raise typer.Exit()
 
 

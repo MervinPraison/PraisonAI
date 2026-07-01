@@ -116,8 +116,8 @@ class RunReport:
     def __post_init__(self):
         # Get praisonai version
         try:
-            from praisonai.version import __version__
-            self.praisonai_version = __version__
+            from praisonai_code._version import get_package_version
+            self.praisonai_version = get_package_version()
         except ImportError:
             self.praisonai_version = "unknown"
         

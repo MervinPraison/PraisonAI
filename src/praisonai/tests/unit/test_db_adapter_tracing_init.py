@@ -108,7 +108,7 @@ class TestPraisonAIDBTracingInit(unittest.TestCase):
         """Test that _init_stores() can be called multiple times safely."""
         # Configure minimal database URLs
         db = self.db
-        db._state_url = "memory://"
+        db._state_url = "sqlite:///:memory:"
         
         # Mock the store creation to avoid actual dependencies
         with patch('praisonai.persistence.factory.create_state_store') as mock_create:

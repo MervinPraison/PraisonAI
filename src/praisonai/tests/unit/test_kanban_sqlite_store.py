@@ -382,16 +382,24 @@ class TestSQLiteKanbanStore:
         assert 'updated' in event_types
 
     def test_concurrent_access_simulation(self, store):
-        """Test optimistic locking prevents concurrent modifications."""
+        """Test optimistic locking raises when CAS update loses the race."""
+        from unittest.mock import MagicMock, patch
+
         task = store.create_task({'title': 'Concurrent Test'})
-        
-        # Simulate concurrent update by manually manipulating version
-        with store._get_connection() as conn:
-            conn.execute("UPDATE tasks SET version = 2 WHERE id = ?", (task.id,))
-        
-        # This update should fail due to version mismatch
-        with pytest.raises(ValueError, match="modified by another process"):
-            store.update_task(task.id, {'title': 'Concurrent Update'})
+
+        version_cursor = MagicMock()
+        version_cursor.fetchone.return_value = {'version': 1}
+        update_cursor = MagicMock()
+        update_cursor.rowcount = 0
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = [version_cursor, update_cursor]
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+
+        with patch.object(store, '_get_connection', return_value=mock_conn):
+            with pytest.raises(ValueError, match="modified by another process"):
+                store.update_task(task.id, {'title': 'Concurrent Update'})
 
 
 class TestClaimReclamation:

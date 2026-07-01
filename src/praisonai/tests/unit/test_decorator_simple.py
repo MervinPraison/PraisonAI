@@ -27,7 +27,7 @@ def test_improved_decorator():
         clear_approval_context()
         
         # Create a test function
-        @require_approval(risk_level="critical")
+        @require_approval(risk_level="high")
         def test_function(message="test"):
             return f"Function executed: {message}"
         

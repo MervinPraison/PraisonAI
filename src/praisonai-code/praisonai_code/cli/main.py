@@ -19,7 +19,9 @@ if os.environ.get('LOGLEVEL', 'INFO').upper() != 'DEBUG':
         category=RuntimeWarning
     )
 
-from praisonai.version import __version__
+from praisonai_code._version import get_package_version
+
+__version__ = get_package_version()
 import yaml
 import time
 from rich import print
@@ -277,7 +279,7 @@ def _get_autogen():
     return autogen
 
 # Configure root logging only at CLI entrypoint
-from praisonai._logging import configure_cli_logging
+from praisonai_code._logging import configure_cli_logging
 configure_cli_logging(os.environ.get('LOGLEVEL', 'WARNING') or 'WARNING')
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
@@ -502,7 +504,7 @@ class PraisonAI:
                 if subcommand == "list" or subcommand is None:
                     # List registered CLI backends
                     try:
-                        from praisonai.cli_backends import list_cli_backends
+                        from praisonai_code.cli_backends import list_cli_backends
                         backends = list_cli_backends()
                         for backend in backends:
                             print(backend)
@@ -1239,7 +1241,7 @@ class PraisonAI:
         # CLI Backend - delegate agent turns to CLI backend
         # Dynamically populate choices from registered backends
         try:
-            from praisonai.cli_backends import list_cli_backends
+            from praisonai_code.cli_backends import list_cli_backends
             cli_backend_choices = list_cli_backends() or None
         except ImportError:
             cli_backend_choices = None
@@ -4934,7 +4936,7 @@ Do NOT add any explanations or formatting."""
             # CLI Backend - delegate agent turns to external CLI tools
             if hasattr(self, 'args') and getattr(self.args, 'cli_backend', None):
                 try:
-                    from praisonai.cli_backends import resolve_cli_backend
+                    from praisonai_code.cli_backends import resolve_cli_backend
                     agent_config["cli_backend"] = resolve_cli_backend(self.args.cli_backend)
                 except Exception as e:
                     self.logger.warning(f"Failed to resolve CLI backend '{self.args.cli_backend}': {e}")

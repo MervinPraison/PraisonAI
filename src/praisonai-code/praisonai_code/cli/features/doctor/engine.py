@@ -50,8 +50,8 @@ class DoctorEngine:
         praisonaiagents_version = "unknown"
         
         try:
-            from praisonai.version import __version__ as pai_version
-            praisonai_version = pai_version
+            from praisonai_code._version import get_package_version
+            praisonai_version = get_package_version()
         except ImportError:
             pass
         

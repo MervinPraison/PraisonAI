@@ -33,12 +33,9 @@ LOGO_MINIMAL = "Praison AI"
 
 
 def get_version() -> str:
-    """Get PraisonAI version string."""
-    try:
-        from praisonai import __version__
-        return __version__
-    except Exception:
-        return "1.0.0"
+    """Get praisonai-code version string."""
+    from praisonai_code._version import get_package_version
+    return get_package_version()
 
 
 def get_logo(width: int = 80) -> str:

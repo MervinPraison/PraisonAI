@@ -21,19 +21,10 @@ LOCK_FILENAME = "runtime.json"
 
 
 def get_runtime_version() -> str:
-    """Return the PraisonAI version this runtime speaks.
+    """Return the PraisonAI version this runtime speaks."""
+    from praisonai_code._version import get_package_version
 
-    Used for the version-compat handshake: a thin client only reuses a running
-    runtime whose major version matches, otherwise the runtime is treated as
-    stale and replaced. Falls back to ``"0"`` when the version cannot be read so
-    a missing version is always considered incompatible.
-    """
-    try:
-        from praisonai.version import __version__
-
-        return str(__version__)
-    except Exception:
-        return "0"
+    return get_package_version()
 
 
 def versions_compatible(a: Optional[str], b: Optional[str]) -> bool:

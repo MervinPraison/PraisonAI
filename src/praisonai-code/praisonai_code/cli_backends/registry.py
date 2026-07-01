@@ -8,17 +8,15 @@ Plugin registry for CLI backend implementations following AGENTS.md patterns:
 
 import threading
 from typing import Dict, Callable, Any, Optional, Union
-from praisonai._registry import PluginRegistry
+from praisonai_code._registry import PluginRegistry
 
 # CLI Backend Registry using canonical PluginRegistry
 def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:
-    """Get built-in CLI backend loaders."""
+    """Get built-in CLI backend loaders (return backend class)."""
     def claude_loader():
-        def factory():
-            from .claude import ClaudeCodeBackend
-            return ClaudeCodeBackend()
-        return factory
-    
+        from .claude import ClaudeCodeBackend
+        return ClaudeCodeBackend
+
     return {
         "claude-code": claude_loader
     }
@@ -47,12 +45,8 @@ def register_cli_backend(backend_id: str, factory: Callable[[], Any]) -> None:
         backend_id: Unique identifier (e.g., "claude-code", "codex-cli") 
         factory: Factory function that returns a CliBackendProtocol instance
     """
-    # Wrap factory in a loader function for PluginRegistry
-    def factory_loader():
-        return factory
-    
     registry = _get_cli_backend_registry()
-    registry.register(backend_id, factory_loader)
+    registry.register(backend_id, factory)
 
 
 def list_cli_backends() -> list[str]:
@@ -78,17 +72,14 @@ def resolve_cli_backend(
         ValueError: If backend_id is not registered
     """
     registry = _get_cli_backend_registry()
-    
-    try:
-        # Get the factory loader and create the factory
-        factory_loader = registry.resolve(backend_id)
-        factory = factory_loader()
-    except ValueError:
+
+    # Only rewrite the error for a genuinely unknown ID; let real loader/
+    # constructor failures propagate with their original, actionable message.
+    if backend_id.lower() not in registry.list_all_names():
         available = registry.list_names()
         raise ValueError(f"Unknown CLI backend: {backend_id}. Available: {available}")
-    
-    # Create instance with factory
-    backend = factory()
+
+    backend = registry.create(backend_id)
     
     # Apply overrides if provided
     if overrides:

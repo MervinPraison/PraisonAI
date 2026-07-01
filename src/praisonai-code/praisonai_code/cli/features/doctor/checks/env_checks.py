@@ -63,14 +63,15 @@ def check_python_version(config: DoctorConfig) -> CheckResult:
 def check_praisonai_package(config: DoctorConfig) -> CheckResult:
     """Check praisonai package is installed."""
     try:
-        from praisonai.version import __version__
+        from praisonai_code._version import get_package_version
+        version = get_package_version()
         return CheckResult(
             id="praisonai_package",
             title="PraisonAI Package",
             category=CheckCategory.ENVIRONMENT,
             status=CheckStatus.PASS,
-            message=f"praisonai {__version__} installed",
-            metadata={"version": __version__},
+            message=f"praisonai-code {version} installed",
+            metadata={"version": version},
         )
     except ImportError as e:
         return CheckResult(

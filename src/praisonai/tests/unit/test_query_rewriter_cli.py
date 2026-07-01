@@ -153,37 +153,38 @@ class TestHandleDirectPromptWithRewrite:
     def test_applies_rewrite_before_agent(self):
         """Test query is rewritten before passing to agent."""
         from praisonai.cli import PraisonAI
-        
+
         praison = PraisonAI()
         praison.args = argparse.Namespace(
             query_rewrite=True,
             rewrite_tools=None,
             verbose=False,
-            llm=None
+            llm=None,
+            no_rules=True,
+            profile=False,
+            workflow=None,
+            no_tools=True,
         )
-        
-        # Mock the agent and its start method
+
         mock_agent = MagicMock()
-        mock_agent.start.return_value = "result"
-        
+        mock_agent.run.return_value = "result"
+
         with patch.object(praison, '_rewrite_query_if_enabled', return_value="rewritten prompt") as mock_rewrite:
             with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
-                # Mock praisonaiagents and all its submodules
-                mock_praisonaiagents = MagicMock()
-                mock_agent = MagicMock()
-                mock_agent.start.return_value = "result"
-                mock_praisonaiagents.Agent = MagicMock(return_value=mock_agent)
-                mock_praisonaiagents.approval = MagicMock()
-                
-                with patch.dict('sys.modules', {
-                    'praisonaiagents': mock_praisonaiagents,
-                    'praisonaiagents.approval': mock_praisonaiagents.approval,
-                    'praisonaiagents.output.status': MagicMock(),
-                }):
-                    praison.handle_direct_prompt("original prompt")
-                    
-                    # Verify rewrite was called
+                with patch('praisonaiagents.Agent', return_value=mock_agent):
+                    with patch.object(praison, '_load_interactive_tools', return_value=[]):
+                        praison.handle_direct_prompt("original prompt")
+
                     mock_rewrite.assert_called_once_with("original prompt")
+
+                    # The rewritten prompt (not the original) must reach the agent.
+                    forwarded_prompts = [
+                        args[0]
+                        for _name, args, _kwargs in mock_agent.method_calls
+                        if args
+                    ]
+                    assert "rewritten prompt" in forwarded_prompts
+                    assert "original prompt" not in forwarded_prompts
 
 
 class TestToolLoading:

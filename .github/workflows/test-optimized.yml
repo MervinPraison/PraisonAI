@@ -98,10 +98,12 @@ jobs:
         /tmp/praisonai-code-standalone/bin/python -c "
         import praisonai_code
         from praisonai_code.cli.configuration.resolver import ConfigResolver
+        from praisonai_code._version import get_package_version
         import toml
         assert hasattr(ConfigResolver, '__name__')
-        print('standalone ok', praisonai_code.__version__, 'toml', toml.__version__)
+        print('standalone ok', get_package_version(), 'toml', toml.__version__)
         "
+        /tmp/praisonai-code-standalone/bin/praisonai-code --version
     
     - name: Smoke Test Summary
       if: always()
@@ -556,6 +558,76 @@ jobs:
     - name: Skip notice
       if: steps.check-key.outputs.has_key == 'false'
       run: echo "✅ Cohere tests skipped (no API key available)"
+
+  # ============================================
+  # LEGACY UNIT TESTS - Post-C6 re-enabled suite
+  # Nightly / extended tier only (~401 tests)
+  # ============================================
+  legacy-unit:
+    if: github.event_name == 'schedule' || github.event.inputs.tier == 'extended' || github.event.inputs.tier == 'nightly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install pytest pytest-asyncio pytest-timeout
+    - uses: ./.github/actions/install-monorepo-packages
+      with:
+        agents-extras: ".[all]"
+        wrapper-extras: ".[chat,code,crewai,autogen]"
+
+    - name: Run post-C6 legacy unit tests
+      env:
+        PRAISONAI_TEST_TIER: extended
+        PRAISONAI_ALLOW_NETWORK: '0'
+        PRAISONAI_ALLOW_JOB_WORKFLOWS: 'true'
+        PRAISONAI_TOOL_SAFETY: 'off'
+        OPENAI_API_KEY: 'test-key'
+      run: |
+        set -euo pipefail
+        cd src/praisonai
+        LEGACY_FILES=(
+          tests/unit/test_warm_runtime.py
+          tests/unit/test_yaml_cli_backend.py
+          tests/unit/test_tool_resolver.py
+          tests/unit/test_serve_unified.py
+          tests/unit/test_security_fixes_core.py
+          tests/unit/test_query_rewriter_cli.py
+          tests/unit/test_kanban_sqlite_store.py
+          tests/unit/test_job_workflow_agent_steps.py
+          tests/unit/test_hybrid_workflow.py
+          tests/unit/test_gateway_session.py
+          tests/unit/test_gateway_gaps.py
+          tests/unit/test_discord_approval.py
+          tests/unit/test_decorator_simple.py
+          tests/unit/test_db_adapter_tracing_init.py
+          tests/unit/test_bot_wiring.py
+          tests/unit/test_bot_history.py
+          tests/unit/test_bot_fixes.py
+          tests/unit/test_auto_lazy_loading.py
+          tests/unit/test_async_daemon_deployment.py
+          tests/unit/test_approval_interactive.py
+          tests/unit/test_approval_agent_integration.py
+          tests/unit/test_agents_yaml_validation.py
+          tests/unit/test_agent_os_wrapper.py
+          tests/unit/test_lazy_imports.py
+          tests/unit/test_profiler.py
+          tests/unit/test_profiler_advanced.py
+          tests/unit/test_serverless_postgres.py
+        )
+        python -m pytest "${LEGACY_FILES[@]}" \
+          -q --tb=line --timeout=120 --maxfail=10
 
   # ============================================
   # TEST SUMMARY

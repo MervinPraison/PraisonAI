@@ -11,21 +11,9 @@ class TestBotHistoryInjection:
     """Tests for Bot._apply_smart_defaults() history wiring."""
 
     def _make_mock_agent(self, memory=None, name="test"):
-        """Create a minimal mock Agent-like object with __name__ == 'Agent'."""
-
-        class Agent:
-            def __init__(self):
-                self.name = name
-                self.tools = []
-                self.memory = memory
-                self.chat_history = []
-                self.llm = "gpt-4o-mini"
-                self._approval_backend = None
-
-            def chat(self, prompt):
-                return f"echo: {prompt}"
-
-        return Agent()
+        """Create a real Agent instance for smart-defaults wiring."""
+        from praisonaiagents import Agent
+        return Agent(name=name, memory=memory)
 
     def _make_bot(self, agent=None, platform="telegram", config=None):
         from praisonai.bots.bot import Bot
@@ -44,12 +32,10 @@ class TestBotHistoryInjection:
 
     def test_history_not_overridden_when_memory_set(self):
         """Agent with existing memory config is NOT overridden."""
-        existing_memory = {"provider": "custom", "history": False}
-        agent = self._make_mock_agent(memory=existing_memory)
+        agent = self._make_mock_agent(memory=True)
         bot = self._make_bot(agent=agent)
         enhanced = bot._apply_smart_defaults(agent)
-        # Should keep existing memory
-        assert enhanced.memory == existing_memory
+        assert enhanced.memory is True
 
     def test_history_not_injected_for_team(self):
         """AgentTeam instances are NOT enhanced."""

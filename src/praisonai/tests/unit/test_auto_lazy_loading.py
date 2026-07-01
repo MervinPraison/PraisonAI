@@ -241,9 +241,9 @@ class TestThreadSafety:
 
         main_mod._typer_commands_cache = None
 
-        # Patch register_commands to raise
+        # Patch discovery helper to raise (register_commands is no longer called here)
         import unittest.mock as mock
-        with mock.patch("praisonai.cli.app.register_commands", side_effect=RuntimeError("boom")):
+        with mock.patch("praisonai.cli.app.get_command_names", side_effect=RuntimeError("boom")):
             result = main_mod._get_typer_commands()
 
         assert result == set(), "Should return empty set on failure"

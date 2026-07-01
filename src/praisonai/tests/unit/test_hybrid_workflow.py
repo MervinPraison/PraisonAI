@@ -204,8 +204,9 @@ class TestHybridWorkflowExecution:
 class TestHybridWorkflowRouting:
     """Test that workflow.py correctly routes to HybridWorkflowExecutor."""
 
-    def test_hybrid_type_detection(self):
+    def test_hybrid_type_detection(self, monkeypatch):
         """type: hybrid should be detected in workflow routing."""
+        monkeypatch.setenv("PRAISONAI_ALLOW_JOB_WORKFLOWS", "true")
         from praisonai.cli.features.workflow import WorkflowHandler
         
         with tempfile.TemporaryDirectory() as tmpdir:
