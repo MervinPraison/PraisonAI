@@ -17,8 +17,11 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-_LEGACY_PYTHONPATH = (
-    str(REPO_ROOT / "src" / "praisonai-agents") + ":" + str(REPO_ROOT / "src" / "praisonai")
+_LEGACY_PYTHONPATH = os.pathsep.join(
+    [
+        str(REPO_ROOT / "src" / "praisonai-agents"),
+        str(REPO_ROOT / "src" / "praisonai"),
+    ]
 )
 
 
@@ -44,7 +47,7 @@ def _run_typer_cli(*args: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, "-m", "praisonai", *args],
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=25,
         cwd=str(REPO_ROOT),
         env=_legacy_env(),
     )

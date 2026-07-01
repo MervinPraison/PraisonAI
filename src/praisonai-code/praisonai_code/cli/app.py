@@ -256,6 +256,9 @@ class LazyCommandGroup(TyperGroup):
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
                 if name in _WRAPPER_COMMANDS:
+                    import importlib.util as _importlib_util
+                    if _importlib_util.find_spec("praisonai") is None:
+                        return None
                     module = importlib.import_module(f"praisonai.cli.commands.{name}")
                 else:
                     module = importlib.import_module(module_path, __package__)
