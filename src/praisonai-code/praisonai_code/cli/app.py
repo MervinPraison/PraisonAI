@@ -126,7 +126,6 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "diag": (".commands.diag", "app", "Diagnostics export"),
     "doctor": (".commands.doctor", "app", "Health checks and diagnostics"),
     "setup": (".commands.setup", "app", "Interactive onboarding / configuration wizard"),
-    "onboard": (".commands.onboard", "app", "Messaging bot onboarding wizard"),
     "obs": (".commands.obs", "app", "Observability diagnostics and management"),
     "validate": (".commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
@@ -135,7 +134,6 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "daemon": (".commands.daemon", "app", "Warm local runtime (keeps MCP/provider clients hot)"),
     "attach": (".commands.attach", "app", "Attach to a live session on the warm runtime"),
     "schedule": (".commands.schedule", "app", "Scheduler management"),
-    "kanban": (".commands.kanban", "app", "Kanban task management"),
     "run": (".commands.run", "app", "Run agents"),
     "checkpoint": (".commands.checkpoint", "app", "File-level checkpoint management (save/restore/diff)"),
     "profile": (".commands.profile", "app", "Performance profiling and diagnostics"),
@@ -185,21 +183,30 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
     "models": (".commands.models", "app", "List and describe available models"),
     
-    # Moltbot-inspired commands
-    "bot": (".commands.bot", "app", "Messaging bots with full agent capabilities"),
-    "gateway": (".commands.gateway", "app", "Multi-bot WebSocket gateway server"),
-    "pairing": (".commands.pairing", "app", "Manage bot user pairing"),
-    "identity": (".commands.identity", "app", "Manage cross-platform user identity links"),
     "browser": (".commands.browser", "app", "Browser control for agent automation"),
     "plugins": (".commands.plugins", "app", "Plugin management and inspection"),
     "sandbox": (".commands.sandbox", "app", "Sandbox container management"),
-    "claw": (".commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
     "flow": (".commands.flow", "app", "Visual workflow builder (Langflow)"),
-    "dashboard": (".commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
     "langfuse": (".commands.langfuse", "app", "🔍 Langfuse observability platform"),
     "langextract": (".commands.langextract", "app", "🧠 Langextract visual trace layer"),
     "port": (".commands.port", "app", "🔌 Manage port usage and resolve conflicts"),
     "up": (".commands.up", "app", "🚀 Start unified PraisonAI stack (Langfuse + Langflow)"),
+}
+
+# Bot/channel commands that intentionally stay in the main ``praisonai``
+# package (they import ``praisonai.bots`` / ``praisonai.gateway``). They are
+# resolved with *absolute* module paths so ``praisonai_code`` never carries a
+# static dependency on ``praisonai`` — the import happens lazily at command
+# invocation time only.
+_BOT_COMMANDS: Dict[str, Tuple[str, str, str]] = {
+    "bot": ("praisonai.cli.commands.bot", "app", "Messaging bots with full agent capabilities"),
+    "gateway": ("praisonai.cli.commands.gateway", "app", "Multi-bot WebSocket gateway server"),
+    "onboard": ("praisonai.cli.commands.onboard", "app", "Messaging bot onboarding wizard"),
+    "pairing": ("praisonai.cli.commands.pairing", "app", "Manage bot user pairing"),
+    "identity": ("praisonai.cli.commands.identity", "app", "Manage cross-platform user identity links"),
+    "kanban": ("praisonai.cli.commands.kanban", "app", "Kanban task management"),
+    "claw": ("praisonai.cli.commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
+    "dashboard": ("praisonai.cli.commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
 }
 
 # Special commands that need custom handling
@@ -219,6 +226,7 @@ class LazyCommandGroup(TyperGroup):
         
         # Add lazy-loaded commands
         commands.update(_LAZY_COMMANDS.keys())
+        commands.update(_BOT_COMMANDS.keys())
         commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add special inline commands
@@ -244,6 +252,21 @@ class LazyCommandGroup(TyperGroup):
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
                 module = importlib.import_module(module_path, __package__)
+                sub_app = getattr(module, attr_name)
+                if isinstance(sub_app, click.Command):
+                    return sub_app
+                return typer_get_command(sub_app)
+            except (ImportError, AttributeError) as e:
+                typer.echo(f"Error loading command '{name}': {e}", err=True)
+                return None
+
+        # Check bot/channel commands that stayed in the main ``praisonai``
+        # package. These use absolute module paths and are imported lazily so
+        # ``praisonai_code`` keeps no static dependency on ``praisonai``.
+        if name in _BOT_COMMANDS:
+            module_path, attr_name, _ = _BOT_COMMANDS[name]
+            try:
+                module = importlib.import_module(module_path)
                 sub_app = getattr(module, attr_name)
                 if isinstance(sub_app, click.Command):
                     return sub_app
@@ -723,6 +746,8 @@ def get_command_names():
     commands that are not in ``_LAZY_COMMANDS`` are added explicitly.
     """
     names = set(_LAZY_COMMANDS.keys())
+    # Bot/channel commands that stayed in the main ``praisonai`` package
+    names.update(_BOT_COMMANDS.keys())
     # Special commands with custom handling (tui, queue)
     names.update(_SPECIAL_COMMANDS.keys())
     # Inline special commands handled outside the registries

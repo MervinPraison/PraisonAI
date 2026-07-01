@@ -414,5 +414,70 @@ class TestCommandRegistryNoDrift(unittest.TestCase):
         )
 
 
+class TestBotCommandRouting(unittest.TestCase):
+    """Bot/channel commands stay in ``praisonai`` but must still be routed.
+
+    During the ``praisonai-code`` extraction (issue #2512, step C6) the
+    agentic CLI moved to ``praisonai_code`` while nine bot/channel commands
+    intentionally stayed in the main ``praisonai`` package (they import
+    ``praisonai.bots`` / ``praisonai.gateway``). The lazy registry in
+    ``praisonai_code.cli.app`` must therefore resolve these commands via
+    *absolute* module paths (``praisonai.cli.commands.*``) — a regression
+    where they kept relative paths (``.commands.gateway``) made
+    ``praisonai gateway/bot/onboard/...`` raise ``ModuleNotFoundError``.
+    """
+
+    BOT_COMMANDS = {
+        "bot",
+        "gateway",
+        "onboard",
+        "pairing",
+        "identity",
+        "kanban",
+        "claw",
+        "dashboard",
+    }
+
+    def test_bot_commands_advertised(self):
+        from praisonai.cli import app as cli_app
+
+        routing = cli_app.get_command_names()
+        missing = self.BOT_COMMANDS - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Bot commands not advertised by get_command_names(): {missing}",
+        )
+
+    def test_bot_commands_use_absolute_main_paths(self):
+        from praisonai.cli import app as cli_app
+
+        bot_registry = cli_app._BOT_COMMANDS
+        missing = self.BOT_COMMANDS - set(bot_registry.keys())
+        self.assertEqual(
+            missing,
+            set(),
+            f"Bot commands missing from _BOT_COMMANDS registry: {missing}",
+        )
+        for name in self.BOT_COMMANDS:
+            module_path = bot_registry[name][0]
+            self.assertTrue(
+                module_path.startswith("praisonai.cli.commands."),
+                f"Bot command '{name}' must use an absolute main-package path, "
+                f"got {module_path!r}",
+            )
+
+    def test_bot_commands_not_duplicated_in_lazy_registry(self):
+        from praisonai.cli import app as cli_app
+
+        overlap = self.BOT_COMMANDS & set(cli_app._LAZY_COMMANDS.keys())
+        self.assertEqual(
+            overlap,
+            set(),
+            f"Bot commands duplicated in _LAZY_COMMANDS (would route to "
+            f"praisonai_code and fail): {overlap}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
