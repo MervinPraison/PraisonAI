@@ -21,8 +21,12 @@ import praisonai_code.cli_backends as _cli_backends
 for _name in ("registry", "claude"):
     _mod = __import__(f"praisonai_code.cli_backends.{_name}", fromlist=[_name])
     _sys.modules[f"{__name__}.{_name}"] = _mod
+    # Bind on the package object too so ``import praisonai.cli_backends.<sub>``
+    # followed by attribute access works (sys.modules aliasing alone does not
+    # set the parent-package attribute when pre-inserted).
+    globals()[_name] = _mod
 
-del _sys, _name
+del _sys, _name, _mod
 
 
 def __getattr__(name: str):

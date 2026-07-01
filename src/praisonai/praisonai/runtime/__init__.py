@@ -20,8 +20,12 @@ import praisonai_code.runtime as _runtime
 for _name in ("descriptor", "client", "server", "__main__"):
     _mod = __import__(f"praisonai_code.runtime.{_name}", fromlist=[_name])
     _sys.modules[f"{__name__}.{_name}"] = _mod
+    # Bind on the package object too so ``import praisonai.runtime.<sub>``
+    # followed by attribute access works (sys.modules aliasing alone does not
+    # set the parent-package attribute when pre-inserted).
+    globals()[_name] = _mod
 
-del _sys, _name
+del _sys, _name, _mod
 
 
 def __getattr__(name: str):

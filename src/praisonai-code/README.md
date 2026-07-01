@@ -29,8 +29,20 @@ incrementally in steps C2–C6 (see issue #2512):
 
 ```
 praisonai (main)  →  depends on  praisonai-code
-praisonai-code    →  depends on  praisonaiagents ONLY (not praisonai)
+praisonai-code    →  depends on  praisonaiagents (core SDK)
 ```
+
+`praisonai-code` also pulls in its own third-party runtime deps (rich, typer,
+click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
+`pyproject.toml`). The rules above govern the **inter-package** direction.
+
+> **Migration note (C1):** `cli_backends/registry.py` still imports
+> `PluginRegistry` from the `praisonai` main package (same "keep main-package
+> import" pattern as `runtime/descriptor.py`'s `from praisonai.version`).
+> `praisonai-code` is wired via an editable path dependency and `praisonai` is
+> always present at runtime during migration, so this residual back-import is a
+> deliberate C1 tradeoff to be removed in a later step — not a standalone-publish
+> guarantee yet.
 
 Backward compatibility is preserved via PEP 562 shims at the old
 `praisonai.*` import paths, so `pip install praisonai` and
