@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from typing import ClassVar, FrozenSet
 from unittest import mock
 
 import praisonai.__main__ as dispatcher
@@ -412,6 +413,115 @@ class TestCommandRegistryNoDrift(unittest.TestCase):
             set(),
             f"Previously-drifted commands not found in routing set: {missing}",
         )
+
+
+class TestBotCommandRouting(unittest.TestCase):
+    """Bot/channel commands stay in ``praisonai`` but must still be routed.
+
+    During the ``praisonai-code`` extraction (issue #2512, step C6) the
+    agentic CLI moved to ``praisonai_code`` while eight bot/channel commands
+    intentionally stayed in the main ``praisonai`` package (they import
+    ``praisonai.bots`` / ``praisonai.gateway``). Their entries remain in
+    ``_LAZY_COMMANDS`` (so ``--help`` advertises them) but are re-routed at
+    invocation time via ``_WRAPPER_COMMANDS`` to the *absolute*
+    ``praisonai.cli.commands.*`` module path. A regression where they were
+    imported with the relative ``.commands.*`` path made
+    ``praisonai gateway/bot/onboard/...`` raise ``ModuleNotFoundError`` because
+    those modules live in ``praisonai`` — not ``praisonai_code``.
+    """
+
+    BOT_COMMANDS: ClassVar[FrozenSet[str]] = frozenset({
+        "bot",
+        "gateway",
+        "onboard",
+        "pairing",
+        "identity",
+        "kanban",
+        "claw",
+        "dashboard",
+    })
+
+    def test_bot_commands_advertised(self):
+        from praisonai.cli import app as cli_app
+
+        routing = cli_app.get_command_names()
+        missing = self.BOT_COMMANDS - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Bot commands not advertised by get_command_names(): {missing}",
+        )
+
+    def test_bot_commands_registered_as_wrapper_commands(self):
+        from praisonai.cli import app as cli_app
+
+        missing = self.BOT_COMMANDS - set(cli_app._WRAPPER_COMMANDS)
+        self.assertEqual(
+            missing,
+            set(),
+            f"Bot commands missing from _WRAPPER_COMMANDS registry: {missing}",
+        )
+
+    def test_bot_commands_present_in_lazy_registry(self):
+        from praisonai.cli import app as cli_app
+
+        missing = self.BOT_COMMANDS - set(cli_app._LAZY_COMMANDS.keys())
+        self.assertEqual(
+            missing,
+            set(),
+            f"Bot commands missing from _LAZY_COMMANDS (would not be advertised "
+            f"in --help): {missing}",
+        )
+
+    def test_wrapper_commands_reroute_to_absolute_main_path(self):
+        """``get_command`` must import ``_WRAPPER_COMMANDS`` via the absolute
+        ``praisonai.cli.commands.<name>`` path, never the relative one that
+        would resolve inside ``praisonai_code`` and fail."""
+        import importlib
+        from unittest import mock
+        from praisonai.cli import app as cli_app
+
+        group = cli_app.LazyCommandGroup(name="praisonai")
+        ctx = mock.MagicMock()
+
+        real_import_module = importlib.import_module
+
+        for name in self.BOT_COMMANDS:
+            imported = []
+
+            def _spy(module_path, package=None, _imported=imported):
+                _imported.append(module_path)
+                # Return a stub module exposing an ``app`` attribute so
+                # get_command proceeds without importing the real command.
+                return mock.MagicMock()
+
+            # Ensure the parent lookup and typer conversion are inert so the
+            # test isolates the module-path routing decision.
+            with mock.patch.object(cli_app.TyperGroup, "get_command",
+                                   return_value=None), \
+                    mock.patch.object(cli_app, "typer_get_command",
+                                      return_value=mock.MagicMock()), \
+                    mock.patch.object(importlib, "import_module",
+                                      side_effect=_spy), \
+                    mock.patch.object(importlib.util, "find_spec",
+                                      return_value=object()):
+                cli_app.LazyCommandGroup.get_command(group, ctx, name)
+
+            self.assertIn(
+                f"praisonai.cli.commands.{name}",
+                imported,
+                f"Bot command '{name}' was not re-routed to the absolute "
+                f"'praisonai.cli.commands.{name}' path; imports seen: {imported}",
+            )
+            self.assertNotIn(
+                f".commands.{name}",
+                imported,
+                f"Bot command '{name}' used the relative '.commands.{name}' path "
+                f"which resolves to praisonai_code and fails.",
+            )
+
+        # Sanity: real import machinery is restored.
+        self.assertIs(importlib.import_module, real_import_module)
 
 
 if __name__ == "__main__":
