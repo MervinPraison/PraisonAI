@@ -46,7 +46,7 @@ def test_write_file_aborts_when_stale(_auto_approve_write):
         target.write_text("v1", encoding="utf-8")
 
         # Read records the hash; an external change then makes it stale.
-        assert file_tools.read_file("s.txt") == "v1"
+        assert file_tools.read_file("s.txt", line_numbers=False) == "v1"
         target.write_text("external change", encoding="utf-8")
 
         # Default write must refuse and leave the file untouched.
@@ -97,6 +97,112 @@ def test_filetools_read_then_edittools_edit_crlf_not_stale(_auto_approve_write):
         reset_yaml_approved_tools(token)
 
 
+def test_read_file_line_numbers_by_default():
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "code.py"
+        target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+
+        out = file_tools.read_file("code.py")
+        lines = out.split("\n")
+        assert lines[0].endswith("\talpha")
+        assert lines[0].strip().startswith("1")
+        assert lines[1].endswith("\tbeta")
+        assert lines[2].endswith("\tgamma")
+
+
+def test_read_file_raw_whole_file_unchanged():
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "c.txt"
+        target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+        # line_numbers=False with no window returns the exact original content.
+        assert file_tools.read_file("c.txt", line_numbers=False) == "one\ntwo\nthree\n"
+
+
+def test_read_file_offset_and_limit_window():
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "big.txt"
+        target.write_text("\n".join(f"line{i}" for i in range(1, 11)) + "\n",
+                          encoding="utf-8")
+
+        out = file_tools.read_file("big.txt", offset=3, limit=2, line_numbers=False)
+        assert out.startswith("line3\nline4")
+        # More lines remain after the window -> paging hint present.
+        assert "call again with offset=5" in out
+
+        numbered = file_tools.read_file("big.txt", offset=3, limit=2)
+        body_lines = numbered.split("\n")
+        assert body_lines[0].endswith("\tline3")
+        assert body_lines[0].strip().startswith("3")
+        assert body_lines[1].endswith("\tline4")
+
+        # A window that reaches EOF has no paging hint.
+        tail = file_tools.read_file("big.txt", offset=9, limit=2, line_numbers=False)
+        assert tail == "line9\nline10"
+
+
+def test_read_file_truncation_hint():
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "big.txt"
+        target.write_text("\n".join(f"line{i}" for i in range(1, 11)) + "\n",
+                          encoding="utf-8")
+
+        out = file_tools.read_file("big.txt", offset=1, limit=4)
+        assert "showing lines 1-4 of 10" in out
+        assert "offset=5" in out
+
+
+def test_read_file_default_line_cap():
+    from praisonaiagents.tools import file_tools as ft_module
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "huge.txt"
+        n = ft_module.DEFAULT_MAX_LINES + 50
+        target.write_text("\n".join(f"l{i}" for i in range(n)) + "\n",
+                          encoding="utf-8")
+
+        out = file_tools.read_file("huge.txt")
+        assert f"call again with offset={ft_module.DEFAULT_MAX_LINES + 1}" in out
+
+
+def test_read_file_per_line_char_cap():
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "long.txt"
+        target.write_text("x" * 5000 + "\nshort\n", encoding="utf-8")
+
+        out = file_tools.read_file("long.txt", max_line_chars=100)
+        assert "(line truncated)" in out
+
+
 def test_write_file_fails_closed_when_verify_unreadable(_auto_approve_write, monkeypatch):
     # Regression: if the staleness verification re-read raises, the write must
     # fail closed (refuse) rather than blindly clobbering the file.
@@ -108,7 +214,7 @@ def test_write_file_fails_closed_when_verify_unreadable(_auto_approve_write, mon
         file_tools = FileTools(workspace=workspace)
         target = Path(tmpdir) / "s.txt"
         target.write_text("v1", encoding="utf-8")
-        assert file_tools.read_file("s.txt") == "v1"
+        assert file_tools.read_file("s.txt", line_numbers=False) == "v1"
 
         def _boom(*args, **kwargs):
             raise OSError("cannot read for verification")

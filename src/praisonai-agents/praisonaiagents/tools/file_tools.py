@@ -20,6 +20,39 @@ import logging
 from ..approval import require_approval
 from . import _file_locks
 
+# Default cap on the number of lines returned by a single ``read_file`` call
+# when no explicit ``limit`` is given.  Keeps an unbounded whole-file read from
+# silently blowing the context budget; the model is told how to page for more.
+DEFAULT_MAX_LINES = 2000
+
+# Default cap on characters rendered per line so one pathologically long line
+# cannot dominate the window.
+DEFAULT_MAX_LINE_CHARS = 2000
+
+
+def _render_with_line_numbers(lines, start_index, max_line_chars):
+    """Render ``lines`` with a right-aligned 1-based line-number gutter.
+
+    Args:
+        lines: The window of lines to render.
+        start_index: 0-based index of the first line within the full file.
+        max_line_chars: Truncate any single line longer than this.
+
+    Returns:
+        str: Line-numbered content (e.g. ``   42\\tconst x = ...``).
+    """
+    if not lines:
+        return ""
+    last_number = start_index + len(lines)
+    width = max(len(str(last_number)), 6)
+    rendered = []
+    for offset, line in enumerate(lines):
+        if max_line_chars and len(line) > max_line_chars:
+            line = line[:max_line_chars] + "... (line truncated)"
+        rendered.append(f"{str(start_index + offset + 1).rjust(width)}\t{line}")
+    return "\n".join(rendered)
+
+
 class FileTools:
     """Tools for file operations including read, write, list, and information."""
     
@@ -95,16 +128,33 @@ class FileTools:
         content = raw_bytes.decode(encoding)
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-    def read_file(self, filepath: str, encoding: str = 'utf-8') -> str:
+    def read_file(self, filepath: str, encoding: str = 'utf-8',
+                  offset: Optional[int] = None, limit: Optional[int] = None,
+                  line_numbers: bool = True,
+                  max_line_chars: int = DEFAULT_MAX_LINE_CHARS) -> str:
         """
-        Read content from a file.
-        
+        Read content from a file (coding-grade, windowed + line-numbered).
+
+        By default the content is returned with a right-aligned line-number
+        gutter so a coding agent can reference exact lines for subsequent
+        edits, and a sensible line cap keeps a whole-file read from blowing the
+        context budget.  Pass ``line_numbers=False`` (with no ``offset``/
+        ``limit``) to get the exact plain-string content as before.
+
         Args:
             filepath: Path to the file
             encoding: File encoding (default: utf-8)
-            
+            offset: 1-based first line to read (default: start of file)
+            limit: Maximum number of lines to read (default: up to
+                ``DEFAULT_MAX_LINES`` lines from ``offset``)
+            line_numbers: Prefix each line with its 1-based number (default:
+                True).  Set False to return raw content.
+            max_line_chars: Truncate any single line longer than this many
+                characters (default: ``DEFAULT_MAX_LINE_CHARS``)
+
         Returns:
-            str: Content of the file
+            str: Content of the requested window.  When truncated, a trailing
+            hint tells the model how to page for the rest via ``offset``.
         """
         try:
             # Validate path to prevent traversal attacks
@@ -124,7 +174,40 @@ class FileTools:
                         safe_path, self._content_hash(safe_path, encoding))
                 except Exception:
                     pass
-            return data
+
+            # Fast path: preserve the exact legacy shape when the caller asks
+            # for raw content of the whole file (no window requested).
+            if not line_numbers and offset is None and limit is None:
+                return data
+
+            lines = data.splitlines()
+            total = len(lines)
+
+            # Clamp the 1-based offset into range; treat <=0 / None as start.
+            start = (offset - 1) if offset and offset > 0 else 0
+            if start > total:
+                start = total
+            if limit is not None and limit >= 0:
+                end = start + limit
+            else:
+                end = start + DEFAULT_MAX_LINES
+            end = min(end, total)
+
+            window = lines[start:end]
+            if line_numbers:
+                body = _render_with_line_numbers(window, start, max_line_chars)
+            else:
+                body = "\n".join(window)
+
+            # Tell the model how to page when the window does not reach EOF.
+            if end < total:
+                if body:
+                    body += "\n"
+                body += (
+                    f"... (showing lines {start + 1}-{end} of {total}; "
+                    f"call again with offset={end + 1} for more)"
+                )
+            return body
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {str(e)}"
             logging.error(error_msg)
