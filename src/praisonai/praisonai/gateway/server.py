@@ -4726,6 +4726,34 @@ class WebSocketGateway:
                 f"(max_concurrent_runs/queue_depth must be integers): {e}"
             ) from e
         _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
+
+        # Issue #2531: single reliability posture. A ``reliability`` preset
+        # (CLI ``--reliability`` override wins over ``gateway.reliability``)
+        # composes the drain window + admission ceiling in one switch, filling
+        # only the fields left unset above so explicit ``drain_timeout`` /
+        # ``max_concurrent_runs`` / ``overflow_policy`` always override it.
+        _reliability = getattr(self, "_reliability_override", None)
+        if _reliability is None:
+            _reliability = gw_cfg.get("reliability")
+        try:
+            from ..bots._reliability import resolve_reliability
+
+            _resolved = resolve_reliability(
+                _reliability,
+                drain_timeout=drain_timeout_cfg,
+                max_concurrent_runs=_max_runs,
+                queue_depth=_queue_depth,
+                overflow_policy=_overflow,
+            )
+            drain_timeout_cfg = _resolved.drain_timeout
+            _max_runs = _resolved.max_concurrent_runs
+            _queue_depth = _resolved.queue_depth
+            _overflow = _resolved.overflow_policy
+        except ValueError as e:
+            # A typo in the reliability profile must fail fast rather than
+            # silently degrade robustness.
+            raise ValueError(f"Invalid gateway reliability config: {e}") from e
+
         from ..bots._admission import build_admission_gate
         self._admission_gate = build_admission_gate(
             max_concurrent_runs=_max_runs,

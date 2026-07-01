@@ -116,6 +116,7 @@ class GatewayHandler:
         max_concurrent_runs: Optional[int] = None,
         queue_depth: Optional[int] = None,
         overflow_policy: Optional[str] = None,
+        reliability: Optional[str] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -144,6 +145,11 @@ class GatewayHandler:
             overflow_policy: Optional overflow behaviour when the queue is full
                 (#2454): ``reject`` | ``queue`` | ``shed_oldest``. Overrides
                 ``gateway.overflow_policy``.
+            reliability: Optional named reliability posture (#2531):
+                ``production`` | ``default`` | ``off``. Composes graceful drain
+                + inbound admission in one switch. Overrides
+                ``gateway.reliability``; explicit ``--drain-timeout`` /
+                ``--max-concurrent-runs`` still win.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -191,6 +197,9 @@ class GatewayHandler:
                 self._gateway._queue_depth_override = queue_depth
             if overflow_policy is not None:
                 self._gateway._overflow_policy_override = overflow_policy
+            # CLI --reliability preset overrides gateway.reliability in YAML (#2531)
+            if reliability is not None:
+                self._gateway._reliability_override = reliability
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
@@ -219,16 +228,36 @@ class GatewayHandler:
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
         self._gateway = WebSocketGateway(config=config)
+        # Resolved graceful-drain window for this no-config run. Defaults to the
+        # explicit ``--drain-timeout`` (``None`` → gateway default) and is
+        # replaced below by the ``--reliability`` preset's drain when a preset
+        # is selected, so the shutdown path honours the preset window (#2531).
+        resolved_drain_timeout: Optional[float] = drain_timeout
         # CLI admission-control flags also apply in no-config mode (#2454):
         # build a shared gate directly so `--max-concurrent-runs` is honoured
-        # even without a gateway.yaml.
-        if max_concurrent_runs is not None:
+        # even without a gateway.yaml. A ``--reliability`` preset (#2531) can
+        # supply the admission ceiling too, so build the gate whenever either
+        # is given, letting the preset fill fields the explicit flags omit.
+        if max_concurrent_runs is not None or reliability is not None:
             try:
                 from praisonai.bots._admission import build_admission_gate
-                self._gateway._admission_gate = build_admission_gate(
-                    max_concurrent_runs=max_concurrent_runs,
+                from praisonai.bots._reliability import resolve_reliability
+
+                # Pass the explicit ``--drain-timeout`` through so it still wins
+                # over the preset; capture the resolved window for shutdown so
+                # ``--reliability production`` actually drains (#2531).
+                _resolved = resolve_reliability(
+                    reliability,
+                    drain_timeout=drain_timeout,
+                    max_concurrent_runs=max_concurrent_runs or 0,
                     queue_depth=queue_depth or 0,
                     overflow_policy=overflow_policy or "reject",
+                )
+                resolved_drain_timeout = _resolved.drain_timeout
+                self._gateway._admission_gate = build_admission_gate(
+                    max_concurrent_runs=_resolved.max_concurrent_runs,
+                    queue_depth=_resolved.queue_depth,
+                    overflow_policy=_resolved.overflow_policy,
                 )
             except Exception as e:
                 # Invalid admission-control config is unrecoverable until the
@@ -255,7 +284,13 @@ class GatewayHandler:
             asyncio.run(self._gateway.start())
         except KeyboardInterrupt:
             print("\nStopping gateway...")
-            asyncio.run(self._gateway.stop())
+            # Honour the resolved graceful-drain window (explicit --drain-timeout
+            # or the --reliability preset) so a no-config restart doesn't cut
+            # in-flight turns (#2531). ``None`` falls back to the stop default.
+            if resolved_drain_timeout is not None:
+                asyncio.run(self._gateway.stop(drain_timeout=resolved_drain_timeout))
+            else:
+                asyncio.run(self._gateway.stop())
             return GATEWAY_OK_EXIT_CODE
         except FatalConfigError as e:
             print(f"Fatal config error: {e}")
@@ -587,6 +622,12 @@ def handle_gateway_command(args) -> int:
             choices=["reject", "queue", "shed_oldest"],
             help="Behaviour when the wait queue is full (default: reject; #2454)",
         )
+        start_parser.add_argument(
+            "--reliability", dest="reliability", default=None,
+            choices=["production", "default", "off"],
+            help="Named reliability posture composing drain + admission in one "
+                 "switch (#2531)",
+        )
         
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -654,6 +695,7 @@ def handle_gateway_command(args) -> int:
             max_concurrent_runs=getattr(args, "max_concurrent_runs", None),
             queue_depth=getattr(args, "queue_depth", None),
             overflow_policy=getattr(args, "overflow_policy", None),
+            reliability=getattr(args, "reliability", None),
         )
     elif subcommand == "status":
         handler.status(
