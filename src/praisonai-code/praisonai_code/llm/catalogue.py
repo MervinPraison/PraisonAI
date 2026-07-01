@@ -247,8 +247,8 @@ class ModelCatalogue:
                     provider=provider,
                     max_context=info.get("max_tokens") or info.get("max_input_tokens"),
                     max_output=info.get("max_output_tokens"),
-                    input_cost=info.get("input_cost_per_token") * 1000 if info.get("input_cost_per_token") else None,
-                    output_cost=info.get("output_cost_per_token") * 1000 if info.get("output_cost_per_token") else None,
+                    input_cost=info.get("input_cost_per_token") * 1000 if info.get("input_cost_per_token") is not None else None,
+                    output_cost=info.get("output_cost_per_token") * 1000 if info.get("output_cost_per_token") is not None else None,
                     supports_tools=supports_tools,
                     supports_vision=supports_vision,
                     supports_reasoning=supports_reasoning,
@@ -444,13 +444,10 @@ class ModelCatalogue:
         Raises:
             ValueError: If model ID is invalid with suggestions
         """
-        # Check if valid
-        if self.is_valid_model(model_id):
-            # Return the correctly cased version
-            info = self.describe_model(model_id)
-            if info:
-                return info["id"]
-            return model_id
+        # Check if valid (single lookup); return the correctly cased ID
+        info = self.describe_model(model_id)
+        if info:
+            return info["id"]
         
         # Invalid - provide suggestions
         suggestions = self.get_suggestions(model_id)
