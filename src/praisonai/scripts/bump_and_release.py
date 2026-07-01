@@ -237,14 +237,14 @@ def validate_dependencies(
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if use_frozen:
-        lock_cmd = ["uv", "lock", "--frozen"]
-    elif agents_version or code_version:
+    if agents_version or code_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
         if code_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-code=={code_version}"])
+    elif use_frozen:
+        lock_cmd = ["uv", "lock", "--frozen"]
     else:
         lock_cmd = ["uv", "lock", "--dry-run"]
 
@@ -520,9 +520,9 @@ Examples:
     patch_release = args.agents is not None
     if not validate_dependencies(
         max_retries=args.retries,
-        use_frozen=not patch_release,
+        use_frozen=patch_release,
         agents_version=args.agents,
-        code_version=code_version if args.code and not args.code_pin else None,
+        code_version=code_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

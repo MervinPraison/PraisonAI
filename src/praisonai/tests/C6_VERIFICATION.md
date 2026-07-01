@@ -2,6 +2,9 @@
 
 Run on `main` after C0–C5 merge. Date: 2026-07-01.
 
+> All `pytest` commands below are run from the `src/praisonai/` package root
+> (i.e. `cd src/praisonai && pytest tests/...`).
+
 ## Smoke commands
 
 | Command | Result |

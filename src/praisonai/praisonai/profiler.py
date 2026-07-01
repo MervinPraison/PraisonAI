@@ -437,6 +437,16 @@ class _ProfilerImpl:
         with self._lock:
             return list(self._api_calls)
 
+    @asynccontextmanager
+    async def streaming_async(self, name: str):
+        """Async context manager for profiling streaming operations."""
+        tracker = StreamingTracker(name)
+        tracker.start()
+        try:
+            yield tracker
+        finally:
+            tracker.end()
+
     def get_streaming_records(self) -> List[StreamingRecord]:
         """Get streaming records."""
         with self._lock:
@@ -555,12 +565,15 @@ class _ProfilerImpl:
         """Profile memory usage for a block when tracemalloc is available."""
         import tracemalloc
 
-        tracemalloc.start()
+        was_tracing = tracemalloc.is_tracing()
+        if not was_tracing:
+            tracemalloc.start()
         try:
             yield
         finally:
             current, peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+            if not was_tracing:
+                tracemalloc.stop()
             self.record_memory(
                 name=name,
                 current_kb=current / 1024.0,
@@ -571,18 +584,21 @@ class _ProfilerImpl:
         """Return current process memory snapshot in KB."""
         import tracemalloc
 
-        tracemalloc.start()
+        was_tracing = tracemalloc.is_tracing()
+        if not was_tracing:
+            tracemalloc.start()
         try:
             current, peak = tracemalloc.get_traced_memory()
         finally:
-            tracemalloc.stop()
+            if not was_tracing:
+                tracemalloc.stop()
         return {"current_kb": current / 1024.0, "peak_kb": peak / 1024.0}
 
     def export_json(self) -> str:
         """Export profiling summary as JSON."""
         import json
 
-        return json.dumps(self.get_summary(), default=str)
+        return json.dumps({"summary": self.get_summary()}, default=str)
 
     def export_html(self) -> str:
         """Export a minimal HTML profiling report."""
@@ -824,6 +840,11 @@ class ProfilerCompat:
     def streaming(name: str):
         """Context manager for profiling streaming operations."""
         return get_profiler().streaming(name)
+
+    @staticmethod
+    def streaming_async(name: str):
+        """Async context manager for profiling streaming operations."""
+        return get_profiler().streaming_async(name)
     
     @staticmethod
     def api_call(endpoint: str, method: str = "GET"):
