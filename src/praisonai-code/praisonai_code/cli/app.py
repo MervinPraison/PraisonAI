@@ -202,6 +202,18 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "up": (".commands.up", "app", "🚀 Start unified PraisonAI stack (Langfuse + Langflow)"),
 }
 
+# Bot/channel commands that remain in the ``praisonai`` wrapper (not ``praisonai_code``).
+_WRAPPER_COMMANDS = frozenset({
+    "bot",
+    "gateway",
+    "pairing",
+    "identity",
+    "onboard",
+    "kanban",
+    "dashboard",
+    "claw",
+})
+
 # Special commands that need custom handling
 _SPECIAL_COMMANDS = {
     "tui": (".features.tui.debug", "create_debug_app", "Interactive TUI and simulation"),
@@ -243,7 +255,13 @@ class LazyCommandGroup(TyperGroup):
         if name in _LAZY_COMMANDS:
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
-                module = importlib.import_module(module_path, __package__)
+                if name in _WRAPPER_COMMANDS:
+                    import importlib.util as _importlib_util
+                    if _importlib_util.find_spec("praisonai") is None:
+                        return None
+                    module = importlib.import_module(f"praisonai.cli.commands.{name}")
+                else:
+                    module = importlib.import_module(module_path, __package__)
                 sub_app = getattr(module, attr_name)
                 if isinstance(sub_app, click.Command):
                     return sub_app
