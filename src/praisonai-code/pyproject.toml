@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-code"
-version = "0.0.1"
+version = "0.0.2"
 description = "Agentic terminal CLI for PraisonAI — the terminal-native agent (run, chat, code, runtime, cli backends) extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
@@ -19,6 +19,7 @@ dependencies = [
     "litellm>=1.83.14,<2",
     "mcp>=1.20.0",
     "pydantic>=2.0.0",
+    "toml>=0.10.2",
 ]
 
 [project.urls]
