@@ -35,11 +35,17 @@ praisonai-code    →  depends on  praisonaiagents (core SDK)
 click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
 `pyproject.toml`). The rules above govern the **inter-package** direction.
 
-> **C7 note:** Some modules still import the `praisonai` wrapper at runtime
-> (~170 files). **Standalone `pip install praisonai-code` without `praisonai`
-> is not fully supported yet.** Use `pip install praisonai` for production.
-> Residual C1 back-imports: `runtime/descriptor.py` → `praisonai.version`;
-> `cli_backends/registry.py` → `praisonai._registry`.
+> **C7 note (in progress):** Residual runtime imports of the `praisonai` wrapper
+> (~170 files) are being migrated via `praisonai_code._wrapper_bridge` for
+> optional wrapper features. **Standalone `pip install praisonai-code`** supports
+> agentic terminal commands (`run`, `chat`, `code`, warm runtime); wrapper-only
+> commands (`bot`, `gateway`, `kanban`, …) require `pip install praisonai`.
+
+Completed C7 steps so far:
+- `praisonai_code._registry` — vendored plugin registry (no wrapper import)
+- `praisonai_code._version` / `runtime/descriptor.py` — version from `praisonai-code`
+- `praisonai_code.__main__` + `praisonai-code` console script — standalone entry
+- `praisonai_code._logging` — CLI logging without wrapper dependency
 
 Backward compatibility is preserved via PEP 562 shims at the old
 `praisonai.*` import paths, so `pip install praisonai` and
@@ -51,6 +57,14 @@ Backward compatibility is preserved via PEP 562 shims at the old
 
 ```bash
 pip install praisonai
+```
+
+**Standalone code package (agentic CLI only):**
+
+```bash
+pip install praisonai-code
+praisonai-code --version
+python -m praisonai_code --help
 ```
 
 **Development / monorepo:**

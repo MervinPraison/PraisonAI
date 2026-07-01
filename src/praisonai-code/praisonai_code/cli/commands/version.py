@@ -18,12 +18,16 @@ def version_show():
     """Show version information."""
     output = get_output_controller()
     
-    from praisonai.version import __version__
-    
-    # Try to get additional version info
+    from praisonai_code._version import get_package_version, get_wrapper_version
+
+    code_version = get_package_version()
+    wrapper_version = get_wrapper_version()
+
     versions = {
-        "praisonai": __version__,
+        "praisonai-code": code_version,
     }
+    if wrapper_version:
+        versions["praisonai"] = wrapper_version
     
     # Check praisonaiagents version
     try:
@@ -41,9 +45,10 @@ def version_show():
         return
     
     output.print_panel(
-        f"PraisonAI: {versions['praisonai']}\n"
-        f"PraisonAI Agents: {versions['praisonaiagents']}\n"
-        f"Python: {versions['python']}",
+        f"PraisonAI Code: {versions['praisonai-code']}\n"
+        + (f"PraisonAI Wrapper: {versions['praisonai']}\n" if wrapper_version else "")
+        + f"PraisonAI Agents: {versions['praisonaiagents']}\n"
+        + f"Python: {versions['python']}",
         title="Version Information"
     )
 
@@ -53,45 +58,45 @@ def version_check():
     """Check for updates."""
     output = get_output_controller()
     
-    from praisonai.version import __version__
-    
-    output.print_info("Checking for updates...")
+    from praisonai_code._version import get_package_version
+
+    current = get_package_version()
     
     try:
         import urllib.request
         import json
         
-        url = "https://pypi.org/pypi/praisonai/json"
+        url = "https://pypi.org/pypi/praisonai-code/json"
         with urllib.request.urlopen(url, timeout=5) as response:
             data = json.loads(response.read().decode())
             latest = data["info"]["version"]
         
         if output.is_json_mode:
             output.print_json({
-                "current": __version__,
+                "current": current,
                 "latest": latest,
-                "update_available": latest != __version__,
+                "update_available": latest != current,
             })
             return
         
-        if latest != __version__:
+        if latest != current:
             output.print_warning(
-                f"Update available: {__version__} → {latest}\n"
-                f"Run: pip install --upgrade praisonai"
+                f"Update available: {current} → {latest}\n"
+                f"Run: pip install --upgrade praisonai-code"
             )
         else:
-            output.print_success(f"You are using the latest version ({__version__})")
+            output.print_success(f"You are using the latest version ({current})")
     
     except Exception as e:
         if output.is_json_mode:
             output.print_json({
-                "current": __version__,
+                "current": current,
                 "latest": None,
                 "error": str(e),
             })
         else:
             output.print_error(f"Failed to check for updates: {e}")
-            output.print(f"Current version: {__version__}")
+            output.print(f"Current version: {current}")
 
 
 @app.callback(invoke_without_command=True)

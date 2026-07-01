@@ -137,8 +137,8 @@ class DiagHandler:
         
         # Get PraisonAI version
         try:
-            from praisonai.version import __version__
-            info["praisonai"]["version"] = __version__
+            from praisonai_code._version import get_package_version
+            info["praisonai"]["version"] = get_package_version()
         except ImportError:
             info["praisonai"]["version"] = "unknown"
         

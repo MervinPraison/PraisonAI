@@ -26,6 +26,9 @@ dependencies = [
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
 
+[project.scripts]
+praisonai-code = "praisonai_code.__main__:main"
+
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }
 
