@@ -191,6 +191,31 @@ def resolve_llm_endpoint(
                     break
         except Exception:
             pass
+    elif api_key and not explicit_or_config_model and fallback_lookup:
+        # The provider key was already in the environment (e.g. injected by
+        # inject_credentials_into_env), so the stored credential's own model
+        # and base_url were never consulted. For an *inferred* default model,
+        # recover the saved endpoint metadata so a stored credential's custom
+        # model/base_url is honoured instead of the hard-coded provider default.
+        try:
+            for provider in _KEY_VAR_TO_FALLBACK_PROVIDERS.get(key_var, ()):
+                cred = fallback_lookup(provider)
+                if not cred:
+                    continue
+                cred_model = cred.get("model")
+                if cred_model and not (env_base or (resolved_config and resolved_config.agent.base_url)):
+                    if validate_model and catalogue:
+                        try:
+                            cred_model = catalogue.validate_model(cred_model)
+                        except ValueError:
+                            cred_model = None
+                    fallback_model = cred_model or fallback_model
+                if not env_base and cred.get("base_url"):
+                    fallback_base = cred["base_url"]
+                if fallback_model or fallback_base:
+                    break
+        except Exception:
+            pass
 
     return LLMEndpoint(
         model=fallback_model or model,
