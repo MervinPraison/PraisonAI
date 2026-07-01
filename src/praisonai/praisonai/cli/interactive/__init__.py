@@ -1,48 +1,10 @@
-"""
-Unified Interactive Core for PraisonAI CLI.
+"""Backward-compatibility shim: ``praisonai.cli.interactive`` moved to
+``praisonai_code.cli.interactive``.
 
-This module provides a single core runtime that powers all interactive modes:
-- `praisonai run --interactive`
-- `praisonai chat`
-- `praisonai tui launch`
-
-All UIs consume the same event model; only rendering differs.
+This module aliases the moved package so all existing imports such as
+``from praisonai.cli.interactive.async_tui import AsyncTUI`` continue to work.
 """
 
-__all__ = [
-    "InteractiveCore",
-    "InteractiveConfig",
-    "InteractiveEvent",
-    "InteractiveEventType",
-    "ApprovalRequest",
-    "ApprovalResponse",
-    "ApprovalDecision",
-]
+from praisonai.cli._shim import alias_package as _alias_package
 
-# Lazy imports to avoid loading heavy dependencies on import
-_lazy_cache = {}
-
-
-def __getattr__(name: str):
-    """Lazy load interactive components."""
-    if name in _lazy_cache:
-        return _lazy_cache[name]
-    
-    if name == "InteractiveCore":
-        from .core import InteractiveCore
-        _lazy_cache[name] = InteractiveCore
-        return InteractiveCore
-    
-    if name == "InteractiveConfig":
-        from .config import InteractiveConfig
-        _lazy_cache[name] = InteractiveConfig
-        return InteractiveConfig
-    
-    if name in ("InteractiveEvent", "InteractiveEventType", "ApprovalRequest", 
-                "ApprovalResponse", "ApprovalDecision"):
-        from . import events
-        obj = getattr(events, name)
-        _lazy_cache[name] = obj
-        return obj
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+_alias_package(__name__, "praisonai_code.cli.interactive")

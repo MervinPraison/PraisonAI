@@ -1,31 +1,7 @@
-"""
-PraisonAI CLI State Module.
-
-Provides state management for run IDs, trace IDs, agent IDs, and sessions.
+"""Backward-compatibility shim: ``praisonai.cli.state`` moved to
+``praisonai_code.cli.state``.
 """
 
-from .identifiers import (
-    generate_run_id,
-    generate_trace_id,
-    generate_agent_id,
-    RunContext,
-    get_current_context,
-    set_current_context,
-)
-from .sessions import (
-    SessionManager,
-    SessionMetadata,
-    get_session_manager,
-)
+from praisonai.cli._shim import alias_package as _alias_package
 
-__all__ = [
-    'generate_run_id',
-    'generate_trace_id',
-    'generate_agent_id',
-    'RunContext',
-    'get_current_context',
-    'set_current_context',
-    'SessionManager',
-    'SessionMetadata',
-    'get_session_manager',
-]
+_alias_package(__name__, "praisonai_code.cli.state")
