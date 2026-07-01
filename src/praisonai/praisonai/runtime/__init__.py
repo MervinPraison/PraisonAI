@@ -11,6 +11,10 @@ submodules so existing imports keep working:
 
 import sys as _sys
 
+from praisonai._bootstrap import ensure_praisonai_code
+
+ensure_praisonai_code()
+
 import praisonai_code.runtime as _runtime
 
 # Alias submodules so ``praisonai.runtime.<sub>`` resolves to the moved module.

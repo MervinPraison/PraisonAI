@@ -1,5 +1,9 @@
 import threading
 
+from ._bootstrap import ensure_praisonai_code
+
+ensure_praisonai_code()
+
 # Version is lightweight, import directly
 from .version import __version__
 

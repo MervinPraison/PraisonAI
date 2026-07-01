@@ -11,6 +11,10 @@ aliases the submodules so existing imports keep working:
 
 import sys as _sys
 
+from praisonai._bootstrap import ensure_praisonai_code
+
+ensure_praisonai_code()
+
 import praisonai_code.cli_backends as _cli_backends
 
 # Alias submodules so ``praisonai.cli_backends.<sub>`` resolves to the moved

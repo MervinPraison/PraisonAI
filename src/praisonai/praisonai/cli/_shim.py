@@ -120,6 +120,9 @@ def alias_package(old_name: str, new_name: str) -> object:
     (rather than a duplicate on-disk load) resolves each submodule, preserving
     module identity.
     """
+    from praisonai._bootstrap import ensure_praisonai_code
+
+    ensure_praisonai_code()
     module = importlib.import_module(new_name)
 
     if not any(

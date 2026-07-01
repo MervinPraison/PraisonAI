@@ -11,6 +11,10 @@ Structure:
 - features/: Feature handlers for CLI flags and commands
 """
 
+from praisonai._bootstrap import ensure_praisonai_code
+
+ensure_praisonai_code()
+
 __all__ = ["PraisonAI"]
 
 

@@ -20,7 +20,6 @@ def _build_env():
     # Build PYTHONPATH without trailing separator
     pythonpath_parts = [
         os.path.join(REPO_ROOT, "src", "praisonai-agents"),
-        os.path.join(REPO_ROOT, "src", "praisonai-code"),
         os.path.join(REPO_ROOT, "src", "praisonai"),
     ]
     if env.get("PYTHONPATH"):
