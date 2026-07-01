@@ -221,6 +221,12 @@ _SPECIAL_COMMANDS = {
 }
 
 
+def _wrapper_available() -> bool:
+    """Return True when the ``praisonai`` wrapper package is importable."""
+    import importlib.util as _importlib_util
+    return _importlib_util.find_spec("praisonai") is not None
+
+
 class LazyCommandGroup(TyperGroup):
     """Click Group that lazily loads subcommands from registry."""
     
@@ -229,8 +235,14 @@ class LazyCommandGroup(TyperGroup):
         # Start with commands from parent (already registered commands)
         commands = set(super().list_commands(ctx))
         
-        # Add lazy-loaded commands
-        commands.update(_LAZY_COMMANDS.keys())
+        # Add lazy-loaded commands. Wrapper-only commands are advertised only when
+        # the ``praisonai`` wrapper is installed, so a standalone ``praisonai-code``
+        # install does not surface commands it cannot resolve.
+        wrapper_ok = _wrapper_available()
+        commands.update(
+            name for name in _LAZY_COMMANDS
+            if wrapper_ok or name not in _WRAPPER_COMMANDS
+        )
         commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add special inline commands
@@ -256,8 +268,7 @@ class LazyCommandGroup(TyperGroup):
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
                 if name in _WRAPPER_COMMANDS:
-                    import importlib.util as _importlib_util
-                    if _importlib_util.find_spec("praisonai") is None:
+                    if not _wrapper_available():
                         return None
                     module = importlib.import_module(f"praisonai.cli.commands.{name}")
                 else:

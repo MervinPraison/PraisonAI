@@ -201,7 +201,7 @@ def bump_version(
             print(f"\n📦 Bumping praisonai-code to {code_version}:")
             update_file(
                 code_dir / "pyproject.toml",
-                [(r'^version = "[^"]+"', f'version = "{code_version}"')],
+                [(r'(?m)^version = "[^"]+"', f'version = "{code_version}"')],
                 root
             )
             update_file(

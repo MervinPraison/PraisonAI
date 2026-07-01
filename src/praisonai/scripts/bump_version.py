@@ -111,7 +111,7 @@ def bump_version(new_version: str, agents_version: str | None = None, code_versi
             print(f"\n📦 Bumping praisonai-code to {code_version}:")
             update_file(
                 code_dir / "pyproject.toml",
-                [(r'^version = "[^"]+"', f'version = "{code_version}"')]
+                [(r'(?m)^version = "[^"]+"', f'version = "{code_version}"')]
             )
             update_file(
                 code_dir / "praisonai_code/__init__.py",
