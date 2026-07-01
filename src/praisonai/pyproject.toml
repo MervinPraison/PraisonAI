@@ -280,6 +280,10 @@ Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }
+# praisonai-code hosts the agentic terminal CLI (extracted incrementally,
+# see issue #2512). Editable path dep during migration; no code has moved
+# yet at C0 so this is a no-op for runtime behaviour.
+praisonai-code = { path = "../praisonai-code", editable = true }
 
 [tool.uv]
 # Exclude from lock resolution — these cause cross-extra conflicts that
