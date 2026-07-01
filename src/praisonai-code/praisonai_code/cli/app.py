@@ -22,6 +22,8 @@ def _setup_langfuse_observability(*, verbose: bool = False) -> None:
     try:
         from praisonai_code._wrapper_bridge import import_wrapper_module
         langfuse = import_wrapper_module("praisonai.observability.langfuse")
+        if langfuse is None:
+            return
         LangfuseSink = langfuse.LangfuseSink
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
         from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
@@ -63,6 +65,8 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
         
         from praisonai_code._wrapper_bridge import import_wrapper_module
         langextract_mod = import_wrapper_module("praisonai.observability.langextract")
+        if langextract_mod is None:
+            return
         LangextractSink = langextract_mod.LangextractSink
         LangextractSinkConfig = langextract_mod.LangextractSinkConfig
         from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
@@ -693,9 +697,13 @@ def main_callback(
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
         # Check for credentials before starting TUI
-        from praisonai_code.llm.credentials import is_configured
+        from praisonai_code.llm.credentials import (
+            inject_credentials_into_env,
+            is_configured,
+        )
         import sys
         
+        inject_credentials_into_env()
         if not is_configured():  # Check for any configured credentials
             # In non-interactive mode, just show error
             if not sys.stdin.isatty() or quiet:
@@ -723,6 +731,7 @@ def main_callback(
                     raise typer.Exit(exit_code)
                 
                 # Re-check credentials after setup
+                inject_credentials_into_env()
                 if not is_configured():
                     typer.echo("Setup completed but credentials still not detected.", err=True)
                     raise typer.Exit(1)
