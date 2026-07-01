@@ -100,9 +100,11 @@ jobs:
         from praisonai_code.cli.configuration.resolver import ConfigResolver
         from praisonai_code._version import get_package_version
         from praisonai_code.llm.credentials import is_configured
+        from praisonai_code.llm.catalogue import ModelCatalogue
         import toml
         assert hasattr(ConfigResolver, '__name__')
         assert callable(is_configured)
+        assert ModelCatalogue().list_models(provider="openai")
         print('standalone ok', get_package_version(), 'toml', toml.__version__)
         "
         /tmp/praisonai-code-standalone/bin/praisonai-code --version

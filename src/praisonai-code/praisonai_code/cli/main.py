@@ -333,7 +333,7 @@ class PraisonAI:
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
         # Resolve LLM endpoint configuration from environment variables
-        from praisonai.llm.config import build_config_list
+        from praisonai_code.llm.config import build_config_list
         self.config_list = build_config_list()
         self.agent_file = agent_file
         self.framework = framework
