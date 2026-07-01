@@ -70,7 +70,7 @@ def _any_provider_credential() -> bool:
     # Derive the credential keys from the single source of truth so this
     # detection never drifts from default_model_for_available_provider().
     try:
-        from praisonai.llm.env import _PROVIDER_DEFAULTS
+        from praisonai_code.llm.env import _PROVIDER_DEFAULTS
         known_keys = tuple(key_var for key_var, _ in _PROVIDER_DEFAULTS)
     except Exception:
         known_keys = (
@@ -120,7 +120,7 @@ def init(
     # Scaffold the default model that matches the user's detected provider
     # credential. Falls back to the OpenAI default when none is detected.
     try:
-        from praisonai.llm.env import default_model_for_available_provider
+        from praisonai_code.llm.env import default_model_for_available_provider
         detected_model = default_model_for_available_provider()
     except Exception:
         detected_model = "gpt-4o-mini"

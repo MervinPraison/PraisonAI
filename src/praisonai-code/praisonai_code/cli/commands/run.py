@@ -528,10 +528,14 @@ def run_main(
 
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
-        from praisonai.llm.credentials import is_configured
+        from praisonai_code.llm.credentials import (
+            inject_credentials_into_env,
+            is_configured,
+        )
         import sys
         
         # Check if credentials are configured (use model if provided, else check general)
+        inject_credentials_into_env()
         if not is_configured(model):
             # In non-interactive mode, show clear error
             if not sys.stdin.isatty() or output.is_json_mode:
@@ -559,6 +563,7 @@ def run_main(
                 
                 output.print_success("Setup complete! Continuing with your run...")
                 # Re-check after setup
+                inject_credentials_into_env()
                 if not is_configured(model):
                     output.print_error("Setup completed but credentials still not detected.")
                     raise typer.Exit(1)

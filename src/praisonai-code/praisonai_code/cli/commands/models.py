@@ -31,7 +31,7 @@ def list_models(
     output = get_output_controller()
     
     try:
-        from praisonai.llm.catalogue import ModelCatalogue
+        from praisonai_code.llm.catalogue import ModelCatalogue
         catalogue = ModelCatalogue()
         models = catalogue.list_models(provider=provider, search=search)
         
@@ -146,7 +146,7 @@ def describe_model(
     output = get_output_controller()
     
     try:
-        from praisonai.llm.catalogue import ModelCatalogue
+        from praisonai_code.llm.catalogue import ModelCatalogue
         catalogue = ModelCatalogue()
         info = catalogue.describe_model(model)
         
@@ -220,7 +220,7 @@ def validate_model(
     output = get_output_controller()
     
     try:
-        from praisonai.llm.catalogue import ModelCatalogue
+        from praisonai_code.llm.catalogue import ModelCatalogue
         catalogue = ModelCatalogue()
         
         if catalogue.is_valid_model(model):
