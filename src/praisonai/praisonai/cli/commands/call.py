@@ -1,45 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.call`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.call` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.call import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.call.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Call command group for PraisonAI CLI.
 
-Provides voice/call interaction commands.
-"""
+import sys as _sys
 
-from typing import Optional
+from praisonai_code.cli.commands import call as _impl
 
-import typer
-
-app = typer.Typer(help="Voice/call interaction mode")
-
-
-@app.callback(invoke_without_command=True)
-def call_main(
-    ctx: typer.Context,
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
-    """
-    Start voice/call interaction mode.
-    
-    Examples:
-        praisonai call
-        praisonai call --model gpt-4o
-    """
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['call']
-    if model:
-        argv.extend(['--model', model])
-    if verbose:
-        argv.append('--verbose')
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl
