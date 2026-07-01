@@ -182,9 +182,13 @@ class PluginRegistry(Generic[T]):
                 f"are not installed: {e}"
             ) from e
         
-        # Re-acquire lock to cache the result
+        # Re-acquire lock to cache the result. Guard against the loader being
+        # replaced or removed by another thread while we loaded outside the
+        # lock, so we never resurrect an unregistered plugin or cache a stale
+        # class over a newer registration.
         with self._lock:
-            self._items[canonical_name] = cls
+            if self._loaders.get(canonical_name) is loader:
+                self._items[canonical_name] = cls
             return cls
 
     def create(self, name: str, *args, **kwargs) -> T:
@@ -319,19 +323,21 @@ def create_lazy_getattr(registry: PluginRegistry[T]) -> Callable[[str], T]:
         # Assuming you have a registry instance
         __getattr__ = create_lazy_getattr(my_registry)
     """
+    # Capture the *defining* module's name once, so the AttributeError reports
+    # the module that actually lacks the attribute rather than the caller, and
+    # we avoid inspecting the call stack on every failed lookup.
+    import inspect
+
+    frame = inspect.currentframe()
+    if frame and frame.f_back:
+        module_name = frame.f_back.f_globals.get('__name__', 'unknown')
+    else:
+        module_name = 'unknown'
+
     def __getattr__(name: str) -> T:
         try:
-            plugin_class = registry.resolve(name)
-            return plugin_class
+            return registry.resolve(name)
         except ValueError:
-            # Get the calling module name for error context
-            import inspect
-            frame = inspect.currentframe()
-            if frame and frame.f_back:
-                module_name = frame.f_back.f_globals.get('__name__', 'unknown')
-            else:
-                module_name = 'unknown'
-            
             raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
-    
+
     return __getattr__

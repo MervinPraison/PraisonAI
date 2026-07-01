@@ -45,12 +45,8 @@ def register_cli_backend(backend_id: str, factory: Callable[[], Any]) -> None:
         backend_id: Unique identifier (e.g., "claude-code", "codex-cli") 
         factory: Factory function that returns a CliBackendProtocol instance
     """
-    # Wrap factory in a loader function for PluginRegistry
-    def factory_loader():
-        return factory
-    
     registry = _get_cli_backend_registry()
-    registry.register(backend_id, factory_loader)
+    registry.register(backend_id, factory)
 
 
 def list_cli_backends() -> list[str]:
