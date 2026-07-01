@@ -141,7 +141,8 @@ def test_read_file_offset_and_limit_window():
                           encoding="utf-8")
 
         out = file_tools.read_file("big.txt", offset=3, limit=2, line_numbers=False)
-        assert out.startswith("line3\nline4")
+        # Raw window preserves original line endings byte-for-byte.
+        assert out.startswith("line3\nline4\n")
         # More lines remain after the window -> paging hint present.
         assert "call again with offset=5" in out
 
@@ -151,9 +152,10 @@ def test_read_file_offset_and_limit_window():
         assert body_lines[0].strip().startswith("3")
         assert body_lines[1].endswith("\tline4")
 
-        # A window that reaches EOF has no paging hint.
+        # A window that reaches EOF has no paging hint; raw window keeps the
+        # file's own trailing newline.
         tail = file_tools.read_file("big.txt", offset=9, limit=2, line_numbers=False)
-        assert tail == "line9\nline10"
+        assert tail == "line9\nline10\n"
 
 
 def test_read_file_truncation_hint():
@@ -201,6 +203,59 @@ def test_read_file_per_line_char_cap():
 
         out = file_tools.read_file("long.txt", max_line_chars=100)
         assert "(line truncated)" in out
+
+
+def test_read_file_raw_window_keeps_newlines():
+    # A raw windowed read (line_numbers=False + offset/limit) preserves the
+    # within-window newlines (via splitlines(keepends=True)) so the slice keeps
+    # its structure. Text-mode reads normalise CRLF->LF as before; the paging
+    # hint is separated from body content by exactly one newline.
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "crlf.txt"
+        target.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+
+        out = file_tools.read_file("crlf.txt", offset=1, limit=2, line_numbers=False)
+        # Body keeps its per-line newlines; hint is not glued with a blank line.
+        assert out.startswith("alpha\nbeta\n")
+        assert "\n\n..." not in out
+        assert "call again with offset=3 for more" in out
+
+
+def test_read_file_negative_limit_returns_empty_window():
+    # A negative limit is an invalid bound and must not silently expand to the
+    # default cap; the window should be empty.
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "n.txt"
+        target.write_text("a\nb\nc\n", encoding="utf-8")
+
+        out = file_tools.read_file("n.txt", offset=1, limit=-1, line_numbers=False)
+        assert out.startswith("... (showing lines 1-0 of 3;")
+
+
+def test_read_file_negative_max_line_chars_leaves_line_intact():
+    # A negative max_line_chars must not truncate lines backwards.
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "long.txt"
+        target.write_text("x" * 50 + "\n", encoding="utf-8")
+
+        out = file_tools.read_file("long.txt", max_line_chars=-1)
+        assert "(line truncated)" not in out
+        assert "x" * 50 in out
 
 
 def test_write_file_fails_closed_when_verify_unreadable(_auto_approve_write, monkeypatch):

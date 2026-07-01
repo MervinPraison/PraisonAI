@@ -46,10 +46,10 @@ def _render_with_line_numbers(lines, start_index, max_line_chars):
     last_number = start_index + len(lines)
     width = max(len(str(last_number)), 6)
     rendered = []
-    for offset, line in enumerate(lines):
-        if max_line_chars and len(line) > max_line_chars:
+    for line_index, line in enumerate(lines):
+        if max_line_chars and max_line_chars > 0 and len(line) > max_line_chars:
             line = line[:max_line_chars] + "... (line truncated)"
-        rendered.append(f"{str(start_index + offset + 1).rjust(width)}\t{line}")
+        rendered.append(f"{str(start_index + line_index + 1).rjust(width)}\t{line}")
     return "\n".join(rendered)
 
 
@@ -146,7 +146,8 @@ class FileTools:
             encoding: File encoding (default: utf-8)
             offset: 1-based first line to read (default: start of file)
             limit: Maximum number of lines to read (default: up to
-                ``DEFAULT_MAX_LINES`` lines from ``offset``)
+                ``DEFAULT_MAX_LINES`` lines from ``offset``).  A negative value
+                is treated as an invalid bound and yields an empty window.
             line_numbers: Prefix each line with its 1-based number (default:
                 True).  Set False to return raw content.
             max_line_chars: Truncate any single line longer than this many
@@ -187,21 +188,29 @@ class FileTools:
             start = (offset - 1) if offset and offset > 0 else 0
             if start > total:
                 start = total
-            if limit is not None and limit >= 0:
+            # A negative ``limit`` is an invalid bound; return an empty window
+            # rather than silently expanding to ``DEFAULT_MAX_LINES``.
+            if limit is not None and limit < 0:
+                end = start
+            elif limit is not None:
                 end = start + limit
             else:
                 end = start + DEFAULT_MAX_LINES
             end = min(end, total)
 
-            window = lines[start:end]
             if line_numbers:
-                body = _render_with_line_numbers(window, start, max_line_chars)
+                body = _render_with_line_numbers(
+                    lines[start:end], start, max_line_chars)
             else:
-                body = "\n".join(window)
+                # Keep each line's trailing newline (keepends=True) so a raw
+                # windowed read preserves the window's structure for the
+                # edit/patch tools rather than collapsing separators.
+                raw_lines = data.splitlines(keepends=True)
+                body = "".join(raw_lines[start:end])
 
             # Tell the model how to page when the window does not reach EOF.
             if end < total:
-                if body:
+                if body and not body.endswith("\n"):
                     body += "\n"
                 body += (
                     f"... (showing lines {start + 1}-{end} of {total}; "
