@@ -7,12 +7,14 @@ on:
       - 'src/**'
       - 'pyproject.toml'
       - '.github/workflows/test-core.yml'
+      - '.github/actions/install-monorepo-packages/**'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'src/**'
       - 'pyproject.toml'
       - '.github/workflows/test-core.yml'
+      - '.github/actions/install-monorepo-packages/**'
   workflow_dispatch:
 
 permissions:

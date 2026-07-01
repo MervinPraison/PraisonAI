@@ -26,10 +26,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
         ROOT="${{ inputs.repo-root }}"
-        AGENTS_PKG="${ROOT}src/praisonai-agents"
-        CODE_PKG="${ROOT}src/praisonai-code"
-        WRAPPER_PKG="${ROOT}src/praisonai"
+        if [ -n "$ROOT" ]; then
+          BASE="${WORKSPACE%/}/${ROOT%/}/"
+        else
+          BASE="${WORKSPACE%/}/"
+        fi
+        AGENTS_PKG="${BASE}src/praisonai-agents"
+        CODE_PKG="${BASE}src/praisonai-code"
+        WRAPPER_PKG="${BASE}src/praisonai"
 
         normalise_extras() {
           local value="${1#.}"
