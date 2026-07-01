@@ -5,6 +5,8 @@ and conformance with the RateLimitPolicyProtocol, matching the shape of the
 sibling gateway policy protocols (send / idle / drain / concurrency).
 """
 
+import dataclasses
+
 import pytest
 
 from praisonaiagents.gateway import (
@@ -85,9 +87,25 @@ def test_keys_are_isolated_by_identity_and_scope():
     assert policy.check(identity="a", scope="auth", now=1.0).allowed is False
 
 
+def test_stays_denied_after_ceiling_without_lockout():
+    # Regression: with lockout_seconds == 0 (the default), a denial must NOT
+    # reset the window, otherwise the next check starts fresh and is allowed
+    # immediately, letting ~N/(N+1) of traffic through per window.
+    policy = SlidingWindowRateLimitPolicy(max_requests=2, window_seconds=60)
+    assert policy.check(identity="u", scope="auth", now=0.0).allowed is True
+    assert policy.check(identity="u", scope="auth", now=1.0).allowed is True
+    # Over the ceiling: denied.
+    assert policy.check(identity="u", scope="auth", now=2.0).allowed is False
+    # The very next request within the window must still be denied.
+    assert policy.check(identity="u", scope="auth", now=3.0).allowed is False
+    assert policy.check(identity="u", scope="auth", now=4.0).allowed is False
+    # Only after the window elapses is a fresh request allowed.
+    assert policy.check(identity="u", scope="auth", now=61.0).allowed is True
+
+
 def test_decision_is_frozen():
     decision = RateLimitDecision(allowed=False, retry_after_seconds=1.5)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         decision.allowed = True  # type: ignore[misc]
 
 

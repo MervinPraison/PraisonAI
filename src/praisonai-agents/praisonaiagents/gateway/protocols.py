@@ -2400,6 +2400,13 @@ class SlidingWindowRateLimitPolicy:
     This class is not internally synchronised; the wrapper owns any locking
     it needs for concurrent hot paths (the built-in limiters already do).
 
+    State ownership: per-``(scope, identity)`` window/lockout entries are
+    reclaimed lazily — a key's entry is dropped or overwritten the next time
+    that key is checked. It keeps one entry per *active* key and is intended
+    for a bounded identity space (endpoint classes, authenticated tenants). A
+    wrapper exposing it to an unbounded/untrusted identity space (e.g. raw
+    per-IP keys) owns periodic reclamation, exactly as it owns locking.
+
     Example::
 
         SlidingWindowRateLimitPolicy(max_requests=5, window_seconds=60,
@@ -2414,28 +2421,28 @@ class SlidingWindowRateLimitPolicy:
     ):
         try:
             ceiling = int(max_requests)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as err:
             raise ValueError(
                 f"max_requests must be an integer, got {max_requests!r}"
-            )
+            ) from err
         if ceiling < 0:
             raise ValueError(f"max_requests must be >= 0, got {max_requests!r}")
         try:
             window = float(window_seconds)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as err:
             raise ValueError(
                 f"window_seconds must be a number, got {window_seconds!r}"
-            )
+            ) from err
         if window <= 0:
             raise ValueError(
                 f"window_seconds must be > 0, got {window_seconds!r}"
             )
         try:
             lockout = float(lockout_seconds)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as err:
             raise ValueError(
                 f"lockout_seconds must be a number, got {lockout_seconds!r}"
-            )
+            ) from err
         if lockout < 0:
             raise ValueError(
                 f"lockout_seconds must be >= 0, got {lockout_seconds!r}"
@@ -2486,12 +2493,19 @@ class SlidingWindowRateLimitPolicy:
         window_start, count = window
         count += 1
         if count > self.max_requests:
-            # Over the ceiling within the window: apply cooldown.
-            del self._windows[key]
+            # Over the ceiling within the window.
             if self.lockout_seconds > 0:
+                # Cooldown: drop the window and lock the key out until it
+                # elapses.
+                del self._windows[key]
                 retry = self.lockout_seconds
                 self._lockouts[key] = now + self.lockout_seconds
             else:
+                # No cooldown: keep the window so the key stays denied until
+                # it naturally expires, matching the retry hint. Deleting it
+                # here would let the next check start a fresh window and be
+                # allowed immediately, bypassing the ceiling.
+                self._windows[key] = (window_start, count)
                 retry = max(0.0, self.window_seconds - (now - window_start))
             return RateLimitDecision(
                 allowed=False,
