@@ -18,70 +18,70 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 42 | 11618 |
-| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2911 |
+| ✅ Agent | 21 | 43 | 11901 |
+| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2927 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 573 |
-| ✅ Approval | 1 | 3 | 1567 |
+| ✅ Approval | 1 | 4 | 1856 |
 | ✅ Audio | 2 | 10 | 645 |
-| ✅ Auto Generation | 5 | 7 | 1978 |
-| ✅ Autonomy | 3 | 5 | 1925 |
-| ✅ Bots | 7 | 24 | 8248 |
+| ✅ Auto Generation | 5 | 7 | 2032 |
+| ✅ Autonomy | 3 | 6 | 2148 |
+| ✅ Bots | 7 | 24 | 8439 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 110 | 27803 |
-| ✅ Chunking | 2 | 2 | 338 |
+| ✅ CLI | 5 | 111 | 28211 |
+| ✅ Chunking | 2 | 2 | 339 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3658 |
-| ✅ Conditions | 1 | 3 | 1107 |
-| ✅ Configuration | 3 | 7 | 2280 |
-| ✅ Context Management | 16 | 33 | 11147 |
-| ✅ Database | 1 | 40 | 5641 |
-| ✅ Deep Research | 8 | 2 | 437 |
-| ✅ Display | 6 | 2 | 290 |
+| ✅ Code Execution | 2 | 13 | 3739 |
+| ✅ Conditions | 1 | 3 | 1108 |
+| ✅ Configuration | 3 | 7 | 2281 |
+| ✅ Context Management | 16 | 33 | 11293 |
+| ✅ Database | 1 | 40 | 5669 |
+| ✅ Deep Research | 8 | 2 | 497 |
+| ✅ Display | 6 | 3 | 610 |
 | ✅ Embeddings | 6 | 23 | 1968 |
 | ✅ Evaluation | 1 | 6 | 2509 |
 | ✅ Events | 1 | 2 | 711 |
-| ✅ Execution | 3 | 3 | 1184 |
+| ✅ Execution | 3 | 4 | 1455 |
 | ✅ Failover | 2 | 1 | 398 |
-| ✅ Files | 2 | 6 | 1769 |
+| ✅ Files | 2 | 6 | 1770 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 24 | 8916 |
-| ✅ Guardrails | 4 | 4 | 1622 |
-| ✅ Handoffs | 11 | 6 | 2595 |
-| ✅ Hooks | 2 | 8 | 3169 |
+| ✅ Gateway | 7 | 30 | 11244 |
+| ✅ Guardrails | 4 | 4 | 1637 |
+| ✅ Handoffs | 11 | 6 | 2596 |
+| ✅ Hooks | 2 | 9 | 3482 |
 | ✅ Image | 1 | 11 | 1105 |
-| ✅ Knowledge | 4 | 24 | 4698 |
-| ✅ LLM | 3 | 10 | 3713 |
+| ✅ Knowledge | 4 | 24 | 4739 |
+| ✅ LLM | 3 | 11 | 4033 |
 | ✅ Loops | 4 | 3 | 778 |
-| ✅ MCP | 1 | 51 | 10912 |
-| ✅ Memory | 6 | 16 | 5894 |
+| ✅ MCP | 1 | 52 | 11147 |
+| ✅ Memory | 6 | 17 | 6103 |
 | ✅ OCR | 2 | 1 | 228 |
-| ✅ Observability | 2 | 23 | 2757 |
-| ✅ Optimizer | 1 | 2 | 742 |
-| ✅ Output | 3 | 4 | 876 |
+| ✅ Observability | 2 | 23 | 2768 |
+| ✅ Optimizer | 1 | 2 | 750 |
+| ✅ Output | 3 | 5 | 1099 |
 | ✅ Parallel Execution | 3 | 2 | 364 |
-| ✅ Planning | 6 | 5 | 1177 |
-| ✅ Plugins | 8 | 3 | 948 |
-| ✅ Prompts | 2 | 7 | 1186 |
-| ✅ Providers | 1 | 52 | 6314 |
-| ✅ Query | 1 | 2 | 616 |
+| ✅ Planning | 6 | 6 | 1423 |
+| ✅ Plugins | 8 | 3 | 971 |
+| ✅ Prompts | 2 | 7 | 1197 |
+| ✅ Providers | 1 | 54 | 6787 |
+| ✅ Query | 1 | 2 | 623 |
 | ✅ RAG | 5 | 15 | 2889 |
 | ✅ Realtime | 2 | 5 | 584 |
-| ✅ Reflection | 3 | 2 | 477 |
+| ✅ Reflection | 3 | 3 | 662 |
 | ✅ Retrieval | 2 | 5 | 903 |
 | ✅ Routing | 1 | 2 | 365 |
 | ✅ Sandbox | 5 | 6 | 2458 |
 | ✅ Security | 1 | 3 | 2772 |
-| ✅ Sessions | 4 | 12 | 3947 |
-| ✅ Skills | 6 | 10 | 3807 |
+| ✅ Sessions | 4 | 12 | 4264 |
+| ✅ Skills | 6 | 13 | 4831 |
 | ✅ Tasks | 2 | 6 | 2709 |
-| ✅ Telemetry | 1 | 2 | 552 |
+| ✅ Telemetry | 1 | 2 | 574 |
 | ✅ Templates | 1 | 8 | 1655 |
-| ✅ Tools | 12 | 118 | 28063 |
+| ✅ Tools | 12 | 122 | 30097 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 3 | 8 | 1849 |
-| ✅ Workflows | 4 | 14 | 6183 |
+| ✅ Web | 3 | 8 | 1901 |
+| ✅ Workflows | 5 | 15 | 6439 |
 
 ## Undocumented Categories (Need Documentation)
 
