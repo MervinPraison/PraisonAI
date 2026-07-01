@@ -333,9 +333,7 @@ class SQLiteKanbanStore:
                     values.append(value)
             
             if not update_fields:
-                cursor = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-                row = cursor.fetchone()
-                return Task.from_dict(dict(row)) if row else None
+                return self._get_task_with_conn(task_id, conn)
             
             update_fields.append("updated_at = ?")
             update_fields.append("version = ?")
@@ -354,9 +352,7 @@ class SQLiteKanbanStore:
             # Log event
             self._log_event(conn, task_id, 'updated', updates)
             
-            cursor = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-            row = cursor.fetchone()
-            return Task.from_dict(dict(row))
+            return self._get_task_with_conn(task_id, conn)
 
     def delete_task(self, task_id: str) -> bool:
         """Delete task."""

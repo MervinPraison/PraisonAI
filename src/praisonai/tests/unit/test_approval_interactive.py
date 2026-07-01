@@ -17,6 +17,26 @@ import pytest
 # Add the praisonai-agents module to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
+
+@pytest.fixture(autouse=True)
+def _reset_approval_state():
+    """Reset the approval callback and approved-context between tests.
+
+    Prevents order-dependence: a prior ``execute_command`` may record an
+    approved context that would otherwise let a later denial test bypass the
+    approval path.
+    """
+    yield
+    try:
+        from praisonaiagents.approval import (
+            set_approval_callback,
+            clear_approval_context,
+        )
+        set_approval_callback(None)
+        clear_approval_context()
+    except Exception:
+        pass
+
 @pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_shell_command_approval():
     """Test shell command execution with approval prompts."""

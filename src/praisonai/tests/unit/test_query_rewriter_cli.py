@@ -177,6 +177,15 @@ class TestHandleDirectPromptWithRewrite:
 
                     mock_rewrite.assert_called_once_with("original prompt")
 
+                    # The rewritten prompt (not the original) must reach the agent.
+                    forwarded_prompts = [
+                        args[0]
+                        for _name, args, _kwargs in mock_agent.method_calls
+                        if args
+                    ]
+                    assert "rewritten prompt" in forwarded_prompts
+                    assert "original prompt" not in forwarded_prompts
+
 
 class TestToolLoading:
     """Test tool loading for query rewriter."""

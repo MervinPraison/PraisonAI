@@ -110,15 +110,25 @@ class TestTimelineAdvancementLogic:
             tokens = 1.0  # reserve future token
             last_refill_fixed = now + global_wait_fixed  # ADVANCE timeline
         
-        # Simulate second caller with fixed logic
+        # Absolute instant the first caller wakes.
+        wake_1 = now + global_wait_fixed
+
+        # Simulate second caller with fixed logic. Because the first caller
+        # already reserved the next token and advanced ``last_refill`` into the
+        # future, the second caller sees a negative elapsed and must reserve the
+        # token *after* that, waiting relative to the advanced timeline.
         elapsed = now - last_refill_fixed  # negative elapsed since future timeline
         tokens_after_advance = min(1.0, tokens + elapsed * messages_per_second)  # will be < 1.0
-        
-        if tokens_after_advance < 1.0:
-            global_wait_2 = (1.0 - tokens_after_advance) / messages_per_second
-            # Second caller waits longer!
-        
-        assert global_wait_2 >= global_wait_fixed, "Second caller should wait at least as long"
+
+        assert tokens_after_advance < 1.0
+        global_wait_2 = (last_refill_fixed - now) + (1.0 - tokens_after_advance) / messages_per_second
+
+        # Absolute instant the second caller wakes.
+        wake_2 = now + global_wait_2
+
+        # The whole point of the fix: the second caller must wake strictly
+        # later than the first, never at the same instant (the original bug).
+        assert wake_2 > wake_1, "Second caller must wake strictly later than the first"
         print(f"✅ Timeline advancement concept verified: caller1={global_wait_fixed}s, caller2={global_wait_2}s")
 
 

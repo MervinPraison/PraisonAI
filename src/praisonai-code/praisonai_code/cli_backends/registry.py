@@ -73,11 +73,13 @@ def resolve_cli_backend(
     """
     registry = _get_cli_backend_registry()
 
-    try:
-        backend = registry.create(backend_id)
-    except ValueError:
+    # Only rewrite the error for a genuinely unknown ID; let real loader/
+    # constructor failures propagate with their original, actionable message.
+    if backend_id.lower() not in registry.list_all_names():
         available = registry.list_names()
         raise ValueError(f"Unknown CLI backend: {backend_id}. Available: {available}")
+
+    backend = registry.create(backend_id)
     
     # Apply overrides if provided
     if overrides:

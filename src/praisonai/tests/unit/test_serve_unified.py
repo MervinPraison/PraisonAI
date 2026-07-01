@@ -212,11 +212,15 @@ class TestServeCommandOptions:
 class TestDeprecationWarnings:
     """Test deprecation warnings for old commands."""
     
-    def test_gateway_deprecation_message_in_docstring(self):
-        """Test gateway handler has deprecation in docstring."""
+    def test_gateway_uses_unified_configuration_docstring(self):
+        """Gateway handler documents the unified-configuration contract.
+
+        The old deprecation notice was intentionally removed: the gateway now
+        routes through the unified configuration schema rather than being
+        deprecated, so the docstring must advertise that contract.
+        """
         from praisonai.cli.features.gateway import handle_gateway_command
-        
-        # Gateway handler uses unified configuration (deprecation text removed)
+
         assert handle_gateway_command.__doc__ is not None
         assert "unified configuration" in handle_gateway_command.__doc__.lower()
     
