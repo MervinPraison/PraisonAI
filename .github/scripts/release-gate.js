@@ -4,7 +4,7 @@
 
 const https = require('https');
 
-const PACKAGE_PATHS = ['src/praisonai', 'src/praisonai-agents'];
+const PACKAGE_PATHS = ['src/praisonai', 'src/praisonai-agents', 'src/praisonai-code'];
 const ACTIVE_RELEASE_STATUSES = new Set([
   'queued', 'in_progress', 'waiting', 'pending', 'requested',
 ]);
@@ -23,6 +23,13 @@ function readVersionsFromTree(root = '.') {
   );
   const agentsMatch = agentsToml.match(/^version\s*=\s*"([^"]+)"/m);
   if (!agentsMatch) throw new Error('Could not read agents version');
+
+  const codeToml = fs.readFileSync(
+    path.join(root, 'src/praisonai-code/pyproject.toml'), 'utf8'
+  );
+  const codeMatch = codeToml.match(/^version\s*=\s*"([^"]+)"/m);
+  if (!codeMatch) throw new Error('Could not read praisonai-code version');
+
   const wrapperPy = fs.readFileSync(
     path.join(root, 'src/praisonai/praisonai/version.py'), 'utf8'
   );
@@ -30,8 +37,10 @@ function readVersionsFromTree(root = '.') {
   if (!wrapperMatch) throw new Error('Could not read wrapper version');
   return {
     currentAgents: agentsMatch[1],
+    currentCode: codeMatch[1],
     currentWrapper: wrapperMatch[1],
     targetAgents: bumpPatch(agentsMatch[1]),
+    targetCode: bumpPatch(codeMatch[1]),
     targetWrapper: bumpPatch(wrapperMatch[1]),
   };
 }
@@ -93,6 +102,7 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
     headSha: headSha || '',
     lastTag: '',
     targetAgents: '',
+    targetCode: '',
     targetWrapper: '',
   };
 
@@ -114,12 +124,17 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
     return out;
   }
   out.targetAgents = versions.targetAgents;
+  out.targetCode = versions.targetCode;
   out.targetWrapper = versions.targetWrapper;
 
   const agentsOnPypi = await pypiVersionExists('praisonaiagents', versions.targetAgents);
+  const codeOnPypi = await pypiVersionExists('praisonai-code', versions.targetCode);
   const wrapperOnPypi = await pypiVersionExists('praisonai', versions.targetWrapper);
-  if (agentsOnPypi && wrapperOnPypi) {
-    reasons.push(`already published: praisonaiagents==${versions.targetAgents}, praisonai==${versions.targetWrapper}`);
+  if (agentsOnPypi && codeOnPypi && wrapperOnPypi) {
+    reasons.push(
+      `already published: praisonaiagents==${versions.targetAgents}, `
+      + `praisonai-code==${versions.targetCode}, praisonai==${versions.targetWrapper}`
+    );
     return out;
   }
 
@@ -184,4 +199,5 @@ module.exports = {
   pypiVersionExists,
   evaluateReleasePreflight,
   ACTIVE_RELEASE_STATUSES,
+  PACKAGE_PATHS,
 };

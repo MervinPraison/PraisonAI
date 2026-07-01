@@ -13,7 +13,7 @@ dependencies = [
     "markdown>=3.5",
     "pyparsing>=3.0.0",
     "praisonaiagents>=1.6.104",
-    "praisonai-code",
+    "praisonai-code>=0.0.2",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
