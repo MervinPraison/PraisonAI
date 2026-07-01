@@ -17,7 +17,13 @@ import praisonai_code.runtime as _runtime
 # These submodules always exist in ``praisonai_code``; let any real import
 # error surface here (with its original traceback) instead of being swallowed
 # and re-raised later as a confusing missing-submodule error on the old path.
-for _name in ("descriptor", "client", "server", "__main__"):
+#
+# ``__main__`` is deliberately excluded: pre-inserting it into ``sys.modules``
+# makes runpy see the old-path ``__main__`` as already loaded under a foreign
+# loader, breaking ``python -m praisonai.runtime`` (RuntimeWarning + ImportError).
+# The physical delegating shim ``praisonai/runtime/__main__.py`` handles that
+# path instead.
+for _name in ("descriptor", "client", "server"):
     _mod = __import__(f"praisonai_code.runtime.{_name}", fromlist=[_name])
     _sys.modules[f"{__name__}.{_name}"] = _mod
     # Bind on the package object too so ``import praisonai.runtime.<sub>``
