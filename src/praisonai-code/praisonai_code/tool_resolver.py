@@ -753,7 +753,7 @@ class ToolResolver:
                     if name not in available:
                         available[name] = ("External tool from praisonai-tools", "external")
             except Exception:
-                pass
+                logger.debug("Error listing tools from praisonai-tools", exc_info=True)
 
         # 5. Core SDK tool registry (entry-point plugins and runtime-registered
         # tools). These resolve at run time via the resolution chain, so
@@ -1016,10 +1016,11 @@ class ToolResolver:
                 continue
             tools_dict[name] = resolved() if inspect.isclass(resolved) else resolved
 
-        # Restore original mutual exclusion: tools.py OR tools/ directory, not both
-        root_directory = os.getcwd()
-        tools_py_path = os.path.join(root_directory, 'tools.py')
-        tools_dir = Path(root_directory) / 'tools'
+        # Restore original mutual exclusion: tools.py OR tools/ directory, not both.
+        # Honor this resolver's bound tools.py path so explicit/custom locations
+        # are respected instead of always assuming CWD.
+        tools_py_path = Path(self._tools_py_path)
+        tools_dir = tools_py_path.parent / 'tools'
 
         # Local class-based tools (path B semantics) are layered on top of the
         # chain result. Surface any name collision so a silent override of a
@@ -1034,11 +1035,11 @@ class ToolResolver:
             tools_dict.update(local_tools)
 
         # Mutual exclusion: prefer tools.py when it exists, otherwise tools/.
-        if os.path.isfile(tools_py_path):
+        if tools_py_path.is_file():
             local_tools = self.get_local_tool_classes()
             if local_tools:
                 _merge_local(local_tools)
-            logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+            logger.debug("%s exists. Loading tools.py and skipping tools folder.", tools_py_path)
         # Otherwise load from tools/ directory if it exists
         elif tools_dir.is_dir():
             _merge_local(self.get_local_tool_classes_from_dir(tools_dir))

@@ -463,7 +463,7 @@ def run_main(
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: silent (default), actions, verbose, json, stream"),
-    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
+    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, plan, accept-edits, bypass, auto, agent, none, slack, telegram, discord, webhook, http, secure, presentation"),
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
