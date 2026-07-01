@@ -519,6 +519,7 @@ def fire_job_completed(
     platform: str = "",
     chat_id: str = "",
     thread_id: str = "",
+    session_id: str = "",
     agent_name: str = "background",
 ) -> None:
     """Fire JOB_COMPLETED hook when a background job reaches a terminal state.
@@ -534,7 +535,7 @@ def fire_job_completed(
         from praisonaiagents.hooks.events import JobCompletedInput
 
         event_input = JobCompletedInput(
-            session_id="",
+            session_id=session_id,
             cwd=os.getcwd(),
             event_name=HookEvent.JOB_COMPLETED,
             timestamp=str(time.time()),

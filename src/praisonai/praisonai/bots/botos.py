@@ -724,6 +724,7 @@ class BotOS:
                     platform=origin.get("platform", ""),
                     chat_id=origin.get("chat_id", ""),
                     thread_id=origin.get("thread_id", ""),
+                    session_id=origin.get("session_id", ""),
                 )
             except Exception as e:  # pragma: no cover — defensive
                 logger.debug(f"JOB_COMPLETED emit error (non-fatal): {e}")

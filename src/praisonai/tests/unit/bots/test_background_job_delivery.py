@@ -56,7 +56,14 @@ def _bind_botos(router):
     return os_like
 
 
-def _job(deliver, platform="telegram", chat_id="123", thread_id="", result=None):
+def _job(
+    deliver,
+    platform="telegram",
+    chat_id="123",
+    thread_id="",
+    session_id="",
+    result=None,
+):
     return SimpleNamespace(
         job_id="j1",
         status=SimpleNamespace(value="completed"),
@@ -67,6 +74,7 @@ def _job(deliver, platform="telegram", chat_id="123", thread_id="", result=None)
             "platform": platform,
             "chat_id": chat_id,
             "thread_id": thread_id,
+            "session_id": session_id,
         },
     )
 
@@ -103,3 +111,25 @@ def test_no_deliver_target_is_pull_only():
 
     assert delivered is False
     assert sent == []
+
+
+def test_job_completed_hook_receives_origin_session_id():
+    """The JOB_COMPLETED hook must carry the originating session_id (#2537)."""
+    router, _sent = _make_router({"telegram": "111"})
+    os_like = _bind_botos(router)
+
+    captured = {}
+
+    class FakeRunner:
+        def execute_sync(self, event, event_input):
+            captured["session_id"] = getattr(event_input, "session_id", None)
+            captured["thread_id"] = getattr(event_input, "thread_id", None)
+
+    os_like._get_hook_runner = lambda: FakeRunner()
+
+    os_like.on_background_job_complete(
+        _job(deliver="origin", session_id="sess-42", thread_id="t-9")
+    )
+
+    assert captured.get("session_id") == "sess-42"
+    assert captured.get("thread_id") == "t-9"

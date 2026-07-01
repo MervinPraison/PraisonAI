@@ -379,8 +379,10 @@ class TestJobManagerCompletion:
         job_id = mgr.start_job(boom, on_complete=lambda info: fired.append(info))
         try:
             mgr.get_result(job_id)
-        except Exception:
-            pass
+        except RuntimeError as exc:
+            assert "kaboom" in str(exc)
+        else:
+            raise AssertionError("Expected failed job to raise RuntimeError")
         assert len(fired) == 1
         assert fired[0].status == JobStatus.FAILED
         assert "kaboom" in fired[0].error
