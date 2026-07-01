@@ -230,6 +230,7 @@ def get_install_hint(name: str) -> str:
         "autogen_v4": "autogen-v4",
         "openai_agents": "openai-agents",
         "google_adk": "google-adk",
+        "pydantic_ai": "pydantic-ai",
     }.get(name, name)
     return f"pip install 'praisonai-frameworks[{extra_name}]'"
 

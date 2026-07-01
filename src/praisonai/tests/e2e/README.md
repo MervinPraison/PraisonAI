@@ -33,6 +33,8 @@ tests/e2e/
 │   └── test_agno_real.py           # Real Agno tests
 ├── google_adk_e2e/
 │   └── test_google_adk_real.py     # Real Google ADK tests
+├── pydantic_ai_e2e/
+│   └── test_pydantic_ai_real.py    # Real Pydantic AI tests
 ├── README.md                   # This file
 └── __init__.py
 ```
@@ -99,6 +101,11 @@ PRAISONAI_LIVE_TESTS=1 OPENAI_API_KEY="your-key" python -m pytest tests/e2e/agno
 **Run Google ADK real tests only:**
 ```bash
 PRAISONAI_LIVE_TESTS=1 GOOGLE_API_KEY="your-key" PRAISONAI_TEST_PROVIDERS=all python -m pytest tests/e2e/google_adk_e2e/ -v -m real
+```
+
+**Run Pydantic AI real tests only:**
+```bash
+PRAISONAI_LIVE_TESTS=1 OPENAI_API_KEY="your-key" python -m pytest tests/e2e/pydantic_ai_e2e/ -v -m real
 ```
 
 **Skip real tests (default behavior without API keys):**

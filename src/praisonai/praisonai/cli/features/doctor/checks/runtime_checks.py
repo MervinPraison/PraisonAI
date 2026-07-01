@@ -206,6 +206,20 @@ class RuntimeCompatibilityChecker:
             supports_handoff=True,
             supports_tool_loop=True
         )
+
+        runtimes['pydantic_ai'] = RuntimeInfo(
+            id='pydantic_ai',
+            name='Pydantic AI',
+            available=_runtime_usable('pydantic_ai', 'pydantic_ai'),
+            capabilities=[
+                RuntimeCapability('agent_creation', 'Create and manage agents'),
+                RuntimeCapability('tool_execution', 'Execute tools and functions'),
+                RuntimeCapability('sequential_execution', 'Sequential task execution'),
+                RuntimeCapability('handoff_support', 'Agent-to-agent handoffs via delegation tools', required=False),
+            ],
+            supports_handoff=True,
+            supports_tool_loop=True
+        )
         
         return runtimes
     
@@ -490,6 +504,7 @@ class RuntimeCompatibilityChecker:
                 'openai_agents',
                 'agno',
                 'google_adk',
+                'pydantic_ai',
             }
             
             if incompatible_handoff_runtimes:
@@ -499,8 +514,8 @@ class RuntimeCompatibilityChecker:
                     category=CheckCategory.CONFIG,
                     status=CheckStatus.FAIL,
                     message=f"Handoffs configured with incompatible runtimes: {', '.join(incompatible_handoff_runtimes)}",
-                    details="Only praisonai, autogen_v4, openai_agents, agno, and google_adk runtimes support handoffs",
-                    remediation="Use praisonai, autogen_v4, openai_agents, agno, or google_adk for agents that need handoff capabilities",
+                    details="Only praisonai, autogen_v4, openai_agents, agno, google_adk, and pydantic_ai runtimes support handoffs",
+                    remediation="Use praisonai, autogen_v4, openai_agents, agno, google_adk, or pydantic_ai for agents that need handoff capabilities",
                     severity=CheckSeverity.HIGH
                 )
 
