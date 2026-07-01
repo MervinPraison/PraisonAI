@@ -19,12 +19,20 @@ class LocalToolsDisabled(RuntimeError):
     pass
 
 
-def load_user_module(module_path: str | Path, *, name: str) -> ModuleType | None:
+def load_user_module(
+    module_path: str | Path,
+    *,
+    name: str,
+    allow_outside_cwd: bool = False,
+) -> ModuleType | None:
     """Load a user-supplied .py file with the same opt-in tool_resolver enforces.
 
     Args:
         module_path: Path to the .py file to load
         name: Module name to use for the spec
+        allow_outside_cwd: When True, skip the CWD boundary check. Only pass
+            this for paths the user provided explicitly (e.g. a ``--tools``
+            CLI argument), never for API/network-derived paths.
 
     Returns:
         Loaded module or None if loading is disabled or the file is missing.
@@ -43,14 +51,15 @@ def load_user_module(module_path: str | Path, *, name: str) -> ModuleType | None
     if not path.is_file():
         return None
 
-    # Optional: enforce that the path is under CWD or an explicit allowlist
-    # to prevent ../-style traversal from API/network inputs.
-    cwd = Path.cwd().resolve()
-    try:
-        path.relative_to(cwd)
-    except ValueError:
-        logger.warning("Refusing to exec %s: outside working directory.", path)
-        return None
+    # Enforce that the path is under CWD to prevent ../-style traversal from
+    # API/network inputs. Explicit user-provided files may opt out.
+    if not allow_outside_cwd:
+        cwd = Path.cwd().resolve()
+        try:
+            path.relative_to(cwd)
+        except ValueError:
+            logger.warning("Refusing to exec %s: outside working directory.", path)
+            return None
 
     spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:

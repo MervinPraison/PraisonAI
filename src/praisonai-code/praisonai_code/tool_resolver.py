@@ -752,7 +752,7 @@ class ToolResolver:
                 for name in praisonai_tools_all:
                     if name not in available:
                         available[name] = ("External tool from praisonai-tools", "external")
-            except (ImportError, AttributeError):
+            except Exception:
                 pass
 
         # 5. Core SDK tool registry (entry-point plugins and runtime-registered
@@ -798,7 +798,7 @@ class ToolResolver:
             
             # Validate tools
             tools = role_config.get('tools', [])
-            if tools:
+            if isinstance(tools, list):
                 for tool_name in tools:
                     if not tool_name or not isinstance(tool_name, str):
                         continue
@@ -935,7 +935,7 @@ class ToolResolver:
         result = {}
         for name, obj in inspect.getmembers(module, 
             lambda x: inspect.isclass(x) and (
-                x.__module__.startswith('langchain_community.tools') or 
+                (getattr(x, '__module__', None) or '').startswith('langchain_community.tools') or 
                 (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
             ) and x is not BaseTool):
             try:
@@ -1028,12 +1028,12 @@ class ToolResolver:
                     )
             tools_dict.update(local_tools)
 
-        # Load from tools.py if it exists
-        local_tools = self.get_local_tool_classes()
-        if local_tools:
-            _merge_local(local_tools)
-            if os.path.isfile(tools_py_path):
-                logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        # Mutual exclusion: prefer tools.py when it exists, otherwise tools/.
+        if os.path.isfile(tools_py_path):
+            local_tools = self.get_local_tool_classes()
+            if local_tools:
+                _merge_local(local_tools)
+            logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         # Otherwise load from tools/ directory if it exists
         elif tools_dir.is_dir():
             _merge_local(self.get_local_tool_classes_from_dir(tools_dir))

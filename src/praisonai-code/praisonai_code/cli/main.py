@@ -4720,7 +4720,7 @@ Do NOT add any explanations or formatting."""
                 # Approval Backend - Set agent-level approval via --approval flag
                 approval_flag = getattr(self.args, 'approval', None)
                 if approval_flag:
-                    from .features.approval import resolve_approval_config
+                    from .features._approval_bridge import resolve_approval_config
                     try:
                         approval_val = resolve_approval_config(
                             approval_flag,

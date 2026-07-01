@@ -245,7 +245,7 @@ def _revert_workspace(ref: str, workspace: str, verbose: bool = False) -> None:
     """
     import asyncio
 
-    from praisonai.cli.commands.checkpoint import _resolve_checkpoint_id
+    from praisonai_code.cli.commands.checkpoint import _resolve_checkpoint_id
     from praisonai_code.cli.features.checkpoints import CheckpointsHandler
 
     # Honor a configured checkpoints.storage_dir so this one-shot restore reads

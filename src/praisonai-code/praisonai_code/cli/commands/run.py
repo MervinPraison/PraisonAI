@@ -15,20 +15,6 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
-def _framework_help() -> str:
-    try:
-        from praisonai_code._wrapper_bridge import optional_wrapper_attr
-
-        framework_option_help = optional_wrapper_attr(
-            "praisonai.framework_adapters.registry", "framework_option_help"
-        )
-        if framework_option_help is not None:
-            return framework_option_help()
-    except Exception:
-        pass
-    return "Framework: praisonai, crewai, autogen"
-
-
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 
@@ -552,7 +538,7 @@ def run_main(
             run_setup = typer.confirm("Would you like to run the setup wizard now?")
             
             if run_setup:
-                from praisonai.cli.commands.setup import _run_setup
+                from praisonai_code.cli.commands.setup import _run_setup
                 exit_code = _run_setup(
                     non_interactive=False,
                     provider=None,
