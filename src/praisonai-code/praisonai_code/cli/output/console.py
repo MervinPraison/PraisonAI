@@ -28,8 +28,8 @@ def _get_rich_available() -> bool:
     global _rich_available
     if _rich_available is None:
         try:
-            from ..._framework_availability import is_available
-            _rich_available = is_available("rich")
+            import rich.console  # noqa: F401
+            _rich_available = True
         except ImportError:
             _rich_available = False
     return _rich_available

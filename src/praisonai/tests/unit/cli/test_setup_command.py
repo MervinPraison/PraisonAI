@@ -208,7 +208,8 @@ class TestSetupCommand:
         ])
 
         assert result.exit_code != 0
-        assert "API key is required" in result.stdout or "required" in result.stdout
+        combined = result.stdout + result.stderr
+        assert "API key is required" in combined or "required" in combined
 
     def test_setup_invalid_provider(self):
         """Test that setup fails with invalid provider."""
