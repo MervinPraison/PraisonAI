@@ -186,9 +186,13 @@ C6 is the **sign-off step** after C0–C5 file moves: no further moves, only reg
 | Install target | Agentic CLI (`run`, `chat`, `code`, …) | Bot/gateway (`bot`, `gateway`, `pairing`, …) |
 |----------------|----------------------------------------|---------------------------------------------|
 | `pip install praisonai` | Yes (via `praisonai-code` dep + shims) | Yes |
-| `pip install praisonai-code` only | Yes for core agentic CLI + credential gate; optional features still lazy-import wrapper | No — wrapper-only commands hidden when `praisonai` absent |
+| `pip install praisonai-code` only | Yes — agentic hot path (`run`, `chat`, `code`, warm runtime) without wrapper import | No — wrapper-only commands hidden when `praisonai` absent |
 
-**C7 (in progress):** Reverse-import elimination — `llm/env`, `llm/credentials`, registry, version, and CLI entry moved to `praisonai_code`; remaining ~440 lazy wrapper imports are optional features (observability, framework adapters, bots).
+**C7 (hot path complete):** Core agentic CLI imports no longer require the `praisonai`
+wrapper at module level. Remaining lazy wrapper imports (~300+) are optional commands
+and features (train, capabilities, bots, framework adapters) — use
+`praisonai_code._wrapper_bridge` or `pip install praisonai`. See
+`src/praisonai/tests/C7_VERIFICATION.md`. CI gate: `scripts/check_c7_imports.sh`.
 
 ---
 

@@ -105,9 +105,36 @@ jobs:
         assert hasattr(ConfigResolver, '__name__')
         assert callable(is_configured)
         assert ModelCatalogue().list_models(provider="openai")
+        import praisonai_code.cli.main
+        import praisonai_code.cli.app
+        from praisonai_code.tool_resolver import ToolResolver
+        assert ToolResolver is not None
         print('standalone ok', get_package_version(), 'toml', toml.__version__)
         "
         /tmp/praisonai-code-standalone/bin/praisonai-code --version
+        /tmp/praisonai-code-standalone/bin/praisonai-code run --help
+        cd src/praisonai-code
+        for f in praisonai_code/cli/main.py praisonai_code/cli/app.py \
+                 praisonai_code/cli/commands/run.py praisonai_code/cli/commands/chat.py \
+                 praisonai_code/cli/commands/code.py; do
+          if grep -E '^from praisonai\.|^import praisonai' "$f"; then
+            echo "FAIL: module-level wrapper import in $f"
+            exit 1
+          fi
+        done
+        echo "C7 hot-path import gate ok"
+        bash scripts/check_c7_imports.sh
+        # Standalone run must not fail on wrapper ImportError (API auth failure is OK)
+        set +e
+        RUN_OUT=$(/tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
+        RUN_CODE=$?
+        set -e
+        echo "$RUN_OUT" | tail -20
+        if echo "$RUN_OUT" | grep -qE 'ImportError|ModuleNotFoundError: No module named .praisonai'; then
+          echo "FAIL: standalone run hit wrapper import error"
+          exit 1
+        fi
+        echo "standalone run import gate ok (exit $RUN_CODE)"
     
     - name: Smoke Test Summary
       if: always()

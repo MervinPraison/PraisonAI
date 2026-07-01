@@ -947,7 +947,7 @@ def docs_serve(
     port: int = typer.Option(8000, "--port", "-p", help="Port to serve on"),
 ):
     """Serve documentation locally."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['docs', 'serve', '--port', str(port)]

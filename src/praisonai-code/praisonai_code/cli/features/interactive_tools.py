@@ -11,7 +11,7 @@ Tool Groups:
 - `interactive`: Union of all groups (default)
 
 Usage:
-    from praisonai.cli.features.interactive_tools import (
+    from praisonai_code.cli.features.interactive_tools import (
         get_interactive_tools,
         resolve_tool_groups,
         TOOL_GROUPS,

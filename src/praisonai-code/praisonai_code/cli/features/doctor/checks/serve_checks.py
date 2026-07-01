@@ -111,7 +111,7 @@ def check_endpoints_module(config: DoctorConfig) -> CheckResult:
 def check_endpoints_cli(config: DoctorConfig) -> CheckResult:
     """Check if endpoints CLI handler is available."""
     try:
-        from praisonai.cli.features.endpoints import EndpointsHandler
+        from praisonai_code.cli.features.endpoints import EndpointsHandler
         handler = EndpointsHandler()
         return CheckResult(
             id="endpoints_cli",

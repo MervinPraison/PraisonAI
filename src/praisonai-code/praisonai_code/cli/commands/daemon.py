@@ -43,7 +43,7 @@ def daemon_start(
         output.print_error("--host must be a valid loopback IP address.")
         raise typer.Exit(1)
 
-    from praisonai.runtime import get_runtime_descriptor
+    from praisonai_code.runtime import get_runtime_descriptor
 
     existing = get_runtime_descriptor()
     if existing is not None:
@@ -103,7 +103,7 @@ def daemon_start(
 
     output.print_info(f"Starting warm runtime on {host}:{port or 'auto'} (Ctrl-C to stop)...")
     try:
-        from praisonai.runtime.server import serve_runtime
+        from praisonai_code.runtime.server import serve_runtime
 
         serve_runtime(host=host, port=port, model=model, idle_timeout=idle_timeout)
     except KeyboardInterrupt:
@@ -118,8 +118,8 @@ def daemon_stop():
     """Stop the running warm runtime."""
     output = get_output_controller()
 
-    from praisonai.runtime import RuntimeClient, get_runtime_descriptor
-    from praisonai.runtime.descriptor import RuntimeDescriptor
+    from praisonai_code.runtime import RuntimeClient, get_runtime_descriptor
+    from praisonai_code.runtime.descriptor import RuntimeDescriptor
 
     descriptor = get_runtime_descriptor()
     if descriptor is None:
@@ -156,7 +156,7 @@ def daemon_status(
     """Show whether a warm runtime is running."""
     output = get_output_controller()
 
-    from praisonai.runtime import get_runtime_descriptor
+    from praisonai_code.runtime import get_runtime_descriptor
 
     descriptor = get_runtime_descriptor()
     running = descriptor is not None

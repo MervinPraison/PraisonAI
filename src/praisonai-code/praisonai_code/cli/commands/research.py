@@ -24,7 +24,7 @@ def research_main(
         praisonai research "What are the latest AI trends?"
         praisonai research --model gpt-4o "Analyze market data"
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['research']

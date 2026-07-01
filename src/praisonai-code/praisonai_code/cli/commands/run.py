@@ -15,15 +15,7 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
-def _framework_help() -> str:
-    try:
-        from praisonai.framework_adapters.registry import framework_option_help
-        return framework_option_help()
-    except ImportError:
-        return "Framework: praisonai, crewai, autogen"
-
-
-_FRAMEWORK_HELP = _framework_help()
+_FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
@@ -188,7 +180,7 @@ def _build_mcp_tools(
     """
     tools: list = []
     try:
-        from praisonai.cli.features.mcp import MCPHandler
+        from praisonai_code.cli.features.mcp import MCPHandler
     except ImportError:
         return tools
 
@@ -351,7 +343,7 @@ def _auto_checkpoint(label: str, *, no_checkpoint: bool, workspace_dir: Optional
 
     output = get_output_controller()
     try:
-        from praisonai.cli.features.checkpoints import CheckpointsHandler
+        from praisonai_code.cli.features.checkpoints import CheckpointsHandler
 
         handler = CheckpointsHandler(
             workspace_dir=workspace_dir or os.getcwd(),
@@ -368,7 +360,7 @@ def _restore_checkpoint(ref: str, workspace_dir: Optional[str] = None) -> None:
     import asyncio
     import os
 
-    from praisonai.cli.features.checkpoints import CheckpointsHandler
+    from praisonai_code.cli.features.checkpoints import CheckpointsHandler
 
     handler = CheckpointsHandler(
         workspace_dir=workspace_dir or os.getcwd(),
@@ -426,7 +418,7 @@ def _try_attach_runtime(
         return False
 
     try:
-        from praisonai.runtime import get_runtime_descriptor, RuntimeClient, RuntimeUnavailable
+        from praisonai_code.runtime import get_runtime_descriptor, RuntimeClient, RuntimeUnavailable
     except ImportError:
         return False
 
@@ -471,7 +463,7 @@ def run_main(
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     output_mode: Optional[str] = typer.Option(None, "--output", "-o", help="Output mode: silent (default), actions, verbose, json, stream"),
-    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
+    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, plan, accept-edits, bypass, auto, agent, none, slack, telegram, discord, webhook, http, secure, presentation"),
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
@@ -519,7 +511,7 @@ def run_main(
     # Validate --thinking and resolve it to the core thinking_budget up front so
     # an unknown value fails closed before any execution (consistent with the
     # `code` command and MODE_RULES validation on custom agents).
-    from praisonai.cli.features.thinking import thinking_to_budget
+    from praisonai_code.cli.features.thinking import thinking_to_budget
     try:
         thinking_budget = thinking_to_budget(thinking)
     except ValueError as exc:
@@ -550,7 +542,7 @@ def run_main(
             run_setup = typer.confirm("Would you like to run the setup wizard now?")
             
             if run_setup:
-                from praisonai.cli.commands.setup import _run_setup
+                from praisonai_code.cli.commands.setup import _run_setup
                 exit_code = _run_setup(
                     non_interactive=False,
                     provider=None,
@@ -607,7 +599,7 @@ def run_main(
 
     # Handle custom agent or command
     if agent:
-        from praisonai.cli.features.custom_definitions import load_agent_from_name
+        from praisonai_code.cli.features.custom_definitions import load_agent_from_name
         agent_config = load_agent_from_name(agent)
         if not agent_config:
             output.print_error(f"Agent '{agent}' not found")
@@ -642,7 +634,7 @@ def run_main(
         return
     
     if command:
-        from praisonai.cli.features.custom_definitions import (
+        from praisonai_code.cli.features.custom_definitions import (
             ShellSubstitutionError,
             interpolate_command_template,
         )
@@ -860,7 +852,7 @@ def _run_from_file(
     
     try:
         # Use existing PraisonAI class
-        from praisonai.cli.main import PraisonAI
+        from praisonai_code.cli.main import PraisonAI
         
         praison = PraisonAI(
             agent_file=file_path,
@@ -975,7 +967,7 @@ def _run_prompt(
     
     try:
         # Handle session continuity first (before any execution mode)
-        from praisonai.cli.main import PraisonAI
+        from praisonai_code.cli.main import PraisonAI
         
         praison = PraisonAI()
         
@@ -1065,7 +1057,7 @@ def _run_prompt(
             
             # Resolve approval backend if specified
             if approval:
-                from praisonai.cli.features.approval import resolve_approval_config
+                from praisonai_code.cli.features._approval_bridge import resolve_approval_config
                 agent_config["approval"] = resolve_approval_config(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
                     permissions_config=permissions_config,
@@ -1236,7 +1228,7 @@ def _run_from_file_profiled(
     no_save: bool = False,
 ):
     """Run agents from a YAML file with profiling enabled."""
-    from praisonai.cli.features.cli_profiler import (
+    from praisonai_code.cli.features.cli_profiler import (
         CLIProfileConfig,
         CLIProfiler,
     )
@@ -1252,7 +1244,7 @@ def _run_from_file_profiled(
     # Import phase
     profiler.mark_import_start()
     try:
-        from praisonai.cli.main import PraisonAI
+        from praisonai_code.cli.main import PraisonAI
     except ImportError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -1370,7 +1362,7 @@ def _run_custom_agent(
             merged_permissions.update(invocation_permissions)
         
         if merged_permissions:
-            from praisonai.cli.features.approval import resolve_approval_config
+            from praisonai_code.cli.features._approval_bridge import resolve_approval_config
             # Preserve promptable `ask` rules: only fall back to non-interactive
             # when there is no interactive approval path. An explicit --approval
             # flag or any `ask` rule keeps the backend interactive so the user
@@ -1389,7 +1381,7 @@ def _run_custom_agent(
                 permissions_config=merged_permissions,
             )
         elif approval:
-            from praisonai.cli.features.approval import resolve_approval_config
+            from praisonai_code.cli.features._approval_bridge import resolve_approval_config
             agent_config["approval"] = resolve_approval_config(
                 approval,
                 all_tools=approve_all_tools,
@@ -1486,7 +1478,7 @@ def _run_prompt_profiled(
     no_save: bool = False,
 ):
     """Run a direct prompt with profiling enabled."""
-    from praisonai.cli.features.cli_profiler import (
+    from praisonai_code.cli.features.cli_profiler import (
         CLIProfileConfig,
         CLIProfiler,
     )

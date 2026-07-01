@@ -33,7 +33,7 @@ def tools_list(
     - External tools (praisonai-tools package)
     - Registered/entry-point tools (core registry plugins)
     """
-    from praisonai.tool_resolver import ToolResolver
+    from praisonai_code.tool_resolver import ToolResolver
     
     resolver = ToolResolver()
     available = resolver.list_available()
@@ -105,7 +105,7 @@ def tools_validate(
     """
     import yaml
     from pathlib import Path
-    from praisonai.tool_resolver import ToolResolver
+    from praisonai_code.tool_resolver import ToolResolver
     
     yaml_path = Path(yaml_file)
     if not yaml_path.exists():
@@ -148,7 +148,7 @@ def tools_info(
     name: str = typer.Argument(..., help="Tool name"),
 ):
     """Show detailed information about a tool."""
-    from praisonai.tool_resolver import ToolResolver
+    from praisonai_code.tool_resolver import ToolResolver
     
     resolver = ToolResolver()
     tool = resolver.resolve(name)
@@ -191,7 +191,7 @@ def tools_test(
     name: str = typer.Argument(..., help="Tool name to test"),
 ):
     """Test a tool with a simple invocation."""
-    from praisonai.tool_resolver import ToolResolver
+    from praisonai_code.tool_resolver import ToolResolver
     
     resolver = ToolResolver()
     tool = resolver.resolve(name)

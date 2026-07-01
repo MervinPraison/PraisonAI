@@ -365,7 +365,7 @@ def interactive(
     # Generate template
     if generate_template:
         # Lazy import
-        from praisonai.cli.features.csv_test_runner import generate_csv_template
+        from praisonai_code.cli.features.csv_test_runner import generate_csv_template
         
         output_path = Path.cwd() / "interactive_tests_template.csv"
         generate_csv_template(output_path)
@@ -408,7 +408,7 @@ def interactive(
             raise typer.Exit(1)
     
     # Lazy import runner
-    from praisonai.cli.features.csv_test_runner import CSVTestRunner
+    from praisonai_code.cli.features.csv_test_runner import CSVTestRunner
     
     typer.echo(f"🧪 Running interactive tests from: {csv_path}")
     typer.echo(f"   Model: {model} | Judge: {judge_model}")

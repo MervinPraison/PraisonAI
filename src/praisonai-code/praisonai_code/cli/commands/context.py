@@ -19,7 +19,7 @@ def context_show(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Show current context."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['context', 'show']
@@ -41,7 +41,7 @@ def context_show(
 @app.command("clear")
 def context_clear():
     """Clear current context."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['context', 'clear']
@@ -63,7 +63,7 @@ def context_add(
     content: str = typer.Argument(..., help="Content to add to context"),
 ):
     """Add content to context."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['context', 'add', content]

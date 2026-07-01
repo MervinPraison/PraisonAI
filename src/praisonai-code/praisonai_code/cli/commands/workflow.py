@@ -27,7 +27,7 @@ def workflow_run(
         praisonai workflow run my_workflow.yaml --var topic="AI Tools"
         praisonai workflow run publish-pypi.yaml --dry-run
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['workflow', 'run', file]
@@ -55,7 +55,7 @@ def workflow_run(
 @app.command("list")
 def workflow_list():
     """List available workflows."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['workflow', 'list']
@@ -78,7 +78,7 @@ def workflow_create(
     template: str = typer.Option(None, "--template", "-t", help="Template to use"),
 ):
     """Create a new workflow."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['workflow', 'create', name]

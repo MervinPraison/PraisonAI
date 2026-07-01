@@ -12,7 +12,7 @@ app = typer.Typer(help="Template management")
 @app.command("list")
 def templates_list():
     """List available templates."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['templates', 'list']
@@ -35,7 +35,7 @@ def templates_create(
     source: str = typer.Option(None, "--source", "-s", help="Source file to create template from"),
 ):
     """Create a new template."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['templates', 'create', name]

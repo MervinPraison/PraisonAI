@@ -39,7 +39,7 @@ def attach_main(
     output = get_output_controller()
 
     try:
-        from praisonai.runtime import (
+        from praisonai_code.runtime import (
             get_runtime_descriptor,
             RuntimeClient,
             RuntimeUnavailable,

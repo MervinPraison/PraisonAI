@@ -51,7 +51,7 @@ def _run_setup(
 ) -> int:
     """Run the setup wizard."""
     try:
-        from praisonai.cli.features.setup.handler import SetupHandler
+        from praisonai_code.cli.features.setup.handler import SetupHandler
         handler = SetupHandler()
         return handler.execute(
             non_interactive=non_interactive,

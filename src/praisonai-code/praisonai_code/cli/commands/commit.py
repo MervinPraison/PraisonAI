@@ -24,7 +24,7 @@ def commit_main(
         praisonai commit -m "Fix bug"
         praisonai commit --all --push
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['commit']

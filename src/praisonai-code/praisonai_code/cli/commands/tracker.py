@@ -145,7 +145,7 @@ def _get_tools(tool_names: List[str]) -> List:
     unresolved = [n for n in tool_names if n not in resolved_names]
     if any(n.startswith(("acp_", "lsp_")) for n in unresolved):
         try:
-            from praisonai.cli.features.interactive_tools import get_interactive_tools, ToolConfig
+            from praisonai_code.cli.features.interactive_tools import get_interactive_tools, ToolConfig
             config = ToolConfig.from_env()
             config.workspace = os.getcwd()
             interactive = get_interactive_tools(config=config)
@@ -402,7 +402,7 @@ When you have fully completed the task, say 'Task completed' or 'Done'.""",
     finally:
         # Stop the LSP/ACP runtime if it was started
         try:
-            from praisonai.cli.features.interactive_tools import cleanup_runtime
+            from praisonai_code.cli.features.interactive_tools import cleanup_runtime
             cleanup_runtime()
         except Exception:
             pass

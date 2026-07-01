@@ -678,7 +678,7 @@ class JobWorkflowExecutor:
         if not tool_names:
             return []
         
-        from praisonai.tool_resolver import ToolResolver
+        from praisonai_code.tool_resolver import ToolResolver
         resolver = ToolResolver()
         
         resolved = []

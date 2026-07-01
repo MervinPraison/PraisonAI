@@ -12,7 +12,7 @@ app = typer.Typer(help="Todo/task management")
 @app.command("list")
 def todo_list():
     """List todos."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['todo', 'list']
@@ -35,7 +35,7 @@ def todo_add(
     priority: str = typer.Option("medium", "--priority", "-p", help="Priority (low, medium, high)"),
 ):
     """Add a todo."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['todo', 'add', task]
@@ -57,7 +57,7 @@ def todo_done(
     task_id: str = typer.Argument(..., help="Task ID to mark as done"),
 ):
     """Mark a todo as done."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['todo', 'done', task_id]

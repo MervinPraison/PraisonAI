@@ -52,7 +52,7 @@ def debug_interactive(
     
     # Delegate to existing handler
     try:
-        from praisonai.cli.features.debug import run_debug_command
+        from praisonai_code.cli.features.debug import run_debug_command
         exit_code = run_debug_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -74,7 +74,7 @@ def debug_lsp(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.debug import run_debug_command
+        from praisonai_code.cli.features.debug import run_debug_command
         exit_code = run_debug_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -94,7 +94,7 @@ def debug_acp(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.debug import run_debug_command
+        from praisonai_code.cli.features.debug import run_debug_command
         exit_code = run_debug_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:
@@ -117,7 +117,7 @@ def debug_trace(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.debug import run_debug_command
+        from praisonai_code.cli.features.debug import run_debug_command
         exit_code = run_debug_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:

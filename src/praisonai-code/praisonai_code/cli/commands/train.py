@@ -43,7 +43,7 @@ def train_llm(
         praisonai train llm dataset.json
         praisonai train llm --model llama-3.1 dataset.json
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['train', dataset]
@@ -539,7 +539,7 @@ def _load_agent_from_file(file_path: str, output) -> Optional[object]:
     
     if path.suffix in ('.yaml', '.yml'):
         try:
-            from praisonai.cli.main import PraisonAI
+            from praisonai_code.cli.main import PraisonAI
             praison = PraisonAI(agent_file=str(path))
             # Return the agents object
             if hasattr(praison, 'agents') and praison.agents:

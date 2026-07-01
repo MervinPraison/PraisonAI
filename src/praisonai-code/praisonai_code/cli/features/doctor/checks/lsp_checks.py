@@ -178,7 +178,7 @@ def check_lsp_server_typescript(config=None) -> CheckResult:
 def check_lsp_runtime(config=None) -> CheckResult:
     """Check if LSP runtime can start."""
     try:
-        from praisonai.cli.features.interactive_runtime import create_runtime
+        from praisonai_code.cli.features.interactive_runtime import create_runtime
         
         async def _check():
             runtime = create_runtime(

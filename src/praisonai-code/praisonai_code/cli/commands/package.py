@@ -15,7 +15,7 @@ def package_install(
     upgrade: bool = typer.Option(False, "--upgrade", "-U", help="Upgrade if already installed"),
 ):
     """Install a package."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['package', 'install', package]
@@ -39,7 +39,7 @@ def package_uninstall(
     package: str = typer.Argument(..., help="Package to uninstall"),
 ):
     """Uninstall a package."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['package', 'uninstall', package]
@@ -59,7 +59,7 @@ def package_uninstall(
 @app.command("list")
 def package_list():
     """List installed packages."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['package', 'list']

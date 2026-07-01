@@ -14,7 +14,7 @@ def agents_list(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
     """List available agents."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['agents', 'list']
@@ -39,7 +39,7 @@ def agents_create(
     template: str = typer.Option(None, "--template", "-t", help="Template to use"),
 ):
     """Create a new agent."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['agents', 'create', name]
@@ -63,7 +63,7 @@ def agents_info(
     name: str = typer.Argument(..., help="Agent name"),
 ):
     """Show agent information."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['agents', 'info', name]

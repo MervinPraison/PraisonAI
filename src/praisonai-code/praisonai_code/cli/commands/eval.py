@@ -17,7 +17,7 @@ def eval_accuracy(
     iterations: int = typer.Option(3, "--iterations", "-n", help="Number of iterations"),
 ):
     """Run accuracy evaluation."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['eval', 'accuracy', agent, '--input', input_text, '--expected', expected]
@@ -40,7 +40,7 @@ def eval_performance(
     iterations: int = typer.Option(50, "--iterations", "-n", help="Number of iterations"),
 ):
     """Run performance evaluation."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['eval', 'performance', agent, '--iterations', str(iterations)]

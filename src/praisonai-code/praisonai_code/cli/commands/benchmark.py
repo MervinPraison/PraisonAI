@@ -48,7 +48,7 @@ def benchmark_profile(
         praisonai benchmark profile "Hi" --deep --format json --output results.json
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -98,7 +98,7 @@ def benchmark_compare(
         praisonai benchmark compare "What is 2+2?" --iterations 3
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -128,7 +128,7 @@ def benchmark_sdk(
         praisonai benchmark sdk "What is 2+2?" --iterations 5
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -157,7 +157,7 @@ def benchmark_agent(
         praisonai benchmark agent "What is 2+2?" --iterations 5
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -191,7 +191,7 @@ def benchmark_cli(
         praisonai benchmark cli "What is 2+2?" --iterations 5
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -225,7 +225,7 @@ def benchmark_workflow(
         praisonai benchmark workflow "What is 2+2?" --iterations 5
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
@@ -259,7 +259,7 @@ def benchmark_litellm(
         praisonai benchmark litellm "What is 2+2?" --iterations 5
     """
     try:
-        from praisonai.cli.features.benchmark import BenchmarkHandler
+        from praisonai_code.cli.features.benchmark import BenchmarkHandler
     except ImportError as e:
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)

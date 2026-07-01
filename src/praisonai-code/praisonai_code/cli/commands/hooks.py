@@ -12,7 +12,7 @@ app = typer.Typer(help="Hook management")
 @app.command("list")
 def hooks_list():
     """List available hooks."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['hooks', 'list']
@@ -35,7 +35,7 @@ def hooks_add(
     event: str = typer.Option(..., "--event", "-e", help="Event to hook into"),
 ):
     """Add a hook."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['hooks', 'add', name, '--event', event]
@@ -57,7 +57,7 @@ def hooks_remove(
     name: str = typer.Argument(..., help="Hook name to remove"),
 ):
     """Remove a hook."""
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['hooks', 'remove', name]

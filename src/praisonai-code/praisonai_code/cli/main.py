@@ -167,7 +167,7 @@ def _provider_preflight_message():
     )
 
 # Use centralized availability detection
-from praisonai._framework_availability import is_available
+from praisonai_code._framework_availability import is_available
 
 # Optional-dependency availability flags are resolved lazily so that merely
 # importing this module (e.g. for `praisonai --help`) does not walk the
@@ -326,9 +326,15 @@ class PraisonAI:
         """
         Initialize the PraisonAI object with default parameters.
         """
-        # Initialize telemetry defaults (moved from lazy __getattr__ hook)
-        from praisonai import _ensure_telemetry_defaults
-        _ensure_telemetry_defaults()
+        # Initialize telemetry defaults (moved from lazy __getattr__ hook).
+        # Optional: the wrapper package is not required for the standalone
+        # praisonai-code hot path, so skip silently when it is absent.
+        from praisonai_code._wrapper_bridge import optional_wrapper_attr
+        _ensure_telemetry_defaults = optional_wrapper_attr(
+            "praisonai", "_ensure_telemetry_defaults"
+        )
+        if _ensure_telemetry_defaults is not None:
+            _ensure_telemetry_defaults()
         self.agent_yaml = agent_yaml
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
@@ -2056,8 +2062,8 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
-                        module = load_user_module(rewrite_tools, name="rewrite_tools_module")
+                        from praisonai_code._safe_loader import load_user_module
+                        module = load_user_module(rewrite_tools, name="rewrite_tools_module", allow_outside_cwd=True)
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2072,7 +2078,7 @@ class PraisonAI:
                     # Treat as comma-separated tool names
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in rewrite_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
@@ -2145,8 +2151,8 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
-                        module = load_user_module(expand_tools, name="expand_tools_module")
+                        from praisonai_code._safe_loader import load_user_module
+                        module = load_user_module(expand_tools, name="expand_tools_module", allow_outside_cwd=True)
                         if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2161,7 +2167,7 @@ class PraisonAI:
                     # Treat as comma-separated tool names
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in expand_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
@@ -2227,8 +2233,8 @@ class PraisonAI:
             # Load from file
             try:
                 import inspect
-                from praisonai._safe_loader import load_user_module
-                module = load_user_module(tools_path, name="tools_module")
+                from praisonai_code._safe_loader import load_user_module
+                module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
                 if module is not None:
                     for name, obj in inspect.getmembers(module):
                         if inspect.isfunction(obj) and not name.startswith('_'):
@@ -2241,7 +2247,7 @@ class PraisonAI:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
             # Comma-separated names: use the unified resolver so CLI == YAML == Python
-            from praisonai.tool_resolver import ToolResolver
+            from praisonai_code.tool_resolver import ToolResolver
             resolver = ToolResolver()
             tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
             for tool_name in tool_names:
@@ -2273,7 +2279,7 @@ class PraisonAI:
             return tools_list
         
         try:
-            from praisonai.tool_resolver import resolve_toolsets
+            from praisonai_code.tool_resolver import resolve_toolsets
             tools_list = resolve_toolsets(toolset_names)
             
             if tools_list:
@@ -2888,8 +2894,8 @@ class PraisonAI:
             
             if tools_file.exists():
                 try:
-                    from praisonai._safe_loader import load_user_module
-                    tools_module = load_user_module(str(tools_file), name="recipe_tools")
+                    from praisonai_code._safe_loader import load_user_module
+                    tools_module = load_user_module(str(tools_file), name="recipe_tools", allow_outside_cwd=True)
                     if tools_module is not None:
                         import inspect
                         # Build registry from public functions only
@@ -4720,7 +4726,7 @@ Do NOT add any explanations or formatting."""
                 # Approval Backend - Set agent-level approval via --approval flag
                 approval_flag = getattr(self.args, 'approval', None)
                 if approval_flag:
-                    from .features.approval import resolve_approval_config
+                    from .features._approval_bridge import resolve_approval_config
                     try:
                         approval_val = resolve_approval_config(
                             approval_flag,
@@ -5782,8 +5788,8 @@ Now, {final_instruction.lower()}:"""
                     # Load from file
                     try:
                         import inspect
-                        from praisonai._safe_loader import load_user_module
-                        module = load_user_module(tools_path, name="tools_module")
+                        from praisonai_code._safe_loader import load_user_module
+                        module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
                         if module is not None:
                             # Get all callable functions from the module
                             for name, obj in inspect.getmembers(module):
@@ -5799,7 +5805,7 @@ Now, {final_instruction.lower()}:"""
                     # Treat as comma-separated tool names (e.g., "internet_search,wiki_search")
                     try:
                         import inspect
-                        from praisonai.tool_resolver import resolve_tool
+                        from praisonai_code.tool_resolver import resolve_tool
 
                         tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
                         for tool_name in tool_names:

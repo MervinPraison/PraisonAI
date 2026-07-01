@@ -24,7 +24,7 @@ def call_main(
         praisonai call
         praisonai call --model gpt-4o
     """
-    from praisonai.cli.main import PraisonAI
+    from praisonai_code.cli.main import PraisonAI
     import sys
     
     argv = ['call']
