@@ -48,7 +48,7 @@ def update_file(filepath: Path, patterns: list[tuple[str, str]]) -> bool:
         return False
 
 
-def bump_version(new_version: str, agents_version: str | None = None):
+def bump_version(new_version: str, agents_version: str | None = None, code_version: str | None = None, code_pin_only: bool = False):
     """Bump version in all required files."""
     root = get_project_root()
     
@@ -102,6 +102,30 @@ def bump_version(new_version: str, agents_version: str | None = None):
             praisonai_dir / "pyproject.toml",
             [(r'praisonaiagents>=[0-9.]+', f'praisonaiagents>={agents_version}')]
         )
+
+    if code_version:
+        code_dir = root / "src/praisonai-code"
+        if code_pin_only:
+            print(f"\n📦 Pinning praisonai-code dependency to >={code_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-code to {code_version}:")
+            update_file(
+                code_dir / "pyproject.toml",
+                [(r'^version = "[^"]+"', f'version = "{code_version}"')]
+            )
+            update_file(
+                code_dir / "praisonai_code/__init__.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{code_version}"')]
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-code(?:>=[0-9.]+)?"',
+                    f'"praisonai-code>={code_version}"',
+                )
+            ],
+        )
     
     print("\n✨ Version bump complete!")
     print("\nNext steps:")
@@ -126,6 +150,17 @@ def main():
         default=None
     )
     
+    parser.add_argument(
+        "--code", "-c",
+        help="Bump praisonai-code version and pin wrapper dependency",
+        default=None
+    )
+    parser.add_argument(
+        "--code-pin",
+        help="Pin praisonai-code>= in wrapper pyproject only",
+        default=None
+    )
+    
     args = parser.parse_args()
     
     # Validate version format
@@ -139,7 +174,21 @@ def main():
         print("   Expected format: X.Y.Z (e.g., 0.0.167)")
         sys.exit(1)
     
-    bump_version(args.version, args.agents)
+    if args.code and args.code_pin:
+        print("❌ Use only one of --code or --code-pin")
+        sys.exit(1)
+
+    code_version = args.code or args.code_pin
+    if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
+        print(f"❌ Invalid code version format: {code_version}")
+        sys.exit(1)
+    
+    bump_version(
+        args.version,
+        args.agents,
+        code_version=code_version,
+        code_pin_only=bool(args.code_pin and not args.code),
+    )
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: 'Version bump type for both packages'
+        description: 'Version bump type for all packages (agents, code, wrapper)'
         required: true
         default: patch
         type: choice
@@ -27,7 +27,12 @@ on:
         default: false
         type: boolean
       skip_wrapper:
-        description: 'Publish agents only'
+        description: 'Skip wrapper publish (agents and/or code only)'
+        required: false
+        default: false
+        type: boolean
+      skip_code:
+        description: 'Skip praisonai-code publish (recovery if already on PyPI)'
         required: false
         default: false
         type: boolean
@@ -38,6 +43,11 @@ on:
         type: string
       wrapper_version:
         description: 'Override wrapper version (empty = auto bump from version.py)'
+        required: false
+        default: ''
+        type: string
+      code_version:
+        description: 'Override praisonai-code version (empty = auto bump from pyproject.toml)'
         required: false
         default: ''
         type: string
@@ -112,7 +122,9 @@ jobs:
           BUMP: ${{ inputs.bump }}
           AGENTS_OVERRIDE: ${{ inputs.agents_version }}
           WRAPPER_OVERRIDE: ${{ inputs.wrapper_version }}
+          CODE_OVERRIDE: ${{ inputs.code_version }}
           SKIP_AGENTS: ${{ inputs.skip_agents }}
+          SKIP_CODE: ${{ inputs.skip_code }}
         run: |
           python <<'PY'
           import os
@@ -143,8 +155,10 @@ jobs:
 
           agents_override = os.environ.get("AGENTS_OVERRIDE", "").strip()
           wrapper_override = os.environ.get("WRAPPER_OVERRIDE", "").strip()
+          code_override = os.environ.get("CODE_OVERRIDE", "").strip()
           validate_version("agents_version", agents_override)
           validate_version("wrapper_version", wrapper_override)
+          validate_version("code_version", code_override)
 
           agents_pyproject = root / "src/praisonai-agents/pyproject.toml"
           agents_content = agents_pyproject.read_text()
@@ -153,9 +167,14 @@ jobs:
               print("Could not read agents version from pyproject.toml", file=sys.stderr)
               sys.exit(1)
           current_agents = agents_match.group(1)
-          if not SEMVER.match(current_agents):
-              print(f"Invalid current agents version: {current_agents}", file=sys.stderr)
+
+          code_pyproject = root / "src/praisonai-code/pyproject.toml"
+          code_content = code_pyproject.read_text()
+          code_match = re.search(r'^version\s*=\s*"([^"]+)"', code_content, re.MULTILINE)
+          if not code_match:
+              print("Could not read praisonai-code version from pyproject.toml", file=sys.stderr)
               sys.exit(1)
+          current_code = code_match.group(1)
 
           wrapper_version_py = root / "src/praisonai/praisonai/version.py"
           wrapper_content = wrapper_version_py.read_text()
@@ -164,11 +183,18 @@ jobs:
               print("Could not read wrapper version from version.py", file=sys.stderr)
               sys.exit(1)
           current_wrapper = wrapper_match.group(1)
-          if not SEMVER.match(current_wrapper):
-              print(f"Invalid current wrapper version: {current_wrapper}", file=sys.stderr)
-              sys.exit(1)
+
+          for label, value in (
+              ("agents", current_agents),
+              ("code", current_code),
+              ("wrapper", current_wrapper),
+          ):
+              if not SEMVER.match(value):
+                  print(f"Invalid current {label} version: {value}", file=sys.stderr)
+                  sys.exit(1)
 
           skip_agents = os.environ.get("SKIP_AGENTS", "false").lower() == "true"
+          skip_code = os.environ.get("SKIP_CODE", "false").lower() == "true"
 
           if agents_override:
               agents_version = agents_override
@@ -176,6 +202,13 @@ jobs:
               agents_version = current_agents
           else:
               agents_version = bump_version(current_agents)
+
+          if code_override:
+              code_version = code_override
+          elif skip_code:
+              code_version = current_code
+          else:
+              code_version = bump_version(current_code)
 
           if wrapper_override:
               wrapper_version = wrapper_override
@@ -185,11 +218,14 @@ jobs:
           github_output = os.environ["GITHUB_OUTPUT"]
           with open(github_output, "a", encoding="utf-8") as fh:
               fh.write(f"agents_version={agents_version}\n")
+              fh.write(f"code_version={code_version}\n")
               fh.write(f"wrapper_version={wrapper_version}\n")
               fh.write(f"current_agents={current_agents}\n")
+              fh.write(f"current_code={current_code}\n")
               fh.write(f"current_wrapper={current_wrapper}\n")
 
           print(f"Agents:  {current_agents} -> {agents_version}")
+          print(f"Code:    {current_code} -> {code_version}")
           print(f"Wrapper: {current_wrapper} -> {wrapper_version}")
           PY
 
@@ -198,29 +234,37 @@ jobs:
         if: inputs.dry_run != true
         env:
           AGENTS_VERSION: ${{ steps.versions.outputs.agents_version }}
+          CODE_VERSION: ${{ steps.versions.outputs.code_version }}
           WRAPPER_VERSION: ${{ steps.versions.outputs.wrapper_version }}
           INPUT_SKIP_AGENTS: ${{ inputs.skip_agents }}
+          INPUT_SKIP_CODE: ${{ inputs.skip_code }}
           INPUT_SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
         run: |
           set -euo pipefail
           skip_agents="${INPUT_SKIP_AGENTS}"
+          skip_code="${INPUT_SKIP_CODE}"
           skip_wrapper="${INPUT_SKIP_WRAPPER}"
           if [ "$skip_agents" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonaiagents/${AGENTS_VERSION}/json" >/dev/null && skip_agents=true || true
+          fi
+          if [ "$skip_code" != "true" ]; then
+            curl -fsSL "https://pypi.org/pypi/praisonai-code/${CODE_VERSION}/json" >/dev/null && skip_code=true || true
           fi
           if [ "$skip_wrapper" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonai/${WRAPPER_VERSION}/json" >/dev/null && skip_wrapper=true || true
           fi
           echo "skip_agents=${skip_agents}" >> "$GITHUB_OUTPUT"
+          echo "skip_code=${skip_code}" >> "$GITHUB_OUTPUT"
           echo "skip_wrapper=${skip_wrapper}" >> "$GITHUB_OUTPUT"
-          if [ "$skip_agents" = "true" ] && [ "$skip_wrapper" = "true" ]; then
-            echo "Both target versions already on PyPI — nothing to publish."
+          if [ "$skip_agents" = "true" ] && [ "$skip_code" = "true" ] && [ "$skip_wrapper" = "true" ]; then
+            echo "All target versions already on PyPI — nothing to publish."
           fi
 
       - name: Exit if already published
         if: >-
           inputs.dry_run != true &&
           steps.pypi_exists.outputs.skip_agents == 'true' &&
+          steps.pypi_exists.outputs.skip_code == 'true' &&
           steps.pypi_exists.outputs.skip_wrapper == 'true'
         run: echo "Idempotent skip — target versions already on PyPI."
 
@@ -229,14 +273,17 @@ jobs:
         run: |
           echo "Dry run — no publish, commit, or push."
           echo "Agents version:  ${{ steps.versions.outputs.agents_version }}"
+          echo "Code version:    ${{ steps.versions.outputs.code_version }}"
           echo "Wrapper version: ${{ steps.versions.outputs.wrapper_version }}"
           echo ""
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
             echo "Would publish praisonaiagents ${{ steps.versions.outputs.agents_version }}"
-            echo "Would commit src/praisonai-agents/pyproject.toml and uv.lock"
+          fi
+          if [ "${{ inputs.skip_code }}" != "true" ]; then
+            echo "Would publish praisonai-code ${{ steps.versions.outputs.code_version }}"
           fi
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
-            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }}"
+            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }}"
             echo "Would uv publish praisonai ${{ steps.versions.outputs.wrapper_version }}"
           fi
 
@@ -306,6 +353,76 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
+      - name: Publish praisonai-code
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_code != true &&
+          steps.pypi_exists.outputs.skip_code != 'true'
+        working-directory: src/praisonai-code
+        env:
+          NEW_VERSION: ${{ steps.versions.outputs.code_version }}
+          CURRENT: ${{ steps.versions.outputs.current_code }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          new = os.environ["NEW_VERSION"]
+          current = os.environ["CURRENT"]
+          pyproject = Path("pyproject.toml")
+          content = pyproject.read_text()
+          pyproject.write_text(content.replace(f'version = "{current}"', f'version = "{new}"', 1))
+          init_py = Path("praisonai_code/__init__.py")
+          init_content = init_py.read_text()
+          init_py.write_text(re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new}"', init_content, count=1))
+          PY
+
+          rm -rf dist
+          uv lock
+          uv build
+          uv publish
+
+      - name: Wait for praisonai-code on PyPI
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_code != true &&
+          steps.pypi_exists.outputs.skip_code != 'true'
+        run: |
+          set -euo pipefail
+          PACKAGE="praisonai-code"
+          VERSION="${{ steps.versions.outputs.code_version }}"
+          MAX_WAIT=600
+          INTERVAL=30
+          START=$(date +%s)
+
+          while true; do
+            if curl -fsSL "https://pypi.org/pypi/${PACKAGE}/${VERSION}/json" >/dev/null; then
+              echo "✅ ${PACKAGE}==${VERSION} is available on PyPI"
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "❌ Timeout waiting for ${PACKAGE}==${VERSION} on PyPI"
+              exit 1
+            fi
+            echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
+            sleep "$INTERVAL"
+          done
+
+      - name: Commit praisonai-code version bump
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_code != true &&
+          steps.pypi_exists.outputs.skip_code != 'true'
+        run: |
+          set -euo pipefail
+          git add src/praisonai-code/pyproject.toml src/praisonai-code/uv.lock src/praisonai-code/praisonai_code/__init__.py
+          git diff --cached --quiet && { echo "No code files to commit"; exit 0; }
+          git commit -m "Bump praisonai-code to ${{ steps.versions.outputs.code_version }}"
+          git pull --rebase origin main
+          git push origin main
+
       - name: Bump and release wrapper
         if: >-
           inputs.dry_run != true &&
@@ -315,6 +432,7 @@ jobs:
           set -euo pipefail
           python src/praisonai/scripts/bump_and_release.py "${{ steps.versions.outputs.wrapper_version }}" \
             --agents "${{ steps.versions.outputs.agents_version }}" \
+            --code-pin "${{ steps.versions.outputs.code_version }}" \
             --wait --max-wait 600 --no-add-all
 
       - name: Publish praisonai wrapper to PyPI
@@ -357,10 +475,15 @@ jobs:
         run: |
           set -euo pipefail
           AGENTS="${{ steps.versions.outputs.agents_version }}"
+          CODE="${{ steps.versions.outputs.code_version }}"
           WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
 
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
             echo "✅ praisonaiagents==${AGENTS}"
+          fi
+
+          if [ "${{ inputs.skip_code }}" != "true" ]; then
+            echo "✅ praisonai-code==${CODE}"
           fi
 
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
