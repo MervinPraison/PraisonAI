@@ -86,6 +86,18 @@ class BotOS:
         platforms: List of platform names; creates a Bot per platform
             using the shared *agent*.
         config: Optional BotOSConfig.
+        reliability: Named reliability posture (Issue #2531) composing the
+            existing lifecycle knobs in one switch:
+
+            * ``"production"`` — graceful drain (15s) + inbound admission with a
+              CPU-scaled ceiling and a bounded fair wait queue.
+            * ``"default"`` / ``None`` — a sane small drain window (5s) so a
+              restart doesn't cut in-flight turns; no admission ceiling.
+            * ``"off"`` — today's immediate-teardown, no-backpressure behaviour.
+
+            Explicit ``drain_timeout`` / ``max_concurrent_runs`` /
+            ``admission_policy`` always override the preset. Durable inbound
+            journaling stays on by default at the session level regardless.
     """
 
     def __init__(
@@ -103,13 +115,39 @@ class BotOS:
         queue_depth: int = 0,
         overflow_policy: str = "reject",
         admission_policy: Optional[Any] = None,
+        reliability: Optional[str] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
         self._config = config
-        # Issue #2375: opt-in graceful drain on shutdown. Default off —
-        # when None/0 the gateway behaves exactly as before (in-flight
-        # agent turns are cancelled immediately on stop()).
+
+        # Issue #2531: a single, discoverable reliability posture that composes
+        # the already-existing lifecycle knobs (graceful drain + inbound
+        # admission) so the happy path is production-grade in one switch. The
+        # preset only fills in fields the caller left unset — explicit
+        # ``drain_timeout=`` / ``max_concurrent_runs=`` / ``admission_policy=``
+        # always win. ``reliability="off"`` preserves today's immediate-
+        # teardown, no-backpressure behaviour.
+        from ._reliability import resolve_reliability
+
+        self._reliability = reliability
+        _resolved = resolve_reliability(
+            reliability,
+            drain_timeout=drain_timeout,
+            max_concurrent_runs=max_concurrent_runs,
+            queue_depth=queue_depth,
+            overflow_policy=overflow_policy,
+            admission_policy=admission_policy,
+        )
+        drain_timeout = _resolved.drain_timeout
+        max_concurrent_runs = _resolved.max_concurrent_runs
+        queue_depth = _resolved.queue_depth
+        overflow_policy = _resolved.overflow_policy
+
+        # Issue #2375: graceful drain on shutdown. A sane default window is now
+        # applied via the reliability preset (Issue #2531) so a restart does not
+        # cut in-flight turns; ``reliability="off"`` restores the immediate-
+        # cancel behaviour.
         self._drain_timeout: Optional[float] = _coerce_drain_timeout(drain_timeout)
         # Whether ingress should keep dispatching new turns. Flipped to
         # False at the start of a drain so current turns finish but no
@@ -1142,6 +1180,11 @@ class BotOS:
             or "reject"
         )
 
+        # Issue #2531: single reliability posture. Accept a top-level
+        # ``reliability`` or ``gateway.reliability``; the preset composes drain
+        # + admission while any explicit field above still overrides it.
+        reliability = raw.get("reliability", gateway_cfg.get("reliability"))
+
         return cls(
             bots=bots,
             health_monitor=health_monitor,
@@ -1150,6 +1193,7 @@ class BotOS:
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            reliability=reliability,
         )
 
     async def probe_all(self, timeout: float = 15.0) -> Dict[str, Any]:
