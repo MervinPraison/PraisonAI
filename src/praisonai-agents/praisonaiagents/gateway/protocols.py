@@ -2314,6 +2314,213 @@ GatewayConcurrencyPolicy = GatewayConcurrencyPolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway rate-limit admission (Issue #2532)
+#
+# Rate limiting completes the gateway's policy-protocol family (send, idle,
+# drain, concurrency). Like its siblings it is a pure, import-free decision
+# over typed facts — an identity, a scope (endpoint class / channel / tenant)
+# and a timestamp — returning a closed :class:`RateLimitDecision`. Core ships
+# a config-driven sliding-window default (:class:`SlidingWindowRateLimitPolicy`)
+# that reproduces today's built-in behaviour; the wrapper limiters adopt the
+# protocol and developers can inject their own (per-tenant, distributed,
+# cost-based) without importing wrapper internals. Core maps a ``limited``
+# decision onto ``ConnectErrorCode.RATE_LIMITED`` +
+# ``HelloError.retry_after_seconds``.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RateLimitDecision:
+    """Result of a rate-limit evaluation.
+
+    Attributes:
+        allowed: Whether the request may proceed.
+        retry_after_seconds: Backoff hint populated when ``allowed`` is
+            ``False`` (seconds until the caller may retry); ``None`` when
+            allowed.
+    """
+
+    allowed: bool
+    retry_after_seconds: Optional[float] = None
+
+
+@runtime_checkable
+class RateLimitPolicyProtocol(Protocol):
+    """Protocol for gateway rate-limit / throttle admission decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's admission
+    paths. The wrapper supplies typed facts (the caller ``identity``, the
+    ``scope`` — an endpoint class, channel, or tenant token — and the current
+    ``now`` timestamp) and the policy decides whether the request is allowed
+    or ``limited`` with a ``retry_after_seconds`` hint. Concrete state and
+    enforcement (sliding windows, token buckets, a Redis-backed per-tenant
+    quota) live in the implementation; this contract keeps the *decision*
+    injectable and testable in isolation, symmetric with
+    :class:`SendPolicyProtocol` / :class:`GatewayConcurrencyPolicyProtocol`.
+
+    A config-driven default (:class:`SlidingWindowRateLimitPolicy`) is
+    provided for the common "N requests per window per identity" case; core
+    maps a ``limited`` decision onto ``ConnectErrorCode.RATE_LIMITED`` and
+    ``HelloError.retry_after_seconds``.
+    """
+
+    def check(
+        self,
+        *,
+        identity: str,
+        scope: str,
+        now: float,
+    ) -> RateLimitDecision:
+        """Return a :class:`RateLimitDecision` for the supplied facts."""
+        ...
+
+
+class SlidingWindowRateLimitPolicy:
+    """Config-driven sliding-window rate-limit policy.
+
+    The default referenced by ``gateway.rate_limit`` blocks in
+    ``gateway.yaml`` and the ``WebSocketGateway(..., rate_limit_policy=...)``
+    Python surface. It is intentionally minimal and dependency-free so the
+    decision lives in core and is provable in isolation; heavy wrapper
+    limiters (``gateway/rate_limiter.py`` sliding window,
+    ``bots/_rate_limit.py`` token bucket) may adopt this protocol while
+    keeping their own state and side effects.
+
+    The decision, keyed by ``(scope, identity)``:
+
+    * ``allowed`` while fewer than ``max_requests`` have been seen in the
+      current ``window_seconds`` window.
+    * Once the window count exceeds ``max_requests``, the key enters a
+      ``lockout_seconds`` cooldown and every :meth:`check` returns
+      ``allowed=False`` with a ``retry_after_seconds`` hint until it elapses.
+
+    A ``max_requests`` of ``0`` disables limiting entirely (every request is
+    allowed) — the legacy default when no rate limit is configured.
+
+    This class is not internally synchronised; the wrapper owns any locking
+    it needs for concurrent hot paths (the built-in limiters already do).
+
+    State ownership: per-``(scope, identity)`` window/lockout entries are
+    reclaimed lazily — a key's entry is dropped or overwritten the next time
+    that key is checked. It keeps one entry per *active* key and is intended
+    for a bounded identity space (endpoint classes, authenticated tenants). A
+    wrapper exposing it to an unbounded/untrusted identity space (e.g. raw
+    per-IP keys) owns periodic reclamation, exactly as it owns locking.
+
+    Example::
+
+        SlidingWindowRateLimitPolicy(max_requests=5, window_seconds=60,
+                                     lockout_seconds=300)
+    """
+
+    def __init__(
+        self,
+        max_requests: int = 0,
+        window_seconds: float = 60.0,
+        lockout_seconds: float = 0.0,
+    ):
+        try:
+            ceiling = int(max_requests)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"max_requests must be an integer, got {max_requests!r}"
+            ) from err
+        if ceiling < 0:
+            raise ValueError(f"max_requests must be >= 0, got {max_requests!r}")
+        try:
+            window = float(window_seconds)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"window_seconds must be a number, got {window_seconds!r}"
+            ) from err
+        if window <= 0:
+            raise ValueError(
+                f"window_seconds must be > 0, got {window_seconds!r}"
+            )
+        try:
+            lockout = float(lockout_seconds)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"lockout_seconds must be a number, got {lockout_seconds!r}"
+            ) from err
+        if lockout < 0:
+            raise ValueError(
+                f"lockout_seconds must be >= 0, got {lockout_seconds!r}"
+            )
+        self.max_requests = ceiling
+        self.window_seconds = window
+        self.lockout_seconds = lockout
+        # (scope, identity) -> (window_start, count)
+        self._windows: Dict[Tuple[str, str], Tuple[float, int]] = {}
+        # (scope, identity) -> lockout_expires_at
+        self._lockouts: Dict[Tuple[str, str], float] = {}
+
+    @property
+    def enabled(self) -> bool:
+        """Whether limiting is active (a positive ceiling is set)."""
+        return self.max_requests > 0
+
+    def check(
+        self,
+        *,
+        identity: str,
+        scope: str,
+        now: float,
+    ) -> RateLimitDecision:
+        # Disabled: preserve legacy always-allow behaviour.
+        if self.max_requests <= 0:
+            return RateLimitDecision(allowed=True)
+
+        key = (scope, identity)
+
+        # Active lockout?
+        lockout_until = self._lockouts.get(key)
+        if lockout_until is not None:
+            if now < lockout_until:
+                return RateLimitDecision(
+                    allowed=False,
+                    retry_after_seconds=max(0.0, lockout_until - now),
+                )
+            # Expired lockout: clear and start fresh.
+            del self._lockouts[key]
+
+        window = self._windows.get(key)
+        if window is None or (now - window[0]) >= self.window_seconds:
+            # New or expired window.
+            self._windows[key] = (now, 1)
+            return RateLimitDecision(allowed=True)
+
+        window_start, count = window
+        count += 1
+        if count > self.max_requests:
+            # Over the ceiling within the window.
+            if self.lockout_seconds > 0:
+                # Cooldown: drop the window and lock the key out until it
+                # elapses.
+                del self._windows[key]
+                retry = self.lockout_seconds
+                self._lockouts[key] = now + self.lockout_seconds
+            else:
+                # No cooldown: keep the window so the key stays denied until
+                # it naturally expires, matching the retry hint. Deleting it
+                # here would let the next check start a fresh window and be
+                # allowed immediately, bypassing the ceiling.
+                self._windows[key] = (window_start, count)
+                retry = max(0.0, self.window_seconds - (now - window_start))
+            return RateLimitDecision(
+                allowed=False,
+                retry_after_seconds=retry,
+            )
+
+        self._windows[key] = (window_start, count)
+        return RateLimitDecision(allowed=True)
+
+
+# Backward-compatible alias following the repo's ``*Protocol`` convention.
+RateLimitPolicy = RateLimitPolicyProtocol
+
+
+# ---------------------------------------------------------------------------
 # Port-less, restart-safe external drain trigger (Issue #2390)
 #
 # Hosted/containerised deployments (Docker, Fly, Kubernetes) need to ask a
