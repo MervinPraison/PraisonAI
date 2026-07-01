@@ -349,6 +349,11 @@ def get_config(project_root: Optional[Path] = None) -> ConfigSchema:
         return _config_cache
 
 
+def load_config(project_root: Optional[Path] = None) -> ConfigSchema:
+    """Alias for get_config(); loads the global configuration."""
+    return get_config(project_root)
+
+
 def get_config_loader(project_root: Optional[Path] = None) -> ConfigLoader:
     """Get the global config loader."""
     global _global_loader

@@ -1,49 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.research`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.research` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.research import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.research.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Research command group for PraisonAI CLI.
 
-Provides research and analysis commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import research as _impl
 
-app = typer.Typer(help="Research and analysis")
-
-
-@app.callback(invoke_without_command=True)
-def research_main(
-    ctx: typer.Context,
-    query: str = typer.Argument(None, help="Research query"),
-    model: str = typer.Option(None, "--model", "-m", help="LLM model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
-):
-    """
-    Run research and analysis tasks.
-    
-    Examples:
-        praisonai research "What are the latest AI trends?"
-        praisonai research --model gpt-4o "Analyze market data"
-    """
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['research']
-    if query:
-        argv.append(query)
-    if model:
-        argv.extend(['--model', model])
-    if verbose:
-        argv.append('--verbose')
-    if output:
-        argv.extend(['--output', output])
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

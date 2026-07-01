@@ -366,5 +366,12 @@ def register_default_vector_stores():
     logger.debug("Registered default vector stores")
 
 
-# Auto-register on import
-register_default_vector_stores()
+# NOTE: No auto-registration at import time. Mutating the core-SDK vector-store
+# registry and probing for chromadb / pinecone on disk as an import side effect
+# violates the "core stays lightweight, wrapper does the heavy work at call
+# time" principle and makes this module unsafe to import in tests / multi-tenant
+# runtimes. Callers that want these backends wired into the SDK registry must
+# invoke ``register_default_vector_stores()`` explicitly, e.g.::
+#
+#     from praisonai.adapters.vector_stores import register_default_vector_stores
+#     register_default_vector_stores()

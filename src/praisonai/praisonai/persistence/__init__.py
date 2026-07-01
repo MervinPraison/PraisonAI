@@ -31,6 +31,9 @@ __all__ = [
     "create_knowledge_store",
     "create_state_store",
     "create_stores_from_config",
+    # Registry (dependency-injection / advanced)
+    "StoreRegistry",
+    "get_default_registry",
     # Config
     "PersistenceConfig",
     # Agent hooks
@@ -76,6 +79,10 @@ def __getattr__(name: str):
     if name == "create_stores_from_config":
         from .factory import create_stores_from_config
         return create_stores_from_config
+    
+    if name in ("StoreRegistry", "get_default_registry"):
+        from .registry import StoreRegistry, get_default_registry
+        return locals()[name]
     
     if name in ("wrap_agent_with_persistence", "PersistentAgent", "create_persistent_session"):
         from .hooks.agent_hooks import wrap_agent_with_persistence, PersistentAgent, create_persistent_session

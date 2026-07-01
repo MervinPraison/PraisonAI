@@ -5,9 +5,11 @@ This package hosts the terminal-native agent product (``run``, ``chat``,
 wrapper. It depends on ``praisonaiagents`` only — never on ``praisonai`` —
 to avoid a PyPI dependency cycle.
 
-C0 scaffold: no runtime code has moved here yet. Subsequent steps
-(C1–C5) migrate ``runtime/``, ``cli_backends/`` and ``cli/`` into this
-package with PEP 562 shims left behind at the old ``praisonai.*`` paths.
+Migration in progress: ``runtime/`` and ``cli_backends/`` have moved here
+(step C1), and the ``interactive``/``execution``/``ui``/``output``/``state``
+CLI sub-packages have moved here (step C2). Subsequent steps (C3–C6) migrate
+the remaining terminal-agent modules, with PEP 562 shims left behind at the
+old ``praisonai.*`` paths for backward compatibility.
 """
 
 __version__ = "0.0.1"

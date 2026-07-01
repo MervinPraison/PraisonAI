@@ -1,19 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.obs`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.obs` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.obs import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.obs.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Obs command group for PraisonAI CLI.
 
-Thin wrapper that re-exports the CLI from praisonai_tools.
-"""
+import sys as _sys
 
-try:
-    from praisonai_tools.observability.cli import app
-except ImportError:
-    import typer
-    app = typer.Typer(help="Observability diagnostics and management")
+from praisonai_code.cli.commands import obs as _impl
 
-    @app.callback(invoke_without_command=True)
-    def obs_fallback(ctx: typer.Context):
-        """Observability diagnostics and management."""
-        from rich.console import Console
-        Console(stderr=True).print("[red]✗ praisonai-tools not installed.[/red]")
-        Console(stderr=True).print("[dim]Install with: pip install praisonai-tools[/dim]")
-        raise typer.Exit(1)
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

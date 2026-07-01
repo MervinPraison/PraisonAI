@@ -1,74 +1,20 @@
+"""Backward-compatibility shim for :mod:`praisonai.cli.commands.hooks`.
+
+The implementation moved to :mod:`praisonai_code.cli.commands.hooks` as part
+of the praisonai-code extraction (issue #2516 / parent #2512).
+
+This shim aliases the moved module into ``sys.modules`` under the old dotted
+path so that:
+
+* ``from praisonai.cli.commands.hooks import X`` keeps working, and
+* ``unittest.mock.patch("praisonai.cli.commands.hooks.X")`` patches the very
+  same module object that the implementation executes against.
 """
-Hooks command group for PraisonAI CLI.
 
-Provides hook management commands.
-"""
+import sys as _sys
 
-import typer
+from praisonai_code.cli.commands import hooks as _impl
 
-app = typer.Typer(help="Hook management")
-
-
-@app.command("list")
-def hooks_list():
-    """List available hooks."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['hooks', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("add")
-def hooks_add(
-    name: str = typer.Argument(..., help="Hook name"),
-    event: str = typer.Option(..., "--event", "-e", help="Event to hook into"),
-):
-    """Add a hook."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['hooks', 'add', name, '--event', event]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("remove")
-def hooks_remove(
-    name: str = typer.Argument(..., help="Hook name to remove"),
-):
-    """Remove a hook."""
-    from praisonai.cli.main import PraisonAI
-    import sys
-    
-    argv = ['hooks', 'remove', name]
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+# Make the old dotted path resolve to the exact same module object so that
+# attribute patching / monkeypatching stays transparent across both paths.
+_sys.modules[__name__] = _impl

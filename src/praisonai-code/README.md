@@ -8,13 +8,13 @@ Agentic terminal CLI for PraisonAI — the terminal-native agent product
 
 ## Status
 
-C0 scaffold. No runtime code has moved into `praisonai_code` yet; this
-package currently only exposes `__version__`. Migration proceeds
-incrementally in steps C1–C6 (see issue #2512):
+Migration in progress. `runtime/` and `cli_backends/` have moved into
+`praisonai_code` (step C1); the remaining terminal-agent modules follow
+incrementally in steps C2–C6 (see issue #2512):
 
 | Step | Scope |
 |------|-------|
-| C0 | Scaffold (this) |
+| C0 | Scaffold |
 | C1 | `runtime/` + `cli_backends/` |
 | C2 | `interactive/`, `execution/`, `ui/`, `output/`, `state/` |
 | C3 | Agentic commands |
@@ -22,12 +22,27 @@ incrementally in steps C1–C6 (see issue #2512):
 | C5 | `main.py`, `app.py`, config/session/utils + shims |
 | C6 | Integration gate |
 
+- `praisonai_code.runtime` — warm local runtime (daemon + thin client).
+- `praisonai_code.cli_backends` — CLI backend implementations (e.g. Claude Code).
+
 ## Dependency rules
 
 ```
 praisonai (main)  →  depends on  praisonai-code
-praisonai-code    →  depends on  praisonaiagents ONLY (not praisonai)
+praisonai-code    →  depends on  praisonaiagents (core SDK)
 ```
+
+`praisonai-code` also pulls in its own third-party runtime deps (rich, typer,
+click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
+`pyproject.toml`). The rules above govern the **inter-package** direction.
+
+> **Migration note (C1):** `cli_backends/registry.py` still imports
+> `PluginRegistry` from the `praisonai` main package (same "keep main-package
+> import" pattern as `runtime/descriptor.py`'s `from praisonai.version`).
+> `praisonai-code` is wired via an editable path dependency and `praisonai` is
+> always present at runtime during migration, so this residual back-import is a
+> deliberate C1 tradeoff to be removed in a later step — not a standalone-publish
+> guarantee yet.
 
 Backward compatibility is preserved via PEP 562 shims at the old
 `praisonai.*` import paths, so `pip install praisonai` and
