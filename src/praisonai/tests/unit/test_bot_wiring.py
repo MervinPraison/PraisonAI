@@ -138,6 +138,7 @@ class TestSessionReaperWiring:
     """Verify session reaper works end-to-end."""
 
     def test_reap_stale_removes_old_sessions(self):
+        from unittest.mock import patch
         from praisonai.bots._session import BotSessionManager
         mgr = BotSessionManager()
         # Manually seed old sessions
@@ -147,7 +148,8 @@ class TestSessionReaperWiring:
         mgr._histories["user2"] = [{"role": "user", "content": "recent"}]
         mgr._last_active["user2"] = time.monotonic()
 
-        reaped = mgr.reap_stale(max_age_seconds=50)
+        with patch.object(mgr._locks, "drop"):
+            reaped = mgr.reap_stale(max_age_seconds=50)
         assert reaped == 1
         assert "user1" not in mgr._histories
         assert "user2" in mgr._histories
@@ -199,7 +201,9 @@ class TestSessionIdLeak:
     def test_no_shared_session_id(self):
         """Memory injected by Bot should NOT contain session_id."""
         from praisonai.bots.bot import Bot
-        agent = self._make_mock_agent()
+        from praisonaiagents import Agent
+
+        agent = Agent(name="test", llm="gpt-4o-mini")
         bot = Bot("telegram", agent=agent)
         enhanced = bot._apply_smart_defaults(agent)
         mem = getattr(enhanced, "memory", None)

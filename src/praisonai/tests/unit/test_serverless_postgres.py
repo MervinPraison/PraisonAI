@@ -155,39 +155,27 @@ class TestRetryLogic(unittest.TestCase):
         mock_conn = MagicMock()
         mock_pool.getconn.return_value = mock_conn
         
+        mock_psycopg2.OperationalError = type("OperationalError", (Exception,), {})
+
         store = PostgresConversationStore.__new__(PostgresConversationStore)
         store._pool = mock_pool
         store._psycopg2 = mock_psycopg2
         store._RealDictCursor = MagicMock()
         store.schema = "public"
         store.table_prefix = "praison_"
-        store.sessions_table = "public.praison_sessions"
-        store.messages_table = "public.praison_messages"
         store._serverless = True
         store._max_retries = 3
         store._retry_delay = 0.01
 
-        # Simulate: first call raises OperationalError, second succeeds
-        op_error = mock_psycopg2.OperationalError("connection closed")
-        call_count = [0]
+        attempts = [0]
 
-        def side_effect(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise op_error
-            return MagicMock()  # success
+        def flaky_op():
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise mock_psycopg2.OperationalError("connection closed")
 
-        mock_cursor = MagicMock()
-        mock_cursor.execute = side_effect
-        mock_cursor.fetchone.return_value = None
-        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-
-        # This should succeed after retry
-        result = store._execute_with_retry(
-            lambda conn: None,
-        )
-        # If no exception raised, retry worked
+        store._execute_with_retry(flaky_op)
+        assert attempts[0] == 2
 
 
 class TestConvenienceClasses(unittest.TestCase):

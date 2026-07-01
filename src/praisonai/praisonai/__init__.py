@@ -153,8 +153,8 @@ def __getattr__(name):
     elif name == 'run_integrated_gateway':
         from .integration.gateway_host import run_integrated_gateway
         return run_integrated_gateway
-    elif name == 'AgentApp':
-        # Silent alias for AgentOS (backward compatibility)
+    elif name in ('AgentOS', 'AgentApp'):
+        # AgentApp is a silent alias for AgentOS (backward compatibility)
         from .app import AgentOS
         return AgentOS
     elif name in ('ManagedAgent', 'ManagedAgentIntegration'):

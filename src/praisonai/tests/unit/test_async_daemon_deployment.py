@@ -25,7 +25,7 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_daemon_manager_astop_daemon_smoke(self):
         """Smoke test: astop_daemon method exists and has correct signature."""
-        from praisonai.praisonai.scheduler.daemon_manager import DaemonManager
+        from praisonai.scheduler.daemon_manager import DaemonManager
         
         manager = DaemonManager()
         
@@ -37,7 +37,7 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_deployment_scheduler_adeploy_with_retry_smoke(self):
         """Smoke test: adeploy_with_retry method exists and has correct signature.""" 
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         scheduler = DeploymentScheduler()
         
@@ -49,14 +49,26 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_astop_daemon_uses_async_sleep(self):
         """Test that astop_daemon uses asyncio.sleep instead of time.sleep."""
-        from praisonai.praisonai.scheduler.daemon_manager import DaemonManager
+        from praisonai.scheduler.daemon_manager import DaemonManager
         
         manager = DaemonManager()
         
         # Mock os.kill to simulate process behavior
         with patch('os.kill') as mock_kill:
-            # First call succeeds (SIGTERM), second call raises ProcessLookupError (process dead)
-            mock_kill.side_effect = [None, ProcessLookupError("Process not found")]
+            # Process alive briefly, then terminates (exercises asyncio.sleep)
+            checks = {'count': 0}
+
+            def kill_side_effect(pid, sig):
+                if sig == signal.SIGTERM:
+                    return None
+                if sig == 0:
+                    checks['count'] += 1
+                    if checks['count'] == 1:
+                        return None
+                    raise ProcessLookupError("Process not found")
+                return None
+
+            mock_kill.side_effect = kill_side_effect
             
             # Mock asyncio.sleep to track calls
             with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
@@ -74,11 +86,11 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
                 mock_sleep.assert_called()
                 
                 # Verify os.kill was called with SIGTERM
-                mock_kill.assert_called_with(12345, signal.SIGTERM)
+                mock_kill.assert_any_call(12345, signal.SIGTERM)
 
     def test_astop_daemon_timeout_behavior(self):
         """Test astop_daemon timeout and escalation to SIGKILL."""
-        from praisonai.praisonai.scheduler.daemon_manager import DaemonManager
+        from praisonai.scheduler.daemon_manager import DaemonManager
         
         manager = DaemonManager()
         
@@ -114,7 +126,7 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_adeploy_with_retry_uses_asyncio_to_thread(self):
         """Test that adeploy_with_retry uses asyncio.to_thread for blocking calls."""
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         scheduler = DeploymentScheduler()
         
@@ -146,7 +158,7 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_adeploy_with_retry_retry_logic(self):
         """Test adeploy_with_retry retry logic and asyncio.sleep usage."""
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         scheduler = DeploymentScheduler()
         
@@ -185,7 +197,7 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_adeploy_with_retry_max_retries_exhausted(self):
         """Test adeploy_with_retry when all retries are exhausted."""
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         scheduler = DeploymentScheduler()
         
@@ -215,8 +227,8 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_async_methods_never_block_event_loop(self):
         """Integration test: verify async methods don't block event loop."""
-        from praisonai.praisonai.scheduler.daemon_manager import DaemonManager
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.daemon_manager import DaemonManager
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         # This test runs multiple async operations concurrently
         # If any method blocks the event loop, this will hang or timeout
@@ -231,7 +243,12 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
         
         async def concurrent_test():
             # Start multiple async operations that should run concurrently
-            with patch('os.kill', side_effect=ProcessLookupError("Process not found")):
+            with patch('os.kill') as mock_kill:
+                def kill_side_effect(pid, sig):
+                    if sig == signal.SIGTERM:
+                        return None
+                    raise ProcessLookupError("Process not found")
+                mock_kill.side_effect = kill_side_effect
                 with patch('asyncio.to_thread', new_callable=AsyncMock) as mock_to_thread:
                     mock_to_thread.return_value = True
                     
@@ -259,8 +276,8 @@ class TestAsyncDaemonDeployment(unittest.TestCase):
 
     def test_exception_handling_in_async_methods(self):
         """Test proper exception handling in async methods."""
-        from praisonai.praisonai.scheduler.daemon_manager import DaemonManager
-        from praisonai.praisonai.scheduler.deployment import DeploymentScheduler
+        from praisonai.scheduler.daemon_manager import DaemonManager
+        from praisonai.scheduler.deployment import DeploymentScheduler
         
         manager = DaemonManager()
         scheduler = DeploymentScheduler()

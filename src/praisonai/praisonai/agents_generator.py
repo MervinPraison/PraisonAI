@@ -205,11 +205,15 @@ def sanitize_agent_name_for_autogen_v4(name):
     return sanitized
 
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
-    """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
-    Deprecated wrapper. Use praisonai.cli_backends.resolve_cli_backend_config directly.
-    """
-    from praisonai.cli_backends import resolve_cli_backend_config
-    return resolve_cli_backend_config(cli_backend_config)
+    """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance."""
+    if cli_backend_config is None:
+        return None
+    try:
+        from praisonai.cli_backends import resolve_cli_backend_config
+        return resolve_cli_backend_config(cli_backend_config)
+    except (ImportError, ValueError, TypeError) as exc:
+        logger.warning("Failed to resolve cli_backend %r: %s", cli_backend_config, exc)
+        return None
 
 
 class AgentsGenerator:

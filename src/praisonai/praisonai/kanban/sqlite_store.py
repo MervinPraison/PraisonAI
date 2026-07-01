@@ -3,7 +3,7 @@ import sqlite3
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
@@ -217,7 +217,7 @@ class SQLiteKanbanStore:
                 key on the same board returns the existing task unchanged.
         """
         task_id = task_data.get('id', self._generate_id())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         board = task_data.get('board', self.board or 'default')
         tenant = task_data.get('tenant', 'default')
         if idempotency_key is None:
@@ -317,7 +317,7 @@ class SQLiteKanbanStore:
             
             current_version = row['version']
             new_version = current_version + 1
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             
             # Build update query dynamically
             update_fields = []
@@ -333,8 +333,9 @@ class SQLiteKanbanStore:
                     values.append(value)
             
             if not update_fields:
-                # No valid updates, return current task
-                return self.get_task(task_id)
+                cursor = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+                row = cursor.fetchone()
+                return Task.from_dict(dict(row)) if row else None
             
             update_fields.append("updated_at = ?")
             update_fields.append("version = ?")
@@ -353,7 +354,9 @@ class SQLiteKanbanStore:
             # Log event
             self._log_event(conn, task_id, 'updated', updates)
             
-            return self.get_task(task_id)
+            cursor = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+            row = cursor.fetchone()
+            return Task.from_dict(dict(row))
 
     def delete_task(self, task_id: str) -> bool:
         """Delete task."""

@@ -460,6 +460,10 @@ class TestResolveAgentTools:
 class TestBackwardCompatibility:
     """Test that existing step types still work."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_job_workflows(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_JOB_WORKFLOWS", "true")
+
     def test_shell_step_still_works(self):
         """Shell step should still execute correctly."""
         from praisonai.cli.features.job_workflow import JobWorkflowExecutor

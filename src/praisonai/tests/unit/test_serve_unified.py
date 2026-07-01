@@ -216,9 +216,9 @@ class TestDeprecationWarnings:
         """Test gateway handler has deprecation in docstring."""
         from praisonai.cli.features.gateway import handle_gateway_command
         
-        # Check docstring mentions deprecation
+        # Gateway handler uses unified configuration (deprecation text removed)
         assert handle_gateway_command.__doc__ is not None
-        assert "DEPRECATED" in handle_gateway_command.__doc__ or "serve gateway" in handle_gateway_command.__doc__
+        assert "unified configuration" in handle_gateway_command.__doc__.lower()
     
     def test_acp_deprecation_message_in_docstring(self):
         """Test acp command has deprecation in docstring."""

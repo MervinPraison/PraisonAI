@@ -29,11 +29,16 @@ def get_runtime_version() -> str:
     a missing version is always considered incompatible.
     """
     try:
-        from praisonai.version import __version__
+        from importlib.metadata import version
 
-        return str(__version__)
+        return str(version("praisonai-code"))
     except Exception:
-        return "0"
+        try:
+            from importlib.metadata import version
+
+            return str(version("praisonai"))
+        except Exception:
+            return "0"
 
 
 def versions_compatible(a: Optional[str], b: Optional[str]) -> bool:

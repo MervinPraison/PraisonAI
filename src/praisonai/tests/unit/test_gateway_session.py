@@ -74,6 +74,7 @@ class TestGatewayTelegramSession:
         gw._channel_routes = {}
         gw._default_agents = {}
         gw._routing_rules = {}
+        gw._routing_bindings = {}
         gw._agents = {}
 
         # Build handler closure the same way the gateway does

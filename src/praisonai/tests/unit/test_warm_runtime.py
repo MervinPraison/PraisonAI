@@ -339,7 +339,7 @@ def test_get_runtime_descriptor_require_compatible_skips_mismatch():
     # require_compatible is set.
     desc = RuntimeDescriptor(
         host="127.0.0.1", port=1, token="t", pid=os.getpid(),
-        version="0.0.0-incompatible",
+        version="99.0.0-incompatible",
     )
     desc.write()
     assert get_runtime_descriptor(require_compatible=False) is not None
@@ -357,7 +357,7 @@ def test_daemon_start_rejects_incompatible_live_runtime():
     # A live (this pid) but incompatible runtime sits in the lockfile.
     RuntimeDescriptor(
         host="127.0.0.1", port=1, token="t", pid=os.getpid(),
-        version="0.0.0-incompatible",
+        version="99.0.0-incompatible",
     ).write()
 
     with pytest.raises(typer.Exit) as exc:

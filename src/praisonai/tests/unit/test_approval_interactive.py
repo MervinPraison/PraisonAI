@@ -163,16 +163,19 @@ def test_auto_approval_callback():
         
         set_approval_callback(auto_approve_callback)
         
-        shell_tools = ShellTools()
-        
-        print("Executing command with auto-approval...")
-        result = shell_tools.execute_command("echo 'Auto-approved command executed!'")
-        
-        if result and "Auto-approved command executed!" in str(result):
-            print("✅ Auto-approved command executed successfully")
-        else:
-            print("❌ Auto-approved command failed:", result)
-            assert False, f"Auto-approved command failed: {result}"
+        try:
+            shell_tools = ShellTools()
+            
+            print("Executing command with auto-approval...")
+            result = shell_tools.execute_command("echo 'Auto-approved command executed!'")
+            
+            if result and "Auto-approved command executed!" in str(result):
+                print("✅ Auto-approved command executed successfully")
+            else:
+                print("❌ Auto-approved command failed:", result)
+                assert False, f"Auto-approved command failed: {result}"
+        finally:
+            set_approval_callback(None)
             
     except Exception as e:
         print(f"❌ Auto-approval test failed: {e}")
@@ -194,17 +197,16 @@ def test_auto_denial_callback():
         
         set_approval_callback(auto_deny_callback)
         
-        shell_tools = ShellTools()
-        
-        print("Executing command with auto-denial...")
-        result = shell_tools.execute_command("echo 'This should be denied'")
-        
-        if result and ("denied" in str(result).lower() or "approval" in str(result).lower()):
-            print("✅ Command was correctly denied by approval system")
-        else:
-            print("❌ Command executed when it should have been denied:", result)
-            assert False, f"Command executed when it should have been denied: {result}"
+        try:
+            shell_tools = ShellTools()
             
+            print("Executing command with auto-denial...")
+            with pytest.raises(PermissionError):
+                shell_tools.execute_command("echo 'This should be denied'")
+            print("✅ Command was correctly denied by approval system")
+        finally:
+            set_approval_callback(None)
+
     except Exception as e:
         print(f"❌ Auto-denial test failed: {e}")
         assert False, f"Auto-denial test failed: {e}"

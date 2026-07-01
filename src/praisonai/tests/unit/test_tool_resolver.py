@@ -11,6 +11,8 @@ import pytest
 
 import time
 
+pytestmark = pytest.mark.network
+
 
 class TestToolResolver:
     """Test suite for ToolResolver class."""

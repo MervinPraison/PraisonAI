@@ -18,6 +18,20 @@ from unittest.mock import patch, MagicMock
 # Add the praisonai-agents module to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
+
+@pytest.fixture(autouse=True)
+def _reset_approval_state(monkeypatch):
+    """Isolate approval registry from other legacy tests in the same session."""
+    from praisonaiagents.approval import clear_approval_context, set_approval_callback
+
+    monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
+    clear_approval_context()
+    set_approval_callback(None)
+    yield
+    clear_approval_context()
+    set_approval_callback(None)
+
+
 # Run interactively only when ASK_USER=1 is set
 @pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_agent_tool_execution_with_approval():
@@ -65,7 +79,7 @@ def test_agent_tool_execution_with_approval():
 
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_with_auto_approval(mock_console_callback, mock_confirm):
+def test_agent_with_auto_approval(mock_console_callback, mock_confirm, monkeypatch):
     """Test agent tool execution with auto-approval callback."""
     print("\n🤖 Testing Agent with Auto-Approval")
     print("=" * 40)
@@ -80,31 +94,21 @@ def test_agent_with_auto_approval(mock_console_callback, mock_confirm):
         from praisonaiagents import Agent
         from praisonaiagents.tools import execute_command
         
+        from praisonaiagents.approval.backends import AutoApproveBackend
+        
+        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
+        
         # Clear any existing approval context
         clear_approval_context()
         
-        # Create auto-approval callback that definitely approves
-        def auto_approve_callback(function_name, arguments, risk_level):
-            print(f"🤖 Auto-approving {function_name} (risk: {risk_level})")
-            return ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        
-        # Mock the console callback to return our auto-approval decision
-        mock_console_callback.return_value = ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        mock_confirm.return_value = True
-        
-        # Set the callback globally before creating agent
-        set_approval_callback(auto_approve_callback)
-        
-        # Pre-approve the execute_command function to bypass approval completely
-        mark_approved("execute_command")
-        
-        # Create agent
+        # Create agent with auto-approve backend (critical tools ignore mark_approved)
         agent = Agent(
             name="Auto-Approve Agent", 
             role="Automated Tester",
             goal="Test auto-approval",
             tools=[execute_command]
         )
+        agent._approval_backend = AutoApproveBackend()
         
         print("Executing command with auto-approval...")
         result = agent.execute_tool(
@@ -162,7 +166,7 @@ def test_agent_with_auto_denial():
 
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_python_code_execution(mock_console_callback, mock_confirm):
+def test_agent_python_code_execution(mock_console_callback, mock_confirm, monkeypatch):
     """Test Python code execution through agent with approval."""
     print("\n🐍 Testing Agent Python Code Execution")
     print("=" * 45)
@@ -183,24 +187,10 @@ def test_agent_python_code_execution(mock_console_callback, mock_confirm):
         
         from praisonaiagents import Agent
         from praisonaiagents.tools import execute_code
+        from praisonaiagents.approval.backends import AutoApproveBackend
         
-        # Clear any existing approval context
+        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
         clear_approval_context()
-        
-        # Create auto-approval for this test
-        def auto_approve_callback(function_name, arguments, risk_level):
-            print(f"🤖 Auto-approving {function_name} (risk: {risk_level})")
-            return ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        
-        # Mock the console callback to return our auto-approval decision
-        mock_console_callback.return_value = ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        mock_confirm.return_value = True
-        
-        # Set the callback before creating agent
-        set_approval_callback(auto_approve_callback)
-        
-        # Pre-approve the execute_code function to bypass approval completely
-        mark_approved("execute_code")
         
         # Create agent
         agent = Agent(
@@ -209,6 +199,7 @@ def test_agent_python_code_execution(mock_console_callback, mock_confirm):
             goal="Test Python code execution",
             tools=[execute_code]
         )
+        agent._approval_backend = AutoApproveBackend()
         
         # Use simple code without "from" pattern which triggers security check
         code = "print('Hello World!')"
@@ -228,7 +219,7 @@ def test_agent_python_code_execution(mock_console_callback, mock_confirm):
 
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_file_operations(mock_console_callback, mock_confirm):
+def test_agent_file_operations(mock_console_callback, mock_confirm, monkeypatch):
     """Test file operations through agent with approval."""
     print("\n📁 Testing Agent File Operations")
     print("=" * 35)
@@ -242,26 +233,12 @@ def test_agent_file_operations(mock_console_callback, mock_confirm):
         
         from praisonaiagents import Agent
         from praisonaiagents.tools import write_file
+        from praisonaiagents.approval.backends import AutoApproveBackend
         import tempfile
         import os
         
-        # Clear any existing approval context
+        monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
         clear_approval_context()
-        
-        # Create auto-approval for this test
-        def auto_approve_callback(function_name, arguments, risk_level):
-            print(f"🤖 Auto-approving {function_name} (risk: {risk_level})")
-            return ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        
-        # Mock the console callback to return our auto-approval decision
-        mock_console_callback.return_value = ApprovalDecision(approved=True, reason="Auto-approved for testing")
-        mock_confirm.return_value = True
-        
-        # Set the callback before creating agent
-        set_approval_callback(auto_approve_callback)
-        
-        # Pre-approve the write_file function to bypass approval completely
-        mark_approved("write_file")
         
         # Create agent
         agent = Agent(
@@ -270,9 +247,10 @@ def test_agent_file_operations(mock_console_callback, mock_confirm):
             goal="Test file operations", 
             tools=[write_file]
         )
+        agent._approval_backend = AutoApproveBackend()
         
         # Create a temporary directory for the test file
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as temp_dir:
             test_file_path = os.path.join(temp_dir, "test_agent_file.txt")
             
             # Test file creation

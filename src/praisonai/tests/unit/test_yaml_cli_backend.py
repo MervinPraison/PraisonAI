@@ -38,7 +38,7 @@ roles:
 """
     details = _role_details(yaml_content)
 
-    with patch('praisonai.cli_backends.resolve_cli_backend') as mock_resolve:
+    with patch('praisonai_code.cli_backends.registry.resolve_cli_backend') as mock_resolve:
         mock_backend = MagicMock()
         mock_resolve.return_value = mock_backend
 
@@ -65,7 +65,7 @@ roles:
 """
     details = _role_details(yaml_content)
 
-    with patch('praisonai.cli_backends.resolve_cli_backend') as mock_resolve:
+    with patch('praisonai_code.cli_backends.registry.resolve_cli_backend') as mock_resolve:
         mock_backend = MagicMock()
         mock_resolve.return_value = mock_backend
 
@@ -116,7 +116,7 @@ def test_yaml_cli_backend_import_error():
     """When registry resolver raises ImportError, return ``None`` and warn."""
     logger = MagicMock()
     with patch(
-        'praisonai.cli_backends.resolve_cli_backend',
+        'praisonai_code.cli_backends.registry.resolve_cli_backend',
         side_effect=ImportError("CLI backends not available"),
     ):
         resolved = _resolve_yaml_cli_backend('claude-code', logger)

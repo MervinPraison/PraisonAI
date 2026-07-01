@@ -8,17 +8,15 @@ Plugin registry for CLI backend implementations following AGENTS.md patterns:
 
 import threading
 from typing import Dict, Callable, Any, Optional, Union
-from praisonai._registry import PluginRegistry
+from praisonai_code._registry import PluginRegistry
 
 # CLI Backend Registry using canonical PluginRegistry
 def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:
-    """Get built-in CLI backend loaders."""
+    """Get built-in CLI backend loaders (return backend class)."""
     def claude_loader():
-        def factory():
-            from .claude import ClaudeCodeBackend
-            return ClaudeCodeBackend()
-        return factory
-    
+        from .claude import ClaudeCodeBackend
+        return ClaudeCodeBackend
+
     return {
         "claude-code": claude_loader
     }
@@ -78,17 +76,12 @@ def resolve_cli_backend(
         ValueError: If backend_id is not registered
     """
     registry = _get_cli_backend_registry()
-    
+
     try:
-        # Get the factory loader and create the factory
-        factory_loader = registry.resolve(backend_id)
-        factory = factory_loader()
+        backend = registry.create(backend_id)
     except ValueError:
         available = registry.list_names()
         raise ValueError(f"Unknown CLI backend: {backend_id}. Available: {available}")
-    
-    # Create instance with factory
-    backend = factory()
     
     # Apply overrides if provided
     if overrides:
