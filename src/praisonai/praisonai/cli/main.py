@@ -8,3 +8,7 @@ import sys as _sys
 import praisonai_code.cli.main as _impl
 
 _sys.modules[__name__] = _impl
+
+if __name__ == "__main__":
+    _impl.install_warning_filters()
+    _impl.PraisonAI().main()
