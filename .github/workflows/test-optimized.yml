@@ -79,6 +79,8 @@ jobs:
       run: |
         set -euo pipefail
         cd src/praisonai
+        python -m pytest tests/unit/test_c5_backward_compat.py \
+          -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
           -m "not slow and not network" \
           -q --tb=line \
@@ -86,6 +88,20 @@ jobs:
           --ignore=tests/fixtures \
           --ignore=tests/unit/cli/test_message_queue.py \
           --maxfail=5
+
+    - name: Standalone praisonai-code import smoke
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-code-standalone
+        /tmp/praisonai-code-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-code
+        /tmp/praisonai-code-standalone/bin/python -c "
+        import praisonai_code
+        from praisonai_code.cli.configuration.resolver import ConfigResolver
+        import toml
+        assert hasattr(ConfigResolver, '__name__')
+        print('standalone ok', praisonai_code.__version__, 'toml', toml.__version__)
+        "
     
     - name: Smoke Test Summary
       if: always()
