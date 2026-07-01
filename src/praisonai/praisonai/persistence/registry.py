@@ -354,7 +354,53 @@ def _register_builtin_state_stores(registry: StoreRegistry):
     registry.register("gcs", _gcs)
 
 
-# Create global registry instances - built-in stores are registered automatically via __init__
-CONVERSATION_STORES = StoreRegistry("conversation", "praisonai.conversation_stores")
-KNOWLEDGE_STORES = StoreRegistry("knowledge", "praisonai.knowledge_stores") 
-STATE_STORES = StoreRegistry("state", "praisonai.state_stores")
+# Lazy, per-caller registry construction. Importing this module no longer walks
+# entry points or registers ~40 built-in loaders as a side effect; that work is
+# deferred until a store is actually requested. Multi-tenant runtimes can build
+# their own StoreRegistry and inject it, keeping registrations isolated.
+_KINDS = {
+    "conversation": "praisonai.conversation_stores",
+    "knowledge": "praisonai.knowledge_stores",
+    "state": "praisonai.state_stores",
+}
+
+_default_registries: Dict[str, StoreRegistry] = {}
+_default_lock = threading.Lock()
+
+
+def get_default_registry(kind: str) -> StoreRegistry:
+    """Return the process-default registry for ``kind``, creating it on first use.
+
+    Prefer dependency-injection (pass your own :class:`StoreRegistry`) over
+    calling this. Valid kinds: ``"conversation"``, ``"knowledge"``, ``"state"``.
+    """
+    if kind not in _KINDS:
+        raise ValueError(
+            f"Unknown store kind: {kind!r}. Expected one of {sorted(_KINDS)}"
+        )
+    registry = _default_registries.get(kind)
+    if registry is not None:
+        return registry
+    with _default_lock:
+        registry = _default_registries.get(kind)
+        if registry is None:
+            registry = StoreRegistry(kind, _KINDS[kind])
+            _default_registries[kind] = registry
+        return registry
+
+
+# Backward-compatible module-level access. ``CONVERSATION_STORES`` /
+# ``KNOWLEDGE_STORES`` / ``STATE_STORES`` still resolve, but only build (and pay
+# for) their registry the first time they are referenced, not at import time.
+_MODULE_ATTR_KIND = {
+    "CONVERSATION_STORES": "conversation",
+    "KNOWLEDGE_STORES": "knowledge",
+    "STATE_STORES": "state",
+}
+
+
+def __getattr__(name: str) -> Any:
+    kind = _MODULE_ATTR_KIND.get(name)
+    if kind is not None:
+        return get_default_registry(kind)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -41,6 +41,7 @@ from typing import (
 )
 from types import MappingProxyType
 from ._safe_loader import load_user_module
+from ._registry import PluginRegistry
 
 if TYPE_CHECKING:  # imported only for type annotations to avoid a runtime cycle
     from .tool_registry import ToolRegistry
@@ -95,6 +96,75 @@ class _CallableSource:
         return self._fn(name)
 
 
+class ToolSourceRegistry(PluginRegistry["ToolSource"]):
+    """Entry-point-driven registry for third-party :class:`ToolSource` plugins.
+
+    Mirrors the other extension surfaces in the wrapper
+    (``FrameworkAdapterRegistry`` / ``LLMProviderRegistry`` / ``StoreRegistry``)
+    so tool sources are discoverable via the ``praisonai.tool_sources``
+    entry-point group instead of requiring subclassing / monkeypatching of
+    :class:`ToolResolver`.
+
+    A registered entry point may resolve to either:
+
+    * a :class:`ToolSource` instance (used directly), or
+    * a zero-argument callable / class that returns a :class:`ToolSource`
+      (instantiated on first use).
+
+    Third-party packages register in ``pyproject.toml``::
+
+        [project.entry-points."praisonai.tool_sources"]
+        corp-tools = "praisonai_corp_tools:CorpToolsSource"
+
+    The built-in resolution chain (local tools.py, wrapper registry,
+    praisonaiagents, praisonai-tools, core registry) stays owned by
+    :meth:`ToolResolver.default_sources`; entry-point sources discovered here
+    are appended after it so third parties extend rather than replace it.
+    """
+
+    def __init__(self) -> None:
+        # No builtins: the historical chain is constructed by ToolResolver and
+        # bound to the resolver instance. This registry only carries pluggable,
+        # instance-independent third-party sources discovered via entry points.
+        super().__init__(entry_point_group="praisonai.tool_sources", builtins=None)
+
+    def create_sources(self) -> List["ToolSource"]:
+        """Instantiate every registered entry-point source, skipping failures.
+
+        A misbehaving plugin (bad import, constructor error) is logged and
+        skipped rather than breaking tool resolution for everyone.
+        """
+        sources: List[ToolSource] = []
+        for name in self.list_names():
+            try:
+                obj = self.resolve(name)
+                sources.append(_coerce_source(obj))
+            except Exception:  # pragma: no cover - defensive against bad plugins
+                logger.debug("Tool source plugin %r failed to load", name, exc_info=True)
+        return sources
+
+
+def _coerce_source(obj: Any) -> "ToolSource":
+    """Turn a resolved entry-point object into a :class:`ToolSource` instance.
+
+    A class (or other zero-arg callable *factory*) is instantiated; a ready-made
+    instance is used as-is. Classes are always instantiated even though the
+    class itself carries ``name`` / ``lookup`` attributes, because a class'
+    ``lookup`` is an unbound function that would receive ``name`` as ``self``.
+    """
+    if inspect.isclass(obj):
+        return obj()
+    lookup = getattr(obj, "lookup", None)
+    name = getattr(obj, "name", None)
+    if callable(lookup) and isinstance(name, str):
+        # Already a ToolSource instance.
+        return obj
+    if callable(obj):
+        # A factory function returning a ToolSource.
+        return obj()
+    return obj
+
+
 class ToolResolver:
     """Resolves tool names to callables from multiple sources.
     
@@ -115,6 +185,8 @@ class ToolResolver:
         tools_py_path: Optional[str] = None,
         registry: Optional["ToolRegistry"] = None,
         sources: Optional[List[ToolSource]] = None,
+        *,
+        source_registry: Optional["ToolSourceRegistry"] = None,
     ):
         """Initialize the resolver.
         
@@ -122,6 +194,11 @@ class ToolResolver:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
             registry: Optional ToolRegistry to include in resolution chain
             sources: Optional list of ToolSource objects. If None, uses defaults.
+            source_registry: Optional ToolSourceRegistry supplying third-party
+                entry-point tool sources. When ``sources`` is not provided,
+                these are appended after the built-in resolution chain. Defaults
+                to the process-default registry (``praisonai.tool_sources``
+                entry-point group). Pass an empty registry to opt out.
         """
         from pathlib import Path
         # Resolve path eagerly in constructor to make binding explicit and inspectable
@@ -139,16 +216,19 @@ class ToolResolver:
         self._local_tools_dir_cache: Dict[str, Dict[str, Any]] = {}
         self._local_tools_dir_lock = threading.Lock()
         self._registry = registry
+        self._source_registry = source_registry
         
         # Resolution chain as an ordered list of ToolSource objects. When a
         # caller supplies sources= they fully control resolution order; this is
         # the documented extension point. Otherwise we build the default chain
-        # equivalent to the historical hardcoded order.
+        # equivalent to the historical hardcoded order, then append any
+        # third-party entry-point sources discovered via ToolSourceRegistry.
         if sources is not None:
             self._sources: List[ToolSource] = list(sources)
             self._uses_default_sources = False
         else:
             self._sources = self.default_sources(registry)
+            self._sources.extend(self._entry_point_sources())
             self._uses_default_sources = True
 
         # Auto-wire cache invalidation so register_function() on the registry
@@ -202,6 +282,23 @@ class ToolResolver:
             _CallableSource("core-registry",
                             lambda n: self._resolve_from_registry(n)),
         ]
+
+    def _entry_point_sources(self) -> List[ToolSource]:
+        """Third-party tool sources discovered via ``praisonai.tool_sources``.
+
+        Returns an empty list when no plugins are installed, so single-tenant
+        callers pay nothing beyond a one-time entry-point scan. A caller can
+        pass ``source_registry=ToolSourceRegistry()`` for isolation, or an empty
+        custom registry to opt out entirely.
+        """
+        registry = self._source_registry
+        if registry is None:
+            registry = ToolSourceRegistry.default()
+        try:
+            return registry.create_sources()
+        except Exception:  # pragma: no cover - defensive; never break resolution
+            logger.debug("Failed to load entry-point tool sources", exc_info=True)
+            return []
 
     def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
