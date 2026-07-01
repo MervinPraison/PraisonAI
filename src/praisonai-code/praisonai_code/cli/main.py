@@ -326,9 +326,15 @@ class PraisonAI:
         """
         Initialize the PraisonAI object with default parameters.
         """
-        # Initialize telemetry defaults (moved from lazy __getattr__ hook)
-        from praisonai import _ensure_telemetry_defaults
-        _ensure_telemetry_defaults()
+        # Initialize telemetry defaults (moved from lazy __getattr__ hook).
+        # Optional: the wrapper package is not required for the standalone
+        # praisonai-code hot path, so skip silently when it is absent.
+        from praisonai_code._wrapper_bridge import optional_wrapper_attr
+        _ensure_telemetry_defaults = optional_wrapper_attr(
+            "praisonai", "_ensure_telemetry_defaults"
+        )
+        if _ensure_telemetry_defaults is not None:
+            _ensure_telemetry_defaults()
         self.agent_yaml = agent_yaml
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility

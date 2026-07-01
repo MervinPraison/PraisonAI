@@ -42,9 +42,10 @@ click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
 
 > **C7 (hot path complete):** Standalone `pip install praisonai-code` supports
 > agentic terminal commands (`run`, `chat`, `code`, warm runtime) without importing
-> the wrapper on the hot path. Optional features (approval backends, observability
-> sinks, framework adapters, bots/gateway) remain wrapper-only via
-> `praisonai_code._wrapper_bridge`.
+> the wrapper on the hot path. Approval backends resolve locally via
+> `praisonai_code.cli.features._approval_bridge` (channel bots delegate to the
+> wrapper). Optional features (observability sinks, framework adapters,
+> bots/gateway) remain wrapper-only via `praisonai_code._wrapper_bridge`.
 
 Completed C7 steps:
 - `praisonai_code._registry` — vendored plugin registry (no wrapper import)

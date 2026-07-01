@@ -32,7 +32,7 @@ cd src/praisonai-code
 for f in praisonai_code/cli/main.py praisonai_code/cli/app.py \
          praisonai_code/cli/commands/run.py praisonai_code/cli/commands/chat.py \
          praisonai_code/cli/commands/code.py; do
-  if grep -E '^from praisonai\.|^import praisonai' "$f"; then
+  if grep -E '^from praisonai([[:space:]]|\.|$)|^import praisonai([[:space:]]|\.|$)' "$f"; then
     echo "FAIL: wrapper import in $f"; exit 1
   fi
 done
@@ -62,7 +62,8 @@ OPENAI_API_KEY=... praisonai-code run "Say hello in one word"
 | `_framework_availability`, `_safe_loader` | `praisonai_code` |
 | `tool_resolver`, `tool_registry` | `praisonai_code` |
 
-Wrapper-only (optional via `_wrapper_bridge`): approval, observability sinks,
+Approval resolves locally via `_approval_bridge` (channel bots delegate to the
+wrapper). Wrapper-only (optional via `_wrapper_bridge`): observability sinks,
 framework adapters, bots, gateway, train, capabilities.
 
 ## Sign-off

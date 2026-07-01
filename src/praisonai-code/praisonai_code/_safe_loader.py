@@ -8,6 +8,7 @@ through this helper to ensure consistent opt-in behavior.
 import importlib.util
 import logging
 import os
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -66,7 +67,14 @@ def load_user_module(
         return None
     
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register before exec so decorators/dataclasses that consult
+    # sys.modules[__name__] during module execution resolve correctly.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return module
 
 
@@ -98,12 +106,19 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
     try:
         path.relative_to(cwd)
     except ValueError:
-        raise LocalToolsDisabled(f"Refusing to exec {path}: outside working directory.")
+        raise LocalToolsDisabled(
+            f"Refusing to exec {path}: outside working directory."
+        ) from None
 
     spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not create spec for {path}")
     
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return module

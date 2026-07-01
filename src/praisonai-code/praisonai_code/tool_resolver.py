@@ -764,8 +764,8 @@ class ToolResolver:
             reg = get_registry()
             try:
                 reg.discover_plugins()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error discovering core registry plugins: %s", e, exc_info=True)
             for name in reg.list_tools():
                 if name not in available:
                     available[name] = ("Registered/entry-point tool", "registered")
@@ -984,7 +984,12 @@ class ToolResolver:
         """
         tools_dict: Dict[str, Callable] = {}
         needed: set[str] = set()
-        for role_cfg in yaml_config.get('roles', {}).values():
+        # Accept both the legacy ``roles`` shape and the canonical ``agents``
+        # shape (mirrors validate_yaml_tools) so tools resolve consistently.
+        role_configs = yaml_config.get('roles') or yaml_config.get('agents') or {}
+        for role_cfg in role_configs.values():
+            if not isinstance(role_cfg, dict):
+                continue
             for t in role_cfg.get('tools') or []:
                 if isinstance(t, str) and t.strip():
                     needed.add(t.strip())

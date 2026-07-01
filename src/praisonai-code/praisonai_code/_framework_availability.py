@@ -40,7 +40,7 @@ def _openai_agents_probe() -> bool:
     try:
         from agents import Runner  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
         return False
 
 def _agno_probe() -> bool:
@@ -53,7 +53,7 @@ def _agno_probe() -> bool:
     try:
         from agno.agent import Agent  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
         return False
 
 def _google_adk_probe() -> bool:
@@ -66,11 +66,11 @@ def _google_adk_probe() -> bool:
     try:
         from google.adk.agents import Agent  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
         try:
             from google.adk import Agent  # noqa: F401
             return True
-        except ImportError:
+        except Exception:
             return False
 
 def _pydantic_ai_probe() -> bool:
@@ -83,7 +83,7 @@ def _pydantic_ai_probe() -> bool:
     try:
         from pydantic_ai import Agent  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
         return False
 
 _PROBES: dict[str, Callable[[], bool]] = {

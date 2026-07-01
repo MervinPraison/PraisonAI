@@ -80,11 +80,16 @@ class ToolRegistry:
             # Clean up dead references
             self._resolvers = alive
         
-        # Notify outside lock to avoid holding lock during external calls
+        # Notify outside lock to avoid holding lock during external calls.
+        # Isolate per-resolver failures so one bad resolver does not leave
+        # the others with stale caches.
         for ref in alive:
             r = ref()
             if r is not None:
-                r.invalidate(name)
+                try:
+                    r.invalidate(name)
+                except Exception:
+                    logger.debug("Resolver cache invalidation failed", exc_info=True)
     
     def register_from_module(self, module: Any) -> List[str]:
         """
