@@ -133,11 +133,11 @@ def create_dakera_memory_adapter(**kwargs) -> MemoryProtocol:
     """
     try:
         import dakera  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "dakera is required for the dakera adapter. "
             "Install with: pip install 'praisonaiagents[dakera]' (or: pip install dakera)"
-        )
+        ) from exc
 
     return DakeraMemoryAdapter(dakera_config=kwargs)
 
@@ -607,9 +607,19 @@ class DakeraMemoryAdapter:
                metadata: Optional[Dict[str, Any]], kwargs: Dict[str, Any]) -> str:
         """Store a memory of ``memory_type`` and return its id."""
         meta = dict(metadata or {})
-        importance = kwargs.get("importance", meta.pop("importance", self.default_importance))
-        session_id = kwargs.get("session_id") or meta.pop("session_id", None)
-        tags = kwargs.get("tags") or meta.pop("tags", None)
+        # Always strip reserved keys from metadata so they never leak into the
+        # stored payload, then let explicit kwargs take precedence over them.
+        meta_importance = meta.pop("importance", None)
+        meta_session_id = meta.pop("session_id", None)
+        meta_tags = meta.pop("tags", None)
+
+        importance = kwargs.get("importance")
+        if importance is None:
+            importance = (
+                meta_importance if meta_importance is not None else self.default_importance
+            )
+        session_id = kwargs.get("session_id") or meta_session_id
+        tags = kwargs.get("tags") or meta_tags
 
         result = self.client.store_memory(
             agent_id=self.agent_id,
@@ -688,7 +698,10 @@ class DakeraMemoryAdapter:
             return True
         except Exception as e:
             import logging
-            logging.warning(f"Dakera delete_memory({memory_id}) failed: {e}")
+            logging.warning(
+                f"Dakera delete_memory({memory_id}) failed for agent "
+                f"'{self.agent_id}': {e}"
+            )
             return False
 
     def delete_memories(self, memory_ids: List[str]) -> int:

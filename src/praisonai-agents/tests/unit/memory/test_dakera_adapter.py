@@ -6,6 +6,7 @@ can be exercised end-to-end without a running Dakera server or the real SDK,
 mirroring how the other wrapper adapters (mem0/chroma/mongodb) are unit tested.
 """
 
+import os
 import sys
 import types
 
@@ -251,6 +252,26 @@ class TestDakeraStoreSearch:
         # Non-reserved metadata keys survive.
         assert stored["metadata"] == {"topic": "food"}
 
+    def test_store_kwargs_reserved_keys_do_not_leak_into_metadata(self, fake_dakera):
+        # Reserved keys passed via kwargs must win over metadata AND be stripped
+        # from the metadata copy, so they never leak into the stored payload.
+        # Regression for the short-circuit `or` that skipped meta.pop() whenever
+        # the kwarg was truthy, leaving a stale session_id/tags in metadata.
+        adapter = _make_adapter()
+        adapter.store_long_term(
+            "fact",
+            metadata={"session_id": "meta-sess", "tags": ["from-meta"], "topic": "food"},
+            session_id="kw-sess",
+            tags=["from-kwargs"],
+            importance=0.8,
+        )
+        stored = adapter.client.stored[0]
+        assert stored["session_id"] == "kw-sess"
+        assert stored["tags"] == ["from-kwargs"]
+        assert stored["importance"] == 0.8
+        # Reserved keys stripped from metadata regardless of their source.
+        assert stored["metadata"] == {"topic": "food"}
+
     def test_store_uses_default_importance(self, fake_dakera):
         adapter = _make_adapter(default_importance=0.3)
         adapter.store_short_term("note")
@@ -320,3 +341,34 @@ class TestDakeraDeleteReset:
         adapter.reset_long_term()
         req = adapter.client.batch_forget_calls[-1]
         assert req.filter.memory_type == "episodic"
+
+
+# ---------------------------------------------------------------------------
+# Real-SDK integration (gated) — exercises the actual `dakera` client against a
+# live self-hosted server. Skipped unless DAKERA_URL is set (e.g. a local
+# `dakera-ai/dakera-deploy` compose), so CI stays hermetic while the real
+# round-trip can be verified on demand:  DAKERA_URL=http://localhost:3000 pytest
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not os.getenv("DAKERA_URL"),
+    reason="requires a running Dakera server (set DAKERA_URL to enable)",
+)
+class TestDakeraRealSDK:
+    def test_store_then_recall_roundtrip(self):
+        pytest.importorskip("dakera")
+        from praisonaiagents.memory.adapters.factories import (
+            create_dakera_memory_adapter,
+        )
+
+        adapter = create_dakera_memory_adapter(
+            config={"agent_id": "praisonai-itest", "default_importance": 0.9}
+        )
+        adapter.reset_long_term()
+        adapter.store_long_term(
+            "The user's favourite programming language is Rust.",
+            metadata={"topic": "preferences"},
+        )
+        results = adapter.search_long_term("what language does the user like?", limit=5)
+        assert any("Rust" in r["text"] for r in results)
+        adapter.reset_long_term()
