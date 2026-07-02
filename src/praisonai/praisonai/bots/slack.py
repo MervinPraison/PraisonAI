@@ -228,7 +228,10 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             # Add channel type for pairing system
             bot_message._channel_type = "slack"
             
-            self.fire_message_received(bot_message)
+            decision = self.fire_message_received(bot_message)
+            if decision.get("drop"):
+                logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+                return
             
             # Check if channel is allowed
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):
@@ -242,7 +245,11 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 if not user_allowed:
                     return
             
-            text = event.get("text", "").strip()
+            # Use the (possibly redacted) content from the inbound gate rather
+            # than the raw Slack event so a MESSAGE_RECEIVED hook that rewrites
+            # content (e.g. PII redaction) actually reaches command parsing and
+            # agent dispatch.
+            text = (decision.get("content") or bot_message.content or "").strip()
             # Per-command authorization: privileged commands (e.g. /learn) can be
             # restricted to admins independent of the channel/pairing allow gate,
             # consistent with Telegram and Discord.
@@ -363,7 +370,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Message handler error: {e}")
             
             should_respond = False
-            text = event.get("text", "")
+            # Dispatch the (possibly redacted) content from the inbound gate so
+            # a MESSAGE_RECEIVED hook rewrite reaches the agent, not the raw text.
+            text = decision.get("content") or bot_message.content or ""
             channel_type = event.get("channel_type", "")
             
             if channel_type == "im":

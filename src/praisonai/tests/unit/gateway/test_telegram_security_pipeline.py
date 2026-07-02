@@ -71,8 +71,9 @@ def create_test_bot(
         is_bot=True,
     )
     
-    # Mock the fire_message_received method and other required attributes
-    bot.fire_message_received = MagicMock()
+    # Mock the fire_message_received method and other required attributes.
+    # It now returns an inbound gate decision dict (drop/content).
+    bot.fire_message_received = MagicMock(return_value={"drop": False, "content": ""})
     bot._started_at = 1234567890.0
     bot._agent = MagicMock()
     bot._command_handlers = {}
@@ -244,7 +245,7 @@ async def test_empty_allowlists_allow_when_policy_is_allow():
         display_name="Test Bot",
         is_bot=True,
     )
-    bot.fire_message_received = MagicMock()
+    bot.fire_message_received = MagicMock(return_value={"drop": False, "content": ""})
     bot._started_at = 1234567890.0
     bot._agent = MagicMock()
     bot._command_handlers = {}
