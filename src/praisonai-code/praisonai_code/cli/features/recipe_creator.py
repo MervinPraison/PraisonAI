@@ -18,10 +18,13 @@ from .sdk_knowledge import get_sdk_knowledge_prompt
 
 
 def _auto_constants():
-    from praisonai_code._wrapper_bridge import get_wrapper_attr
+    """Load wrapper tool-category maps, degrading to empty maps when the
+    ``praisonai`` wrapper is not installed so recipe creation still works
+    (falls back to the core tool selection / template path)."""
+    from praisonai_code._wrapper_bridge import optional_wrapper_attr
     return (
-        get_wrapper_attr("praisonai.auto", "TOOL_CATEGORIES"),
-        get_wrapper_attr("praisonai.auto", "TASK_KEYWORD_TO_TOOLS"),
+        optional_wrapper_attr("praisonai.auto", "TOOL_CATEGORIES", {}) or {},
+        optional_wrapper_attr("praisonai.auto", "TASK_KEYWORD_TO_TOOLS", {}) or {},
     )
 
 

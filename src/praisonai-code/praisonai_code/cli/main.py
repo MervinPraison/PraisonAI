@@ -361,7 +361,11 @@ class PraisonAI:
         
         # Validate framework availability early to fail fast
         if self.framework:
-            _fw_validators_module().assert_framework_available(self.framework)
+            try:
+                _fw_validators_module().assert_framework_available(self.framework)
+            except ImportError as e:
+                print(f"ERROR: {e}")
+                sys.exit(1)
         
         self.auto = auto
         self.init = init
@@ -478,7 +482,11 @@ class PraisonAI:
         
         # Validate framework availability early to fail fast
         if self.framework:
-            _fw_validators_module().assert_framework_available(self.framework)
+            try:
+                _fw_validators_module().assert_framework_available(self.framework)
+            except ImportError as e:
+                print(f"ERROR: {e}")
+                sys.exit(1)
         
         # Update config_list model if --model flag is provided
         if getattr(args, 'model', None):
@@ -1868,7 +1876,11 @@ class PraisonAI:
                 
                 handler = cmd_map.get(args.command)
                 if handler:
-                    exit_code = handler(args, unknown_args)
+                    try:
+                        exit_code = handler(args, unknown_args)
+                    except ImportError as e:
+                        print(f"ERROR: {e}")
+                        sys.exit(1)
                     sys.exit(exit_code if exit_code else 0)
             
             elif args.command == 'doctor':

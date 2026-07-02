@@ -458,7 +458,8 @@ class LazyCommandGroup(TyperGroup):
             console = Console()
             
             try:
-                from praisonai import AgentOS
+                from praisonai_code._wrapper_bridge import get_wrapper_attr
+                AgentOS = get_wrapper_attr("praisonai", "AgentOS")
                 from praisonaiagents import AgentOSConfig
             except ImportError as e:
                 console.print(f"[red]Error importing AgentOS: {e}[/red]")

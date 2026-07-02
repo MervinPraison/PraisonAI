@@ -3,12 +3,12 @@
 set -euo pipefail
 
 ROOT="${1:-src/praisonai-code/praisonai_code}"
-cd "$(dirname "$0")/.."
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Module-level hot path: praisonai wrapper only (not praisonaiagents / praisonai_code).
 HOT_PATH_RE='^from praisonai([[:space:]]|\.|$)|^import praisonai([[:space:]]|\.|$)'
 # Line-level wrapper imports (exclude praisonaiagents, praisonai_code, praisonai-tools).
-ANY_WRAPPER_RE='(^\s*from praisonai\.|^import praisonai($|\.))'
+ANY_WRAPPER_RE='(^[[:space:]]*from praisonai([[:space:]]|\.)|^import praisonai($|\.))'
 ALLOWLIST="scripts/c7_wrapper_import_allowlist.txt"
 
 echo "== C7 hot-path module-level gate =="
@@ -41,7 +41,7 @@ done
 echo "strict hot-path gate ok"
 
 echo "== C7 regression baseline (total wrapper import lines) =="
-BASELINE="${C7_WRAPPER_IMPORT_BASELINE:-211}"
+BASELINE="${C7_WRAPPER_IMPORT_BASELINE:-225}"
 # Count wrapper import lines with a portable tool. Prefer ripgrep when present
 # (fast, respects the same regex) and fall back to POSIX grep -r otherwise, so
 # the gate does not exit 127 on runners without rg. The `|| true` keeps a
