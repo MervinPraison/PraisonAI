@@ -1864,15 +1864,21 @@ Now provide your final answer using this result. Summarize the information natur
         try:
             import litellm
             safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
-            resp = litellm.completion(
-                **self._build_completion_params(
-                    messages=messages + [wrap_up],
-                    temperature=temperature,
-                    stream=False,
-                    tool_choice="none",
-                    **safe_kwargs
-                )
+            final_params = self._build_completion_params(
+                messages=messages + [wrap_up],
+                temperature=temperature,
+                stream=False,
+                tool_choice="none",
+                **safe_kwargs
             )
+            # Ensure no tools are advertised even if the builder injects
+            # runtime tools (e.g. web_fetch, Claude memory); tool_choice="none"
+            # with tools present is invalid/undesirable for the wrap-up call.
+            # Drop the now-meaningless tool_choice too, as some providers reject
+            # tool_choice when no tools are supplied.
+            final_params.pop("tools", None)
+            final_params.pop("tool_choice", None)
+            resp = litellm.completion(**final_params)
             summary = resp["choices"][0]["message"].get("content")
             if summary and summary.strip():
                 return summary.strip()
@@ -1898,15 +1904,21 @@ Now provide your final answer using this result. Summarize the information natur
         try:
             import litellm
             safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
-            resp = await litellm.acompletion(
-                **self._build_completion_params(
-                    messages=messages + [wrap_up],
-                    temperature=temperature,
-                    stream=False,
-                    tool_choice="none",
-                    **safe_kwargs
-                )
+            final_params = self._build_completion_params(
+                messages=messages + [wrap_up],
+                temperature=temperature,
+                stream=False,
+                tool_choice="none",
+                **safe_kwargs
             )
+            # Ensure no tools are advertised even if the builder injects
+            # runtime tools (e.g. web_fetch, Claude memory); tool_choice="none"
+            # with tools present is invalid/undesirable for the wrap-up call.
+            # Drop the now-meaningless tool_choice too, as some providers reject
+            # tool_choice when no tools are supplied.
+            final_params.pop("tools", None)
+            final_params.pop("tool_choice", None)
+            resp = await litellm.acompletion(**final_params)
             summary = resp["choices"][0]["message"].get("content")
             if summary and summary.strip():
                 return summary.strip()
