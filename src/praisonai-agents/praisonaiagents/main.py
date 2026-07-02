@@ -256,6 +256,7 @@ def _sanitize_renderable(renderable, stream):
     try:
         from rich.text import Text
         from rich.panel import Panel
+        from rich.markdown import Markdown
     except ImportError:
         return safe_text(renderable, stream) if isinstance(renderable, str) else renderable
 
@@ -264,12 +265,38 @@ def _sanitize_renderable(renderable, stream):
     if isinstance(renderable, Text):
         renderable.plain = safe_text(renderable.plain, stream)
         return renderable
+    if isinstance(renderable, Markdown):
+        # Rebuild from sanitized markup so the rendered body drops
+        # unencodable glyphs (otherwise the LLM response would be lost).
+        return Markdown(safe_text(renderable.markup, stream))
     if isinstance(renderable, Panel):
         renderable.renderable = _sanitize_renderable(renderable.renderable, stream)
         if isinstance(renderable.title, str):
             renderable.title = safe_text(renderable.title, stream)
         return renderable
     return renderable
+
+def _renderable_to_plain(renderable, stream):
+    """Best-effort plain-text extraction from a Rich renderable for the
+    last-resort ``print()`` fallback, so LLM responses are never dropped.
+    """
+    from .output.encoding import safe_text
+    if isinstance(renderable, str):
+        return safe_text(renderable, stream)
+    try:
+        from rich.text import Text
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+    except ImportError:
+        return safe_text(str(getattr(renderable, "plain", renderable)), stream)
+
+    if isinstance(renderable, Text):
+        return safe_text(renderable.plain, stream)
+    if isinstance(renderable, Markdown):
+        return safe_text(renderable.markup, stream)
+    if isinstance(renderable, Panel):
+        return _renderable_to_plain(renderable.renderable, stream)
+    return safe_text(str(getattr(renderable, "plain", renderable)), stream)
 
 def _safe_console_print(console, *renderables, **kwargs):
     """Print via Rich, falling back to ASCII-safe glyphs on encoding errors.
@@ -288,12 +315,10 @@ def _safe_console_print(console, *renderables, **kwargs):
         try:
             console.print(*sanitized, **kwargs)
         except UnicodeEncodeError:
-            from .output.encoding import safe_text
-            plain = " ".join(
-                safe_text(r if isinstance(r, str) else str(getattr(r, "plain", r)), stream)
-                for r in renderables
-            )
-            print(plain)
+            plain = " ".join(_renderable_to_plain(r, stream) for r in sanitized)
+            # Write to the console's own stream (which may be a captured or
+            # redirected file), not the process-wide sys.stdout.
+            print(plain, file=stream if stream is not None else None)
 
 def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None, metrics=None):
     """Synchronous version of display_interaction.

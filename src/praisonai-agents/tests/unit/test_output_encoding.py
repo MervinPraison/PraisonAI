@@ -174,3 +174,53 @@ def test_display_tool_call_preserves_unicode_on_utf8():
     stream.flush()
     stream.seek(0)
     assert "\u25b8" in stream.buffer.getvalue().decode("utf-8")
+
+
+def test_display_interaction_markdown_no_unicode_error_on_cp1252():
+    # markdown=True routes the response through Panel.fit(Markdown(...)),
+    # whose body previously stayed unsanitized and dropped the LLM response.
+    from praisonaiagents.main import display_interaction
+
+    console, stream = _cp1252_console()
+    display_interaction(
+        "the question",
+        "the answer \u25b8 with a decorative glyph \u2192 here",
+        markdown=True,
+        console=console,
+    )
+    stream.flush()  # must not raise UnicodeEncodeError
+    stream.seek(0)
+    rendered = stream.buffer.getvalue().decode("cp1252")
+    # The response text must survive the fallback, not be dropped.
+    assert "answer" in rendered
+
+
+def test_sanitize_markdown_rebuilds_from_safe_markup():
+    from rich.markdown import Markdown
+    from praisonaiagents.main import _sanitize_renderable
+
+    md = Markdown("hello \u25b8 world")
+    out = _sanitize_renderable(md, _Cp1252Stream())
+    assert isinstance(out, Markdown)
+    assert "\u25b8" not in out.markup
+    out.markup.encode("cp1252")  # must not raise
+
+
+def test_safe_console_print_fallback_writes_to_console_stream():
+    # The last-resort plain print must target the console's own stream,
+    # not the process-wide sys.stdout.
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from praisonaiagents.main import _safe_console_print
+
+    class _StrictMarkdown(Markdown):
+        # Force both Rich attempts to fail so the plain fallback runs.
+        def __rich_console__(self, console, options):
+            raise UnicodeEncodeError("cp1252", "\u25b8", 0, 1, "boom")
+
+    stream = _Cp1252Stream()
+    console = Console(file=stream, force_terminal=True)
+    panel = Panel.fit(_StrictMarkdown("the answer body"), title="Response")
+    _safe_console_print(console, panel)
+    assert "the answer body" in stream.getvalue()
