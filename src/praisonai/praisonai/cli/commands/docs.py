@@ -137,6 +137,11 @@ def docs_run(
         "--python",
         help="Python executable to use (default: current interpreter)",
     ),
+    dry_run: bool = typer.Option(
+    False,
+    "--dry-run",
+    help="Extract code blocks without executing them",
+),
     quiet: bool = typer.Option(
         False,
         "--quiet", "-q",
@@ -190,6 +195,8 @@ def docs_run(
         timeout=timeout,
         fail_fast=fail_fast,
         stream_output=not no_stream,
+        dry_run=dry_run,
+
         max_items=max_snippets,
         require_env=list(require_env) if require_env else None,
         report_dir=output_dir,
@@ -834,11 +841,6 @@ def docs_generate(
         "--output", "-o",
         help="Output directory for MDX files (default: ~/PraisonAIDocs/docs/sdk/reference/praisonaiagents)",
     ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Preview without writing files",
-    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -1149,6 +1151,7 @@ def cli_run_all(
         "--quiet", "-q",
         help="Minimal output",
     ),
+      
     ci: bool = typer.Option(
         False,
         "--ci",
