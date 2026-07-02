@@ -42,7 +42,15 @@ echo "strict hot-path gate ok"
 
 echo "== C7 regression baseline (total wrapper import lines) =="
 BASELINE="${C7_WRAPPER_IMPORT_BASELINE:-211}"
-COUNT="$(rg -c "$ANY_WRAPPER_RE" "$ROOT" --glob '*.py' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+# Count wrapper import lines with a portable tool. Prefer ripgrep when present
+# (fast, respects the same regex) and fall back to POSIX grep -r otherwise, so
+# the gate does not exit 127 on runners without rg. The `|| true` keeps a
+# no-match (grep/rg exit 1) from aborting the script under `set -o pipefail`.
+if command -v rg >/dev/null 2>&1; then
+  COUNT="$( { rg -c "$ANY_WRAPPER_RE" "$ROOT" --glob '*.py' 2>/dev/null || true; } | awk -F: '{s+=$2} END {print s+0}')"
+else
+  COUNT="$( { grep -rEc --include='*.py' "$ANY_WRAPPER_RE" "$ROOT" 2>/dev/null || true; } | awk -F: '{s+=$2} END {print s+0}')"
+fi
 echo "wrapper import lines: $COUNT (baseline $BASELINE)"
 if [ "$COUNT" -gt "$BASELINE" ]; then
   echo "FAIL: wrapper import count regressed above baseline ($COUNT > $BASELINE)"
