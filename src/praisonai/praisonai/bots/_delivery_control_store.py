@@ -6,7 +6,7 @@ already SQLite-first. The *delivery-control* state that decides how fast and
 whether to send, however, was per-process: the rate limiter kept its token
 bucket in memory and the dead-target registry rewrote a whole JSON file on
 every change. Under a horizontally-scaled gateway N workers each keep their own
-token bucket, so the global send rate becomes ~N× the platform ceiling — exactly
+token bucket, so the global send rate becomes ~N times the platform ceiling — exactly
 the 429s the limiter exists to prevent.
 
 This module provides a small SQLite-backed store that both ``RateLimiter`` and
@@ -157,10 +157,16 @@ class DeliveryControlStore:
                         float(row[0]), float(row[1]), float(row[2])
                     )
 
-                # Refill based on elapsed wall-clock since last reservation anchor.
+                # Refill based on elapsed wall-clock since last reservation
+                # anchor. Do NOT clamp elapsed to >= 0: when a previous caller
+                # reserved a future slot, ``last_refill`` is ahead of ``now`` and
+                # ``elapsed`` is negative, which correctly withholds the refill so
+                # queued reservations keep accumulating debt (matching the
+                # in-memory ``RateLimiter.acquire`` path). Clamping here would
+                # reset the anchor early and hand out slots faster than the
+                # configured ceiling.
                 elapsed = now - last_refill
-                if elapsed > 0:
-                    tokens = min(burst_size, tokens + elapsed * messages_per_second)
+                tokens = min(burst_size, tokens + elapsed * messages_per_second)
                 last_refill = now
 
                 global_wait = 0.0
@@ -319,23 +325,36 @@ class DeliveryControlStore:
             return float(row[0]) if row else None
 
     def dead_expire(self, cutoff: float) -> None:
+        # Table-wide TTL sweep. The ``dead_targets`` table is keyed by
+        # ``(platform, channel_id)`` with no per-registry column, so a single
+        # store is expected to back registries that agree on ``ttl_seconds`` /
+        # ``max_size`` (the multi-worker sharing model of issue #2579, where
+        # every worker runs the same config). Do NOT point registries with
+        # divergent TTL/bound settings at one store file, or the shorter setting
+        # will prune the longer registry's suppressions.
         with self._lock, closing(self._connect()) as conn:
             conn.execute("DELETE FROM dead_targets WHERE ts < ?", (cutoff,))
             conn.commit()
 
     def dead_enforce_bound(self, max_size: int) -> None:
+        # See ``dead_expire``: this bound is table-wide and assumes registries
+        # sharing a store agree on ``max_size``.
         if max_size <= 0:
             return
         with self._lock, closing(self._connect()) as conn:
-            n = conn.execute("SELECT COUNT(*) FROM dead_targets").fetchone()[0]
-            if n <= max_size:
-                return
-            conn.execute(
-                "DELETE FROM dead_targets WHERE rowid IN ("
-                "SELECT rowid FROM dead_targets ORDER BY ts ASC LIMIT ?)",
-                (n - max_size,),
-            )
-            conn.commit()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                n = conn.execute("SELECT COUNT(*) FROM dead_targets").fetchone()[0]
+                if n > max_size:
+                    conn.execute(
+                        "DELETE FROM dead_targets WHERE rowid IN ("
+                        "SELECT rowid FROM dead_targets ORDER BY ts ASC LIMIT ?)",
+                        (n - max_size,),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def dead_list(self) -> List[Tuple[str, str, str, float]]:
         with self._lock, closing(self._connect()) as conn:

@@ -241,7 +241,6 @@ class TestDeadTargetRegistrySharedBackend:
         reg.mark_dead("telegram", "-1001", reason="403")
         # Force ts into the past directly in the store.
         store.dead_clear("telegram", "-1001")
-        store._lock  # sanity: store exists
         import sqlite3
         conn = sqlite3.connect(str(store.path))
         conn.execute(
