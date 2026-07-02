@@ -69,9 +69,34 @@ class BotPlatformRegistry(PluginRegistry):
             entry_point_group="praisonai.bots",
             builtins=_BUILTIN_PLATFORMS
         )
+        # Also discover the idiomatic ``praisonai.channels`` entry-point group
+        # so a ``pip install``ed channel connector registers itself with no code.
+        self._discover_channel_entry_points()
         # Store capabilities for each platform
         self._capabilities: Dict[str, PlatformCapabilities] = {}
         self._capabilities_lock = threading.Lock()
+
+    def _discover_channel_entry_points(self) -> None:
+        """Discover channel connectors from the ``praisonai.channels`` group."""
+        import logging
+        from importlib.metadata import entry_points
+        logger = logging.getLogger(__name__)
+        try:
+            for ep in entry_points(group="praisonai.channels"):
+                # Do not let a third-party entry point silently shadow a
+                # built-in (or already-registered) channel loader.
+                if ep.name.lower() in self._loaders:
+                    logger.warning(
+                        "Skipping duplicate channel entry point %r; a loader "
+                        "with that name is already registered.", ep.name
+                    )
+                    continue
+                self._add_loader(ep.name, ep.load)
+        except Exception:
+            logger.debug(
+                "Entry points not available for group praisonai.channels",
+                exc_info=True,
+            )
     
     def register_with_capabilities(
         self, 

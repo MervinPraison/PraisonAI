@@ -298,6 +298,10 @@ def gateway_channels(
     config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
     probe: bool = typer.Option(False, "--probe", help="Probe each channel's credentials"),
+    available: bool = typer.Option(
+        False, "--available",
+        help="List all registered platforms (built-in + entry-point + custom)",
+    ),
 ):
     """List channels configured in a gateway.yaml file.
 
@@ -305,9 +309,39 @@ def gateway_channels(
         praisonai gateway channels
         praisonai gateway channels --config my-gateway.yaml --json
         praisonai gateway channels --probe
+        praisonai gateway channels --available
     """
     import os
     import yaml
+
+    if available:
+        try:
+            from praisonai.bots._registry import list_platforms
+            platforms = sorted(list_platforms())
+        except Exception as exc:
+            print(f"Error: could not load platform registry: {exc}")
+            raise typer.Exit(1) from exc
+
+        if json_output:
+            import json
+            print(json.dumps(platforms, indent=2))
+            raise typer.Exit(0)
+
+        try:
+            from rich.table import Table
+            from rich.console import Console
+
+            console = Console()
+            table = Table(title="Available Platforms")
+            table.add_column("Platform", style="green")
+            for platform in platforms:
+                table.add_row(platform)
+            console.print(table)
+        except ImportError:
+            print("Available platforms:")
+            for platform in platforms:
+                print(f"  - {platform}")
+        raise typer.Exit(0)
 
     if not os.path.exists(config):
         print(f"Error: Config file not found: {config}")
