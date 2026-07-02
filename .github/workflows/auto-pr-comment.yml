@@ -1,8 +1,8 @@
 name: Auto PR Comment
 
 # Review chain: CodeRabbit + Greptile (+ optional Qodo/Gemini) → Copilot → Claude (FINAL)
-# Copilot posts only when required prior reviewers have finished.
-# Claude posts only after Copilot has responded — never from Gemini/Greptile directly.
+# Claude posts after Copilot responds, or after Copilot timeout if @copilot was already posted.
+# Fork PR jobs use pull_request_target so GH_TOKEN is available for comments.
 #
 # IMPORTANT: @copilot ignores bot comments. All @copilot mentions must use
 # PAT_TOKEN so the comment posts as MervinPraison (a real user).
@@ -15,6 +15,8 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
+    types: [opened, synchronize]
+  pull_request_target:
     types: [opened, synchronize]
   schedule:
     - cron: '30 3,9,15,21 * * *'
@@ -82,7 +84,7 @@ jobs:
   # ================================================================
   claude-fallback-timeout:
     if: |
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       github.event.action == 'opened'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -95,7 +97,7 @@ jobs:
       - name: Wait for review chain (25 min)
         run: sleep 1500
 
-      - name: Trigger Claude only after prior reviewers + Copilot
+      - name: Post Claude FINAL (prior reviewers + Copilot timeout OK)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -104,21 +106,11 @@ jobs:
             const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pr-review-chain.js'));
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const pr = context.payload.pull_request.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const { comments, reviews } = await chain.listCommentsAndReviews(github, owner, repo, pr);
-            const gate = chain.claudeFinalReady(comments, reviews, {
-              prCreatedAt: context.payload.pull_request.created_at,
-            });
-            if (!gate.ready) {
-              core.info(`Claude fallback skipped on PR #${pr}: ${gate.reason}`);
-              return;
-            }
-            await github.rest.issues.createComment({
-              issue_number: pr, owner, repo,
-              body: mergeGate.FINAL_CLAUDE_REVIEW_BODY,
-            });
-            core.info(`Claude fallback triggered on PR #${pr}`);
+            await chain.maybeTriggerClaudeFinal(
+              github, context.repo.owner, context.repo.repo, pr,
+              mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
+              { allowCopilotTimeout: true, optionalWaitMs: 0 }
+            );
 
   # ================================================================
   # Claude FINAL — only after Copilot responds (prior reviewers already done)
@@ -161,8 +153,7 @@ jobs:
             core.setOutput('copilot_ready', result.ready ? 'true' : 'false');
             if (!result.ready) core.info(`Copilot not ready: ${result.reason}`);
 
-      - name: Trigger Claude final review
-        if: steps.poll.outputs.copilot_ready == 'true'
+      - name: Post Claude FINAL after Copilot (or timeout fallback)
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ needs.copilot-after-prior-reviewers.outputs.pr_number }}
@@ -173,20 +164,11 @@ jobs:
             const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pr-review-chain.js'));
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const pr = parseInt(process.env.PR_NUMBER, 10);
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const { data: prData } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
-            const { comments, reviews } = await chain.listCommentsAndReviews(github, owner, repo, pr);
-            const gate = chain.claudeFinalReady(comments, reviews, { prCreatedAt: prData.created_at });
-            if (!gate.ready) {
-              core.info(`Skip Claude on PR #${pr}: ${gate.reason}`);
-              return;
-            }
-            await github.rest.issues.createComment({
-              issue_number: pr, owner, repo,
-              body: mergeGate.FINAL_CLAUDE_REVIEW_BODY,
-            });
-            core.info(`Claude FINAL triggered on PR #${pr} after Copilot + prior reviewers`);
+            await chain.maybeTriggerClaudeFinal(
+              github, context.repo.owner, context.repo.repo, pr,
+              mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
+              { allowCopilotTimeout: true }
+            );
 
       - name: Sync pipeline status labels
         uses: actions/github-script@v7
@@ -207,7 +189,7 @@ jobs:
   # ================================================================
   claude-review-recovery:
     if: |
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     permissions:
@@ -257,19 +239,10 @@ jobs:
                 core.info(`Skip stale-FINAL recovery: ${gate.reason}`);
                 return;
               }
-              const ready = chain.claudeFinalReady(comments, reviews, {
-                prCreatedAt: context.payload.pull_request.created_at,
-              });
-              if (!ready.ready && !ready.already) {
-                core.info(`Skip stale-FINAL recovery — chain incomplete: ${ready.reason}`);
-                return;
-              }
-              if (ready.already) {
-                core.info('Claude FINAL already triggered — skip stale recovery');
-                return;
-              }
-              await github.rest.issues.createComment({ issue_number: pr, owner, repo, body: finalBody });
-              core.info(`Posted stale-FINAL recovery @claude on PR #${pr}`);
+              const result = await chain.maybeTriggerClaudeFinal(
+                github, owner, repo, pr, finalBody, core, { allowCopilotTimeout: true }
+              );
+              if (result.posted) core.info(`Posted stale-FINAL recovery @claude on PR #${pr}`);
               return;
             }
 
@@ -278,16 +251,10 @@ jobs:
               return;
             }
 
-            const ready = chain.claudeFinalReady(comments, reviews, {
-              prCreatedAt: context.payload.pull_request.created_at,
-            });
-            if (!ready.ready) {
-              core.info(`Skip missing-FINAL recovery: ${ready.reason}`);
-              return;
-            }
-
-            await github.rest.issues.createComment({ issue_number: pr, owner, repo, body: finalBody });
-            core.info(`Posted missing FINAL Claude review on PR #${pr}`);
+            const result = await chain.maybeTriggerClaudeFinal(
+              github, owner, repo, pr, finalBody, core, { allowCopilotTimeout: true }
+            );
+            if (result.posted) core.info(`Posted missing FINAL Claude review on PR #${pr}`);
 
       - name: Sync pipeline status labels
         uses: actions/github-script@v7
@@ -300,8 +267,8 @@ jobs:
             await ps.ensurePipelineLabels(github, context.repo.owner, context.repo.repo, core);
             await ps.syncPipelineLabels(github, context.repo.owner, context.repo.repo, pr, core);
 
-  # Scheduled: re-post @claude when FINAL is stale (Claude pushed after last FINAL trigger)
-  stale-final-recovery-scheduled:
+  # Scheduled + manual: post missing or stale FINAL @claude on all open PRs (incl. forks)
+  post-missing-claude-final:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -310,7 +277,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Re-post stale FINAL @claude on open internal PRs
+      - name: Post missing/stale FINAL @claude on open PRs
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -326,40 +293,40 @@ jobs:
             let posted = 0;
             for (const pr of prs) {
               if (pr.draft) continue;
-              if (pr.head?.repo?.full_name && pr.head.repo.full_name !== `${owner}/${repo}`) continue;
               const comments = await mergeGate.listAllComments(github, owner, repo, pr.number);
-              const { data: reviews } = await github.rest.pulls.listReviews({
-                owner, repo, pull_number: pr.number, per_page: 100,
-              });
               const headPushedAt = (await mergeGate.getHeadCommitDate(github, owner, repo, pr.number)) || pr.updated_at;
-              if (!mergeGate.needsStaleFinalRecovery(comments, headPushedAt)) continue;
+              const hasFinal = mergeGate.hasFinalClaudeReviewTrigger(comments);
+              const isStale = mergeGate.isStaleFinalAfterPush(comments, headPushedAt);
+
+              if (hasFinal && !isStale) continue;
               if (mergeGate.hasRecentClaudeTrigger(comments, 10)) {
-                core.info(`PR #${pr.number}: stale FINAL but @claude within 10min — skip`);
+                core.info(`PR #${pr.number}: @claude within 10min — skip`);
                 continue;
               }
               if (await mergeGate.hasInProgressClaudeAssistant(github, owner, repo, pr.number)) {
-                core.info(`PR #${pr.number}: Claude workflow in progress — skip`);
+                core.info(`PR #${pr.number}: Claude in progress — skip`);
                 continue;
               }
-              const gate = mergeGate.shouldSkipStaleFinalRecovery(comments, headPushedAt);
-              if (gate.skip) {
-                core.info(`PR #${pr.number}: skip stale-FINAL — ${gate.reason}`);
-                continue;
+              if (hasFinal && isStale) {
+                const gate = mergeGate.shouldSkipStaleFinalRecovery(comments, headPushedAt);
+                if (gate.skip) {
+                  core.info(`PR #${pr.number}: skip stale — ${gate.reason}`);
+                  continue;
+                }
               }
-              const ready = chain.claudeFinalReady(comments, reviews, { prCreatedAt: pr.created_at });
-              if (!ready.ready) {
-                core.info(`PR #${pr.number}: skip scheduled recovery — ${ready.reason}`);
-                continue;
+
+              const result = await chain.maybeTriggerClaudeFinal(
+                github, owner, repo, pr.number,
+                mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
+                { allowCopilotTimeout: true, optionalWaitMs: 0 }
+              );
+              if (result.posted) {
+                posted++;
+                core.info(`Posted Claude FINAL on PR #${pr.number}`);
               }
-              await github.rest.issues.createComment({
-                issue_number: pr.number, owner, repo,
-                body: mergeGate.FINAL_CLAUDE_REVIEW_BODY,
-              });
-              posted++;
-              core.info(`Posted scheduled stale-FINAL recovery on PR #${pr.number}`);
-              if (posted >= 5) break;
+              if (posted >= 10) break;
             }
-            core.info(`Scheduled stale-FINAL recovery complete (${posted} posted)`);
+            core.info(`Missing/stale Claude FINAL sweep complete (${posted} posted)`);
 
   # ================================================================
   # BOT PRs: CodeRabbit/Qodo skip bot-authored PRs by default.

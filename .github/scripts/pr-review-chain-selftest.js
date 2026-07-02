@@ -47,5 +47,13 @@ assert(
   'claude ready after full chain',
   chain.claudeFinalReady([coderabbit, greptile, copilotKick, copilotReply]).ready
 );
+assert(
+  'claude timeout fallback when copilot triggered but silent',
+  chain.claudeFinalReady([coderabbit, greptile, copilotKick], [], { allowCopilotTimeout: true }).ready
+);
+assert(
+  'no timeout fallback without copilot trigger',
+  !chain.claudeFinalReady([coderabbit, greptile], [], { allowCopilotTimeout: true }).ready
+);
 
 process.exit(failed ? 1 : 0);
