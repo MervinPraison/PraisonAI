@@ -1415,7 +1415,6 @@ def custom_search(query: str) -> str:
         
         # After context, original state should be restored
         # (implementation detail - registry should be isolated)
-    
 
     def test_default_custom_dirs(self):
         """Test that default custom tool directories are defined."""
@@ -1431,6 +1430,7 @@ def custom_search(query: str) -> str:
             or ".praison/tools" in Path(d).as_posix()
             for d in default_dirs
         )
+
     def test_no_scanning_on_import(self):
         """Test that no filesystem scanning occurs on import."""
         import sys
