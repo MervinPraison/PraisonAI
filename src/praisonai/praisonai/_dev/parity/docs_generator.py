@@ -195,7 +195,6 @@ PYTHON_DOC_ORPHAN_EXCLUSIONS = frozenset({
 DOC_FEATURE_CATEGORY_ALIASES = {
     'Callbacks': 'Hooks',
     'Middleware': 'Hooks',
-    'Vector Store': 'Knowledge',
     'Token Management': 'Context Management',
     'Jobs': 'Workflows',
     'Chat': 'Agent',
