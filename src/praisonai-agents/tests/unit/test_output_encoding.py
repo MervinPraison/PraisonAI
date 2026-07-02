@@ -92,3 +92,138 @@ def test_trace_output_response_preserves_unicode_on_utf8():
     out = TraceOutput(file=stream, use_color=False, show_timestamps=False)
     out.response("\u25b8 answer \u2192 ok")
     assert "\u25b8" in stream.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# main.py Rich display path (praisonai run) — reproduces issue #2569.
+# Rich's legacy Windows renderer encodes with the terminal encoding using
+# strict error handling, so decorative glyphs (▸ U+25B8, ⚠ U+26A0) crash the
+# agent loop. These tests drive the real Rich Console against a cp1252-backed
+# stream and assert the display helpers degrade gracefully.
+# ---------------------------------------------------------------------------
+
+
+def _make_console(encoding="cp1252", force_terminal=True):
+    """Build a Rich Console whose file strictly encodes with ``encoding``."""
+    from rich.console import Console
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict")
+    return Console(file=stream, force_terminal=force_terminal), stream
+
+
+def _cp1252_console(force_terminal=True):
+    """Build a Rich Console whose file strictly encodes as cp1252."""
+    return _make_console("cp1252", force_terminal)
+
+
+def test_rich_console_reproduces_cp1252_error():
+    # Sanity check: a raw Rich print of ▸ DOES raise on cp1252 (the bug).
+    console, _ = _cp1252_console()
+    import pytest
+
+    with pytest.raises(UnicodeEncodeError):
+        console.print("[bold]\u25b8[/] test")
+
+
+def test_display_tool_call_no_unicode_error_on_cp1252():
+    from praisonaiagents.main import display_tool_call
+
+    console, stream = _cp1252_console()
+    # Legacy inline format uses the ▸ (U+25B8) prefix directly.
+    display_tool_call("running search tool", console=console)
+    stream.flush()  # must not raise UnicodeEncodeError
+
+
+def test_display_tool_call_structured_no_unicode_error_on_cp1252():
+    from praisonaiagents.main import display_tool_call
+
+    console, stream = _cp1252_console()
+    display_tool_call(
+        "search",
+        console=console,
+        tool_name="search",
+        tool_input={"q": "weather"},
+        tool_output="sunny",
+        elapsed_time=0.5,
+        success=True,
+    )
+    stream.flush()  # must not raise UnicodeEncodeError
+
+
+def test_display_error_no_unicode_error_on_cp1252():
+    from praisonaiagents.main import display_error
+
+    console, stream = _cp1252_console()
+    # Panel title "⚠ Error" (U+26A0) previously crashed on cp1252.
+    display_error("something went wrong", console=console)
+    stream.flush()  # must not raise UnicodeEncodeError
+
+
+def test_display_interaction_no_unicode_error_on_cp1252():
+    from praisonaiagents.main import display_interaction
+
+    console, stream = _cp1252_console()
+    display_interaction(
+        "\u25b8 question", "\u25b8 answer", markdown=False, console=console
+    )
+    stream.flush()  # must not raise UnicodeEncodeError
+
+
+def test_display_tool_call_preserves_unicode_on_utf8():
+    from praisonaiagents.main import display_tool_call
+
+    console, stream = _make_console("utf-8")
+    display_tool_call("running search", console=console)
+    stream.flush()
+    stream.seek(0)
+    assert "\u25b8" in stream.buffer.getvalue().decode("utf-8")
+
+
+def test_display_interaction_markdown_no_unicode_error_on_cp1252():
+    # markdown=True routes the response through Panel.fit(Markdown(...)),
+    # whose body previously stayed unsanitized and dropped the LLM response.
+    from praisonaiagents.main import display_interaction
+
+    console, stream = _cp1252_console()
+    display_interaction(
+        "the question",
+        "the answer \u25b8 with a decorative glyph \u2192 here",
+        markdown=True,
+        console=console,
+    )
+    stream.flush()  # must not raise UnicodeEncodeError
+    stream.seek(0)
+    rendered = stream.buffer.getvalue().decode("cp1252")
+    # The response text must survive the fallback, not be dropped.
+    assert "answer" in rendered
+
+
+def test_sanitize_markdown_rebuilds_from_safe_markup():
+    from rich.markdown import Markdown
+    from praisonaiagents.main import _sanitize_renderable
+
+    md = Markdown("hello \u25b8 world")
+    out = _sanitize_renderable(md, _Cp1252Stream())
+    assert isinstance(out, Markdown)
+    assert "\u25b8" not in out.markup
+    out.markup.encode("cp1252")  # must not raise
+
+
+def test_safe_console_print_fallback_writes_to_console_stream():
+    # The last-resort plain print must target the console's own stream,
+    # not the process-wide sys.stdout.
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from praisonaiagents.main import _safe_console_print
+
+    class _StrictMarkdown(Markdown):
+        # Force both Rich attempts to fail so the plain fallback runs.
+        def __rich_console__(self, console, options):
+            raise UnicodeEncodeError("cp1252", "\u25b8", 0, 1, "boom")
+
+    stream = _Cp1252Stream()
+    console = Console(file=stream, force_terminal=True)
+    panel = Panel.fit(_StrictMarkdown("the answer body"), title="Response")
+    _safe_console_print(console, panel)
+    assert "the answer body" in stream.getvalue()
