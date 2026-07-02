@@ -5,6 +5,7 @@ Provides terminal-native interactive chat mode.
 This command NEVER opens a browser - it runs entirely in the terminal.
 """
 
+import logging
 from typing import List, Optional, Union
 
 import typer
@@ -231,6 +232,10 @@ def chat_main(
         response = tui.run_single(prompt)
         if response:
             print(response)
+        # Propagate a non-zero exit code on failure (e.g. invalid API key)
+        # so shell scripts and CI can detect authentication failures (#2562).
+        if tui.execution_failed:
+            raise typer.Exit(1)
     else:
         # Interactive split-pane TUI mode
         tui.run()
@@ -278,19 +283,40 @@ def _run_profiled_chat(
     agent = Agent(**agent_config)
     profiler.mark_init_end()
     
-    # Execution phase
+    # Execution phase. Capture auth failures (raised or logged-then-swallowed)
+    # so profiling still runs and CI can detect the failure (#2562).
+    from praisonai_code.cli.interactive.async_tui import _LogCapture
+
+    log_capture = _LogCapture()
+    root_logger = logging.getLogger()
+    root_logger.addHandler(log_capture)
+
+    response = None
+    failed = False
     profiler.mark_exec_start()
-    response = agent.start(prompt)
-    profiler.mark_exec_end()
-    
+    try:
+        response = agent.start(prompt)
+    except Exception as exc:  # noqa: BLE001 - surface any failure via exit code
+        typer.echo(f"Error: {exc}", err=True)
+        failed = True
+    finally:
+        profiler.mark_exec_end()
+        root_logger.removeHandler(log_capture)
+
     profiler.stop()
-    
+
     # Print response
     if response:
         print(response)
-    
-    # Print profiling report
+
+    # Print profiling report (always, even on failure)
     profiler.print_report()
+
+    # Propagate failure (e.g. invalid API key) so CI can detect it (#2562).
+    # An empty-but-successful response is NOT treated as a failure on its own;
+    # only a raised exception or a logged auth error (with no response) exits 1.
+    if failed or (not response and log_capture.find_auth_error()):
+        raise typer.Exit(1)
 
 
 def _run_legacy_terminal_chat(
