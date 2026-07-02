@@ -40,8 +40,13 @@ class Agent(CoreAgent):
         super().__init__(*args, cli_backend=cli_backend, **kwargs)
     
     def _is_protocol_instance(self, obj) -> bool:
-        """Check if object appears to be a protocol instance (duck typing)."""
-        return callable(obj) or hasattr(obj, 'process_turn')
+        """Check if object is a pre-resolved CliBackendProtocol instance (duck typing).
+
+        A CliBackendProtocol instance exposes both ``execute()`` and ``stream()``.
+        Factory callables are intentionally NOT treated as protocol instances here
+        so that wrapper-level normalization in ``resolve_cli_backend_config`` runs.
+        """
+        return hasattr(obj, "execute") and hasattr(obj, "stream")
 
 
 # Export the wrapper Agent as the default for import from praisonai

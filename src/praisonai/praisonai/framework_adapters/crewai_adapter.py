@@ -17,6 +17,8 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     name = "crewai"
     install_hint = 'pip install "praisonai-frameworks[crewai]"'
     requires_tools_extra = True
+    # CrewAI's kickoff() is sync-only; arun offloads run() to a bounded pool.
+    SUPPORTS_ASYNC = False
     
     def is_available(self) -> bool:
         """Check if CrewAI is available for import."""

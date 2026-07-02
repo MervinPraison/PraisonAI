@@ -28,7 +28,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
     - Agent-centric tools (ACP/LSP)
     - Memory and planning features
     """
-    
+
+    # Native async path: arun() awaits team.astart() directly (no thread offload).
+    SUPPORTS_ASYNC = True
+
     @property
     def name(self) -> str:
         """Return adapter name."""
