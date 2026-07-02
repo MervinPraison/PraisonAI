@@ -898,7 +898,10 @@ Example: /handoff code "refactor the auth module" """
                 return f"Error: {result_error}"
             if getattr(response, "success", None) is False:
                 self._last_error = RuntimeError("Agent execution failed")
-                return f"Error: Agent execution failed"
+                # Preserve any partial/diagnostic output for the user instead
+                # of hiding it behind a generic message (still exits non-zero
+                # via ``execution_failed``).
+                return output_text if output_text is not None else "Error: Agent execution failed"
 
             return output_text
         except Exception as e:
