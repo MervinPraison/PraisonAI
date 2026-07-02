@@ -40,7 +40,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Embeddings | 6 | 23 | 1968 |
 | ✅ Evaluation | 1 | 6 | 2509 |
 | ✅ Events | 1 | 2 | 711 |
-| ✅ Execution | 3 | 4 | 1455 |
+| ✅ Execution | 3 | 4 | 1451 |
 | ✅ Failover | 2 | 1 | 398 |
 | ✅ Files | 2 | 6 | 1801 |
 | ✅ Flow | 1 | 3 | 777 |
@@ -50,7 +50,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Hooks | 2 | 9 | 3475 |
 | ✅ Image | 1 | 11 | 1103 |
 | ✅ Knowledge | 4 | 12 | 3643 |
-| ✅ LLM | 3 | 11 | 4010 |
+| ✅ LLM | 3 | 11 | 4026 |
 | ✅ Loops | 4 | 3 | 774 |
 | ✅ MCP | 1 | 52 | 11137 |
 | ✅ Memory | 6 | 17 | 6136 |

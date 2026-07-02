@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (Rust)
 
-> **Categories:** 68 | **Documented:** 63 | **Parity:** 92.6%
+> **Categories:** 68 | **Documented:** 64 | **Parity:** 94.1%
 
 This report compares **Rust SDK feature categories** against **Rust documentation** (docs/rust/).
 
@@ -9,9 +9,9 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 68 |
-| **Documented Categories** | **63** |
-| **Undocumented Categories** | **5** |
-| **Parity** | **92.6%** |
+| **Documented Categories** | **64** |
+| **Undocumented Categories** | **4** |
+| **Parity** | **94.1%** |
 
 ## Documented Categories
 
@@ -48,7 +48,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Handoffs | 13 | 1 | 276 |
 | ✅ Hooks | 12 | 2 | 517 |
 | ✅ Image | 4 | 1 | 85 |
-| ✅ Knowledge | 12 | 2 | 368 |
+| ✅ Knowledge | 12 | 1 | 146 |
 | ✅ LLM | 10 | 2 | 279 |
 | ✅ Loops | 7 | 1 | 134 |
 | ✅ MCP | 11 | 1 | 196 |
@@ -76,6 +76,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Templates | 1 | 1 | 66 |
 | ✅ Tools | 16 | 1 | 334 |
 | ✅ Tracing | 8 | 1 | 310 |
+| ✅ Vector Store | 2 | 1 | 222 |
 | ✅ Video | 5 | 1 | 60 |
 | ✅ Vision | 3 | 1 | 65 |
 | ✅ Web | 5 | 2 | 185 |
@@ -89,7 +90,6 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ❌ Process | 2 |
 | ❌ Streaming | 6 |
 | ❌ Token Management | 2 |
-| ❌ Vector Store | 2 |
 
 ## Documentation Without Features
 

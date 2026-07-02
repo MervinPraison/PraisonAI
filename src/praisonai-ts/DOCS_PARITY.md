@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 75 | **Documented:** 68 | **Parity:** 90.7%
+> **Categories:** 75 | **Documented:** 69 | **Parity:** 92.0%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -9,9 +9,9 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 75 |
-| **Documented Categories** | **68** |
-| **Undocumented Categories** | **7** |
-| **Parity** | **90.7%** |
+| **Documented Categories** | **69** |
+| **Undocumented Categories** | **6** |
+| **Parity** | **92.0%** |
 
 ## Documented Categories
 
@@ -49,7 +49,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Handoffs | 12 | 1 | 179 |
 | ✅ Hooks | 8 | 3 | 572 |
 | ✅ Image | 4 | 2 | 282 |
-| ✅ Knowledge | 3 | 4 | 842 |
+| ✅ Knowledge | 3 | 2 | 312 |
 | ✅ LLM | 6 | 4 | 668 |
 | ✅ Loops | 11 | 1 | 180 |
 | ✅ MCP | 17 | 4 | 828 |
@@ -80,6 +80,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Tools | 34 | 17 | 3598 |
 | ✅ Tracing | 8 | 3 | 477 |
+| ✅ Vector Store | 6 | 2 | 530 |
 | ✅ Video | 2 | 1 | 150 |
 | ✅ Vision | 2 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
@@ -96,7 +97,6 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ❌ Scheduler | 2 |
 | ❌ Streaming | 2 |
 | ❌ Token Management | 1 |
-| ❌ Vector Store | 6 |
 
 ## Documentation Without Features
 
