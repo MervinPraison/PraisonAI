@@ -1275,24 +1275,53 @@ class BotOS:
                 if key in agent_cfg:
                     agent_kwargs[key] = agent_cfg[key]
 
-            # Resolve tool names to real functions
+            # Resolve tool names to real functions. Delegate string names to the
+            # shared ToolResolver so BotOS honours the same resolution chain as
+            # the rest of the framework (local tools.py -> wrapper registry ->
+            # praisonaiagents -> praisonai-tools -> plugins) instead of only
+            # seeing built-in praisonaiagents.tools. See issue #2585.
             tool_names = agent_cfg.get("tools")
             if tool_names and isinstance(tool_names, list):
                 resolved_tools = []
-                for tname in tool_names:
-                    if isinstance(tname, str):
+                string_names = [t for t in tool_names if isinstance(t, str)]
+                callables = [t for t in tool_names if not isinstance(t, str)]
+
+                if string_names:
+                    try:
+                        from praisonai_code.tool_resolver import ToolResolver
+
+                        resolver = ToolResolver()
+                        for tname in string_names:
+                            fn = resolver.resolve(tname)
+                            if fn is not None:
+                                resolved_tools.append(fn)
+                            else:
+                                logger.warning(
+                                    f"BotOS: tool '{tname}' could not be resolved "
+                                    "via ToolResolver (local/praisonaiagents/"
+                                    "praisonai-tools/plugins)"
+                                )
+                    except ImportError:
+                        # Fall back to the built-in praisonaiagents.tools lookup
+                        # if the shared resolver is unavailable.
+                        import importlib
                         try:
-                            import importlib
                             mod = importlib.import_module("praisonaiagents.tools")
-                            fn = getattr(mod, tname, None)
+                        except ImportError:
+                            mod = None
+                        for tname in string_names:
+                            fn = getattr(mod, tname, None) if mod else None
                             if fn:
                                 resolved_tools.append(fn)
                             else:
-                                logger.warning(f"BotOS: tool '{tname}' not found in praisonaiagents.tools")
-                        except ImportError:
-                            logger.warning(f"BotOS: could not import tools module for '{tname}'")
-                    else:
-                        resolved_tools.append(tname)  # Already a callable
+                                logger.warning(
+                                    f"BotOS: tool '{tname}' not found in "
+                                    "praisonaiagents.tools"
+                                )
+
+                # Already-callable tools pass through unchanged.
+                resolved_tools.extend(callables)
+
                 if resolved_tools:
                     agent_kwargs["tools"] = resolved_tools
 

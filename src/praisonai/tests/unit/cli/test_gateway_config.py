@@ -94,6 +94,33 @@ def test_config_migration():
     
     print("✅ Migration patterns validated")
 
+def test_schema_accepts_gateway_and_hooks_blocks():
+    """GatewayConfigSchema validates a real gateway.yaml with gateway:/hooks:.
+
+    Regression for issue #2585: the strict schema previously had no
+    ``gateway:``/``hooks:`` fields, so validating a real gateway.yaml (which
+    ``gateway/server.py::load_gateway_config`` happily runs) would fail. One
+    schema must model everything the runtime reads.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return  # schema requires pydantic; skip when unavailable
+
+    from praisonai.bots._config_schema import GatewayConfigSchema
+
+    cfg = GatewayConfigSchema(
+        agents={"assistant": {"name": "assistant", "instructions": "Help"}},
+        channels={"telegram": {"token": "fake-token"}},
+        gateway={"host": "127.0.0.1", "port": 8765, "drain_timeout": 5},
+        hooks=[{"path": "gmail", "agent": "assistant"}],
+    )
+    assert cfg.gateway["port"] == 8765
+    assert cfg.hooks[0]["path"] == "gmail"
+    assert "telegram" in cfg.channels
+    print("✓ Schema accepts gateway:/hooks: blocks")
+
+
 def test_doctor_checks():
     """Test doctor check structure."""
     print("\n=== Testing Doctor Checks ===")
