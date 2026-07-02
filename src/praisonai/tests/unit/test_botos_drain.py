@@ -30,11 +30,22 @@ class _FakeBot:
 
 
 def test_drain_disabled_by_default_is_noop():
-    botos = BotOS()
+    """reliability='off' preserves immediate-teardown (no drain window)."""
+    botos = BotOS(reliability="off")
     abandoned = asyncio.run(botos.drain())
     assert abandoned == 0
     assert botos.accepting is True
     assert botos.is_draining is False
+
+
+def test_drain_default_reliability_quiesces_ingress():
+    """Default reliability applies a small drain window (#2531)."""
+    botos = BotOS()
+    assert botos._drain_timeout == 5.0
+    abandoned = asyncio.run(botos.drain())
+    assert abandoned == 0
+    assert botos.accepting is False
+    assert botos.is_draining is True
 
 
 def test_drain_zero_timeout_is_noop():

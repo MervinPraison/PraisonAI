@@ -59,7 +59,7 @@ class TestTyperApp:
         from praisonai.cli.app import app
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "PraisonAI version" in result.output
+        assert "PraisonAI Code version" in result.output or "PraisonAI version" in result.output
 
 
 class TestConfigCommand:

@@ -117,8 +117,15 @@ class _ClientConn:
 
     def start(self) -> None:
         """Start the background drain task for this connection."""
-        if self._task is None:
-            self._task = asyncio.ensure_future(self._drain())
+        if self._task is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Sync client registration (e.g. unit tests) — drain starts once
+            # the gateway event loop is running.
+            return
+        self._task = loop.create_task(self._drain())
 
     def offer(self, data: Any) -> bool:
         """Try to enqueue a frame within the configured bounds.

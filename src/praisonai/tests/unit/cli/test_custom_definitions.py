@@ -645,7 +645,7 @@ class TestRunCustomAgentPermissionMerge:
             agent_config["permissions"] = dict(agent_permissions)
 
         with patch(
-            "praisonai.cli.features.approval.resolve_approval_config",
+            "praisonai_code.cli.features._approval_bridge.resolve_approval_config",
             side_effect=fake_resolve_approval_config,
         ), patch("praisonaiagents.Agent", FakeAgent):
             run_module._run_custom_agent(

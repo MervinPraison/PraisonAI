@@ -14,7 +14,9 @@ def test_validate_workflow_framework_rejects_crewai(caplog):
     import logging
     from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(
+        logging.WARNING, logger="praisonai.framework_adapters.workflow_framework"
+    ):
         with pytest.raises(ValueError, match="not supported for workflow execution"):
             validate_workflow_framework("crewai", source="workflow.yaml")
     assert any("crewai" in r.message for r in caplog.records)
@@ -24,7 +26,9 @@ def test_validate_workflow_framework_rejects_openai_agents(caplog):
     import logging
     from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(
+        logging.WARNING, logger="praisonai.framework_adapters.workflow_framework"
+    ):
         with pytest.raises(ValueError, match="not supported for workflow execution"):
             validate_workflow_framework("openai_agents", source="workflow.yaml")
     assert any("openai_agents" in r.message for r in caplog.records)

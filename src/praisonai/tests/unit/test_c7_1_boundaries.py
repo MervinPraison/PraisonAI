@@ -82,3 +82,28 @@ def test_serve_doctor_skips_without_wrapper():
     if not wrapper_available():
         result = check_serve_module(DoctorConfig())
         assert result.status == CheckStatus.SKIP
+
+
+def test_run_file_crewai_requires_wrapper():
+    """Multi-framework YAML is wrapper-enhanced; standalone must fail clearly."""
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if wrapper_available():
+        pytest.skip("requires standalone env without praisonai wrapper")
+
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write("framework: crewai\nagents: []\n")
+        yaml_path = f.name
+
+    result = subprocess.run(
+        ["praisonai-code", "run", "--file", yaml_path, "hello"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "pip install praisonai" in combined.lower() or "import" in combined.lower()
