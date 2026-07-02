@@ -293,7 +293,8 @@ class StatusOutput:
             self._emit_text("Final Output:", ts, "bold", show_timestamp=False)
             # Print actual content to stdout (not stderr) so users see it
             with self._lock:  # Thread-safe output
-                print(content)
+                from .encoding import safe_text
+                print(safe_text(content, sys.stdout))
     
     def _emit_text(self, message: str, ts: float, style: str = None, show_timestamp: bool = True) -> None:
         """Emit a text line. Thread-safe for multi-agent execution."""
@@ -309,7 +310,8 @@ class StatusOutput:
                 else:
                     console.print(f"[dim]{ts_str}[/dim]{message}")
             else:
-                print(f"{ts_str}{message}", file=self._file)
+                from .encoding import safe_text
+                print(safe_text(f"{ts_str}{message}", self._file), file=self._file)
     
     def _emit_jsonl(self, event_type: str, **kwargs) -> None:
         """Emit a JSONL line. Thread-safe for multi-agent execution."""
