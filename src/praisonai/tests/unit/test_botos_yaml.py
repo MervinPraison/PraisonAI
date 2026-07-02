@@ -112,6 +112,53 @@ class TestBotOSFromConfigEnhanced:
         finally:
             os.unlink(path)
 
+    def test_agent_tools_use_tool_resolver(self, monkeypatch):
+        """agent.tools names are resolved via the shared ToolResolver.
+
+        Regression for issue #2585: BotOS previously resolved tool names only
+        against ``praisonaiagents.tools`` via ad-hoc importlib, so custom /
+        local / praisonai-tools / plugin tools were silently dropped. It must
+        now delegate to ``ToolResolver`` like the rest of the framework.
+        """
+        seen = []
+
+        def fake_custom_tool():
+            return "custom"
+
+        import praisonai.tool_resolver as tr
+
+        original_resolve = tr.ToolResolver.resolve
+
+        def spy_resolve(self, name, instantiate=False):
+            seen.append(name)
+            if name == "my_custom_tool":
+                return fake_custom_tool
+            return original_resolve(self, name, instantiate)
+
+        monkeypatch.setattr(tr.ToolResolver, "resolve", spy_resolve)
+
+        path = self._write_yaml({
+            "agent": {
+                "name": "tool_agent",
+                "instructions": "Use tools",
+                "tools": ["my_custom_tool"],
+            },
+            "platforms": {
+                "telegram": {"token": "fake"},
+            },
+        })
+        try:
+            from praisonai.bots.botos import BotOS
+            botos = BotOS.from_config(path)
+            bot = botos.get_bot("telegram")
+            agent = bot.agent
+            # ToolResolver.resolve was consulted for the custom tool name.
+            assert "my_custom_tool" in seen
+            # The custom (non-praisonaiagents) tool was actually resolved.
+            assert fake_custom_tool in getattr(agent, "tools", [])
+        finally:
+            os.unlink(path)
+
     def test_agent_role_parsed(self):
         """agent.role is passed to Agent."""
         path = self._write_yaml({
