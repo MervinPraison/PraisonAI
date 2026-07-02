@@ -462,6 +462,19 @@ def check_npx_available(config: DoctorConfig) -> CheckResult:
         )
 
 
+def _probe_optional_package(package: str) -> bool:
+    """Attempt to import a single optional package.
+
+    Returns True if the import succeeds. Raises ``ImportError`` if the package
+    is not installed, or any other exception if the import itself fails (e.g. a
+    broken C extension). Kept as a module-level helper so it can be dispatched
+    to a daemon worker thread with a per-package timeout (see
+    ``check_optional_deps``).
+    """
+    __import__(package)
+    return True
+
+
 @register_check(
     id="optional_deps",
     title="Optional Dependencies",
@@ -471,7 +484,23 @@ def check_npx_available(config: DoctorConfig) -> CheckResult:
     requires_deep=True,
 )
 def check_optional_deps(config: DoctorConfig) -> CheckResult:
-    """Check availability of optional dependencies."""
+    """Check availability of optional dependencies.
+
+    Imports are dispatched to daemon worker threads with an individual
+    per-package timeout so that a single slow or hanging optional import (e.g.
+    ``chromadb`` or ``crawl4ai``) cannot block the entire check and trip the
+    engine-wide timeout. Packages that exceed the per-package budget are
+    reported as ``slow`` rather than failing the whole check.
+
+    Daemon threads (rather than a ``ThreadPoolExecutor``) are used deliberately:
+    a pool's worker threads are joined by its internal ``atexit`` handler at
+    interpreter shutdown even after ``shutdown(wait=False)``, so a truly
+    hanging import would still stall CLI exit. Daemon threads are abandoned on
+    exit, so a hanging import can never block the process from terminating.
+    """
+    import time
+    import threading
+
     optional_packages = [
         ("chromadb", "Knowledge/RAG features"),
         ("mem0ai", "Memory features"),
@@ -482,36 +511,110 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
         ("tavily", "Tavily search"),
         ("duckduckgo_search", "DuckDuckGo search"),
     ]
-    
+
+    # Reserve a slice of the overall check budget for each package. The engine
+    # gives this check ``config.timeout`` seconds total; keep the per-package
+    # cap comfortably below that so the aggregate stays within budget even when
+    # several imports are slow.
+    per_package_timeout = max(1.0, min(3.0, config.timeout / 4))
+
     available = []
     missing = []
-    
-    for package, description in optional_packages:
+    broken = []
+    slow = []
+
+    # Probe each import on its own daemon thread. Each thread records its own
+    # outcome; the main thread waits at most ``per_package_timeout`` (bounded by
+    # the overall check budget) for each to finish. A thread that is still
+    # running past its deadline is abandoned: because it is a daemon it will not
+    # block interpreter/CLI shutdown, unlike ThreadPoolExecutor workers which
+    # are joined by an atexit handler even after ``shutdown(wait=False)``.
+    outcomes: dict[str, tuple[str, BaseException | None]] = {}
+    threads: dict[str, threading.Thread] = {}
+
+    def _run_probe(pkg: str) -> None:
         try:
-            __import__(package)
-            available.append(package)
+            _probe_optional_package(pkg)
+            outcomes[pkg] = ("available", None)
         except ImportError:
+            outcomes[pkg] = ("missing", None)
+        except Exception as exc:  # noqa: BLE001 - surface broken installs
+            outcomes[pkg] = ("broken", exc)
+
+    for package, _description in optional_packages:
+        thread = threading.Thread(
+            target=_run_probe,
+            args=(package,),
+            name=f"doctor-optdep-{package}",
+            daemon=True,
+        )
+        threads[package] = thread
+        thread.start()
+
+    deadline = time.monotonic() + max(per_package_timeout, config.timeout * 0.8)
+    for package, description in optional_packages:
+        remaining = max(0.0, deadline - time.monotonic())
+        wait_for = min(per_package_timeout, remaining) if remaining > 0 else 0.0
+        threads[package].join(timeout=wait_for)
+
+        if threads[package].is_alive():
+            # Import is hanging or unusually slow; abandon the daemon thread
+            # rather than let it block the whole deep-doctor pass.
+            slow.append(f"{package} ({description})")
+            continue
+
+        status, _exc = outcomes.get(package, ("missing", None))
+        if status == "available":
+            available.append(package)
+        elif status == "broken":
+            broken.append(f"{package} ({description})")
+        else:
             missing.append(f"{package} ({description})")
-    
+
+    details_parts = []
     if missing:
-        return CheckResult(
-            id="optional_deps",
-            title="Optional Dependencies",
-            category=CheckCategory.ENVIRONMENT,
-            status=CheckStatus.PASS,
-            message=f"{len(available)} optional packages available, {len(missing)} not installed",
-            details=f"Missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}",
-            metadata={"available": available, "missing": missing},
+        details_parts.append(
+            f"Missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}"
         )
-    else:
-        return CheckResult(
-            id="optional_deps",
-            title="Optional Dependencies",
-            category=CheckCategory.ENVIRONMENT,
-            status=CheckStatus.PASS,
-            message=f"All {len(available)} optional packages available",
-            metadata={"available": available},
+    if broken:
+        details_parts.append(f"Broken install: {', '.join(broken)}")
+    if slow:
+        details_parts.append(
+            f"Slow (skipped after {per_package_timeout:.0f}s): {', '.join(slow)}"
         )
+
+    message_parts = [f"{len(available)} optional packages available"]
+    if missing:
+        message_parts.append(f"{len(missing)} not installed")
+    if broken:
+        message_parts.append(f"{len(broken)} broken")
+    if slow:
+        message_parts.append(f"{len(slow)} slow/skipped")
+
+    # A broken install is actionable (fix the install) so surface it as a
+    # warning; missing/slow packages are informational and keep the check green.
+    status = CheckStatus.WARN if broken else CheckStatus.PASS
+    remediation = (
+        f"Reinstall the broken optional package(s): {', '.join(broken)}"
+        if broken
+        else None
+    )
+
+    return CheckResult(
+        id="optional_deps",
+        title="Optional Dependencies",
+        category=CheckCategory.ENVIRONMENT,
+        status=status,
+        message=", ".join(message_parts),
+        details="; ".join(details_parts) or None,
+        remediation=remediation,
+        metadata={
+            "available": available,
+            "missing": missing,
+            "broken": broken,
+            "slow": slow,
+        },
+    )
 
 
 @register_check(
