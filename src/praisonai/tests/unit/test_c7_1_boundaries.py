@@ -84,6 +84,25 @@ def test_serve_doctor_skips_without_wrapper():
         assert result.status == CheckStatus.SKIP
 
 
+def test_wrapper_resident_commands_resolve_when_wrapper_installed():
+    """Each _WRAPPER_RESIDENT command loads from praisonai.cli.commands.*."""
+    from praisonai_code._wrapper_bridge import wrapper_available
+    from praisonai_code.cli.app import _WRAPPER_RESIDENT_COMMANDS
+
+    if not wrapper_available():
+        pytest.skip("requires praisonai wrapper installed")
+
+    import importlib
+
+    # Commands without a Typer ``app`` (inline or click-only wiring in code app.py)
+    _skip_app_attr = frozenset({"standardise", "app", "audit"})
+
+    for name in sorted(_WRAPPER_RESIDENT_COMMANDS):
+        if name in _skip_app_attr:
+            continue
+        mod = importlib.import_module(f"praisonai.cli.commands.{name}")
+        assert hasattr(mod, "app"), f"praisonai.cli.commands.{name} must expose Typer app"
+
 def test_run_file_crewai_requires_wrapper():
     """Multi-framework YAML is wrapper-enhanced; standalone must fail clearly."""
     from praisonai_code._wrapper_bridge import wrapper_available

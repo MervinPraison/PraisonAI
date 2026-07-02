@@ -50,7 +50,8 @@ def check_performance_praisonai_import(config: DoctorConfig) -> CheckResult:
     start = time.perf_counter()
     try:
         # Import version module (lightweight)
-        from praisonai import version
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        import_wrapper_module("praisonai.version")
         elapsed = (time.perf_counter() - start) * 1000
         
         if elapsed > budget_ms:

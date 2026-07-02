@@ -25,7 +25,9 @@ def get_wrapper_version() -> Optional[str]:
         return str(version("praisonai"))
     except Exception:
         try:
-            from praisonai.version import __version__ as wrapper_version
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.version')
+            wrapper_version = getattr(_mod, '__version__')
 
             return str(wrapper_version)
         except Exception:

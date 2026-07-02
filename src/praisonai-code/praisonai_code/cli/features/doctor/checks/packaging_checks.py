@@ -34,24 +34,30 @@ def check_praisonai_package_structure(config: DoctorConfig) -> CheckResult:
     metadata = {}
     
     try:
-        import praisonai
-        package_path = praisonai.__file__
-        if package_path:
-            package_dir = os.path.dirname(package_path)
-            metadata["package_path"] = package_path
-            metadata["package_dir"] = package_dir
-            
-            # Check for __main__.py
-            main_py_path = os.path.join(package_dir, "__main__.py")
-            if os.path.exists(main_py_path):
-                metadata["has_main_py"] = True
-                metadata["main_py_path"] = main_py_path
-            else:
-                issues.append("Missing __main__.py - python -m praisonai will not work")
-                metadata["has_main_py"] = False
+        from praisonai_code._wrapper_bridge import import_wrapper_module, wrapper_available
+
+        if not wrapper_available():
+            issues.append("praisonai wrapper not installed")
+            metadata["import_error"] = "wrapper not available"
         else:
-            issues.append("praisonai.__file__ is None - namespace package detected")
-            
+            praisonai = import_wrapper_module("praisonai")
+            package_path = praisonai.__file__
+            if package_path:
+                package_dir = os.path.dirname(package_path)
+                metadata["package_path"] = package_path
+                metadata["package_dir"] = package_dir
+
+                # Check for __main__.py
+                main_py_path = os.path.join(package_dir, "__main__.py")
+                if os.path.exists(main_py_path):
+                    metadata["has_main_py"] = True
+                    metadata["main_py_path"] = main_py_path
+                else:
+                    issues.append("Missing __main__.py - python -m praisonai will not work")
+                    metadata["has_main_py"] = False
+            else:
+                issues.append("praisonai.__file__ is None - namespace package detected")
+
     except ImportError as e:
         issues.append(f"Cannot import praisonai: {e}")
         metadata["import_error"] = str(e)
@@ -332,72 +338,78 @@ def check_packaging_metadata(config: DoctorConfig) -> CheckResult:
     issues = []
     
     try:
-        import praisonai
-        metadata["praisonai_file"] = getattr(praisonai, "__file__", None)
-        metadata["praisonai_version"] = getattr(praisonai, "__version__", "unknown")
-        
-        # Check if installed via pip (using modern importlib.metadata)
-        try:
+        from praisonai_code._wrapper_bridge import import_wrapper_module, wrapper_available
+
+        if not wrapper_available():
+            issues.append("praisonai wrapper not installed")
+            metadata["import_error"] = "wrapper not available"
+        else:
+            praisonai = import_wrapper_module("praisonai")
+            metadata["praisonai_file"] = getattr(praisonai, "__file__", None)
+            metadata["praisonai_version"] = getattr(praisonai, "__version__", "unknown")
+
+            # Check if installed via pip (using modern importlib.metadata)
             try:
-                from importlib.metadata import distribution, PackageNotFoundError
+                try:
+                    from importlib.metadata import distribution, PackageNotFoundError
+                except ImportError:
+                    # Python < 3.8 fallback
+                    from importlib_metadata import distribution, PackageNotFoundError
+
+                try:
+                    dist = distribution("praisonai")
+                    metadata["pip_version"] = dist.version
+                    metadata["pip_location"] = str(dist.locate_file(""))
+                    metadata["pip_installed"] = True
+                except PackageNotFoundError:
+                    metadata["pip_installed"] = False
+                    issues.append("Package not found in pip registry (editable install?)")
             except ImportError:
-                # Python < 3.8 fallback
-                from importlib_metadata import distribution, PackageNotFoundError
-            
-            try:
-                dist = distribution("praisonai")
-                metadata["pip_version"] = dist.version
-                metadata["pip_location"] = str(dist.locate_file(""))
-                metadata["pip_installed"] = True
-            except PackageNotFoundError:
-                metadata["pip_installed"] = False
-                issues.append("Package not found in pip registry (editable install?)")
-        except ImportError:
-            metadata["importlib_metadata_available"] = False
-        
-        # Check for editable install markers
-        if praisonai.__file__:
-            package_dir = os.path.dirname(praisonai.__file__)
-            # Look for .egg-link or similar editable install markers
-            site_packages = []
-            try:
-                import site
-                site_packages.extend(site.getsitepackages())
-                if hasattr(site, 'getusersitepackages'):
-                    site_packages.append(site.getusersitepackages())
-            except Exception as e:
-                metadata["site_packages_probe_error"] = str(e)
-            
-            is_editable = False
-            for sp in site_packages:
-                if sp and os.path.exists(sp):
-                    # Check for both case variations of egg-link files
-                    for egg_link_name in ("praisonai.egg-link", "PraisonAI.egg-link"):
-                        egg_link = os.path.join(sp, egg_link_name)
-                        if os.path.exists(egg_link):
-                            is_editable = True
-                            metadata["editable_install"] = True
-                            metadata["egg_link_path"] = egg_link
-                            break
-                    if is_editable:
-                        break
-                    
-                    # Check for modern editable install markers (PEP 660)
-                    try:
-                        for file in os.listdir(sp):
-                            if file.startswith("__editable__") and "praisonai" in file.lower() and file.endswith(".pth"):
+                metadata["importlib_metadata_available"] = False
+
+            # Check for editable install markers
+            if praisonai.__file__:
+                package_dir = os.path.dirname(praisonai.__file__)
+                # Look for .egg-link or similar editable install markers
+                site_packages = []
+                try:
+                    import site
+                    site_packages.extend(site.getsitepackages())
+                    if hasattr(site, 'getusersitepackages'):
+                        site_packages.append(site.getusersitepackages())
+                except Exception as e:
+                    metadata["site_packages_probe_error"] = str(e)
+
+                is_editable = False
+                for sp in site_packages:
+                    if sp and os.path.exists(sp):
+                        # Check for both case variations of egg-link files
+                        for egg_link_name in ("praisonai.egg-link", "PraisonAI.egg-link"):
+                            egg_link = os.path.join(sp, egg_link_name)
+                            if os.path.exists(egg_link):
                                 is_editable = True
                                 metadata["editable_install"] = True
-                                metadata["editable_pth_path"] = os.path.join(sp, file)
+                                metadata["egg_link_path"] = egg_link
                                 break
-                    except OSError:
-                        pass
-                    if is_editable:
-                        break
-            
-            if not is_editable:
-                metadata["editable_install"] = False
-        
+                        if is_editable:
+                            break
+
+                        # Check for modern editable install markers (PEP 660)
+                        try:
+                            for file in os.listdir(sp):
+                                if file.startswith("__editable__") and "praisonai" in file.lower() and file.endswith(".pth"):
+                                    is_editable = True
+                                    metadata["editable_install"] = True
+                                    metadata["editable_pth_path"] = os.path.join(sp, file)
+                                    break
+                        except OSError:
+                            pass
+                        if is_editable:
+                            break
+
+                if not is_editable:
+                    metadata["editable_install"] = False
+
     except ImportError as e:
         issues.append(f"Cannot import praisonai: {e}")
         metadata["import_error"] = str(e)

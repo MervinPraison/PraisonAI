@@ -1,53 +1,5 @@
 # Files allowed to contain lazy ``from praisonai.*`` imports in praisonai-code.
-# New direct imports require review; prefer praisonai_code._wrapper_bridge.
+# C8 complete — reverse imports eliminated; bridge-only access remains.
 # Regenerate counts: bash scripts/check_c7_imports.sh
 #
-# Format: path  # reason (approx line count after C7.1)
-
-cli/main.py  # legacy argparse, auto, agents_generator (wrapper-enhanced)
-cli/features/recipe.py  # recipe runner (wrapper integrations)
-cli/features/templates.py  # template store in wrapper
-cli/commands/serve.py  # hybrid; gateway serve subpaths need wrapper
-cli/commands/train.py  # training uses wrapper capabilities
-cli/commands/docs.py  # docs server wrapper paths
-cli/commands/replay.py  # trace replay wrapper
-cli/features/deploy.py  # deployment integrations
-cli/commands/standardise.py  # migration tooling
-cli/commands/schedule.py  # scheduler wrapper
-cli/commands/n8n.py  # n8n integration
-cli/commands/examples.py  # example runners
-cli/features/persistence.py  # persistence backends
-cli/commands/langfuse.py  # observability
-cli/commands/flow.py  # Langflow
-cli/features/recipe_optimizer.py  # recipe tooling
-cli/interactive/async_tui.py  # interactive wrapper hooks
-cli/commands/mcp.py  # MCP server management
-cli/commands/validate.py  # validation against wrapper schemas
-cli/commands/context.py  # context features
-cli/commands/batch.py  # batch runner
-cli/features/agent_scheduler.py  # scheduler integration
-cli/features/eval.py  # eval harness
-cli/features/tools.py  # tool discovery
-cli/features/sandbox_cli.py  # sandbox wrapper
-cli/features/registry.py  # plugin registry wrapper
-cli/features/ollama.py  # ollama wrapper
-cli/features/workflow.py  # workflow wrapper
-cli/features/tui/app.py  # TUI wrapper hooks
-cli/features/interactive_runtime.py  # runtime bridge
-cli/features/endpoints.py  # API endpoints
-cli/features/background.py  # background jobs
-cli/features/agent_tools.py  # agent tools wrapper
-cli/features/acp.py  # ACP wrapper
-cli/commands/rag.py  # RAG server
-cli/commands/realtime.py  # realtime API
-cli/commands/knowledge.py  # knowledge CLI
-cli/commands/langextract.py  # langextract
-cli/commands/profile.py  # profiler
-cli/commands/recipe.py  # recipe command
-cli/commands/audit.py  # audit
-cli/interactive/core.py  # interactive core
-cli/commands/managed.py  # managed deployment (wrapper integrations)
-cli/commands/app.py  # legacy app launcher (wrapper-enhanced)
-cli/features/doctor/checks/performance_checks.py  # perf checks probe wrapper import cost
-_version.py  # optional wrapper version fallback
-cli/langfuse_client.py  # langfuse shim path
+# If a new direct import is unavoidable, add path below after Architecture Review.
