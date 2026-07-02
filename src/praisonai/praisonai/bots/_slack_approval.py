@@ -22,9 +22,15 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
-from ._approval_base import classify_keyword, classify_with_llm, sync_wrapper
+from ._approval_base import (
+    classify_keyword,
+    classify_with_llm,
+    is_authorized_actor,
+    normalize_approvers,
+    sync_wrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +49,20 @@ class SlackApproval:
         channel: Slack channel ID, channel name, or user ID for DMs.
         timeout: Max seconds to wait for a response (default 300 = 5 min).
         poll_interval: Seconds between polls (default 3.0).
+        allowed_approvers: Optional set of Slack user IDs permitted to
+            approve/deny. When provided, a reply from any other user is
+            ignored, so an unauthorised member of a shared channel cannot
+            resolve a gated tool. When ``None`` (default) any user may respond
+            (legacy behaviour, backward compatible). Falls back to a
+            comma-separated ``SLACK_APPROVERS`` env var when not passed.
 
     Example::
 
         from praisonai.bots import SlackApproval
-        agent = Agent(name="bot", approval=SlackApproval(channel="U0ABPEV1HK8"))
+        agent = Agent(
+            name="bot",
+            approval=SlackApproval(channel="U0ABPEV1HK8", allowed_approvers=["U0ABPEV1HK8"]),
+        )
     """
 
     def __init__(
@@ -56,6 +71,7 @@ class SlackApproval:
         channel: Optional[str] = None,
         timeout: float = 300,
         poll_interval: float = 3.0,
+        allowed_approvers: Optional[Iterable[str]] = None,
     ):
         self._token = token or os.environ.get("SLACK_BOT_TOKEN", "")
         if not self._token:
@@ -65,6 +81,11 @@ class SlackApproval:
         self._channel = channel or os.environ.get("SLACK_CHANNEL", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
+        if allowed_approvers is None:
+            _env = os.environ.get("SLACK_APPROVERS", "").strip()
+            if _env:
+                allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
+        self._allowed_approvers = normalize_approvers(allowed_approvers)
 
     def __repr__(self) -> str:
         masked = f"xoxb-...{self._token[-4:]}" if len(self._token) > 4 else "***"
@@ -297,6 +318,17 @@ class SlackApproval:
 
                     text = msg.get("text", "").strip()
                     user = msg.get("user", "unknown")
+
+                    # Authorization boundary: ignore replies from users not in
+                    # the allowlist so an unauthorised channel member cannot
+                    # resolve a gated tool.
+                    if not is_authorized_actor(user, self._allowed_approvers):
+                        logger.warning(
+                            "Ignoring Slack approval reply from unauthorized "
+                            "user %s", user,
+                        )
+                        continue
+
                     kw = classify_keyword(text)
 
                     if kw == "approve":
