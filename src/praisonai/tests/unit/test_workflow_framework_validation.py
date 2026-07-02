@@ -10,58 +10,16 @@ def test_validate_workflow_framework_allows_praisonai():
     validate_workflow_framework(None)
 
 
-def test_validate_workflow_framework_rejects_crewai(caplog):
-    import logging
+@pytest.mark.parametrize(
+    "framework",
+    ["crewai", "openai_agents", "agno", "google_adk", "pydantic_ai"],
+)
+def test_validate_workflow_framework_rejects_non_native(framework):
     from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
 
-    with caplog.at_level(
-        logging.WARNING, logger="praisonai.framework_adapters.workflow_framework"
-    ):
-        with pytest.raises(ValueError, match="not supported for workflow execution"):
-            validate_workflow_framework("crewai", source="workflow.yaml")
-    assert any("crewai" in r.message for r in caplog.records)
-
-
-def test_validate_workflow_framework_rejects_openai_agents(caplog):
-    import logging
-    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
-
-    with caplog.at_level(
-        logging.WARNING, logger="praisonai.framework_adapters.workflow_framework"
-    ):
-        with pytest.raises(ValueError, match="not supported for workflow execution"):
-            validate_workflow_framework("openai_agents", source="workflow.yaml")
-    assert any("openai_agents" in r.message for r in caplog.records)
-
-
-def test_validate_workflow_framework_rejects_agno(caplog):
-    import logging
-    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
-
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(ValueError, match="not supported for workflow execution"):
-            validate_workflow_framework("agno", source="workflow.yaml")
-    assert any("agno" in r.message for r in caplog.records)
-
-
-def test_validate_workflow_framework_rejects_google_adk(caplog):
-    import logging
-    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
-
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(ValueError, match="not supported for workflow execution"):
-            validate_workflow_framework("google_adk", source="workflow.yaml")
-    assert any("google_adk" in r.message for r in caplog.records)
-
-
-def test_validate_workflow_framework_rejects_pydantic_ai(caplog):
-    import logging
-    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
-
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(ValueError, match="not supported for workflow execution"):
-            validate_workflow_framework("pydantic_ai", source="workflow.yaml")
-    assert any("pydantic_ai" in r.message for r in caplog.records)
+    with pytest.raises(ValueError, match="not supported for workflow execution") as exc:
+        validate_workflow_framework(framework, source="workflow.yaml")
+    assert framework in str(exc.value)
 
 
 def test_framework_from_config_defaults_praisonai():

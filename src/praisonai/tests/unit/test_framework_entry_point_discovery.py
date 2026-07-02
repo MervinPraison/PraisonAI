@@ -101,10 +101,9 @@ def test_entry_point_discovery_without_manual_register():
             return [fake_ep]
         return []
 
-    with mock.patch(
-        "praisonai._registry.entry_points", side_effect=_fake_entry_points
-    ):
-        registry = FrameworkAdapterRegistry()
+    registry = FrameworkAdapterRegistry(discover_entry_points=False)
+    with mock.patch("praisonai._registry.entry_points", side_effect=_fake_entry_points):
+        registry._discover_entry_points()
 
     assert "echo_test_adapter" in registry.list_names()
     adapter = registry.create("echo_test_adapter")
