@@ -91,8 +91,20 @@ __all__ = [
 ]
 
 
+_WRAPPER_LOCAL_HANDLERS = {
+    "ToolsHandler": "tools",
+    "WorkflowHandler": "workflow",
+}
+
+
 def __getattr__(name):
-    """Delegate handler/attribute access to ``praisonai_code.cli.features``."""
+    """Resolve repatriated handlers locally, then delegate to code features."""
+    submodule = _WRAPPER_LOCAL_HANDLERS.get(name)
+    if submodule is not None:
+        import importlib
+
+        mod = importlib.import_module(f"{__name__}.{submodule}")
+        return getattr(mod, name)
     if _code_features is not None:
         try:
             return getattr(_code_features, name)
