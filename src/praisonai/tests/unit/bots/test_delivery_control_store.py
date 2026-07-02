@@ -182,7 +182,6 @@ class TestRateLimiterSharedBackend:
 
 
 async def _measure_wait(limiter, channel):
-    start = time.monotonic()
     # Reserve directly through the store to read the wait without sleeping.
     return limiter._store.reserve_tokens(
         limiter._scope,
