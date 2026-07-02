@@ -28,6 +28,28 @@ _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
 _WRITE_REDIRECTS = (">", ">>", ">|", "&>", "&>>")
 
 
+def _looks_like_path(tok: str) -> bool:
+    """Return ``True`` if *tok* is path-like enough to warrant a boundary check.
+
+    Conservative but covers common escape forms: absolute (``/x``),
+    home-relative (``~``), explicit relative (``./``, ``../``, ``..``),
+    env-prefixed (``$VAR/…``) and any bare token that embeds a ``/`` (e.g.
+    ``subdir/../../etc/passwd``). Plain flags/values without a path shape are
+    ignored so non-path args never trigger a spurious prompt.
+    """
+    if not tok:
+        return False
+    return (
+        tok.startswith("/")
+        or tok.startswith("~")
+        or tok.startswith("./")
+        or tok.startswith("../")
+        or tok == ".."
+        or tok.startswith("$")
+        or "/" in tok
+    )
+
+
 @dataclass
 class ShellOp:
     """A single simple-command extracted from a shell command line.
@@ -52,23 +74,26 @@ class ShellOp:
     def path_args(self) -> List[str]:
         """Args that look like filesystem paths (for boundary checks).
 
-        Conservative: only tokens that clearly denote a path — absolute
-        (``/x``), home-relative (``~``), parent/relative (``./`` , ``../``)
-        or env-prefixed (``$VAR/…``) — are returned so plain flags and
-        non-path values never trigger a boundary prompt.
+        Returns path-like tokens for boundary evaluation. Covers absolute
+        (``/x``), home-relative (``~``), parent/relative (``./``, ``../``),
+        env-prefixed (``$VAR/…``) and bare traversal/relative paths that
+        embed ``/`` (e.g. ``subdir/../../etc/passwd``). Path operands passed
+        as joined flags (``--config=/etc/x``) are also unwrapped so the value
+        is boundary-checked. Plain flags and non-path values are ignored.
         """
         paths: List[str] = []
         for tok in self.args:
-            if not tok or tok.startswith("-"):
+            if not tok:
                 continue
-            if (
-                tok.startswith("/")
-                or tok.startswith("~")
-                or tok.startswith("./")
-                or tok.startswith("../")
-                or tok == ".."
-                or tok.startswith("$")
-            ):
+            # Joined-flag form: --flag=<value> / -o=<value>. Unwrap and check
+            # the value component (a path operand can hide behind a flag).
+            if tok.startswith("-"):
+                if "=" in tok:
+                    value = tok.split("=", 1)[1]
+                    if value and _looks_like_path(value):
+                        paths.append(value)
+                continue
+            if _looks_like_path(tok):
                 paths.append(tok)
         return paths
 

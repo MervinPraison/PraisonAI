@@ -109,6 +109,30 @@ class TestShellBoundary:
         )
         assert manager.check("bash:cat /etc/passwd").is_denied
 
+    def test_bare_relative_traversal_asks(self, manager):
+        # Bare relative path that escapes via ``..`` (no leading ./ or ../).
+        result = manager.check("bash:cat sub/../../../etc/passwd")
+        assert result.needs_approval
+
+    def test_joined_flag_path_asks(self, manager):
+        # Path operand hidden behind a joined flag must still be gated.
+        result = manager.check("bash:tool --config=/etc/app.conf")
+        assert result.needs_approval
+
+    def test_external_executable_path_asks(self, manager):
+        # Running an executable outside the workspace must ask.
+        result = manager.check("bash:/tmp/outside-tool")
+        assert result.needs_approval
+
+    def test_external_relative_executable_asks(self, manager):
+        result = manager.check("bash:../../outside/tool.sh")
+        assert result.needs_approval
+
+    def test_bare_executable_name_allowed(self, manager):
+        # PATH-resolved bare command name must not trigger a boundary prompt.
+        result = manager.check("bash:ls")
+        assert result.is_allowed
+
 
 class TestFileToolBoundary:
     def test_external_path_asks(self, manager):

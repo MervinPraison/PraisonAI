@@ -300,7 +300,16 @@ class PermissionManager:
             # resolves outside the workspace root gets a distinct
             # ``external_dir:`` sub-target (default ``ask``).
             if self.workspace_root is not None:
-                for path in list(op.write_targets) + op.path_args:
+                boundary_paths = list(op.write_targets) + op.path_args
+                # An executable referenced by path (``/tmp/tool``, ``../tool``)
+                # runs code outside the workspace; a bare name (``rm``) is
+                # PATH-resolved and must not trigger a boundary prompt.
+                if op.executable and (
+                    op.executable.startswith(("/", "~", "./", "../", "$"))
+                    or "/" in op.executable
+                ):
+                    boundary_paths.append(op.executable)
+                for path in boundary_paths:
                     ext = self._external_dir_target(path)
                     if ext is not None:
                         sub_targets.append(ext)
