@@ -13,6 +13,12 @@ import os
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
+
+
+def _wrapper_mod(name: str):
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module(name)
 
 
 @register_check(
@@ -25,8 +31,13 @@ from ..registry import register_check
 )
 def check_serve_module(config: DoctorConfig) -> CheckResult:
     """Check if serve module is available."""
+    skipped = skip_if_no_wrapper(
+        "serve_module", "Serve Module", category=CheckCategory.ENVIRONMENT
+    )
+    if skipped:
+        return skipped
     try:
-        from praisonai.cli.features.serve import ServeHandler
+        ServeHandler = _wrapper_mod("praisonai.cli.features.serve").ServeHandler
         ServeHandler()  # Test instantiation
         return CheckResult(
             id="serve_module",
@@ -65,13 +76,17 @@ def check_serve_module(config: DoctorConfig) -> CheckResult:
 )
 def check_endpoints_module(config: DoctorConfig) -> CheckResult:
     """Check if endpoints module is available."""
+    skipped = skip_if_no_wrapper(
+        "endpoints_module", "Endpoints Module", category=CheckCategory.ENVIRONMENT
+    )
+    if skipped:
+        return skipped
     try:
-        from praisonai.endpoints import (
-            DiscoveryDocument,
-            EndpointInfo,
-            ProviderInfo,
-            list_provider_types,
-        )
+        endpoints = _wrapper_mod("praisonai.endpoints")
+        DiscoveryDocument = endpoints.DiscoveryDocument
+        EndpointInfo = endpoints.EndpointInfo
+        ProviderInfo = endpoints.ProviderInfo
+        list_provider_types = endpoints.list_provider_types
         types = list_provider_types()
         return CheckResult(
             id="endpoints_module",
@@ -273,13 +288,18 @@ def check_discovery_endpoint(config: DoctorConfig) -> CheckResult:
 )
 def check_a2u_module(config: DoctorConfig) -> CheckResult:
     """Check if A2U server module is available."""
+    skipped = skip_if_no_wrapper(
+        "a2u_module", "A2U Module", category=CheckCategory.ENVIRONMENT
+    )
+    if skipped:
+        return skipped
     try:
-        from praisonai.endpoints.a2u_server import (
-            A2UEvent,
-            A2USubscription,
-            A2UEventBus,
-            create_a2u_routes,
-        )
+        a2u = _wrapper_mod("praisonai.endpoints.a2u_server")
+        A2UEvent = a2u.A2UEvent
+        A2USubscription = a2u.A2USubscription
+        A2UEventBus = a2u.A2UEventBus
+        create_a2u_routes = a2u.create_a2u_routes
+        _ = (A2UEvent, A2USubscription, A2UEventBus, create_a2u_routes)
         return CheckResult(
             id="a2u_module",
             title="A2U Module",
@@ -316,8 +336,21 @@ def check_a2u_module(config: DoctorConfig) -> CheckResult:
 )
 def check_provider_adapters(config: DoctorConfig) -> CheckResult:
     """Check if all provider adapters are available."""
+    skipped = skip_if_no_wrapper(
+        "provider_adapters", "Provider Adapters", category=CheckCategory.ENVIRONMENT
+    )
+    if skipped:
+        return skipped
     try:
-        from praisonai.endpoints.providers import (
+        providers_mod = _wrapper_mod("praisonai.endpoints.providers")
+        BaseProvider = providers_mod.BaseProvider
+        RecipeProvider = providers_mod.RecipeProvider
+        AgentsAPIProvider = providers_mod.AgentsAPIProvider
+        MCPProvider = providers_mod.MCPProvider
+        ToolsMCPProvider = providers_mod.ToolsMCPProvider
+        A2AProvider = providers_mod.A2AProvider
+        A2UProvider = providers_mod.A2UProvider
+        _ = (
             BaseProvider,
             RecipeProvider,
             AgentsAPIProvider,

@@ -5,8 +5,11 @@ set -euo pipefail
 ROOT="${1:-src/praisonai-code/praisonai_code}"
 cd "$(dirname "$0")/.."
 
+# Module-level hot path: praisonai wrapper only (not praisonaiagents / praisonai_code).
 HOT_PATH_RE='^from praisonai([[:space:]]|\.|$)|^import praisonai([[:space:]]|\.|$)'
-ANY_WRAPPER_RE='from praisonai\.|import praisonai[^_]'
+# Line-level wrapper imports (exclude praisonaiagents, praisonai_code, praisonai-tools).
+ANY_WRAPPER_RE='(^\s*from praisonai\.|^import praisonai($|\.))'
+ALLOWLIST="scripts/c7_wrapper_import_allowlist.txt"
 
 echo "== C7 hot-path module-level gate =="
 for f in \
@@ -38,7 +41,7 @@ done
 echo "strict hot-path gate ok"
 
 echo "== C7 regression baseline (total wrapper import lines) =="
-BASELINE="${C7_WRAPPER_IMPORT_BASELINE:-310}"
+BASELINE="${C7_WRAPPER_IMPORT_BASELINE:-211}"
 COUNT="$(rg -c "$ANY_WRAPPER_RE" "$ROOT" --glob '*.py' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
 echo "wrapper import lines: $COUNT (baseline $BASELINE)"
 if [ "$COUNT" -gt "$BASELINE" ]; then
@@ -46,3 +49,7 @@ if [ "$COUNT" -gt "$BASELINE" ]; then
   exit 1
 fi
 echo "regression baseline ok"
+
+if [ -f "$ALLOWLIST" ]; then
+  echo "== C7 allowlist present: $ALLOWLIST =="
+fi

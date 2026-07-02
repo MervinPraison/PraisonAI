@@ -169,7 +169,10 @@ def check_agents_yaml_schema(config: DoctorConfig) -> CheckResult:
     if "framework" in data:
         framework = data["framework"]
         try:
-            from praisonai.framework_adapters.registry import get_default_registry
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            get_default_registry = import_wrapper_module(
+                "praisonai.framework_adapters.registry"
+            ).get_default_registry
             registered = get_default_registry().list_names()
             if framework not in registered:
                 warnings.append(f"Unknown framework: {framework} (registered: {', '.join(sorted(registered))})")

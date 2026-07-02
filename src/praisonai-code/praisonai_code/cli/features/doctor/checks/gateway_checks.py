@@ -12,6 +12,12 @@ from typing import List, Optional
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
+
+
+def _bots_config_schema():
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.bots._config_schema")
 
 
 @register_check(
@@ -24,6 +30,9 @@ from ..registry import register_check
 def check_gateway_config_validation(config: DoctorConfig) -> CheckResult:
     """Validate gateway/bot configuration using canonical schema."""
     start = time.time()
+    skipped = skip_if_no_wrapper("gateway_config_validation", "Gateway Config Validation", start=start)
+    if skipped:
+        return skipped
     
     # Check multiple possible config locations
     config_paths = []
@@ -31,7 +40,7 @@ def check_gateway_config_validation(config: DoctorConfig) -> CheckResult:
         config_paths.append(config.config_file)
     
     # Check common locations
-    from praisonai.cli._paths import resolve_bot_config_path
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_paths.extend([
         resolve_bot_config_path("gateway.yaml"),
         resolve_bot_config_path("bot.yaml"),
@@ -58,7 +67,7 @@ def check_gateway_config_validation(config: DoctorConfig) -> CheckResult:
         )
         
     try:
-        from praisonai.bots._config_schema import load_and_validate_gateway_yaml
+        load_and_validate_gateway_yaml = _bots_config_schema().load_and_validate_gateway_yaml
         validated_config = load_and_validate_gateway_yaml(config_path)
         
         channel_count = len(validated_config.channels)
@@ -107,9 +116,12 @@ def check_gateway_config_validation(config: DoctorConfig) -> CheckResult:
 def check_gateway_security(config: DoctorConfig) -> CheckResult:
     """Check gateway security settings for safe defaults."""
     start = time.time()
+    skipped = skip_if_no_wrapper("gateway_security", "Gateway Security Settings", start=start)
+    if skipped:
+        return skipped
     
     # Find config file
-    from praisonai.cli._paths import resolve_bot_config_path
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = None
     for path in [resolve_bot_config_path("gateway.yaml"), resolve_bot_config_path("bot.yaml"), "gateway.yaml", "bot.yaml"]:
         if os.path.exists(path):
@@ -127,7 +139,7 @@ def check_gateway_security(config: DoctorConfig) -> CheckResult:
         )
         
     try:
-        from praisonai.bots._config_schema import load_and_validate_gateway_yaml
+        load_and_validate_gateway_yaml = _bots_config_schema().load_and_validate_gateway_yaml
         validated_config = load_and_validate_gateway_yaml(config_path)
         
         security_issues = []
@@ -210,9 +222,12 @@ def check_gateway_security(config: DoctorConfig) -> CheckResult:
 def check_gateway_config_migration(config: DoctorConfig) -> CheckResult:
     """Check if configuration needs migration to canonical format."""
     start = time.time()
+    skipped = skip_if_no_wrapper("gateway_config_migration", "Gateway Config Migration", start=start)
+    if skipped:
+        return skipped
     
     # Find config file
-    from praisonai.cli._paths import resolve_bot_config_path
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = None
     for path in [resolve_bot_config_path("gateway.yaml"), resolve_bot_config_path("bot.yaml"), "gateway.yaml", "bot.yaml"]:
         if os.path.exists(path):
@@ -238,7 +253,7 @@ def check_gateway_config_migration(config: DoctorConfig) -> CheckResult:
         # Deep copy to preserve original for comparison
         original = copy.deepcopy(raw)
             
-        from praisonai.bots._config_schema import migrate_legacy_config
+        migrate_legacy_config = _bots_config_schema().migrate_legacy_config
         migrated = migrate_legacy_config(copy.deepcopy(original))
         
         # Check if migration changed anything
@@ -300,9 +315,12 @@ def check_gateway_config_migration(config: DoctorConfig) -> CheckResult:
 def check_gateway_env_substitution(config: DoctorConfig) -> CheckResult:
     """Check that environment variables referenced in config are set."""
     start = time.time()
+    skipped = skip_if_no_wrapper("gateway_env_substitution", "Gateway Environment Variables", start=start)
+    if skipped:
+        return skipped
     
     # Find config file
-    from praisonai.cli._paths import resolve_bot_config_path
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = None
     for path in [resolve_bot_config_path("gateway.yaml"), resolve_bot_config_path("bot.yaml"), "gateway.yaml", "bot.yaml"]:
         if os.path.exists(path):
@@ -321,7 +339,7 @@ def check_gateway_env_substitution(config: DoctorConfig) -> CheckResult:
         
     try:
         import re
-        from praisonai.cli.utils.env_utils import load_env_file
+        from praisonai_code.cli.utils.env_utils import load_env_file
         
         # Load .env file first to ensure all env vars are available
         try:

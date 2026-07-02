@@ -116,7 +116,12 @@ def _run_typer(argv):
 
 
 def _run_legacy(argv):
-    """Dispatch to the legacy argparse CLI (prompts, YAML, deprecated flags)."""
+    """Dispatch to the legacy argparse CLI (prompts, YAML, deprecated flags).
+
+    Wrapper-enhanced: multi-framework YAML and ``--framework crewai`` paths load
+    framework adapters via ``praisonai_code._wrapper_bridge`` (requires
+    ``pip install praisonai``). Typer hot path remains in ``_run_typer``.
+    """
     from praisonai.cli.main import PraisonAI
 
     original = sys.argv

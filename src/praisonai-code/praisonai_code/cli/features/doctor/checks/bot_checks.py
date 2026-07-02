@@ -12,6 +12,12 @@ from typing import List
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
+
+
+def _bots_config_schema():
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.bots._config_schema")
 
 
 @register_check(
@@ -23,7 +29,7 @@ from ..registry import register_check
 )
 def check_bot_tokens(config: DoctorConfig) -> CheckResult:
     """Check bot token environment variables."""
-    from praisonai.cli._paths import resolve_bot_config_path
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     token_vars = {
         "TELEGRAM_BOT_TOKEN": "Telegram",
@@ -64,7 +70,10 @@ def check_bot_tokens(config: DoctorConfig) -> CheckResult:
 def check_bot_config(config: DoctorConfig) -> CheckResult:
     """Check bot.yaml exists and is valid."""
     start = time.time()
-    from praisonai.cli._paths import resolve_bot_config_path
+    skipped = skip_if_no_wrapper("bot_config", "Bot Config", start=start)
+    if skipped:
+        return skipped
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     if not os.path.exists(config_path):
         return CheckResult(
@@ -77,7 +86,7 @@ def check_bot_config(config: DoctorConfig) -> CheckResult:
             duration_ms=(time.time() - start) * 1000,
         )
     try:
-        from praisonai.bots._config_schema import load_and_validate_bot_yaml
+        load_and_validate_bot_yaml = _bots_config_schema().load_and_validate_bot_yaml
         load_and_validate_bot_yaml(config_path)
         return CheckResult(
             id="bot_config",
@@ -109,7 +118,10 @@ def check_bot_config(config: DoctorConfig) -> CheckResult:
 def check_bot_security(config: DoctorConfig) -> CheckResult:
     """Check bot security configuration for safe defaults."""
     start = time.time()
-    from praisonai.cli._paths import resolve_bot_config_path
+    skipped = skip_if_no_wrapper("bot_security", "Bot Security Config", start=start)
+    if skipped:
+        return skipped
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     channel_warnings = []
     global_warnings = []
@@ -126,8 +138,7 @@ def check_bot_security(config: DoctorConfig) -> CheckResult:
         )
     
     try:
-        from praisonai.bots._config_schema import load_and_validate_bot_yaml
-        config = load_and_validate_bot_yaml(config_path)
+        config = _bots_config_schema().load_and_validate_bot_yaml(config_path)
         
         # Check for risky configurations across channels
         for channel_name, channel_config in config.channels.items():
@@ -210,7 +221,10 @@ def check_bot_security(config: DoctorConfig) -> CheckResult:
 def check_multi_channel_tokens(config: DoctorConfig) -> CheckResult:
     """Check multi-channel token configuration for duplicates and naming conventions."""
     start = time.time()
-    from praisonai.cli._paths import resolve_bot_config_path
+    skipped = skip_if_no_wrapper("multi_channel_tokens", "Multi-Channel Token Configuration", start=start)
+    if skipped:
+        return skipped
+    from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     
     # Check if bot.yaml exists
@@ -225,8 +239,7 @@ def check_multi_channel_tokens(config: DoctorConfig) -> CheckResult:
         )
     
     try:
-        from praisonai.bots._config_schema import load_and_validate_bot_yaml
-        config_data = load_and_validate_bot_yaml(config_path)
+        config_data = _bots_config_schema().load_and_validate_bot_yaml(config_path)
         
         warnings = []
         errors = []

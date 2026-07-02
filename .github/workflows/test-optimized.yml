@@ -80,6 +80,7 @@ jobs:
         set -euo pipefail
         cd src/praisonai
         python -m pytest tests/unit/test_c5_backward_compat.py \
+          tests/unit/test_c7_1_boundaries.py \
           -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
           -m "not slow and not network" \
