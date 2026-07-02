@@ -465,9 +465,11 @@ def check_npx_available(config: DoctorConfig) -> CheckResult:
 def _probe_optional_package(package: str) -> bool:
     """Attempt to import a single optional package.
 
-    Returns True if the import succeeds, False if the package is missing.
-    Kept as a module-level helper so it can be dispatched to a thread pool
-    with a per-package timeout (see ``check_optional_deps``).
+    Returns True if the import succeeds. Raises ``ImportError`` if the package
+    is not installed, or any other exception if the import itself fails (e.g. a
+    broken C extension). Kept as a module-level helper so it can be dispatched
+    to a daemon worker thread with a per-package timeout (see
+    ``check_optional_deps``).
     """
     __import__(package)
     return True
@@ -484,17 +486,20 @@ def _probe_optional_package(package: str) -> bool:
 def check_optional_deps(config: DoctorConfig) -> CheckResult:
     """Check availability of optional dependencies.
 
-    Imports are dispatched to a thread pool with an individual per-package
-    timeout so that a single slow or hanging optional import (e.g. ``chromadb``
-    or ``crawl4ai``) cannot block the entire check and trip the engine-wide
-    timeout. Packages that exceed the per-package budget are reported as
-    ``slow`` rather than failing the whole check.
+    Imports are dispatched to daemon worker threads with an individual
+    per-package timeout so that a single slow or hanging optional import (e.g.
+    ``chromadb`` or ``crawl4ai``) cannot block the entire check and trip the
+    engine-wide timeout. Packages that exceed the per-package budget are
+    reported as ``slow`` rather than failing the whole check.
+
+    Daemon threads (rather than a ``ThreadPoolExecutor``) are used deliberately:
+    a pool's worker threads are joined by its internal ``atexit`` handler at
+    interpreter shutdown even after ``shutdown(wait=False)``, so a truly
+    hanging import would still stall CLI exit. Daemon threads are abandoned on
+    exit, so a hanging import can never block the process from terminating.
     """
     import time
-    from concurrent.futures import (
-        ThreadPoolExecutor,
-        TimeoutError as FuturesTimeoutError,
-    )
+    import threading
 
     optional_packages = [
         ("chromadb", "Knowledge/RAG features"),
@@ -515,47 +520,64 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
 
     available = []
     missing = []
+    broken = []
     slow = []
 
-    # Submit every import concurrently. We intentionally do NOT use the
-    # executor as a context manager because its __exit__ would call
-    # shutdown(wait=True) and block on any hanging import thread, re-introducing
-    # the very hang we are guarding against. Instead we collect results with a
-    # per-package deadline and then shut down without waiting, abandoning any
-    # still-running (hanging) import thread.
-    executor = ThreadPoolExecutor(max_workers=len(optional_packages))
-    try:
-        future_map = {
-            executor.submit(_probe_optional_package, package): (package, description)
-            for package, description in optional_packages
-        }
+    # Probe each import on its own daemon thread. Each thread records its own
+    # outcome; the main thread waits at most ``per_package_timeout`` (bounded by
+    # the overall check budget) for each to finish. A thread that is still
+    # running past its deadline is abandoned: because it is a daemon it will not
+    # block interpreter/CLI shutdown, unlike ThreadPoolExecutor workers which
+    # are joined by an atexit handler even after ``shutdown(wait=False)``.
+    outcomes: dict[str, tuple[str, BaseException | None]] = {}
+    threads: dict[str, threading.Thread] = {}
 
-        deadline = time.monotonic() + max(per_package_timeout, config.timeout * 0.8)
-        for future, (package, description) in future_map.items():
-            remaining = max(0.0, deadline - time.monotonic())
-            wait_for = min(per_package_timeout, remaining) if remaining > 0 else 0.0
-            try:
-                future.result(timeout=wait_for)
-                available.append(package)
-            except FuturesTimeoutError:
-                # Import is hanging or unusually slow; skip it rather than let
-                # it block the whole deep-doctor pass.
-                slow.append(f"{package} ({description})")
-            except ImportError:
-                missing.append(f"{package} ({description})")
-            except Exception:
-                # Any other import-time error (e.g. broken install) is treated
-                # as missing so the check still completes successfully.
-                missing.append(f"{package} ({description})")
-    finally:
-        # Do not wait for abandoned/hanging import threads to finish.
-        executor.shutdown(wait=False)
+    def _run_probe(pkg: str) -> None:
+        try:
+            _probe_optional_package(pkg)
+            outcomes[pkg] = ("available", None)
+        except ImportError:
+            outcomes[pkg] = ("missing", None)
+        except Exception as exc:  # noqa: BLE001 - surface broken installs
+            outcomes[pkg] = ("broken", exc)
+
+    for package, _description in optional_packages:
+        thread = threading.Thread(
+            target=_run_probe,
+            args=(package,),
+            name=f"doctor-optdep-{package}",
+            daemon=True,
+        )
+        threads[package] = thread
+        thread.start()
+
+    deadline = time.monotonic() + max(per_package_timeout, config.timeout * 0.8)
+    for package, description in optional_packages:
+        remaining = max(0.0, deadline - time.monotonic())
+        wait_for = min(per_package_timeout, remaining) if remaining > 0 else 0.0
+        threads[package].join(timeout=wait_for)
+
+        if threads[package].is_alive():
+            # Import is hanging or unusually slow; abandon the daemon thread
+            # rather than let it block the whole deep-doctor pass.
+            slow.append(f"{package} ({description})")
+            continue
+
+        status, _exc = outcomes.get(package, ("missing", None))
+        if status == "available":
+            available.append(package)
+        elif status == "broken":
+            broken.append(f"{package} ({description})")
+        else:
+            missing.append(f"{package} ({description})")
 
     details_parts = []
     if missing:
         details_parts.append(
             f"Missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}"
         )
+    if broken:
+        details_parts.append(f"Broken install: {', '.join(broken)}")
     if slow:
         details_parts.append(
             f"Slow (skipped after {per_package_timeout:.0f}s): {', '.join(slow)}"
@@ -564,17 +586,34 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
     message_parts = [f"{len(available)} optional packages available"]
     if missing:
         message_parts.append(f"{len(missing)} not installed")
+    if broken:
+        message_parts.append(f"{len(broken)} broken")
     if slow:
         message_parts.append(f"{len(slow)} slow/skipped")
+
+    # A broken install is actionable (fix the install) so surface it as a
+    # warning; missing/slow packages are informational and keep the check green.
+    status = CheckStatus.WARN if broken else CheckStatus.PASS
+    remediation = (
+        f"Reinstall the broken optional package(s): {', '.join(broken)}"
+        if broken
+        else None
+    )
 
     return CheckResult(
         id="optional_deps",
         title="Optional Dependencies",
         category=CheckCategory.ENVIRONMENT,
-        status=CheckStatus.PASS,
+        status=status,
         message=", ".join(message_parts),
         details="; ".join(details_parts) or None,
-        metadata={"available": available, "missing": missing, "slow": slow},
+        remediation=remediation,
+        metadata={
+            "available": available,
+            "missing": missing,
+            "broken": broken,
+            "slow": slow,
+        },
     )
 
 

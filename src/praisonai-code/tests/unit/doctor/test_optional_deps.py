@@ -64,4 +64,29 @@ def test_optional_deps_missing_package_reported(monkeypatch):
     assert result.status == CheckStatus.PASS
     assert result.metadata["available"] == []
     assert len(result.metadata["missing"]) == 8
+    assert result.metadata["broken"] == []
     assert result.metadata["slow"] == []
+
+
+def test_optional_deps_broken_install_reported_as_warning(monkeypatch):
+    """A non-ImportError during import (broken install) should surface as WARN.
+
+    Guards against masking broken installs (e.g. a broken C extension) as
+    simply "missing", which would misleadingly tell users to reinstall a
+    package that is already installed.
+    """
+    def fake_probe(package):
+        if package == "chromadb":
+            raise RuntimeError("broken C extension")
+        raise ImportError(f"No module named {package!r}")
+
+    monkeypatch.setattr(env_checks, "_probe_optional_package", fake_probe)
+
+    config = DoctorConfig(deep=True, timeout=10.0)
+    result = env_checks.check_optional_deps(config)
+
+    assert result.status == CheckStatus.WARN
+    assert any("chromadb" in entry for entry in result.metadata["broken"])
+    assert result.remediation is not None
+    # The broken package must NOT be double-counted as missing.
+    assert not any("chromadb" in entry for entry in result.metadata["missing"])
