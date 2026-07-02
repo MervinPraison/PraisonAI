@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional
 import logging
 
