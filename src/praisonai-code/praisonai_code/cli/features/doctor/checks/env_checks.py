@@ -462,6 +462,17 @@ def check_npx_available(config: DoctorConfig) -> CheckResult:
         )
 
 
+def _probe_optional_package(package: str) -> bool:
+    """Attempt to import a single optional package.
+
+    Returns True if the import succeeds, False if the package is missing.
+    Kept as a module-level helper so it can be dispatched to a thread pool
+    with a per-package timeout (see ``check_optional_deps``).
+    """
+    __import__(package)
+    return True
+
+
 @register_check(
     id="optional_deps",
     title="Optional Dependencies",
@@ -471,7 +482,20 @@ def check_npx_available(config: DoctorConfig) -> CheckResult:
     requires_deep=True,
 )
 def check_optional_deps(config: DoctorConfig) -> CheckResult:
-    """Check availability of optional dependencies."""
+    """Check availability of optional dependencies.
+
+    Imports are dispatched to a thread pool with an individual per-package
+    timeout so that a single slow or hanging optional import (e.g. ``chromadb``
+    or ``crawl4ai``) cannot block the entire check and trip the engine-wide
+    timeout. Packages that exceed the per-package budget are reported as
+    ``slow`` rather than failing the whole check.
+    """
+    import time
+    from concurrent.futures import (
+        ThreadPoolExecutor,
+        TimeoutError as FuturesTimeoutError,
+    )
+
     optional_packages = [
         ("chromadb", "Knowledge/RAG features"),
         ("mem0ai", "Memory features"),
@@ -482,36 +506,76 @@ def check_optional_deps(config: DoctorConfig) -> CheckResult:
         ("tavily", "Tavily search"),
         ("duckduckgo_search", "DuckDuckGo search"),
     ]
-    
+
+    # Reserve a slice of the overall check budget for each package. The engine
+    # gives this check ``config.timeout`` seconds total; keep the per-package
+    # cap comfortably below that so the aggregate stays within budget even when
+    # several imports are slow.
+    per_package_timeout = max(1.0, min(3.0, config.timeout / 4))
+
     available = []
     missing = []
-    
-    for package, description in optional_packages:
-        try:
-            __import__(package)
-            available.append(package)
-        except ImportError:
-            missing.append(f"{package} ({description})")
-    
+    slow = []
+
+    # Submit every import concurrently. We intentionally do NOT use the
+    # executor as a context manager because its __exit__ would call
+    # shutdown(wait=True) and block on any hanging import thread, re-introducing
+    # the very hang we are guarding against. Instead we collect results with a
+    # per-package deadline and then shut down without waiting, abandoning any
+    # still-running (hanging) import thread.
+    executor = ThreadPoolExecutor(max_workers=len(optional_packages))
+    try:
+        future_map = {
+            executor.submit(_probe_optional_package, package): (package, description)
+            for package, description in optional_packages
+        }
+
+        deadline = time.monotonic() + max(per_package_timeout, config.timeout * 0.8)
+        for future, (package, description) in future_map.items():
+            remaining = max(0.0, deadline - time.monotonic())
+            wait_for = min(per_package_timeout, remaining) if remaining > 0 else 0.0
+            try:
+                future.result(timeout=wait_for)
+                available.append(package)
+            except FuturesTimeoutError:
+                # Import is hanging or unusually slow; skip it rather than let
+                # it block the whole deep-doctor pass.
+                slow.append(f"{package} ({description})")
+            except ImportError:
+                missing.append(f"{package} ({description})")
+            except Exception:
+                # Any other import-time error (e.g. broken install) is treated
+                # as missing so the check still completes successfully.
+                missing.append(f"{package} ({description})")
+    finally:
+        # Do not wait for abandoned/hanging import threads to finish.
+        executor.shutdown(wait=False)
+
+    details_parts = []
     if missing:
-        return CheckResult(
-            id="optional_deps",
-            title="Optional Dependencies",
-            category=CheckCategory.ENVIRONMENT,
-            status=CheckStatus.PASS,
-            message=f"{len(available)} optional packages available, {len(missing)} not installed",
-            details=f"Missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}",
-            metadata={"available": available, "missing": missing},
+        details_parts.append(
+            f"Missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}"
         )
-    else:
-        return CheckResult(
-            id="optional_deps",
-            title="Optional Dependencies",
-            category=CheckCategory.ENVIRONMENT,
-            status=CheckStatus.PASS,
-            message=f"All {len(available)} optional packages available",
-            metadata={"available": available},
+    if slow:
+        details_parts.append(
+            f"Slow (skipped after {per_package_timeout:.0f}s): {', '.join(slow)}"
         )
+
+    message_parts = [f"{len(available)} optional packages available"]
+    if missing:
+        message_parts.append(f"{len(missing)} not installed")
+    if slow:
+        message_parts.append(f"{len(slow)} slow/skipped")
+
+    return CheckResult(
+        id="optional_deps",
+        title="Optional Dependencies",
+        category=CheckCategory.ENVIRONMENT,
+        status=CheckStatus.PASS,
+        message=", ".join(message_parts),
+        details="; ".join(details_parts) or None,
+        metadata={"available": available, "missing": missing, "slow": slow},
+    )
 
 
 @register_check(
