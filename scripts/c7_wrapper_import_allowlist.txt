@@ -46,5 +46,8 @@ cli/commands/profile.py  # profiler
 cli/commands/recipe.py  # recipe command
 cli/commands/audit.py  # audit
 cli/interactive/core.py  # interactive core
+cli/commands/managed.py  # managed deployment (wrapper integrations)
+cli/commands/app.py  # legacy app launcher (wrapper-enhanced)
+cli/features/doctor/checks/performance_checks.py  # perf checks probe wrapper import cost
 _version.py  # optional wrapper version fallback
 cli/langfuse_client.py  # langfuse shim path

@@ -58,6 +58,29 @@ if [ "$COUNT" -gt "$BASELINE" ]; then
 fi
 echo "regression baseline ok"
 
+echo "== C7 allowlist enforcement =="
 if [ -f "$ALLOWLIST" ]; then
-  echo "== C7 allowlist present: $ALLOWLIST =="
+  # Files (relative to $ROOT) that carry wrapper imports.
+  if command -v rg >/dev/null 2>&1; then
+    OFFENDERS="$( { rg -l "$ANY_WRAPPER_RE" "$ROOT" --glob '*.py' 2>/dev/null || true; } )"
+  else
+    OFFENDERS="$( { grep -rlE --include='*.py' "$ANY_WRAPPER_RE" "$ROOT" 2>/dev/null || true; } )"
+  fi
+  # Strip the reasons/comments and blank/comment lines from the allowlist.
+  ALLOWED="$(sed -E 's/[[:space:]]*#.*$//; /^[[:space:]]*$/d' "$ALLOWLIST" | sed -E 's/[[:space:]]+$//')"
+  FAIL=0
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    rel="${f#"$ROOT/"}"
+    if ! printf '%s\n' "$ALLOWED" | grep -Fxq "$rel"; then
+      echo "FAIL: non-allowlisted wrapper import in $rel (add to $ALLOWLIST after review)"
+      FAIL=1
+    fi
+  done <<< "$OFFENDERS"
+  if [ "$FAIL" -ne 0 ]; then
+    exit 1
+  fi
+  echo "allowlist enforcement ok"
+else
+  echo "allowlist file missing: $ALLOWLIST (skipping enforcement)"
 fi

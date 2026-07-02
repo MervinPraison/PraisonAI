@@ -12,12 +12,7 @@ from typing import List
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
-from ._wrapper_checks import skip_if_no_wrapper
-
-
-def _bots_config_schema():
-    from praisonai_code._wrapper_bridge import import_wrapper_module
-    return import_wrapper_module("praisonai.bots._config_schema")
+from ._wrapper_checks import skip_if_no_wrapper, bots_config_schema as _bots_config_schema
 
 
 @register_check(

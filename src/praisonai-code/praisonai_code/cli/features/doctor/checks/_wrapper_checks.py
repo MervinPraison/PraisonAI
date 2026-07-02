@@ -29,3 +29,10 @@ def skip_if_no_wrapper(
         message="Install full wrapper: pip install praisonai",
         duration_ms=duration_ms,
     )
+
+
+def bots_config_schema():
+    """Load ``praisonai.bots._config_schema`` via the wrapper bridge."""
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+
+    return import_wrapper_module("praisonai.bots._config_schema")
