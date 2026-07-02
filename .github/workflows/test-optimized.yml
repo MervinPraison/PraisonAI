@@ -105,7 +105,7 @@ jobs:
         import toml
         assert hasattr(ConfigResolver, '__name__')
         assert callable(is_configured)
-        assert ModelCatalogue().list_models(provider="openai")
+        assert ModelCatalogue().list_models(provider='openai')
         import praisonai_code.cli.main
         import praisonai_code.cli.app
         from praisonai_code.tool_resolver import ToolResolver
