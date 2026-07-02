@@ -191,6 +191,15 @@ class LLM:
     # Ollama-specific prompt constants
     OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
     OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
+
+    # Step-limit finalisation constants (used when the tool loop hits max_iter)
+    STEP_LIMIT_WRAP_UP_PROMPT = (
+        "You have reached the step limit for this task. Do not call any tools. "
+        "Provide a final answer that summarises what you accomplished, what "
+        "remains unfinished, and any suggested next steps, using the tool "
+        "results already gathered."
+    )
+    STEP_LIMIT_FALLBACK_MESSAGE = "Reached the step limit before finishing this task."
     
     # Force tool usage prompt template (used when model ignores tools)
     FORCE_TOOL_USAGE_PROMPT = """You MUST use one of the available tools to answer this question.
@@ -1852,17 +1861,8 @@ Now provide your final answer using this result. Summarize the information natur
         Returns:
             The synthesised final answer, or a safe fallback string.
         """
-        wrap_up = {
-            "role": "user",
-            "content": (
-                "You have reached the step limit for this task. Do not call any tools. "
-                "Provide a final answer that summarises what you accomplished, what "
-                "remains unfinished, and any suggested next steps, using the tool "
-                "results already gathered."
-            ),
-        }
+        wrap_up = {"role": "user", "content": self.STEP_LIMIT_WRAP_UP_PROMPT}
         try:
-            import litellm
             safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
             final_params = self._build_completion_params(
                 messages=messages + [wrap_up],
@@ -1878,7 +1878,9 @@ Now provide your final answer using this result. Summarize the information natur
             # tool_choice when no tools are supplied.
             final_params.pop("tools", None)
             final_params.pop("tool_choice", None)
-            resp = litellm.completion(**final_params)
+            # Route through the retry wrapper so this bounded final call gets the
+            # same rate-limit/failover resilience as every other completion.
+            resp = self._completion_with_retry(**final_params)
             summary = resp["choices"][0]["message"].get("content")
             if summary and summary.strip():
                 return summary.strip()
@@ -1887,22 +1889,13 @@ Now provide your final answer using this result. Summarize the information natur
 
         if response_text and response_text.strip():
             return response_text.strip()
-        return "Reached the step limit before finishing this task."
+        return self.STEP_LIMIT_FALLBACK_MESSAGE
 
     async def _finalise_on_limit_async(self, messages: List[Dict], response_text: str,
                                        temperature: float = 0.2, **kwargs) -> str:
         """Async counterpart of :meth:`_finalise_on_limit`."""
-        wrap_up = {
-            "role": "user",
-            "content": (
-                "You have reached the step limit for this task. Do not call any tools. "
-                "Provide a final answer that summarises what you accomplished, what "
-                "remains unfinished, and any suggested next steps, using the tool "
-                "results already gathered."
-            ),
-        }
+        wrap_up = {"role": "user", "content": self.STEP_LIMIT_WRAP_UP_PROMPT}
         try:
-            import litellm
             safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
             final_params = self._build_completion_params(
                 messages=messages + [wrap_up],
@@ -1918,7 +1911,9 @@ Now provide your final answer using this result. Summarize the information natur
             # tool_choice when no tools are supplied.
             final_params.pop("tools", None)
             final_params.pop("tool_choice", None)
-            resp = await litellm.acompletion(**final_params)
+            # Route through the retry wrapper so this bounded final call gets the
+            # same rate-limit/failover resilience as every other completion.
+            resp = await self._acompletion_with_retry(**final_params)
             summary = resp["choices"][0]["message"].get("content")
             if summary and summary.strip():
                 return summary.strip()
@@ -1927,7 +1922,7 @@ Now provide your final answer using this result. Summarize the information natur
 
         if response_text and response_text.strip():
             return response_text.strip()
-        return "Reached the step limit before finishing this task."
+        return self.STEP_LIMIT_FALLBACK_MESSAGE
 
     def _needs_system_message_skip(self) -> bool:
         """Check if this model requires skipping system messages"""
