@@ -927,7 +927,8 @@ class ToolResolver:
             PRAISONAI_TOOLS_AVAILABLE = True
         except ImportError:
             try:
-                from praisonai.tools import BaseTool
+                from praisonai_code._wrapper_bridge import get_wrapper_attr
+                BaseTool = get_wrapper_attr("praisonai.tools", "BaseTool")
                 PRAISONAI_TOOLS_AVAILABLE = True
             except ImportError:
                 pass

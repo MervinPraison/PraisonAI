@@ -247,6 +247,21 @@ def _get_gradio():
     import gradio as gr
     return gr
 
+def _fw_registry_module():
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.framework_adapters.registry")
+
+
+def _fw_validators_module():
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.framework_adapters.validators")
+
+
+def _fw_workflow_module():
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.framework_adapters.workflow_framework")
+
+
 def _get_autogen():
     """Resolve the autogen framework via the canonical adapter registry.
 
@@ -258,7 +273,7 @@ def _get_autogen():
     Raises:
         ImportError: If autogen is not installed
     """
-    from praisonai.framework_adapters.registry import get_default_registry
+    get_default_registry = _fw_registry_module().get_default_registry
     # Use resolve() (returns the adapter class without the strict run()-signature
     # validation that create() applies) because "autogen" maps to the family
     # *router* adapter, whose run() intentionally does not implement the full
@@ -346,8 +361,11 @@ class PraisonAI:
         
         # Validate framework availability early to fail fast
         if self.framework:
-            from praisonai.framework_adapters.validators import assert_framework_available
-            assert_framework_available(self.framework)
+            try:
+                _fw_validators_module().assert_framework_available(self.framework)
+            except ImportError as e:
+                print(f"ERROR: {e}")
+                sys.exit(1)
         
         self.auto = auto
         self.init = init
@@ -464,8 +482,11 @@ class PraisonAI:
         
         # Validate framework availability early to fail fast
         if self.framework:
-            from praisonai.framework_adapters.validators import assert_framework_available
-            assert_framework_available(self.framework)
+            try:
+                _fw_validators_module().assert_framework_available(self.framework)
+            except ImportError as e:
+                print(f"ERROR: {e}")
+                sys.exit(1)
         
         # Update config_list model if --model flag is provided
         if getattr(args, 'model', None):
@@ -1034,7 +1055,7 @@ class PraisonAI:
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         try:
-            from praisonai.framework_adapters.registry import list_framework_choices
+            list_framework_choices = _fw_registry_module().list_framework_choices
             _framework_choices = list_framework_choices(include_unavailable=True) or [
                 "ag2", "autogen", "crewai", "praisonai",
             ]
@@ -1855,7 +1876,11 @@ class PraisonAI:
                 
                 handler = cmd_map.get(args.command)
                 if handler:
-                    exit_code = handler(args, unknown_args)
+                    try:
+                        exit_code = handler(args, unknown_args)
+                    except ImportError as e:
+                        print(f"ERROR: {e}")
+                        sys.exit(1)
                     sys.exit(exit_code if exit_code else 0)
             
             elif args.command == 'doctor':
@@ -1999,7 +2024,7 @@ class PraisonAI:
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):
             try:
-                from praisonai.framework_adapters.registry import list_framework_choices
+                list_framework_choices = _fw_registry_module().list_framework_choices
                 if not list_framework_choices():
                     print("[red]ERROR: No framework adapter is installed.[/red]")
                     print("\npip install praisonaiagents  # native PraisonAI")
@@ -2913,7 +2938,7 @@ class PraisonAI:
             # Load and execute the YAML workflow with tool registry
             workflow = manager.load_yaml(yaml_file, tool_registry=tool_registry)
 
-            from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
+            validate_workflow_framework = _fw_workflow_module().validate_workflow_framework
             validate_workflow_framework(
                 getattr(workflow, "framework", "praisonai"),
                 source=f"workflow file {yaml_file}",
@@ -3047,7 +3072,7 @@ class PraisonAI:
             parser = YAMLWorkflowParser()
             workflow = parser.parse_file(yaml_file)
 
-            from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
+            validate_workflow_framework = _fw_workflow_module().validate_workflow_framework
             validate_workflow_framework(
                 getattr(workflow, "framework", "praisonai"),
                 source=f"workflow file {yaml_file}",
@@ -5655,7 +5680,7 @@ Now, {final_instruction.lower()}:"""
                 return result
 
             try:
-                from praisonai.framework_adapters.registry import list_framework_choices
+                list_framework_choices = _fw_registry_module().list_framework_choices
                 _gradio_frameworks = list_framework_choices(include_unavailable=True) or [
                     "crewai", "autogen", "praisonai",
                 ]

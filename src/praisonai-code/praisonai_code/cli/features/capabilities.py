@@ -9,6 +9,12 @@ import sys
 from typing import Optional, List
 
 
+def _cap(submodule: str, attr: str):
+    """Load a wrapper capabilities symbol (requires pip install praisonai)."""
+    from praisonai_code._wrapper_bridge import get_wrapper_attr
+    return get_wrapper_attr(f"praisonai.capabilities.{submodule}", attr)
+
+
 class CapabilitiesHandler:
     """Handler for capabilities CLI commands."""
     
@@ -50,9 +56,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.audio import transcribe
-        
+        transcribe = _cap("audio", "transcribe")
         try:
             result = transcribe(
                 audio=parsed.file,
@@ -93,9 +97,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.audio import speech
-        
+        speech = _cap("audio", "speech")
         try:
             result = speech(
                 text=parsed.text,
@@ -149,9 +151,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.images import image_generate
-        
+        image_generate = _cap("images", "image_generate")
         try:
             results = image_generate(
                 prompt=parsed.prompt,
@@ -184,9 +184,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.images import image_edit
-        
+        image_edit = _cap("images", "image_edit")
         try:
             results = image_edit(
                 image=parsed.image,
@@ -244,9 +242,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.files import file_create
-        
+        file_create = _cap("files", "file_create")
         try:
             result = file_create(
                 file=parsed.file,
@@ -273,9 +269,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.files import file_list
-        
+        file_list = _cap("files", "file_list")
         try:
             results = file_list(purpose=parsed.purpose)
             
@@ -300,9 +294,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.files import file_retrieve
-        
+        file_retrieve = _cap("files", "file_retrieve")
         try:
             result = file_retrieve(file_id=parsed.file_id)
             
@@ -327,9 +319,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.files import file_delete
-        
+        file_delete = _cap("files", "file_delete")
         try:
             result = file_delete(file_id=parsed.file_id)
             
@@ -389,9 +379,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.rerank import rerank
-        
+        rerank = _cap("rerank", "rerank")
         try:
             result = rerank(
                 query=parsed.query,
@@ -420,9 +408,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.moderations import moderate
-        
+        moderate = _cap("moderations", "moderate")
         try:
             text_input = " ".join(parsed.text)
             results = moderate(
@@ -454,9 +440,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.ocr import ocr
-        
+        ocr = _cap("ocr", "ocr")
         try:
             result = ocr(
                 document=parsed.document,
@@ -514,9 +498,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.batches import batch_create
-        
+        batch_create = _cap("batches", "batch_create")
         try:
             result = batch_create(
                 input_file_id=parsed.file_id,
@@ -534,8 +516,7 @@ class CapabilitiesHandler:
     @staticmethod
     def _handle_batches_list(args, remaining_args):
         """Handle: praisonai batches list"""
-        from praisonai.capabilities.batches import batch_list
-        
+        batch_list = _cap("batches", "batch_list")
         try:
             results = batch_list()
             
@@ -560,9 +541,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.batches import batch_retrieve
-        
+        batch_retrieve = _cap("batches", "batch_retrieve")
         try:
             result = batch_retrieve(batch_id=parsed.batch_id)
             
@@ -587,9 +566,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.batches import batch_cancel
-        
+        batch_cancel = _cap("batches", "batch_cancel")
         try:
             result = batch_cancel(batch_id=parsed.batch_id)
             
@@ -633,9 +610,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.vector_stores import vector_store_create
-        
+        vector_store_create = _cap("vector_stores", "vector_store_create")
         try:
             result = vector_store_create(
                 name=parsed.name,
@@ -663,9 +638,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.vector_stores import vector_store_search
-        
+        vector_store_search = _cap("vector_stores", "vector_store_search")
         try:
             result = vector_store_search(
                 vector_store_id=parsed.store_id,
@@ -719,9 +692,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.assistants import assistant_create
-        
+        assistant_create = _cap("assistants", "assistant_create")
         try:
             result = assistant_create(
                 name=parsed.name,
@@ -741,8 +712,7 @@ class CapabilitiesHandler:
     @staticmethod
     def _handle_assistants_list(args, remaining_args):
         """Handle: praisonai assistants list"""
-        from praisonai.capabilities.assistants import assistant_list
-        
+        assistant_list = _cap("assistants", "assistant_list")
         try:
             results = assistant_list()
             
@@ -790,9 +760,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.fine_tuning import fine_tuning_create
-        
+        fine_tuning_create = _cap("fine_tuning", "fine_tuning_create")
         try:
             result = fine_tuning_create(
                 training_file=parsed.file_id,
@@ -812,8 +780,7 @@ class CapabilitiesHandler:
     @staticmethod
     def _handle_fine_tuning_list(args, remaining_args):
         """Handle: praisonai fine-tuning list"""
-        from praisonai.capabilities.fine_tuning import fine_tuning_list
-        
+        fine_tuning_list = _cap("fine_tuning", "fine_tuning_list")
         try:
             results = fine_tuning_list()
             
@@ -846,9 +813,7 @@ class CapabilitiesHandler:
         if not parsed.prompt:
             print("Usage: praisonai completions <prompt> [options]")
             return 1
-        
-        from praisonai.capabilities.completions import chat_completion
-        
+        chat_completion = _cap("completions", "chat_completion")
         try:
             messages = []
             if parsed.system:
@@ -899,9 +864,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.messages import messages_create
-        
+        messages_create = _cap("messages", "messages_create")
         try:
             result = messages_create(
                 messages=[{"role": "user", "content": parsed.prompt}],
@@ -931,9 +894,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.messages import count_tokens
-        
+        count_tokens = _cap("messages", "count_tokens")
         try:
             result = count_tokens(
                 messages=[{"role": "user", "content": parsed.text}],
@@ -958,9 +919,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.guardrails import apply_guardrail
-        
+        apply_guardrail = _cap("guardrails", "apply_guardrail")
         try:
             result = apply_guardrail(
                 content=parsed.content,
@@ -994,9 +953,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.rag import rag_query
-        
+        rag_query = _cap("rag", "rag_query")
         try:
             result = rag_query(
                 query=parsed.query,
@@ -1028,9 +985,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.realtime import realtime_connect
-        
+        realtime_connect = _cap("realtime", "realtime_connect")
         try:
             if parsed.action == "connect":
                 session = realtime_connect(model=parsed.model)
@@ -1059,9 +1014,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.videos import video_generate
-        
+        video_generate = _cap("videos", "video_generate")
         try:
             result = video_generate(
                 prompt=parsed.prompt,
@@ -1089,9 +1042,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.a2a import a2a_send
-        
+        a2a_send = _cap("a2a", "a2a_send")
         try:
             result = a2a_send(
                 message=parsed.message,
@@ -1137,9 +1088,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(remaining_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.containers import container_create
-        
+        container_create = _cap("containers", "container_create")
         try:
             result = container_create(
                 image=parsed.image,
@@ -1173,9 +1122,7 @@ class CapabilitiesHandler:
                 parsed = parser.parse_args(action_args)
             except SystemExit:
                 return 1
-            
-            from praisonai.capabilities.container_files import container_file_read
-            
+            container_file_read = _cap("container_files", "container_file_read")
             try:
                 result = container_file_read(
                     container_id=parsed.container_id,
@@ -1201,9 +1148,7 @@ class CapabilitiesHandler:
                 parsed = parser.parse_args(action_args)
             except SystemExit:
                 return 1
-            
-            from praisonai.capabilities.container_files import container_file_list
-            
+            container_file_list = _cap("container_files", "container_file_list")
             try:
                 results = container_file_list(
                     container_id=parsed.container_id,
@@ -1238,8 +1183,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.passthrough import passthrough
+        passthrough = _cap("passthrough", "passthrough")
         import json
         
         try:
@@ -1273,9 +1217,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.responses import responses_create
-        
+        responses_create = _cap("responses", "responses_create")
         try:
             result = responses_create(
                 input=parsed.input,
@@ -1301,9 +1243,7 @@ class CapabilitiesHandler:
             parsed = parser.parse_args(unknown_args)
         except SystemExit:
             return 1
-        
-        from praisonai.capabilities.search import search
-        
+        search = _cap("search", "search")
         try:
             result = search(
                 query=parsed.query,

@@ -223,6 +223,9 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
 # relative ``.commands.*`` path would resolve to ``praisonai_code`` where the
 # modules do not live. The import happens lazily at invocation time only, so
 # ``praisonai_code`` keeps no static dependency on ``praisonai``.
+# C7.1 audit: wrapper-resident Typer modules only (no praisonai_code.cli.commands.*
+# copy). Do NOT add train/serve here — their impl lives in praisonai_code; bridge
+# internal wrapper imports instead. mint_link is wrapper-only but not in Typer registry.
 _WRAPPER_COMMANDS = frozenset({
     "bot",
     "gateway",
@@ -455,7 +458,8 @@ class LazyCommandGroup(TyperGroup):
             console = Console()
             
             try:
-                from praisonai import AgentOS
+                from praisonai_code._wrapper_bridge import get_wrapper_attr
+                AgentOS = get_wrapper_attr("praisonai", "AgentOS")
                 from praisonaiagents import AgentOSConfig
             except ImportError as e:
                 console.print(f"[red]Error importing AgentOS: {e}[/red]")

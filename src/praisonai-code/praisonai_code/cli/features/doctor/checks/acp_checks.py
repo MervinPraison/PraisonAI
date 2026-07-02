@@ -8,6 +8,7 @@ import os
 
 from ..models import CheckCategory, CheckResult, CheckStatus
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +103,12 @@ def check_acp_sdk(config=None) -> CheckResult:
 )
 def check_acp_server(config=None) -> CheckResult:
     """Check if ACP server can be imported."""
+    skipped = skip_if_no_wrapper("acp_server", "ACP Server Import", category=CheckCategory.TOOLS)
+    if skipped:
+        return skipped
     try:
-        from praisonai.acp import ACPServer  # noqa: F401
+        from praisonai_code._wrapper_bridge import get_wrapper_attr
+        get_wrapper_attr("praisonai.acp", "ACPServer")
         
         return CheckResult(
             id="acp_server",

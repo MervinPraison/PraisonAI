@@ -76,11 +76,15 @@ When moving a module from `praisonai` to `praisonai_code`:
 4. Add module-identity pair to `test_c5_backward_compat.py` if applicable.
 5. Run `bash scripts/check_c7_imports.sh`.
 
-## C7.1 backlog (out of scope for hot-path sign-off)
+## C7.1 backlog (boundary hardening — see C7.1_BOUNDARIES.md)
 
-- `cli/main.py` legacy argparse paths (auto, agents_generator, framework adapters)
-- `capabilities`, `train`, `n8n`, `templates`, `recipe`, `replay`
-- `bots`, `gateway`, `serve`, observability sink implementations
+Completed in C7.1: `_wrapper_bridge` for framework adapters, capabilities, doctor bot/gateway checks; import gate baseline fix.
+
+Remaining intentional lazy wrapper usage (do not bulk-migrate):
+
+- `cli/main.py` legacy argparse paths (auto, agents_generator)
+- `capabilities`, `train`, `n8n`, `templates`, `recipe`, `replay` (bridged, not moved)
+- `bots`, `gateway`, `serve`, observability sink implementations (wrapper-owned)
 
 ## Sign-off
 
@@ -88,3 +92,13 @@ When moving a module from `praisonai` to `praisonai_code`:
 - [x] Hot-path import gate passes (`scripts/check_c7_imports.sh`)
 - [x] C5 backward-compat tests pass
 - [x] CI smoke job includes standalone block + import regression gate
+
+## C7.1 sign-off
+
+See [`C7.1_BOUNDARIES.md`](C7.1_BOUNDARIES.md).
+
+- [x] Package ownership documented (AGENTS.md §2.4)
+- [x] Framework adapters bridged in `main.py` + doctor runtime/config checks
+- [x] Capabilities bridged via `_cap()`; doctor serve/acp checks bridged
+- [x] Import baseline corrected (211; excludes `praisonaiagents` false positives)
+- [x] `test_c7_1_boundaries.py` passes

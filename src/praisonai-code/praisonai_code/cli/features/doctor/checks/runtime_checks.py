@@ -56,7 +56,7 @@ class RuntimeCompatibilityChecker:
         
         # Check framework availability using the same pattern as agents_generator
         try:
-            from praisonai._framework_availability import is_available
+            from praisonai_code._framework_availability import is_available
         except ImportError:
             is_available = lambda x: False
 
@@ -67,7 +67,10 @@ class RuntimeCompatibilityChecker:
         # (e.g. unimplemented AutoGen v0.4 / AG2 entry-point placeholders).
         def _runtime_usable(framework_name: str, package_name: str) -> bool:
             try:
-                from praisonai.framework_adapters.registry import get_default_registry
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                get_default_registry = import_wrapper_module(
+                    "praisonai.framework_adapters.registry"
+                ).get_default_registry
             except ImportError:
                 # Fallback to raw package probe only when the registry module
                 # itself cannot be imported (e.g. partial install).
@@ -226,7 +229,7 @@ class RuntimeCompatibilityChecker:
     def _check_autogen_v4(self) -> bool:
         """Check if AutoGen v0.4+ packages are installed."""
         try:
-            from praisonai._framework_availability import is_available as fw_available
+            from praisonai_code._framework_availability import is_available as fw_available
             return fw_available('autogen_v4')
         except ImportError:
             return False

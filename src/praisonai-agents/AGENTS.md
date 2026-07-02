@@ -189,10 +189,30 @@ C6 is the **sign-off step** after C0–C5 file moves: no further moves, only reg
 | `pip install praisonai-code` only | Yes — agentic hot path (`run`, `chat`, `code`, warm runtime) without wrapper import | No — wrapper-only commands hidden when `praisonai` absent |
 
 **C7 (hot path complete):** Core agentic CLI imports no longer require the `praisonai`
-wrapper at module level. Remaining lazy wrapper imports (~300+) are optional commands
+wrapper at module level. Remaining lazy wrapper imports (~211, regression-gated) are optional commands
 and features (train, capabilities, bots, framework adapters) — use
 `praisonai_code._wrapper_bridge` or `pip install praisonai`. See
 `src/praisonai/tests/C7_VERIFICATION.md`. CI gate: `scripts/check_c7_imports.sh`.
+
+### 2.4 Package ownership (C7.1)
+
+| Tier | Package | Owns |
+|------|---------|------|
+| 1 | `praisonaiagents` | Agent, tools, memory, hooks, `frameworks/` protocols |
+| 2 | `praisonai-code` | `run`/`chat`/`code`, Typer, runtime, llm, tool resolution |
+| 3 | `praisonai` | Gateway, bots, `framework_adapters/`, capabilities, train, serve orchestration |
+
+**Cross-tier rule:** `praisonai-code` must not declare a PyPI dependency on `praisonai`. Use
+[`praisonai_code._wrapper_bridge`](../praisonai-code/praisonai_code/_wrapper_bridge.py) for lazy wrapper access.
+
+**framework_adapters:** protocols in SDK; registry + CrewAI/AutoGen/PraisonAI bodies stay in
+[`praisonai/framework_adapters/`](../praisonai/praisonai/framework_adapters/). Do not move to `praisonai-code`.
+
+**Typer `_WRAPPER_COMMANDS`:** only for commands whose implementation lives in the wrapper
+(`bot`, `gateway`, `pairing`, `identity`, `onboard`, `kanban`, `dashboard`, `claw`). Commands
+implemented in `praisonai_code` (`train`, `serve`) stay local; bridge internal wrapper imports.
+
+Full boundary doc: [`src/praisonai/tests/C7.1_BOUNDARIES.md`](../praisonai/tests/C7.1_BOUNDARIES.md).
 
 ---
 

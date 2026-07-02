@@ -16,8 +16,17 @@ from typing import Dict, List, Optional, Any
 
 from .sdk_knowledge import get_sdk_knowledge_prompt
 
-# DRY: Import tool categories from auto.py instead of duplicating
-from praisonai.auto import TOOL_CATEGORIES, TASK_KEYWORD_TO_TOOLS
+
+def _auto_constants():
+    """Load wrapper tool-category maps, degrading to empty maps when the
+    ``praisonai`` wrapper is not installed so recipe creation still works
+    (falls back to the core tool selection / template path)."""
+    from praisonai_code._wrapper_bridge import optional_wrapper_attr
+    return (
+        optional_wrapper_attr("praisonai.auto", "TOOL_CATEGORIES", {}) or {},
+        optional_wrapper_attr("praisonai.auto", "TASK_KEYWORD_TO_TOOLS", {}) or {},
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +40,10 @@ class RecipeCreator:
         path = creator.create("Build a web scraper for news articles")
     """
     
-    # DRY: Use imported TOOL_CATEGORIES and TASK_KEYWORD_TO_TOOLS from auto.py
-    TOOL_CATEGORIES = TOOL_CATEGORIES
-    TASK_KEYWORD_TO_TOOLS = TASK_KEYWORD_TO_TOOLS
+    def _auto_tool_maps(self):
+        if not hasattr(self, "_auto_tool_maps_cache"):
+            self._auto_tool_maps_cache = _auto_constants()
+        return self._auto_tool_maps_cache
     
     def __init__(
         self,
@@ -108,18 +118,19 @@ class RecipeCreator:
         """
         goal_lower = goal.lower()
         matched_categories = set()
+        tool_categories, task_keyword_to_tools = self._auto_tool_maps()
         
         # Match keywords to categories
-        for keyword, category in self.TASK_KEYWORD_TO_TOOLS.items():
+        for keyword, category in task_keyword_to_tools.items():
             if keyword in goal_lower:
                 matched_categories.add(category)
         
         # Collect tools from matched categories
         tools = []
         for category in matched_categories:
-            if category in self.TOOL_CATEGORIES:
+            if category in tool_categories:
                 # Add first 2-3 tools from each category
-                tools.extend(self.TOOL_CATEGORIES[category][:3])
+                tools.extend(tool_categories[category][:3])
         
         # Always include core tools for flexibility
         core_tools = ['read_file', 'write_file']
