@@ -39,6 +39,13 @@ def manager(workspace):
         mgr.add_rule(
             PermissionRule(pattern="write:*", action=PermissionAction.ALLOW, priority=1)
         )
+        # Broad file-tool allows so only the boundary gate can trigger asks.
+        for p in ("write_file", "edit", "apply_patch"):
+            mgr.add_rule(
+                PermissionRule(
+                    pattern=f"{p}:*", action=PermissionAction.ALLOW, priority=1
+                )
+            )
         yield mgr
 
 
@@ -154,6 +161,50 @@ class TestFileToolBoundary:
         assert manager.check_path_boundary(os.path.join(workspace, "a.txt")) is None
 
 
+class TestFileToolCheckGate:
+    """File-tool targets flow through ``check()`` and hit the boundary gate."""
+
+    def test_write_file_external_asks(self, manager):
+        # Broad write_file:* allow present, but an out-of-workspace path asks.
+        result = manager.check("write_file:/etc/hosts")
+        assert result.needs_approval
+
+    def test_edit_external_asks(self, manager):
+        result = manager.check("edit:/etc/hosts")
+        assert result.needs_approval
+
+    def test_apply_patch_external_asks(self, manager):
+        result = manager.check("apply_patch:/etc/cron.d/job")
+        assert result.needs_approval
+
+    def test_write_file_in_workspace_allowed(self, manager, workspace):
+        target = os.path.join(workspace, "out.txt")
+        assert manager.check(f"write_file:{target}").is_allowed
+
+    def test_write_file_relative_in_workspace_allowed(self, manager):
+        assert manager.check("write_file:sub/file.txt").is_allowed
+
+    def test_file_external_deny_wins(self, manager):
+        manager.add_rule(
+            PermissionRule(
+                pattern="external_dir:*",
+                action=PermissionAction.DENY,
+                priority=100,
+            )
+        )
+        assert manager.check("write_file:/etc/hosts").is_denied
+
+    def test_file_external_can_be_preauthorised(self, manager):
+        manager.add_rule(
+            PermissionRule(
+                pattern="external_dir:/data/*",
+                action=PermissionAction.ALLOW,
+                priority=100,
+            )
+        )
+        assert manager.check("write_file:/data/out.csv").is_allowed
+
+
 class TestFailClosed:
     def test_resolution_failure_asks(self, manager, monkeypatch):
         # If path resolution raises, the boundary check must fail *closed*
@@ -199,9 +250,15 @@ class TestBackwardCompatibility:
                     pattern="write:*", action=PermissionAction.ALLOW, priority=1
                 )
             )
+            mgr.add_rule(
+                PermissionRule(
+                    pattern="write_file:*", action=PermissionAction.ALLOW, priority=1
+                )
+            )
             # Without a workspace root, no external gate fires.
             assert mgr.check("bash:cat /etc/passwd").is_allowed
             assert mgr.check("bash:echo x > /etc/evil").is_allowed
+            assert mgr.check("write_file:/etc/hosts").is_allowed
             assert mgr.check_path_boundary("/etc/hosts") is None
 
     def test_deny_still_wins_over_boundary(self, manager):

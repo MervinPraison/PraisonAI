@@ -210,6 +210,22 @@ class PermissionManager:
     # sub-targets before matching (command-aware permission matching).
     _SHELL_PREFIXES = ("bash:", "shell:")
 
+    # File-mutating tool prefixes whose ``<prefix>:<path>`` target must also be
+    # gated by the workspace boundary. A broad ``write_file:*`` approval should
+    # not silently permit writes outside ``workspace_root``; out-of-workspace
+    # paths emit an ``external_dir:`` ask (deny rules still win).
+    _FILE_PREFIXES = (
+        "write:",
+        "write_file:",
+        "edit:",
+        "edit_file:",
+        "apply_patch:",
+        "append:",
+        "append_file:",
+        "delete:",
+        "delete_file:",
+    )
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -234,8 +250,60 @@ class PermissionManager:
             structured = self._check_shell_command(prefix, command, agent)
             if structured is not None:
                 return structured
+            return self._check_flat(target, agent)
+
+        # File-mutating tool targets share the workspace-boundary gate so a
+        # broad ``write_file:*`` approval cannot silently escape the workspace.
+        if self.workspace_root is not None:
+            file_prefix = next(
+                (p for p in self._FILE_PREFIXES if target.startswith(p)), None
+            )
+            if file_prefix is not None:
+                boundary = self._check_file_boundary(
+                    file_prefix, target[len(file_prefix):], target, agent
+                )
+                if boundary is not None:
+                    return boundary
 
         return self._check_flat(target, agent)
+
+    def _check_file_boundary(
+        self, prefix: str, path: str, original_target: str, agent: Optional[str]
+    ) -> Optional[PermissionResult]:
+        """Apply the workspace boundary to a file-tool ``<prefix>:<path>``.
+
+        Returns ``None`` when the path is inside the workspace (defer to normal
+        flat matching) so in-workspace behaviour is unchanged. When the path
+        escapes the root, aggregates the flat file-target result with the
+        ``external_dir:`` gate using deny-wins → ask → allow, mirroring the
+        shell decomposition semantics (a deny still wins over the ask gate).
+        """
+        ext = self._external_dir_target(path)
+        if ext is None:
+            return None
+
+        file_res = self._check_flat(original_target, agent)
+        ext_res = self._check_flat(ext, agent)
+
+        # Deny wins (either an explicit file-target deny or an external_dir deny).
+        for sub_target, res in ((original_target, file_res), (ext, ext_res)):
+            if res.action == PermissionAction.DENY:
+                res.reason = f"Denied '{sub_target}' ({res.reason})"
+                res.target = original_target
+                return res
+
+        # Then ask: the external-directory gate requires approval unless it has
+        # been explicitly pre-authorised (allow rule/approval on external_dir:).
+        if ext_res.action != PermissionAction.ALLOW:
+            ext_res.reason = (
+                f"Out-of-workspace path requires approval "
+                f"('{ext}': {ext_res.reason})"
+            )
+            ext_res.target = original_target
+            return ext_res
+
+        # External path was explicitly pre-authorised; honour the file rule.
+        return file_res
 
     def _check_flat(self, target: str, agent: Optional[str]) -> PermissionResult:
         """Legacy flat matching against approvals and rules for a target."""
