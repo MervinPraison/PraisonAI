@@ -12,6 +12,21 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 
+def _serve_command_opts(subcommand: str) -> set[str]:
+    """Return CLI option flags for a serve subcommand (CI-safe vs help text)."""
+    from typer.main import get_command
+
+    from praisonai.cli.commands.serve import app
+
+    click_app = get_command(app)
+    cmd = click_app.commands.get(subcommand)
+    assert cmd is not None, f"serve subcommand missing: {subcommand}"
+    opts: set[str] = set()
+    for param in cmd.params:
+        opts.update(getattr(param, "opts", ()))
+    return opts
+
+
 class TestServeUnifiedCommands:
     """Test unified serve command structure."""
     
@@ -174,17 +189,13 @@ class TestServeCommandOptions:
     
     def test_serve_agents_has_host_option(self):
         """Test serve agents has --host option."""
-        from praisonai.cli.commands.serve import app
-        
-        result = runner.invoke(app, ["agents", "--help"])
-        assert "--host" in result.output
+        opts = _serve_command_opts("agents")
+        assert "--host" in opts
     
     def test_serve_agents_has_port_option(self):
         """Test serve agents has --port option."""
-        from praisonai.cli.commands.serve import app
-        
-        result = runner.invoke(app, ["agents", "--help"])
-        assert "--port" in result.output
+        opts = _serve_command_opts("agents")
+        assert "--port" in opts
     
     def test_serve_gateway_has_agents_option(self):
         """Test serve gateway has --agents option."""
