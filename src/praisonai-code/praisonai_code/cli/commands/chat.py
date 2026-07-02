@@ -231,6 +231,10 @@ def chat_main(
         response = tui.run_single(prompt)
         if response:
             print(response)
+        # Propagate a non-zero exit code on failure (e.g. invalid API key)
+        # so shell scripts and CI can detect authentication failures (#2562).
+        if tui.execution_failed:
+            raise typer.Exit(1)
     else:
         # Interactive split-pane TUI mode
         tui.run()
@@ -291,6 +295,10 @@ def _run_profiled_chat(
     
     # Print profiling report
     profiler.print_report()
+
+    # Propagate failure (e.g. invalid API key) so CI can detect it (#2562).
+    if not response:
+        raise typer.Exit(1)
 
 
 def _run_legacy_terminal_chat(
