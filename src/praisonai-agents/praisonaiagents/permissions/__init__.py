@@ -36,6 +36,8 @@ __all__ = [
     "PermissionResult",
     "PersistentApproval",
     "DoomLoopDetector",
+    "derive_pattern",
+    "command_prefix",
 ]
 
 
@@ -68,5 +70,13 @@ def __getattr__(name: str):
     if name == "DoomLoopDetector":
         from .doom_loop import DoomLoopDetector
         return DoomLoopDetector
+
+    if name == "derive_pattern":
+        from .arity import derive_pattern
+        return derive_pattern
+
+    if name == "command_prefix":
+        from .arity import prefix
+        return prefix
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
