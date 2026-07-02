@@ -74,8 +74,39 @@ class DeliveryControlStore:
     def __init__(self, path: Union[str, Path]) -> None:
         self.path = Path(path).expanduser()
         self._lock = threading.Lock()
+        # First-registry dead-target config (ttl_seconds, max_size). The
+        # ``dead_targets`` table is table-wide (no per-registry column), so
+        # ``dead_expire`` / ``dead_enforce_bound`` sweep every row. That is only
+        # correct when every registry sharing this store agrees on those bounds
+        # (the homogeneous-worker model of issue #2579). This records the first
+        # registry's settings so a second registry attaching with a divergent
+        # ttl/max_size fails loudly instead of silently pruning the other
+        # registry's suppressions. Guarded by ``_lock``.
+        self._dead_config: Optional[Tuple[int, int]] = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+
+    def register_dead_config(self, ttl_seconds: int, max_size: int) -> None:
+        """Record/validate the shared dead-target bounds for this store.
+
+        The dead-target sweep is table-wide, so all registries sharing a store
+        must agree on ``ttl_seconds`` / ``max_size``. The first caller sets the
+        contract; a later caller with divergent bounds raises ``ValueError``
+        rather than silently evicting the other registry's dead targets.
+        """
+        cfg = (int(ttl_seconds), int(max_size))
+        with self._lock:
+            if self._dead_config is None:
+                self._dead_config = cfg
+            elif self._dead_config != cfg:
+                raise ValueError(
+                    "DeliveryControlStore already backs a DeadTargetRegistry with "
+                    f"(ttl_seconds, max_size)={self._dead_config}; refusing to "
+                    f"attach an incompatible registry with {cfg}. Dead-target "
+                    "TTL/bound sweeps are table-wide, so registries sharing one "
+                    "store must use identical bounds (issue #2579). Use separate "
+                    "store files for registries with different settings."
+                )
 
     # ── Connection / schema ─────────────────────────────────────────
     def _connect(self) -> sqlite3.Connection:
@@ -327,18 +358,18 @@ class DeliveryControlStore:
     def dead_expire(self, cutoff: float) -> None:
         # Table-wide TTL sweep. The ``dead_targets`` table is keyed by
         # ``(platform, channel_id)`` with no per-registry column, so a single
-        # store is expected to back registries that agree on ``ttl_seconds`` /
-        # ``max_size`` (the multi-worker sharing model of issue #2579, where
-        # every worker runs the same config). Do NOT point registries with
-        # divergent TTL/bound settings at one store file, or the shorter setting
-        # will prune the longer registry's suppressions.
+        # store backs registries that agree on ``ttl_seconds`` / ``max_size``
+        # (the multi-worker sharing model of issue #2579, where every worker
+        # runs the same config). ``register_dead_config`` enforces this at
+        # attach time: a registry with divergent bounds is rejected before it
+        # can share the store, so this table-wide sweep is safe.
         with self._lock, closing(self._connect()) as conn:
             conn.execute("DELETE FROM dead_targets WHERE ts < ?", (cutoff,))
             conn.commit()
 
     def dead_enforce_bound(self, max_size: int) -> None:
-        # See ``dead_expire``: this bound is table-wide and assumes registries
-        # sharing a store agree on ``max_size``.
+        # See ``dead_expire``: this bound is table-wide and ``register_dead_config``
+        # enforces that registries sharing a store agree on ``max_size``.
         if max_size <= 0:
             return
         with self._lock, closing(self._connect()) as conn:

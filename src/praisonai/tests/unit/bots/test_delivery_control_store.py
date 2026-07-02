@@ -272,6 +272,29 @@ class TestDeadTargetRegistrySharedBackend:
         reg.clear("slack", "C1")  # must not raise
         assert reg.size() == 0
 
+    def test_same_config_registries_share_store(self, tmp_path):
+        # Homogeneous workers (identical config) may share one store instance.
+        store = DeliveryControlStore(tmp_path / "ctl.sqlite")
+        reg1 = DeadTargetRegistry(store=store, ttl_seconds=100, max_size=50)
+        reg2 = DeadTargetRegistry(store=store, ttl_seconds=100, max_size=50)
+        reg1.mark_dead("telegram", "-1001", reason="403")
+        assert reg2.is_dead("telegram", "-1001") is True
+
+    def test_incompatible_ttl_rejected(self, tmp_path):
+        # The dead-target sweep is table-wide; divergent TTL on a shared store
+        # would let the shorter registry prune the longer one's suppressions.
+        # The guard must reject it (Greptile P1).
+        store = DeliveryControlStore(tmp_path / "ctl.sqlite")
+        DeadTargetRegistry(store=store, ttl_seconds=100, max_size=50)
+        with pytest.raises(ValueError, match="incompatible"):
+            DeadTargetRegistry(store=store, ttl_seconds=999, max_size=50)
+
+    def test_incompatible_max_size_rejected(self, tmp_path):
+        store = DeliveryControlStore(tmp_path / "ctl.sqlite")
+        DeadTargetRegistry(store=store, ttl_seconds=100, max_size=50)
+        with pytest.raises(ValueError, match="incompatible"):
+            DeadTargetRegistry(store=store, ttl_seconds=100, max_size=10)
+
 
 # ─── Export ──────────────────────────────────────────────────────────
 def test_exported_from_bots_package():

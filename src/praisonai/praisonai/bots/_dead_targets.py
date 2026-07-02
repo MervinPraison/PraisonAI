@@ -118,6 +118,13 @@ class DeadTargetRegistry:
         # (issue #2579). Single-process gateways keep the JSON path (default).
         self._store = store
         if store is not None:
+            # The store's dead-target TTL/bound sweeps are table-wide, so every
+            # registry sharing one store must agree on ``ttl_seconds`` /
+            # ``max_size``. Register this registry's bounds; a later registry
+            # attaching to the same store with divergent settings fails loudly
+            # instead of silently pruning this registry's suppressions
+            # (Greptile P1, issue #2579).
+            store.register_dead_config(self.ttl_seconds, self.max_size)
             self._persist_path = None
             return
         self._persist_path = Path(
