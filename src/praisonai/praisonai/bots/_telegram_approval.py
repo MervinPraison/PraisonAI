@@ -25,9 +25,15 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
-from ._approval_base import classify_keyword, classify_with_llm, sync_wrapper
+from ._approval_base import (
+    classify_keyword,
+    classify_with_llm,
+    is_authorized_actor,
+    normalize_approvers,
+    sync_wrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +51,20 @@ class TelegramApproval:
         chat_id: Telegram chat ID (user or group) to send approval requests to.
         timeout: Max seconds to wait for a response (default 300 = 5 min).
         poll_interval: Seconds between polls (default 2.0).
+        allowed_approvers: Optional set of Telegram user IDs permitted to
+            approve/deny. When provided, a button tap or keyword reply from any
+            other user is ignored, so an unauthorised member of a shared group
+            cannot resolve a gated tool. When ``None`` (default) any user may
+            respond (legacy behaviour, backward compatible). Falls back to a
+            comma-separated ``TELEGRAM_APPROVERS`` env var when not passed.
 
     Example::
 
         from praisonai.bots import TelegramApproval
-        agent = Agent(name="bot", approval=TelegramApproval(chat_id="123456789"))
+        agent = Agent(
+            name="bot",
+            approval=TelegramApproval(chat_id="123456789", allowed_approvers=["999"]),
+        )
     """
 
     def __init__(
@@ -58,6 +73,7 @@ class TelegramApproval:
         chat_id: Optional[str] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
+        allowed_approvers: Optional[Iterable[str]] = None,
     ):
         self._token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
         if not self._token:
@@ -67,6 +83,11 @@ class TelegramApproval:
         self._chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
+        if allowed_approvers is None:
+            _env = os.environ.get("TELEGRAM_APPROVERS", "").strip()
+            if _env:
+                allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
+        self._allowed_approvers = normalize_approvers(allowed_approvers)
         # Optional: set PRAISONAI_TELEGRAM_SSL_VERIFY=false to skip SSL verify
         # (e.g. corporate proxy / CA issues)
         _v = os.environ.get("PRAISONAI_TELEGRAM_SSL_VERIFY", "true").lower()
@@ -249,6 +270,21 @@ class TelegramApproval:
                             user_id = str(user.get("id", "unknown"))
                             username = user.get("username", user_id)
 
+                            # Authorization boundary: an unauthorised presser
+                            # must not resolve a gated tool. Answer the callback
+                            # with an alert and ignore the tap (keep polling).
+                            if not is_authorized_actor(user_id, self._allowed_approvers):
+                                logger.warning(
+                                    "Ignoring Telegram approval tap from "
+                                    "unauthorized user %s", user_id,
+                                )
+                                await self._telegram_api("answerCallbackQuery", {
+                                    "callback_query_id": cb.get("id"),
+                                    "text": "You are not authorized to approve this action.",
+                                    "show_alert": True,
+                                }, session=session)
+                                continue
+
                             # Answer the callback to remove loading state
                             await self._telegram_api("answerCallbackQuery", {
                                 "callback_query_id": cb.get("id"),
@@ -281,6 +317,16 @@ class TelegramApproval:
                             text = msg.get("text", "").strip()
                             user = msg.get("from", {})
                             user_id = str(user.get("id", "unknown"))
+
+                            # Authorization boundary for keyword/free-text
+                            # replies: ignore replies from unauthorised users.
+                            if not is_authorized_actor(user_id, self._allowed_approvers):
+                                logger.warning(
+                                    "Ignoring Telegram approval reply from "
+                                    "unauthorized user %s", user_id,
+                                )
+                                continue
+
                             kw = classify_keyword(text)
 
                             if kw == "approve":
