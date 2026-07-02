@@ -27,6 +27,40 @@ const withRecovery = [
 ];
 assert('not stale when @claude after head', !mg.isStaleFinalAfterPush(withRecovery, '2026-06-12T09:00:00Z'));
 
+// Stale-FINAL recovery guards (PR #2560 push loop)
+const nowMs = Date.now();
+const iso = (ms) => new Date(ms).toISOString();
+const firstFinal = {
+  user: { login: 'MervinPraison' },
+  body: '@claude You are the FINAL architecture reviewer.',
+  created_at: iso(nowMs - 20 * 60 * 1000),
+};
+const pushSoonAfter = mg.shouldSkipStaleFinalRecovery(
+  [firstFinal],
+  iso(nowMs - 16 * 60 * 1000)
+);
+assert('debounce push soon after FINAL', pushSoonAfter.skip && pushSoonAfter.reason.includes('soon after'));
+
+const secondFinal = {
+  user: { login: 'MervinPraison' },
+  body: '@claude You are the FINAL architecture reviewer.',
+  created_at: iso(nowMs - 20 * 60 * 1000),
+};
+const capped = mg.shouldSkipStaleFinalRecovery(
+  [firstFinal, secondFinal],
+  iso(nowMs - 2 * 60 * 1000)
+);
+assert('hourly cap blocks third FINAL in window', capped.skip && capped.reason.includes('capped'));
+
+const botPush = mg.shouldSkipStaleFinalRecovery(
+  [firstFinal],
+  iso(nowMs - 16 * 60 * 1000),
+  'praisonai-triage-agent[bot]'
+);
+assert('skip when automation pushed head', botPush.skip && botPush.reason.includes('automation'));
+
+assert('claude automation login', mg.isClaudeAutomationLogin('praisonai-triage-agent[bot]'));
+
 // Bot CHANGES_REQUESTED then APPROVE
 const reviews = [
   { user: { login: 'coderabbit[bot]', type: 'Bot' }, state: 'CHANGES_REQUESTED', submitted_at: '2026-06-12T08:00:00Z' },

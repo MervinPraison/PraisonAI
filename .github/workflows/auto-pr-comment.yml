@@ -550,6 +550,7 @@ jobs:
             const comments = await mergeGate.listAllComments(github, owner, repo, pr);
             const headPushedAt = (await mergeGate.getHeadCommitDate(github, owner, repo, pr))
               || context.payload.pull_request.updated_at;
+            const headPusher = context.payload.sender?.login || null;
 
             const hasFinal = mergeGate.hasFinalClaudeReviewTrigger(comments);
             const isStale = mergeGate.isStaleFinalAfterPush(comments, headPushedAt);
@@ -559,9 +560,19 @@ jobs:
               return;
             }
 
+            if (await mergeGate.hasInProgressClaudeAssistant(github, owner, repo, pr)) {
+              core.info('Claude workflow in progress — skip recovery');
+              return;
+            }
+
             const finalBody = mergeGate.FINAL_CLAUDE_REVIEW_BODY;
 
             if (hasFinal && isStale) {
+              const gate = mergeGate.shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusher);
+              if (gate.skip) {
+                core.info(`Skip stale-FINAL recovery: ${gate.reason}`);
+                return;
+              }
               await github.rest.issues.createComment({ issue_number: pr, owner, repo, body: finalBody });
               core.info(`Posted stale-FINAL recovery @claude on PR #${pr}`);
               return;
@@ -627,6 +638,15 @@ jobs:
               if (!mergeGate.needsStaleFinalRecovery(comments, headPushedAt)) continue;
               if (mergeGate.hasRecentClaudeTrigger(comments, 10)) {
                 core.info(`PR #${pr.number}: stale FINAL but @claude within 10min — skip`);
+                continue;
+              }
+              if (await mergeGate.hasInProgressClaudeAssistant(github, owner, repo, pr.number)) {
+                core.info(`PR #${pr.number}: Claude workflow in progress — skip`);
+                continue;
+              }
+              const gate = mergeGate.shouldSkipStaleFinalRecovery(comments, headPushedAt);
+              if (gate.skip) {
+                core.info(`PR #${pr.number}: skip stale-FINAL — ${gate.reason}`);
                 continue;
               }
               await github.rest.issues.createComment({

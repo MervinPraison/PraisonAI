@@ -133,6 +133,9 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&
       github.actor != 'renovate[bot]'
+    concurrency:
+      group: claude-response-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write

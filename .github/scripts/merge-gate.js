@@ -7,6 +7,9 @@ const CLAUDE_TRIGGER_LOGINS = ['MervinPraison', 'github-actions[bot]'];
 const AUTO_ACTORS = CLAUDE_TRIGGER_LOGINS;
 const CONFLICT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const CLAUDE_ACTIVE_MS = 35 * 60 * 1000;
+const STALE_FINAL_RECOVERY_WINDOW_MS = 60 * 60 * 1000;
+const STALE_FINAL_MAX_PER_WINDOW = 2;
+const PUSH_AFTER_FINAL_DEBOUNCE_MS = 15 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
 const PR_MAX_AUTO_ADDITIONS = 800;
@@ -192,6 +195,55 @@ function shouldSkipFinalRecovery(comments, headPushedAt) {
   const isStale = isStaleFinalAfterPush(comments, headPushedAt);
   if (isStale) return false;
   return hasRecentClaudeTrigger(comments, 35);
+}
+
+function countFinalTriggersSince(comments, sinceMs) {
+  return comments.filter(
+    (c) => isFinalClaudeTriggerComment(c) && new Date(c.created_at).getTime() > sinceMs
+  ).length;
+}
+
+function isClaudeAutomationLogin(login) {
+  const lower = (login || '').toLowerCase();
+  return lower.includes('praisonai-triage') || lower === 'github-actions[bot]';
+}
+
+function isPushSoonAfterLatestFinal(comments, headPushedAt) {
+  if (!headPushedAt) return false;
+  const finals = comments.filter(isFinalClaudeTriggerComment);
+  if (finals.length === 0) return false;
+  const latestFinal = finals.reduce((a, b) =>
+    new Date(a.created_at) > new Date(b.created_at) ? a : b
+  );
+  const finalTime = new Date(latestFinal.created_at).getTime();
+  const headTime = new Date(headPushedAt).getTime();
+  if (headTime <= finalTime) return false;
+  return headTime - finalTime < PUSH_AFTER_FINAL_DEBOUNCE_MS;
+}
+
+/** Returns { skip: true, reason } when stale-FINAL recovery should not post. */
+function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = null) {
+  if (!isStaleFinalAfterPush(comments, headPushedAt)) {
+    return { skip: true, reason: 'not stale' };
+  }
+  if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin)) {
+    return { skip: true, reason: 'head pushed by Claude automation' };
+  }
+  if (isPushSoonAfterLatestFinal(comments, headPushedAt)) {
+    return {
+      skip: true,
+      reason: 'head pushed soon after FINAL (wait for CI / batched fixes)',
+    };
+  }
+  const windowStart = Date.now() - STALE_FINAL_RECOVERY_WINDOW_MS;
+  const finalsInWindow = countFinalTriggersSince(comments, windowStart);
+  if (finalsInWindow >= STALE_FINAL_MAX_PER_WINDOW) {
+    return {
+      skip: true,
+      reason: `stale-FINAL capped (${finalsInWindow} FINAL triggers in last hour)`,
+    };
+  }
+  return { skip: false, reason: '' };
 }
 
 function finalClaudeCompletedOnSha(comments, headPushedAt) {
@@ -736,6 +788,12 @@ module.exports = {
   isStaleFinalAfterPush,
   needsStaleFinalRecovery,
   shouldSkipFinalRecovery,
+  shouldSkipStaleFinalRecovery,
+  isClaudeAutomationLogin,
+  isPushSoonAfterLatestFinal,
+  countFinalTriggersSince,
+  STALE_FINAL_RECOVERY_WINDOW_MS,
+  STALE_FINAL_MAX_PER_WINDOW,
   FINAL_CLAUDE_REVIEW_BODY,
   loadPrContext,
   evaluatePipelineQuiescent,
