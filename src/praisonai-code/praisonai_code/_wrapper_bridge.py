@@ -39,10 +39,15 @@ def get_wrapper_attr(module_name: str, attr: str) -> Any:
 
 
 def optional_wrapper_attr(module_name: str, attr: str, default: T | None = None) -> Any | T | None:
-    """Return a wrapper attribute when installed, else ``default``."""
+    """Return a wrapper attribute when installed, else ``default``.
+
+    Falls back to ``default`` when the wrapper package is missing (ImportError)
+    or when an installed wrapper module lacks the requested attribute
+    (AttributeError), so callers degrade gracefully in both cases.
+    """
     if not wrapper_available():
         return default
     try:
         return get_wrapper_attr(module_name, attr)
-    except ImportError:
+    except (ImportError, AttributeError):
         return default
