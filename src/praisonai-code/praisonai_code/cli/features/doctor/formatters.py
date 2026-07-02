@@ -291,7 +291,28 @@ class TextFormatter(BaseFormatter):
             parts.append(self._color(f"{summary.errors} errors", "red"))
         
         return f"{summary.total} checks: " + ", ".join(parts)
-    
+
+    def format_next_steps(self, report: DoctorReport) -> str:
+        """Format a numbered list of remediation steps (Hermes-style footer).
+
+        Returns an empty string when there are no warnings or failures.
+        """
+        actionable = [
+            r for r in report.results
+            if r.status in (CheckStatus.WARN, CheckStatus.FAIL, CheckStatus.ERROR)
+        ]
+        if not actionable:
+            return ""
+
+        lines = [self._color("Next steps:", "bold")]
+        for idx, result in enumerate(actionable, start=1):
+            remediation = result.remediation or result.message
+            if self.redact:
+                remediation = redact_secrets(remediation, self.show_prefix_suffix)
+            symbol = self._status_symbol(result.status)
+            lines.append(f"  {idx}. {symbol} {result.title}: {remediation}")
+        return "\n".join(lines)
+
     def format_report(self, report: DoctorReport) -> str:
         """Format a complete report."""
         lines = []
@@ -314,7 +335,14 @@ class TextFormatter(BaseFormatter):
         # Duration
         if not self.quiet and report.duration_ms > 0:
             lines.append(self._color(f"Completed in {report.duration_ms:.0f}ms", "dim"))
-        
+
+        # Numbered next steps footer (only when there are warnings/failures)
+        if not self.quiet:
+            next_steps = self.format_next_steps(report)
+            if next_steps:
+                lines.append(self._divider())
+                lines.append(next_steps)
+
         return "\n".join(lines)
 
 

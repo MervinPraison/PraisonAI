@@ -14,6 +14,38 @@ from ..output.console import get_output_controller
 app = typer.Typer(help="Health checks and diagnostics")
 
 
+@app.callback(invoke_without_command=True)
+def doctor_main(
+    ctx: typer.Context,
+    quick: bool = typer.Option(False, "--quick", help="Fast env-only checks (alias for 'doctor env')"),
+    live: bool = typer.Option(False, "--live", help="Include live provider pings (validate keys, not just presence)"),
+    deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures"),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Run a full setup report when no subcommand is given.
+
+    ``praisonai doctor`` (no subcommand) now runs a comprehensive first-run /
+    operator troubleshooting report instead of failing with "Missing command".
+    Use ``praisonai doctor env`` (or ``--quick``) for the fast, CI-friendly path.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    args: list = []
+    if quick:
+        args.append("env")
+    if live:
+        args.append("--live")
+    if deep:
+        args.append("--deep")
+    if strict:
+        args.append("--strict")
+    if json_output:
+        args.append("--json")
+    raise typer.Exit(_run_doctor(args))
+
+
 def _run_doctor(args: list) -> int:
     """Run doctor command with args."""
     try:
