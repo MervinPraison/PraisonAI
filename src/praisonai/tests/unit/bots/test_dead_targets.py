@@ -251,15 +251,16 @@ class TestPermanentClassification:
 
 # ─── DeliveryRouter wiring ───────────────────────────────────────────
 class _FakeBot:
-    def __init__(self, exc=None):
+    def __init__(self, exc=None, result=True):
         self.exc = exc
+        self.result = result
         self.sends = []
 
     async def send_message(self, channel_id, text):
         self.sends.append((channel_id, text))
         if self.exc is not None:
             raise self.exc
-        return True
+        return self.result
 
 
 class _FakeBotOS:
@@ -486,6 +487,38 @@ class TestProactiveDurability:
         assert bot.sends[-1] == ("-1001", "hi")  # retry reached the platform
 
     @pytest.mark.asyncio
+    async def test_explicit_false_send_result_treated_as_failure(self):
+        # An adapter that returns explicit False (failed send without raising)
+        # must NOT be cached as delivered, so a legitimate retry with the same
+        # key still reaches the platform once the transport recovers.
+        bot = _FakeBot()
+        bot.result = False  # transport reports failure via explicit False
+        router = DeliveryRouterFor(bot)
+
+        ok1 = await router.deliver("telegram", "hi", idempotency_key="job-w")
+        assert ok1 is False  # explicit False surfaces as a failed send
+
+        bot.result = True  # transport recovers
+        ok2 = await router.deliver("telegram", "hi", idempotency_key="job-w")
+        assert ok2 is True
+        assert bot.sends[-1] == ("-1001", "hi")  # retry was not suppressed
+
+    @pytest.mark.asyncio
+    async def test_none_send_result_still_succeeds(self):
+        # Lightweight adapters return None/void on success (raising on failure);
+        # None must remain a success signal so those paths do not regress.
+        bot = _FakeBot()
+        bot.result = None
+        router = DeliveryRouterFor(bot)
+
+        ok = await router.deliver("telegram", "hi", idempotency_key="job-n")
+        assert ok is True
+        # Recorded as delivered: a re-fire with the same key is suppressed.
+        ok2 = await router.deliver("telegram", "hi", idempotency_key="job-n")
+        assert ok2 is True
+        assert bot.sends == [("-1001", "hi")]
+
+    @pytest.mark.asyncio
     async def test_retry_after_penalises_limiter(self):
         bot = _FakeBot(exc=_StatusError(429, "Too Many Requests: retry after 7"))
         router = DeliveryRouterFor(bot)
@@ -506,10 +539,27 @@ class TestProactiveDurability:
         assert penalties == [("-1001", 7.0)]  # server Retry-After widened the lane
 
 
+class _NoOpLimiter:
+    """A stub rate limiter so dedup/retry tests never touch the real one."""
+
+    async def acquire(self, channel_id=None):
+        pass
+
+    async def penalise(self, channel_id, seconds):
+        pass
+
+
 def DeliveryRouterFor(bot):
-    """Build a router over a fake botos with a telegram home channel."""
+    """Build a router over a fake botos with a telegram home channel.
+
+    Registers a no-op limiter for telegram so tests that focus on
+    dedup/retry behaviour are isolated from the real ``RateLimiter``'s
+    internal timing/state (tests that assert on limiter behaviour override
+    this with their own stub).
+    """
     from praisonai.bots.delivery import DeliveryRouter
 
     router = DeliveryRouter(_FakeBotOS(bot))
     router.directory.set_home_channel("telegram", "-1001")
+    router._rate_limiters["telegram"] = _NoOpLimiter()
     return router

@@ -24,6 +24,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DeliveryNotAccepted(Exception):
+    """Raised internally when an adapter reports a send failure without raising.
+
+    Some adapters signal a failed delivery by returning an explicit ``False``
+    from ``send_message`` instead of raising. :meth:`DeliveryRouter.deliver`
+    normalises that into this exception so the failure flows through the same
+    path as a raised error: the idempotency key is not recorded (the send stays
+    retryable) and a dead target is not cleared. It is a transient failure
+    marker — never classified as a permanent target failure — so existing
+    retry/DLQ behaviour is unchanged.
+
+    Note: only an explicit ``False`` is treated as failure. The dominant adapter
+    convention is to return a truthy message object (or ``None``/void for
+    lightweight adapters) on success and to *raise* on failure, so ``None`` is
+    deliberately left as a success signal to avoid regressing those paths.
+    """
+
+
 def detect_chat_type(platform: str, chat_id: str) -> str:
     """Detect chat type based on platform and chat ID patterns.
     
@@ -621,7 +639,21 @@ class DeliveryRouter:
                     )
 
             try:
-                await bot.send_message(channel_id, text)
+                result = await bot.send_message(channel_id, text)
+                # An adapter that explicitly returns ``False`` is signalling a
+                # failed send without raising. Treat that as a failure so we do
+                # not cache the idempotency key or clear a dead target for a
+                # message that never left the process. The check is deliberately
+                # ``is False`` only: the dominant convention across adapters is
+                # to return a truthy message object on success, ``None``/void on
+                # success for lightweight adapters, and to *raise* on failure —
+                # so ``None`` must NOT be treated as a failure or those succeed
+                # paths would regress.
+                if result is False:
+                    raise DeliveryNotAccepted(
+                        f"{platform} adapter reported no delivery "
+                        f"(send_message returned {result!r})"
+                    )
             except Exception as send_err:
                 # A server-mandated Retry-After widens the limiter's lane so the
                 # next proactive sends hold off instead of re-tripping the 429.
