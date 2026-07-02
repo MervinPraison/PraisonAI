@@ -58,6 +58,7 @@ class PermissionManager:
         storage_dir: Optional[str] = None,
         agent_name: Optional[str] = None,
         approval_callback: Optional[Callable[[str, str], bool]] = None,
+        workspace_root: Optional[str] = None,
     ):
         """
         Initialize the permission manager.
@@ -66,10 +67,19 @@ class PermissionManager:
             storage_dir: Directory for persistent storage
             agent_name: Optional agent name for filtering rules
             approval_callback: Optional callback for user approval
+            workspace_root: Optional project/workspace root. When set, shell
+                and file targets that resolve *outside* this root emit a
+                distinct ``external_dir:<parent>/*`` sub-target (default
+                ``ask``), gating out-of-workspace access with an extra
+                approval. When ``None`` (default) no boundary check runs and
+                behaviour is unchanged.
         """
         self.storage_dir = storage_dir or DEFAULT_PERMISSIONS_DIR
         self.agent_name = agent_name
         self.approval_callback = approval_callback
+        self.workspace_root = (
+            os.path.realpath(workspace_root) if workspace_root else None
+        )
         
         self._rules: List[PermissionRule] = []
         self._approvals: List[PersistentApproval] = []
@@ -286,6 +296,14 @@ class PermissionManager:
                 sub_targets.append(prefix + cmd_str)
             for path in op.write_targets:
                 sub_targets.append(f"write:{path}")
+            # Workspace-boundary gate: any write target or path-like arg that
+            # resolves outside the workspace root gets a distinct
+            # ``external_dir:`` sub-target (default ``ask``).
+            if self.workspace_root is not None:
+                for path in list(op.write_targets) + op.path_args:
+                    ext = self._external_dir_target(path)
+                    if ext is not None:
+                        sub_targets.append(ext)
 
         # No structured decomposition possible, or it collapses to exactly the
         # original target — defer to the existing flat matcher.
@@ -327,6 +345,46 @@ class PermissionManager:
             target=original_target,
             reason="All shell sub-operations allowed",
         )
+
+    def _external_dir_target(self, path: str) -> Optional[str]:
+        """Return an ``external_dir:<parent>/*`` target if *path* escapes root.
+
+        Resolves *path* (``~``, ``$VARS``, ``..``) against ``workspace_root``
+        using the shared ``path_safety`` containment logic. In-workspace paths
+        return ``None`` so existing flows are unaffected.
+        """
+        if self.workspace_root is None:
+            return None
+        try:
+            from ..tools.path_safety import is_within_root
+        except Exception:  # noqa: BLE001 - never weaken on import failure
+            return None
+        try:
+            if is_within_root(path, self.workspace_root):
+                return None
+            expanded = os.path.expanduser(os.path.expandvars(path))
+            if not os.path.isabs(expanded):
+                expanded = os.path.join(self.workspace_root, expanded)
+            resolved = os.path.realpath(os.path.normpath(expanded))
+            parent = os.path.dirname(resolved) or resolved
+            return f"external_dir:{parent}/*"
+        except Exception:  # noqa: BLE001 - conservative: skip on any failure
+            return None
+
+    def check_path_boundary(
+        self, path: str, agent_name: Optional[str] = None
+    ) -> Optional[PermissionResult]:
+        """Check a single file-tool target against the workspace boundary.
+
+        Shared boundary policy for file tools (``write_file``/``edit``/
+        ``apply_patch``). Returns ``None`` when no ``workspace_root`` is
+        configured or the path is inside it (i.e. no extra gate); otherwise
+        returns the ``external_dir:`` permission decision (default ``ask``).
+        """
+        ext = self._external_dir_target(path)
+        if ext is None:
+            return None
+        return self.check(ext, agent_name)
 
     def approve(
         self,

@@ -48,6 +48,30 @@ class ShellOp:
         parts = [self.executable, *self.args]
         return " ".join(p for p in parts if p)
 
+    @property
+    def path_args(self) -> List[str]:
+        """Args that look like filesystem paths (for boundary checks).
+
+        Conservative: only tokens that clearly denote a path — absolute
+        (``/x``), home-relative (``~``), parent/relative (``./`` , ``../``)
+        or env-prefixed (``$VAR/…``) — are returned so plain flags and
+        non-path values never trigger a boundary prompt.
+        """
+        paths: List[str] = []
+        for tok in self.args:
+            if not tok or tok.startswith("-"):
+                continue
+            if (
+                tok.startswith("/")
+                or tok.startswith("~")
+                or tok.startswith("./")
+                or tok.startswith("../")
+                or tok == ".."
+                or tok.startswith("$")
+            ):
+                paths.append(tok)
+        return paths
+
 
 def _extract_substitutions(token: str) -> List[str]:
     """Extract inner commands from ``$(...)`` and backtick substitutions.
