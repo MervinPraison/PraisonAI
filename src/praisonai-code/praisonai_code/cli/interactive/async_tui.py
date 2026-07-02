@@ -93,13 +93,9 @@ _AUTH_ERROR_SIGNATURES = (
     "invalid api key",
     "invalid_api_key",
     "incorrect api key",
-    "unauthorized",
-    "permission denied",
-    "access denied",
+    "authenticationerror",
     "http 401",
-    " 401 ",
     "error code: 401",
-    "http 403",
     "error code: 403",
 )
 
@@ -812,6 +808,12 @@ Example: /handoff code "refactor the auth module" """
             # Capture WARNING/ERROR log records (e.g. "Authentication failed")
             # emitted by the agent so we can detect silent failures where
             # agent.start() logs an auth error but returns None.
+            #
+            # NOTE: praisonaiagents emits these via the *root* logger
+            # (``logging.warning(...)`` in llm.py), so the handler must be on
+            # the root logger to catch them. False positives are avoided by (a)
+            # only matching precise auth signatures (no broad "permission
+            # denied"/"access denied") and (b) gating on an empty response.
             log_capture = _LogCapture(level=logging.WARNING)
             root_logger = logging.getLogger()
             root_logger.addHandler(log_capture)
@@ -850,7 +852,7 @@ Example: /handoff code "refactor the auth module" """
             # Detect silent failures: some providers log an auth/permission
             # error and return None instead of raising. Surface these so the
             # CLI can exit with a non-zero status (issue #2562).
-            auth_error = log_capture.find_auth_error() or _detect_auth_error(stderr_content)
+            auth_error = log_capture.find_auth_error()
             if auth_error and not response:
                 self._last_error = RuntimeError(auth_error)
                 return f"Error: {auth_error}"
