@@ -28,27 +28,26 @@ def _load_user_module_safe(path: Path, *, name: str):
     Callers of ``load_from_file`` / ``load_from_directory`` pass explicit,
     user-provided paths (the wrapper's historical contract only rejects
     remote URLs). To preserve that behaviour on top of the canonical gate --
-    which requires ``PRAISONAI_ALLOW_LOCAL_TOOLS=true`` -- we opt the explicit
-    load in for the duration of the call and use ``allow_outside_cwd=True``
-    (the same treatment the canonical resolver gives explicit ``--tools``
-    paths in :meth:`ToolResolver.load_functions_from_module`). The implicit
-    ``tools.py`` autoload path keeps its own ``PRAISONAI_ALLOW_TEMPLATE_TOOLS``
-    opt-in layered above this helper.
+    which requires ``PRAISONAI_ALLOW_LOCAL_TOOLS=true`` -- we authorize this
+    single explicit load in-process via ``skip_env_check=True`` and use
+    ``allow_outside_cwd=True`` (the same treatment the canonical resolver
+    gives explicit ``--tools`` paths in
+    :meth:`ToolResolver.load_functions_from_module`).
+
+    ``skip_env_check`` is a thread-safe, per-call opt-in: unlike temporarily
+    mutating the process-wide ``PRAISONAI_ALLOW_LOCAL_TOOLS`` env var, it does
+    not leak authorization to concurrent threads that read the gate. The
+    implicit ``tools.py`` autoload path keeps its own
+    ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` opt-in layered above this helper.
     """
     from praisonai._bootstrap import ensure_praisonai_code
 
     ensure_praisonai_code()
     from praisonai_code._safe_loader import load_user_module
 
-    _prev = os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS")
-    os.environ["PRAISONAI_ALLOW_LOCAL_TOOLS"] = "true"
-    try:
-        return load_user_module(str(path), name=name, allow_outside_cwd=True)
-    finally:
-        if _prev is None:
-            os.environ.pop("PRAISONAI_ALLOW_LOCAL_TOOLS", None)
-        else:
-            os.environ["PRAISONAI_ALLOW_LOCAL_TOOLS"] = _prev
+    return load_user_module(
+        str(path), name=name, allow_outside_cwd=True, skip_env_check=True
+    )
 
 
 def _autoload_tools_enabled() -> bool:
