@@ -686,6 +686,14 @@ class DakeraMemoryAdapter:
         response = self.client.batch_recall(
             BatchRecallRequest(agent_id=self.agent_id, limit=limit)
         )
+        total = getattr(response, "total", len(response.memories))
+        if total > limit:
+            import logging
+            logging.warning(
+                f"Dakera get_all_memories truncated to limit={limit} "
+                f"(agent_id={self.agent_id}, total={total}); pass a higher "
+                "`limit` to retrieve more."
+            )
         return [self._to_result(m) for m in response.memories]
 
     # -- DeletableMemoryProtocol -------------------------------------------

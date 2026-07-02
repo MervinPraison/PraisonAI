@@ -9,6 +9,7 @@ mirroring how the other wrapper adapters (mem0/chroma/mongodb) are unit tested.
 import os
 import sys
 import types
+from typing import ClassVar
 
 import pytest
 
@@ -18,9 +19,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 class _FakeRecalledMemory:
-    def __init__(self, id, content, memory_type, importance=0.5, score=0.9,
+    def __init__(self, memory_id, content, memory_type, importance=0.5, score=0.9,
                  metadata=None):
-        self.id = id
+        self.id = memory_id
         self.content = content
         self.memory_type = memory_type
         self.importance = importance
@@ -34,14 +35,15 @@ class _FakeRecallResponse:
 
 
 class _FakeBatchResponse:
-    def __init__(self, memories):
+    def __init__(self, memories, total=None):
         self.memories = memories
-        self.total = len(memories)
+        self.total = len(memories) if total is None else total
         self.filtered = len(memories)
 
 
 class _FakeBatchRecallRequest:
-    def __init__(self, agent_id, filter=None, limit=100, min_importance=None):
+    # ``filter`` mirrors the real dakera SDK kwarg (see factories._reset_type).
+    def __init__(self, agent_id, filter=None, limit=100, min_importance=None):  # noqa: A002
         self.agent_id = agent_id
         self.filter = filter
         self.limit = limit
@@ -49,7 +51,8 @@ class _FakeBatchRecallRequest:
 
 
 class _FakeBatchForgetRequest:
-    def __init__(self, agent_id, filter=None):
+    # ``filter`` mirrors the real dakera SDK kwarg (see factories._reset_type).
+    def __init__(self, agent_id, filter=None):  # noqa: A002
         self.agent_id = agent_id
         self.filter = filter
 
@@ -63,7 +66,7 @@ class _FakeBatchMemoryFilter:
 class _FakeDakeraClient:
     """Records calls and returns canned responses."""
 
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, base_url=None, api_key=None):
         self.base_url = base_url
@@ -110,11 +113,14 @@ class _FakeDakeraClient:
 
     def batch_recall(self, request):
         self.batch_recall_calls.append(request)
-        return _FakeBatchResponse([
-            _FakeRecalledMemory(m["id"], m["content"], m["memory_type"],
-                                metadata=m["metadata"])
-            for m in self.stored[:request.limit]
-        ])
+        return _FakeBatchResponse(
+            [
+                _FakeRecalledMemory(m["id"], m["content"], m["memory_type"],
+                                    metadata=m["metadata"])
+                for m in self.stored[:request.limit]
+            ],
+            total=len(self.stored),
+        )
 
     def forget(self, agent_id, memory_id):
         self.forgotten.append(memory_id)
@@ -271,7 +277,11 @@ class TestDakeraStoreSearch:
         adapter = _make_adapter()
         adapter.store_long_term(
             "fact",
-            metadata={"session_id": "meta-sess", "tags": ["from-meta"], "topic": "food"},
+            metadata={
+                "session_id": "meta-sess",
+                "tags": ["from-meta"],
+                "topic": "food",
+            },
             session_id="kw-sess",
             tags=["from-kwargs"],
             importance=0.8,
@@ -315,6 +325,14 @@ class TestDakeraStoreSearch:
         results = adapter.get_all_memories()
         assert len(adapter.client.batch_recall_calls) == 1
         assert {r["text"] for r in results} == {"a", "b"}
+
+    def test_get_all_memories_warns_when_truncated(self, fake_dakera, caplog):
+        adapter = _make_adapter()
+        adapter.store_short_term("a")
+        adapter.store_long_term("b")
+        with caplog.at_level("WARNING"):
+            adapter.get_all_memories(limit=1)
+        assert any("truncated" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
