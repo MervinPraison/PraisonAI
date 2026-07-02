@@ -103,12 +103,17 @@ def test_trace_output_response_preserves_unicode_on_utf8():
 # ---------------------------------------------------------------------------
 
 
-def _cp1252_console(force_terminal=True):
-    """Build a Rich Console whose file strictly encodes as cp1252."""
+def _make_console(encoding="cp1252", force_terminal=True):
+    """Build a Rich Console whose file strictly encodes with ``encoding``."""
     from rich.console import Console
 
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+    stream = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict")
     return Console(file=stream, force_terminal=force_terminal), stream
+
+
+def _cp1252_console(force_terminal=True):
+    """Build a Rich Console whose file strictly encodes as cp1252."""
+    return _make_console("cp1252", force_terminal)
 
 
 def test_rich_console_reproduces_cp1252_error():
@@ -165,11 +170,9 @@ def test_display_interaction_no_unicode_error_on_cp1252():
 
 
 def test_display_tool_call_preserves_unicode_on_utf8():
-    from rich.console import Console
     from praisonaiagents.main import display_tool_call
 
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
-    console = Console(file=stream, force_terminal=True)
+    console, stream = _make_console("utf-8")
     display_tool_call("running search", console=console)
     stream.flush()
     stream.seek(0)
