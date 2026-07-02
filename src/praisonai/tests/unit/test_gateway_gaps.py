@@ -6,6 +6,7 @@ Tests the fixes for PraisonAIUI gateway integration gaps.
 
 import pytest
 
+import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -320,3 +321,39 @@ class TestGapS2ReExportWebSocketGateway:
         assert GatewayMessage is not None
         assert EventType is not None
         assert GatewayConfig is not None
+
+
+class TestClientConnLazyDrain:
+    """_ClientConn must not lose frames when registered without a running loop."""
+
+    def _make_conn(self):
+        from praisonai.gateway.server import _ClientConn
+
+        return _ClientConn(
+            ws=Mock(),
+            client_id="c1",
+            max_buffered_bytes=0,
+            max_queued_frames=0,
+        )
+
+    def test_start_without_running_loop_is_noop(self):
+        """start() outside a loop must not raise and leaves the task unset."""
+        conn = self._make_conn()
+        conn.start()
+        assert conn._task is None
+
+    def test_offer_lazily_starts_drain_task(self):
+        """A frame offered on a running loop must start the drain task."""
+        conn = self._make_conn()
+
+        async def _run():
+            # Sync-registered: no drain task yet.
+            assert conn._task is None
+            admitted = conn.offer({"hello": "world"})
+            assert admitted is True
+            # offer() must have lazily scheduled the drain task.
+            assert conn._task is not None
+            conn._closed = True
+            conn._task.cancel()
+
+        asyncio.run(_run())
