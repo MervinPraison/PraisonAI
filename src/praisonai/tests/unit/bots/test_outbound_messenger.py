@@ -159,6 +159,94 @@ def test_send_with_valid_media_uploads_via_adapter(tmp_path):
     assert "1 attachment(s) delivered" in result.summary
 
 
+def test_duplicate_idempotency_key_suppresses_text_and_media(tmp_path):
+    # Issue #2578: a re-fired proactive send with the same idempotency_key must
+    # skip BOTH the text and the media upload — otherwise the attachment would
+    # be re-uploaded even though the text was deduplicated.
+    uploaded = []
+    sent = []
+
+    class FakeBot:
+        platform = "telegram"
+
+        async def send_message(self, channel_id, text):
+            sent.append((channel_id, text))
+
+        async def send_media(self, channel_id, path, caption=None):
+            uploaded.append((channel_id, path, caption))
+
+    fake_bot = FakeBot()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return fake_bot if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+
+    f = tmp_path / "chart.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+
+    origin = SessionSource(platform="telegram", channel_id="123")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    r1 = asyncio.run(
+        messenger.send("origin", "Report", media=[str(f)], idempotency_key="job-1")
+    )
+    r2 = asyncio.run(
+        messenger.send("origin", "Report", media=[str(f)], idempotency_key="job-1")
+    )
+
+    assert r1.ok is True and r2.ok is True  # both report success
+    assert sent == [("123", "Report")]  # text sent exactly once
+    assert uploaded == [("123", str(f), None)]  # media uploaded exactly once
+    assert "duplicate suppressed" in r2.summary.lower()
+
+
+def test_failed_send_does_not_record_idempotency_key(tmp_path):
+    # A failed send must not record the key, so a legitimate retry still sends.
+    sent = []
+
+    class FakeBot:
+        platform = "telegram"
+        fail = True
+
+        async def send_message(self, channel_id, text):
+            if self.fail:
+                raise RuntimeError("transport down")
+            sent.append((channel_id, text))
+
+    fake_bot = FakeBot()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return fake_bot if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+
+    origin = SessionSource(platform="telegram", channel_id="123")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    r1 = asyncio.run(messenger.send("origin", "hi", idempotency_key="job-x"))
+    assert r1.ok is False
+
+    fake_bot.fail = False  # transport recovers
+    r2 = asyncio.run(messenger.send("origin", "hi", idempotency_key="job-x"))
+    assert r2.ok is True
+    assert sent == [("123", "hi")]  # retry reached the platform
+
+
 def test_send_media_unwraps_bot_wrapper_to_adapter(tmp_path):
     # get_bot returns the Bot wrapper; the upload primitive lives on the
     # underlying adapter. The router must unwrap via ``.adapter`` so real

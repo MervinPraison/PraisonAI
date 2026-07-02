@@ -485,6 +485,22 @@ class DeliveryRouter:
         self._seen_keys.move_to_end(idempotency_key)
         while len(self._seen_keys) > self._seen_keys_max:
             self._seen_keys.popitem(last=False)
+
+    def is_duplicate_key(self, idempotency_key: Optional[str]) -> bool:
+        """Public dedup check for callers owning a multi-step send envelope.
+
+        The messenger (:class:`BotOutboundMessenger`) wraps a *text + media*
+        send and must suppress a duplicate before doing any work — otherwise a
+        re-fired job with attachments would double-upload media even though the
+        text was deduplicated. It calls this up-front and records the key via
+        :meth:`remember_key` only after the whole envelope succeeds. Shares the
+        same bounded LRU as :meth:`deliver`'s in-line guard.
+        """
+        return self._is_duplicate(idempotency_key)
+
+    def remember_key(self, idempotency_key: Optional[str]) -> None:
+        """Public counterpart to :meth:`is_duplicate_key` for envelope callers."""
+        self._remember_key(idempotency_key)
     
     def refresh_directory(self) -> None:
         """Refresh the channel directory from the registered bots.
