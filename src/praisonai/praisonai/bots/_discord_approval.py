@@ -25,9 +25,15 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
-from ._approval_base import classify_keyword, classify_with_llm, sync_wrapper
+from ._approval_base import (
+    classify_keyword,
+    classify_with_llm,
+    is_authorized_actor,
+    normalize_approvers,
+    sync_wrapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +53,20 @@ class DiscordApproval:
         channel_id: Discord channel ID to send approval requests to.
         timeout: Max seconds to wait for a response (default 300 = 5 min).
         poll_interval: Seconds between polls (default 3.0).
+        allowed_approvers: Optional set of Discord user IDs permitted to
+            approve/deny. When provided, a reply from any other user is
+            ignored, so an unauthorised member of a shared channel cannot
+            resolve a gated tool. When ``None`` (default) any user may respond
+            (legacy behaviour, backward compatible). Falls back to a
+            comma-separated ``DISCORD_APPROVERS`` env var when not passed.
 
     Example::
 
         from praisonai.bots import DiscordApproval
-        agent = Agent(name="bot", approval=DiscordApproval(channel_id="1234567890"))
+        agent = Agent(
+            name="bot",
+            approval=DiscordApproval(channel_id="1234567890", allowed_approvers=["999"]),
+        )
     """
 
     def __init__(
@@ -60,6 +75,7 @@ class DiscordApproval:
         channel_id: Optional[str] = None,
         timeout: float = 300,
         poll_interval: float = 3.0,
+        allowed_approvers: Optional[Iterable[str]] = None,
     ):
         self._token = token or os.environ.get("DISCORD_BOT_TOKEN", "")
         if not self._token:
@@ -69,6 +85,11 @@ class DiscordApproval:
         self._channel_id = channel_id or os.environ.get("DISCORD_CHANNEL_ID", "")
         self._timeout = timeout
         self._poll_interval = poll_interval
+        if allowed_approvers is None:
+            _env = os.environ.get("DISCORD_APPROVERS", "").strip()
+            if _env:
+                allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
+        self._allowed_approvers = normalize_approvers(allowed_approvers)
         # Optional: set PRAISONAI_DISCORD_SSL_VERIFY=false to skip SSL verify
         # (e.g. corporate proxy / CA issues)
         _v = os.environ.get("PRAISONAI_DISCORD_SSL_VERIFY", "true").lower()
@@ -261,6 +282,17 @@ class DiscordApproval:
                     text = msg.get("content", "").strip()
                     user_id = author.get("id", "unknown")
                     username = author.get("username", user_id)
+
+                    # Authorization boundary: ignore replies from users not in
+                    # the allowlist so an unauthorised channel member cannot
+                    # resolve a gated tool.
+                    if not is_authorized_actor(user_id, self._allowed_approvers):
+                        logger.warning(
+                            "Ignoring Discord approval reply from unauthorized "
+                            "user %s", user_id,
+                        )
+                        continue
+
                     kw = classify_keyword(text)
 
                     if kw == "approve":

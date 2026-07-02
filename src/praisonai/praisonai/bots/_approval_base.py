@@ -11,7 +11,7 @@ This is an internal module — end users import the concrete classes.
 from __future__ import annotations
 
 import logging
-from typing import Set
+from typing import Iterable, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,51 @@ def classify_keyword(text: str) -> str | None:
     if t in DENY_KEYWORDS:
         return "deny"
     return None
+
+
+def normalize_approvers(
+    allowed_approvers: Optional[Union[Iterable[str], str]],
+) -> Optional[Set[str]]:
+    """Normalise an allowed-approver allowlist to a ``set`` of ``str`` IDs.
+
+    Returns ``None`` when *allowed_approvers* is ``None`` (no restriction —
+    legacy behaviour). Otherwise returns a set of stringified IDs so
+    cross-platform user IDs (int Telegram ids, str Slack/Discord ids) compare
+    consistently.
+    """
+    if allowed_approvers is None:
+        return None
+    if isinstance(allowed_approvers, str):
+        allowed_approvers = allowed_approvers.split(",")
+    return {str(a).strip() for a in allowed_approvers if str(a).strip()}
+
+
+def is_authorized_actor(
+    actor: Optional[str],
+    allowed_approvers: Optional[Set[str]],
+) -> bool:
+    """Return whether *actor* may resolve an approval.
+
+    This is the security boundary for chat-native (inline button / keyword
+    reply) approvals: when an allowlist is configured, only an actor in it may
+    approve or deny a gated tool, so an unauthorised group member's tap/reply
+    can never resolve the request.
+
+    Args:
+        actor: The resolving user's ID (may be ``None`` if the channel could
+            not determine it).
+        allowed_approvers: Normalised allowlist (see :func:`normalize_approvers`).
+            ``None`` means no restriction (any actor allowed — legacy
+            behaviour). An empty set denies everyone.
+
+    Returns:
+        ``True`` when there is no restriction, or *actor* is in the allowlist;
+        ``False`` otherwise (including when *actor* is ``None`` but an
+        allowlist is configured).
+    """
+    if allowed_approvers is None:
+        return True
+    return actor is not None and str(actor) in allowed_approvers
 
 
 async def classify_with_llm(
