@@ -119,6 +119,17 @@ class TestShellBoundary:
         result = manager.check("bash:tool --config=/etc/app.conf")
         assert result.needs_approval
 
+    def test_short_flag_attached_path_asks(self, manager):
+        # Short getopt form with the path joined to the flag (``-o/tmp/x``)
+        # must still be boundary-checked.
+        result = manager.check("bash:curl -o/tmp/outside http://example.com")
+        assert result.needs_approval
+
+    def test_short_flag_attached_path_inside_allowed(self, manager, workspace):
+        target = os.path.join(workspace, "out.bin")
+        result = manager.check(f"bash:curl -o{target} http://example.com")
+        assert result.is_allowed
+
     def test_external_executable_path_asks(self, manager):
         # Running an executable outside the workspace must ask.
         result = manager.check("bash:/tmp/outside-tool")

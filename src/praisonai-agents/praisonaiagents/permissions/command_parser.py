@@ -50,6 +50,27 @@ def _looks_like_path(tok: str) -> bool:
     )
 
 
+def _extract_flag_path(tok: str) -> str:
+    """Extract a path operand attached to a short flag (``-o/tmp/x``).
+
+    Handles the ``getopt`` short-option form where the value is joined to the
+    flag with no separator (e.g. ``-o/tmp/outside``, ``-I/usr/include``). The
+    leading dashes and flag letters are stripped and the first embedded
+    path-shaped segment (``/…``, ``~…``, ``$…``) is returned; otherwise ``""``.
+    Long flags (``--flag=…``) are handled separately via ``=`` splitting.
+    """
+    if not tok.startswith("-") or tok.startswith("--"):
+        return ""
+    body = tok.lstrip("-")
+    for i, ch in enumerate(body):
+        if ch in ("/", "~", "$"):
+            candidate = body[i:]
+            if _looks_like_path(candidate):
+                return candidate
+            break
+    return ""
+
+
 @dataclass
 class ShellOp:
     """A single simple-command extracted from a shell command line.
@@ -78,20 +99,25 @@ class ShellOp:
         (``/x``), home-relative (``~``), parent/relative (``./``, ``../``),
         env-prefixed (``$VAR/…``) and bare traversal/relative paths that
         embed ``/`` (e.g. ``subdir/../../etc/passwd``). Path operands passed
-        as joined flags (``--config=/etc/x``) are also unwrapped so the value
-        is boundary-checked. Plain flags and non-path values are ignored.
+        as joined flags (``--config=/etc/x``) or short-flag-attached
+        (``-o/tmp/x``) are also unwrapped so the value is boundary-checked.
+        Plain flags and non-path values are ignored.
         """
         paths: List[str] = []
         for tok in self.args:
             if not tok:
                 continue
-            # Joined-flag form: --flag=<value> / -o=<value>. Unwrap and check
-            # the value component (a path operand can hide behind a flag).
+            # Flag forms can hide a path operand: ``--flag=<value>`` (split on
+            # ``=``) or short getopt ``-o<value>`` (value joined to the flag).
             if tok.startswith("-"):
                 if "=" in tok:
                     value = tok.split("=", 1)[1]
                     if value and _looks_like_path(value):
                         paths.append(value)
+                    continue
+                attached = _extract_flag_path(tok)
+                if attached:
+                    paths.append(attached)
                 continue
             if _looks_like_path(tok):
                 paths.append(tok)
