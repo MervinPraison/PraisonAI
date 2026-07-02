@@ -229,19 +229,41 @@ class MessageHookMixin:
             active_runs=self._active_run_count(),
         )
 
-    def fire_message_received(self, message: Any) -> None:
+    def fire_message_received(self, message: Any) -> Dict[str, Any]:
         """Fire MESSAGE_RECEIVED hook when an incoming message arrives.
+
+        Hooks/plugins can gate or rewrite an inbound message before it is
+        dispatched to the agent, symmetric with :meth:`fire_message_sending`
+        on the outbound side. A hook may:
+
+        * ``deny``/``block`` the event to **drop** the message (the adapter
+          should skip agent dispatch entirely), or
+        * return ``modified_data["content"]`` to **rewrite** the inbound
+          content (e.g. PII redaction) before it reaches the agent.
+
+        When a hook rewrites the content, the ``message.content`` attribute is
+        updated in place (when writable) so adapters that ignore the return
+        value still see the redacted content.
 
         Args:
             message: A BotMessage instance.
+
+        Returns:
+            dict with keys ``content`` (possibly modified) and ``drop`` (bool).
+            Adapters should skip dispatch when ``drop`` is ``True`` and use
+            ``content`` for the (possibly redacted) inbound text.
         """
         # Passive inbound liveness: refresh on every inbound message so the
         # health monitor can detect a deaf-but-reachable channel even when the
         # outbound probe keeps passing.
         self._note_inbound()
+        content = getattr(message, 'content', '')
+        if not isinstance(content, str):
+            content = str(content)
+        result: Dict[str, Any] = {"content": content, "drop": False}
         runner = self._get_hook_runner()
         if runner is None:
-            return
+            return result
         try:
             from praisonaiagents.hooks.types import HookEvent
             from praisonaiagents.hooks.events import MessageReceivedInput
@@ -249,9 +271,6 @@ class MessageHookMixin:
             platform = getattr(self, 'platform', 'unknown')
             sender = getattr(message, 'sender', None)
             channel = getattr(message, 'channel', None)
-            content = getattr(message, 'content', '')
-            if not isinstance(content, str):
-                content = str(content)
 
             event_input = MessageReceivedInput(
                 session_id="",
@@ -266,9 +285,26 @@ class MessageHookMixin:
                 channel_type=getattr(channel, 'channel_type', '') if channel else '',
                 message_id=getattr(message, 'message_id', ''),
             )
-            runner.execute_sync(HookEvent.MESSAGE_RECEIVED, event_input)
+            hook_results = runner.execute_sync(HookEvent.MESSAGE_RECEIVED, event_input)
+            if runner.is_blocked(hook_results):
+                result["drop"] = True
+                return result
+            # Check for modified (e.g. redacted) content in results
+            if hook_results:
+                for hr in hook_results:
+                    output = getattr(hr, 'output', None)
+                    if output is not None:
+                        modified = getattr(output, 'modified_data', None)
+                        if isinstance(modified, dict) and 'content' in modified:
+                            new_content = modified["content"]
+                            result["content"] = new_content
+                            try:
+                                message.content = new_content
+                            except Exception:
+                                pass
         except Exception as e:
             logger.debug(f"MESSAGE_RECEIVED hook error (non-fatal): {e}")
+        return result
 
     def fire_message_sending(
         self, channel_id: str, content: str, reply_to: Optional[str] = None

@@ -228,7 +228,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             # Add channel type for pairing system
             bot_message._channel_type = "slack"
             
-            self.fire_message_received(bot_message)
+            if self.fire_message_received(bot_message).get("drop"):
+                logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+                return
             
             # Check if channel is allowed
             if not self.config.is_channel_allowed(bot_message.channel.channel_id if bot_message.channel else ""):

@@ -376,8 +376,10 @@ class EmailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     
     async def _handle_message(self, message: BotMessage) -> None:
         """Handle an incoming email message."""
-        # Fire message hooks
-        self.fire_message_received(message)
+        # Fire message hooks (inbound gate: may drop or redact)
+        if self.fire_message_received(message).get("drop"):
+            logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+            return
         
         # Check command prefix in subject
         subject = message.metadata.get("subject", "")
