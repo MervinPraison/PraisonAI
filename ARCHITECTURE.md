@@ -1,24 +1,27 @@
 # PraisonAI Architecture
 
-> **Last updated:** 2026-06-24
+> **Last updated:** 2026-07-02 (v4.6.110 — C7.1 package boundaries)
 >
 > Strategic architecture document for PraisonAI — a multi-agent AI framework.
-> Covers system design, runtime architecture, data contracts, reliability,
-> observability, and the 2-quarter road map.
+> Covers **Python three-tier package model (C7.1)**, system design, runtime
+> architecture, data contracts, reliability, observability, and the road map.
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)
-2. [System Overview](#2-system-overview)
-3. [Layered Architecture](#3-layered-architecture)
-4. [Core Data Contracts](#4-core-data-contracts)
-5. [Reliability by Design](#5-reliability-by-design)
-6. [Observability & Telemetry](#6-observability--telemetry)
-7. [Replay & Checkpointing](#7-replay--checkpointing)
-8. [Implementation Roadmap](#8-implementation-roadmap)
-9. [Success Metrics](#9-success-metrics)
+2. [Python Three-Tier Package Model (C7.1)](#2-python-three-tier-package-model-c71)
+3. [System Overview](#3-system-overview)
+4. [Layered Architecture](#4-layered-architecture)
+5. [Core Data Contracts](#5-core-data-contracts)
+6. [Reliability by Design](#6-reliability-by-design)
+7. [Observability & Telemetry](#7-observability--telemetry)
+8. [Replay & Checkpointing](#8-replay--checkpointing)
+9. [Implementation Roadmap](#9-implementation-roadmap)
+10. [Success Metrics](#10-success-metrics)
+
+**Related boundary docs:** [`src/praisonai/tests/C7.1_BOUNDARIES.md`](src/praisonai/tests/C7.1_BOUNDARIES.md) · [`src/praisonai/tests/C7_VERIFICATION.md`](src/praisonai/tests/C7_VERIFICATION.md) · [`src/praisonai/tests/C8_BACKLOG.md`](src/praisonai/tests/C8_BACKLOG.md) · [`src/praisonai-agents/AGENTS.md`](src/praisonai-agents/AGENTS.md) §2.4
 
 ---
 
@@ -48,7 +51,85 @@ Orchestration + Observability** core to unlock adoption and trust:
 
 ---
 
-## 2. System Overview
+## 2. Python Three-Tier Package Model (C7.1)
+
+**Release:** v4.6.110 · `praisonaiagents` 1.6.110 · `praisonai` 4.6.110 · `praisonai-code` 0.0.8
+
+The Python monorepo publishes three tiers with strict dependency direction. C7
+delivered a standalone agentic hot path; C7.1 formalised ownership and import
+gates.
+
+```mermaid
+flowchart TB
+  subgraph tier1 [Tier 1 — Core SDK]
+    Agents["praisonaiagents<br/>Agent, tools, memory, hooks, protocols"]
+  end
+
+  subgraph tier2 [Tier 2 — Terminal CLI]
+    Code["praisonai-code<br/>run, chat, code, Typer, runtime, LLM, tools"]
+  end
+
+  subgraph tier3 [Tier 3 — Wrapper]
+    Wrapper["praisonai<br/>gateway, bots, framework_adapters, train, serve"]
+  end
+
+  Agents --> Code
+  Agents --> Wrapper
+  Code -.->|"lazy bridge only<br/>no PyPI dep"| Wrapper
+```
+
+| Tier | Package | Owns | Must not depend on |
+|------|---------|------|-------------------|
+| 1 | `src/praisonai-agents/` | Agent, tools, memory, hooks, `frameworks/` protocols | `praisonai`, `praisonai-code` |
+| 2 | `src/praisonai-code/` | `run`/`chat`/`code`, Typer, runtime, LLM, tool resolution | **`praisonai` as a PyPI dependency** (optional lazy imports via `_wrapper_bridge` only) |
+| 3 | `src/praisonai/` | Gateway, bots, `framework_adapters/`, capabilities, train, serve | — |
+
+**Publish order:** `praisonaiagents` → `praisonai-code` → `praisonai`
+
+### Dependency rule (validated)
+
+| Question | Answer |
+|----------|--------|
+| Does `praisonai-code` declare `praisonai` in `pyproject.toml`? | **No** — only `praisonaiagents` + CLI/runtime deps |
+| Does `praisonai` declare `praisonai-code`? | **Yes** — one-way chain, no PyPI cycle |
+| Can `praisonai-code` import `praisonai.*` at runtime? | **Only lazily** via `praisonai_code._wrapper_bridge` for optional features; **not** on the agentic hot path |
+| Does standalone `pip install praisonai-code` work? | **Yes** — CI smoke validates imports + `praisonai-code run` without the wrapper |
+
+### CLI routing
+
+```mermaid
+flowchart LR
+  User[User] --> Entry{Entry point}
+  Entry -->|pip install praisonai-code| CodeCLI["praisonai-code run/chat/code"]
+  Entry -->|pip install praisonai| WrapperCLI["praisonai …"]
+  WrapperCLI --> Router["praisonai.__main__"]
+  Router --> CodePath["praisonai_code.cli.app"]
+  Router --> Legacy["praisonai.cli.main"]
+  CodePath --> HotPath["run / chat / code"]
+  CodePath --> Bridge{"wrapper_available?"}
+  Bridge -->|yes| WrapperCmds["bot, gateway, pairing, …"]
+  Bridge -->|no| Hidden["Wrapper commands hidden"]
+```
+
+### Import gates (CI enforced)
+
+- **Hot path:** no module-level `from praisonai` in `main.py`, `app.py`, `run.py`, `chat.py`, `code.py`
+- **Regression baseline:** 225 wrapper import lines max (`scripts/check_c7_imports.sh`)
+- **Allowlist:** reviewed files only (`scripts/c7_wrapper_import_allowlist.txt`)
+
+### C7 / C7.1 status
+
+| Milestone | Status |
+|-----------|--------|
+| Standalone agentic hot path | **Complete** |
+| `_wrapper_bridge` hardening | **Complete** |
+| Import gate + allowlist | **Complete** |
+| Boundary tests + CI smoke | **Complete** |
+| C8+ (zero lazy imports, package splits) | **Future** — see [`C8_BACKLOG.md`](src/praisonai/tests/C8_BACKLOG.md) |
+
+---
+
+## 3. System Overview
 
 ```
 User/SDK/CLI
@@ -75,33 +156,42 @@ User/SDK/CLI
 
 ### Existing Architecture (Python SDK)
 
-The Python SDK is the primary runtime and is organised as follows:
+The Python SDK is organised as three publishable tiers (see [§2](#2-python-three-tier-package-model-c71)):
 
-- `src/praisonai/` — Core runtime and agent abstractions
-  - `agents/` — Agent types (chat, code, realtime, audio, vision, etc.)
-  - `llm/` — Model runtime with provider routing, rate limiting, failover
-  - `tools/` — Tool runtime with sandbox, approval, retry
-  - `memory/` — Memory runtime (in-memory, SQLite, MongoDB, Mem0 adapters)
-  - `knowledge/` — Knowledge management (indexing, retrieval, chunking)
-  - `workflow/` — Workflow engine (YAML/SDK-based orchestration)
-  - `telemetry/` — Observability, monitoring, token tracking
-  - `reliability/` — Error classification, circuit breaker, failover
-  - `skill/` — Plugin/skill system
-  - `loop_detection/` — Doom loop detection and prevention
-  - `mcp/` — MCP protocol support
-  - `a2a/`, `a2ui/` — Agent-to-agent and agent-to-UI protocols
+- `src/praisonai-agents/` — Core SDK (`Agent`, tools, memory, hooks, protocols)
+- `src/praisonai-code/` — Terminal CLI (`run`, `chat`, `code`, Typer, runtime, LLM)
+- `src/praisonai/` — Wrapper (gateway, bots, `framework_adapters/`, integrations)
+
+Core execution modules live in `praisonaiagents`:
+
+- `agent/` — Agent class, handoff, autonomy
+- `llm/` — Model runtime with provider routing, rate limiting, failover
+- `tools/` — Tool runtime with sandbox, approval, retry
+- `memory/` — Memory runtime (in-memory, SQLite, MongoDB, Mem0 adapters)
+- `knowledge/` — Knowledge management (indexing, retrieval, chunking)
+- `workflows/` — Workflow engine (YAML/SDK-based orchestration)
+- `hooks/`, `bus/` — Hook system and event bus
+- `mcp/` — MCP protocol support
+- `a2a/`, `a2ui/` — Agent-to-agent and agent-to-UI protocols (wrapper/SDK)
+
+Wrapper-only surfaces remain in `src/praisonai/`:
+
+  - `gateway/`, `bots/` — Multi-bot orchestration (BotOS)
+  - `framework_adapters/` — CrewAI, AutoGen, PraisonAI adapters
+  - `cli/commands/` — Wrapper commands (`bot`, `gateway`, `pairing`, …)
 
 ### Multi-SDK Layout
 
-- **Python SDK** — Primary runtime (`src/praisonai/`)
+- **Python Core SDK** — `src/praisonai-agents/` (`praisonaiagents`)
+- **Python Terminal CLI** — `src/praisonai-code/` (`praisonai-code`)
+- **Python Wrapper** — `src/praisonai/` (`praisonai`)
 - **TypeScript SDK** — JS/TS runtime (`ts-sdk/`)
 - **Rust SDK** — High-performance Rust runtime (`rust-sdk/`)
-- **CLI** — Command-line interface (`cli/`)
 - **UI** — Web UI (`ui/`)
 
 ---
 
-## 3. Layered Architecture
+## 4. Layered Architecture
 
 ```mermaid
 flowchart TB
@@ -197,7 +287,7 @@ flowchart TB
 
 ---
 
-## 4. Core Data Contracts
+## 5. Core Data Contracts
 
 ### RunRequest
 
@@ -255,7 +345,7 @@ Checkpoint {
 
 ---
 
-## 5. Reliability by Design
+## 6. Reliability by Design
 
 ### Error Taxonomy
 
@@ -308,7 +398,7 @@ def test_agent_workflow():
 
 ---
 
-## 6. Observability & Telemetry
+## 7. Observability & Telemetry
 
 ### Current Telemetry Stack
 
@@ -335,7 +425,7 @@ PraisonAI already includes:
 
 ---
 
-## 7. Replay & Checkpointing
+## 8. Replay & Checkpointing
 
 ### Design
 
@@ -376,7 +466,15 @@ sequenceDiagram
 
 ---
 
-## 8. Implementation Roadmap
+## 9. Implementation Roadmap
+
+### Completed (C7 / C7.1 — v4.6.110)
+
+| Project | Description | Status |
+|---------|-------------|--------|
+| C7 hot path | Standalone `praisonai-code run/chat/code` without wrapper import | **Complete** |
+| C7.1 boundaries | Three-tier ownership, `_wrapper_bridge`, import gates | **Complete** |
+| CI parity | Smoke standalone block + pre-existing test fixes (#2560) | **Complete** |
 
 ### Quarter 1: Trust Foundation (Q3 2026)
 
@@ -414,7 +512,7 @@ gantt
 
 ---
 
-## 9. Success Metrics
+## 10. Success Metrics
 
 ### KPI Targets
 
