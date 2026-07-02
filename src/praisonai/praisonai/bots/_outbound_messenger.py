@@ -74,6 +74,7 @@ class BotOutboundMessenger:
         text: str,
         *,
         media: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> DeliveryResult:
         """Deliver ``text`` to a symbolic ``target`` via the delivery router.
 
@@ -94,8 +95,31 @@ class BotOutboundMessenger:
             )
 
         resolved = f"{platform}:{channel_id}"
+
+        # Idempotency covers the *whole* text+media envelope (issue #2578). A
+        # duplicate proactive send must skip both the text and any media upload,
+        # otherwise a re-fired job with attachments would double-upload media
+        # even though the text was suppressed. We therefore check the key here
+        # (before any work) and only record it after the full send succeeds —
+        # deferring the router's own recording by not passing the key down.
+        if idempotency_key and self._router.is_duplicate_key(idempotency_key):
+            logger.info(
+                "BotOutboundMessenger: suppressing duplicate proactive send "
+                "(idempotency_key=%s) to %s",
+                idempotency_key,
+                resolved,
+            )
+            return DeliveryResult(
+                ok=True,
+                target=resolved,
+                summary=f"Sent to {resolved} (duplicate suppressed).",
+                detail="idempotency_key already delivered",
+            )
+
         try:
-            delivered = await self._router.deliver(target, text, self._origin)
+            delivered = await self._router.deliver(
+                target, text, self._origin
+            )
         except Exception as e:  # pragma: no cover — defensive
             logger.error("BotOutboundMessenger.send failed for %s: %s", target, e)
             return DeliveryResult(
@@ -132,6 +156,12 @@ class BotOutboundMessenger:
                 )
             else:
                 summary = f"Sent to {resolved} (media not attached)."
+
+        # Record the key only after the full text+media envelope has been sent,
+        # so a failed send stays retryable and a re-fire is deduplicated across
+        # both text and attachments.
+        if idempotency_key:
+            self._router.remember_key(idempotency_key)
 
         return DeliveryResult(
             ok=True,

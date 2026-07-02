@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
@@ -20,6 +22,24 @@ if TYPE_CHECKING:
     from .botos import BotOS
 
 logger = logging.getLogger(__name__)
+
+
+class DeliveryNotAccepted(Exception):
+    """Raised internally when an adapter reports a send failure without raising.
+
+    Some adapters signal a failed delivery by returning an explicit ``False``
+    from ``send_message`` instead of raising. :meth:`DeliveryRouter.deliver`
+    normalises that into this exception so the failure flows through the same
+    path as a raised error: the idempotency key is not recorded (the send stays
+    retryable) and a dead target is not cleared. It is a transient failure
+    marker — never classified as a permanent target failure — so existing
+    retry/DLQ behaviour is unchanged.
+
+    Note: only an explicit ``False`` is treated as failure. The dominant adapter
+    convention is to return a truthy message object (or ``None``/void for
+    lightweight adapters) on success and to *raise* on failure, so ``None`` is
+    deliberately left as a success signal to avoid regressing those paths.
+    """
 
 
 def detect_chat_type(platform: str, chat_id: str) -> str:
@@ -399,6 +419,88 @@ class DeliveryRouter:
         # Optional self-healing dead-target registry (issue #2486). Default OFF:
         # when None, delivery behaves exactly as before (no suppression).
         self._dead_targets = dead_targets
+        # Per-platform token-bucket rate limiters for the proactive path
+        # (issue #2578). Agent-initiated sends previously bypassed the limiter
+        # entirely, so a burst of scheduled/background sends could trip platform
+        # 429s with no throttle. Built lazily per platform; if the live adapter
+        # already owns a ``_rate_limiter`` we reuse it so proactive and reply
+        # traffic share one bucket instead of double-counting.
+        self._rate_limiters: Dict[str, Any] = {}
+        # Bounded in-memory idempotency guard so a retried proactive send (e.g. a
+        # scheduled job re-fired after a crash) with a caller-stable key does not
+        # double-post. Best-effort and per-process; the outbox UNIQUE key remains
+        # the durable dedup on the reply path.
+        self._seen_keys: "OrderedDict[str, float]" = OrderedDict()
+        self._seen_keys_max: int = 4096
+
+    def _rate_limiter_for(self, platform: str) -> Optional[Any]:
+        """Return a rate limiter for ``platform``, reusing the adapter's own.
+
+        Prefers the live adapter's ``_rate_limiter`` (so proactive and reply
+        sends share one bucket) and otherwise lazily builds a platform-default
+        limiter. Returns None only if the rate-limit helper cannot be imported,
+        in which case delivery proceeds unthrottled exactly as before.
+        """
+        bot = self._botos.get_bot(platform)
+        adapter = getattr(bot, "adapter", None) or bot
+        existing = getattr(adapter, "_rate_limiter", None)
+        if existing is not None:
+            return existing
+        limiter = self._rate_limiters.get(platform)
+        if limiter is not None:
+            return limiter
+        try:
+            from ._rate_limit import RateLimiter
+
+            limiter = RateLimiter.for_platform(platform)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug(
+                "DeliveryRouter: rate limiter unavailable for %s", platform,
+                exc_info=True,
+            )
+            return None
+        self._rate_limiters[platform] = limiter
+        return limiter
+
+    def _is_duplicate(self, idempotency_key: Optional[str]) -> bool:
+        """Report whether ``idempotency_key`` was already delivered this process.
+
+        Best-effort, bounded LRU dedup for the proactive path. Returns True when
+        the key maps to a prior *successful* send (suppress the re-send), False
+        for a fresh or absent key. The key is only recorded once delivery
+        succeeds (see :meth:`_remember_key`) so a failed send stays retryable.
+        """
+        if not idempotency_key:
+            return False
+        if idempotency_key in self._seen_keys:
+            self._seen_keys.move_to_end(idempotency_key)
+            return True
+        return False
+
+    def _remember_key(self, idempotency_key: Optional[str]) -> None:
+        """Record a successfully delivered ``idempotency_key`` for future dedup."""
+        if not idempotency_key:
+            return
+        self._seen_keys[idempotency_key] = time.monotonic()
+        self._seen_keys.move_to_end(idempotency_key)
+        while len(self._seen_keys) > self._seen_keys_max:
+            self._seen_keys.popitem(last=False)
+
+    def is_duplicate_key(self, idempotency_key: Optional[str]) -> bool:
+        """Public dedup check for callers owning a multi-step send envelope.
+
+        The messenger (:class:`BotOutboundMessenger`) wraps a *text + media*
+        send and must suppress a duplicate before doing any work — otherwise a
+        re-fired job with attachments would double-upload media even though the
+        text was deduplicated. It calls this up-front and records the key via
+        :meth:`remember_key` only after the whole envelope succeeds. Shares the
+        same bounded LRU as :meth:`deliver`'s in-line guard.
+        """
+        return self._is_duplicate(idempotency_key)
+
+    def remember_key(self, idempotency_key: Optional[str]) -> None:
+        """Public counterpart to :meth:`is_duplicate_key` for envelope callers."""
+        self._remember_key(idempotency_key)
     
     def refresh_directory(self) -> None:
         """Refresh the channel directory from the registered bots.
@@ -466,7 +568,14 @@ class DeliveryRouter:
         # If nothing matches, it might be an undefined alias
         raise ValueError(f"Cannot resolve target '{target}': not a platform, alias, or platform:channel format")
     
-    async def deliver(self, target: str, text: str, origin: Optional[SessionSource] = None) -> bool:
+    async def deliver(
+        self,
+        target: str,
+        text: str,
+        origin: Optional[SessionSource] = None,
+        *,
+        idempotency_key: Optional[str] = None,
+    ) -> bool:
         """
         Deliver a message to a target.
         
@@ -474,6 +583,10 @@ class DeliveryRouter:
             target: Target specification (origin|platform|platform:channel|alias)
             text: Message content to deliver
             origin: Optional source of the original request
+            idempotency_key: Optional caller-stable key (issue #2578). When
+                supplied, a repeat proactive send with the same key is suppressed
+                in-process so a retried scheduled/background job does not
+                double-post. The adapter's own outbox remains the durable dedup.
             
         Returns:
             True if delivered successfully, False otherwise
@@ -485,6 +598,19 @@ class DeliveryRouter:
             if not bot:
                 logger.warning(f"DeliveryRouter: platform '{platform}' not available")
                 return False
+
+            # Idempotency short-circuit (issue #2578): suppress a duplicate
+            # proactive send whose caller-stable key we have already delivered,
+            # so a re-fired scheduled job cannot double-post.
+            if self._is_duplicate(idempotency_key):
+                logger.info(
+                    "DeliveryRouter: suppressing duplicate proactive send "
+                    "(idempotency_key=%s) to %s:%s",
+                    idempotency_key,
+                    platform,
+                    channel_id,
+                )
+                return True
             
             # Short-circuit known-dead targets (issue #2486): the bot was
             # kicked/blocked or the chat no longer exists, so skip the doomed
@@ -511,9 +637,54 @@ class DeliveryRouter:
                     )
                     return False
             
+            # Rate-limit the proactive path (issue #2578): a burst of
+            # agent-initiated/scheduled sends must pass through the same
+            # token-bucket the reply/streaming path uses so it cannot trip
+            # platform 429s. Best-effort — if no limiter is available delivery
+            # proceeds unthrottled exactly as before.
+            limiter = self._rate_limiter_for(platform)
+            if limiter is not None:
+                try:
+                    await limiter.acquire(channel_id)
+                except Exception:
+                    logger.debug(
+                        "DeliveryRouter: rate-limit acquire failed for %s:%s",
+                        platform,
+                        channel_id,
+                        exc_info=True,
+                    )
+
             try:
-                await bot.send_message(channel_id, text)
+                result = await bot.send_message(channel_id, text)
+                # An adapter that explicitly returns ``False`` is signalling a
+                # failed send without raising. Treat that as a failure so we do
+                # not cache the idempotency key or clear a dead target for a
+                # message that never left the process. The check is deliberately
+                # ``is False`` only: the dominant convention across adapters is
+                # to return a truthy message object on success, ``None``/void on
+                # success for lightweight adapters, and to *raise* on failure —
+                # so ``None`` must NOT be treated as a failure or those succeed
+                # paths would regress.
+                if result is False:
+                    raise DeliveryNotAccepted(
+                        f"{platform} adapter reported no delivery "
+                        f"(send_message returned {result!r})"
+                    )
             except Exception as send_err:
+                # A server-mandated Retry-After widens the limiter's lane so the
+                # next proactive sends hold off instead of re-tripping the 429.
+                if limiter is not None:
+                    try:
+                        from ._resilience import server_retry_after
+
+                        mandated = server_retry_after(send_err)
+                        if mandated is not None and mandated > 0:
+                            await limiter.penalise(channel_id, mandated)
+                    except Exception:
+                        logger.debug(
+                            "DeliveryRouter: rate-limit penalise failed",
+                            exc_info=True,
+                        )
                 # On a *confirmed permanent* failure, mark the whole target dead
                 # so future cycles short-circuit. Transient errors and
                 # message-scoped 404s stay on the existing retry path.
@@ -541,6 +712,10 @@ class DeliveryRouter:
                     logger.debug(
                         "DeliveryRouter: dead-target clear failed", exc_info=True
                     )
+
+            # Record the idempotency key only after a confirmed success so a
+            # failed send stays retryable while a re-fired job is deduplicated.
+            self._remember_key(idempotency_key)
 
             logger.info(f"DeliveryRouter: delivered to {platform}:{channel_id}")
             return True
