@@ -410,3 +410,106 @@ class TestDeliveryRouterWiring:
         assert reg.is_dead("telegram", "-1001") is True
         # Clock reset: no longer immediately re-probable.
         assert reg.should_reprobe("telegram", "-1001") is False
+
+
+# ─── Proactive durability: rate-limit + idempotency (issue #2578) ────
+class TestProactiveDurability:
+    """The agent-initiated (proactive) path must share the reply path's
+    delivery guarantees: pass through a rate limiter and dedup retried sends
+    via a caller-stable idempotency key.
+    """
+
+    @pytest.mark.asyncio
+    async def test_deliver_acquires_rate_limiter(self):
+        bot = _FakeBot()
+        router = DeliveryRouterFor(bot)
+
+        acquired = []
+
+        class _Limiter:
+            async def acquire(self, channel_id=None):
+                acquired.append(channel_id)
+
+            async def penalise(self, channel_id, seconds):
+                pass
+
+        router._rate_limiters["telegram"] = _Limiter()
+
+        ok = await router.deliver("telegram", "hi")
+        assert ok is True
+        assert acquired == ["-1001"]  # limiter was consulted before send
+        assert bot.sends == [("-1001", "hi")]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_idempotency_key_suppressed(self):
+        bot = _FakeBot()
+        router = DeliveryRouterFor(bot)
+
+        ok1 = await router.deliver("telegram", "reminder", idempotency_key="job-1")
+        ok2 = await router.deliver("telegram", "reminder", idempotency_key="job-1")
+
+        assert ok1 is True and ok2 is True  # both report success
+        assert bot.sends == [("-1001", "reminder")]  # but only sent once
+
+    @pytest.mark.asyncio
+    async def test_distinct_keys_both_delivered(self):
+        bot = _FakeBot()
+        router = DeliveryRouterFor(bot)
+
+        await router.deliver("telegram", "a", idempotency_key="job-1")
+        await router.deliver("telegram", "b", idempotency_key="job-2")
+
+        assert bot.sends == [("-1001", "a"), ("-1001", "b")]
+
+    @pytest.mark.asyncio
+    async def test_no_key_never_deduplicated(self):
+        bot = _FakeBot()
+        router = DeliveryRouterFor(bot)
+
+        await router.deliver("telegram", "x")
+        await router.deliver("telegram", "x")
+
+        assert bot.sends == [("-1001", "x"), ("-1001", "x")]
+
+    @pytest.mark.asyncio
+    async def test_failed_send_key_stays_retryable(self):
+        # A failed send must NOT record the key, so a legitimate retry proceeds.
+        bot = _FakeBot(exc=_StatusError(503, "service unavailable"))
+        router = DeliveryRouterFor(bot)
+
+        ok1 = await router.deliver("telegram", "hi", idempotency_key="job-9")
+        assert ok1 is False
+
+        bot.exc = None  # transport recovers
+        ok2 = await router.deliver("telegram", "hi", idempotency_key="job-9")
+        assert ok2 is True
+        assert bot.sends[-1] == ("-1001", "hi")  # retry reached the platform
+
+    @pytest.mark.asyncio
+    async def test_retry_after_penalises_limiter(self):
+        bot = _FakeBot(exc=_StatusError(429, "Too Many Requests: retry after 7"))
+        router = DeliveryRouterFor(bot)
+
+        penalties = []
+
+        class _Limiter:
+            async def acquire(self, channel_id=None):
+                pass
+
+            async def penalise(self, channel_id, seconds):
+                penalties.append((channel_id, seconds))
+
+        router._rate_limiters["telegram"] = _Limiter()
+
+        ok = await router.deliver("telegram", "hi")
+        assert ok is False
+        assert penalties == [("-1001", 7.0)]  # server Retry-After widened the lane
+
+
+def DeliveryRouterFor(bot):
+    """Build a router over a fake botos with a telegram home channel."""
+    from praisonai.bots.delivery import DeliveryRouter
+
+    router = DeliveryRouter(_FakeBotOS(bot))
+    router.directory.set_home_channel("telegram", "-1001")
+    return router

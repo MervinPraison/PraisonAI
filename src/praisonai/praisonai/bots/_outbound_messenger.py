@@ -74,6 +74,7 @@ class BotOutboundMessenger:
         text: str,
         *,
         media: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> DeliveryResult:
         """Deliver ``text`` to a symbolic ``target`` via the delivery router.
 
@@ -95,7 +96,9 @@ class BotOutboundMessenger:
 
         resolved = f"{platform}:{channel_id}"
         try:
-            delivered = await self._router.deliver(target, text, self._origin)
+            delivered = await self._router.deliver(
+                target, text, self._origin, idempotency_key=idempotency_key
+            )
         except Exception as e:  # pragma: no cover — defensive
             logger.error("BotOutboundMessenger.send failed for %s: %s", target, e)
             return DeliveryResult(
