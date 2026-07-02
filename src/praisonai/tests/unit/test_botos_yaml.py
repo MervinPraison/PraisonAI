@@ -125,7 +125,7 @@ class TestBotOSFromConfigEnhanced:
         def fake_custom_tool():
             return "custom"
 
-        import praisonai_code.tool_resolver as tr
+        import praisonai.tool_resolver as tr
 
         original_resolve = tr.ToolResolver.resolve
 
