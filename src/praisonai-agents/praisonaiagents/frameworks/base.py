@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
 from .protocols import FrameworkAdapterProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class BaseFrameworkAdapter:
@@ -18,10 +22,21 @@ class BaseFrameworkAdapter:
     requires_tools_extra: bool = False
     is_router: bool = False
 
+    # Adapters with a native async ``run`` path set this True and override
+    # ``arun``. When False (default), ``arun`` offloads the sync ``run`` to a
+    # bounded, per-adapter thread pool so one slow run cannot starve the
+    # process-wide default executor used by ``asyncio.to_thread``.
+    SUPPORTS_ASYNC: bool = False
+
+    # Bounded per-adapter offload pool. Kept small on purpose: framework runs
+    # are long-lived, so a large pool provides no benefit and just hides the
+    # lack of a native async path. Overridable per subclass / instance.
+    _THREAD_OFFLOAD_MAX_WORKERS: int = 4
+
     DEFAULT_MODEL = "openai/gpt-4o-mini"
 
     def __init__(self) -> None:
-        pass
+        self._thread_pool: Optional[ThreadPoolExecutor] = None
 
     def _resolve_llm(self, spec: Any, llm_config: Optional[List[Dict]]) -> str:
         """Resolve a model name from per-agent spec and shared llm_config."""
@@ -61,6 +76,29 @@ class BaseFrameworkAdapter:
     def setup(self, *, framework_tag: str) -> None:
         pass
 
+    def _get_thread_pool(self) -> ThreadPoolExecutor:
+        """Lazily create the bounded, per-adapter offload executor."""
+        # Defensive: tolerate subclasses that don't call super().__init__().
+        if getattr(self, "_thread_pool", None) is None:
+            self._thread_pool = ThreadPoolExecutor(
+                max_workers=self._THREAD_OFFLOAD_MAX_WORKERS,
+                thread_name_prefix=f"{self.name or 'framework'}-arun",
+            )
+        return self._thread_pool
+
+    async def _thread_offload_run(self, *args: Any, **kwargs: Any) -> str:
+        """Run the sync ``run`` on this adapter's bounded thread pool.
+
+        Unlike ``asyncio.to_thread`` (which shares the process-wide default
+        executor), this isolates the offload so one slow framework run cannot
+        starve every other async caller in the process.
+        """
+        loop = asyncio.get_running_loop()
+        pool = self._get_thread_pool()
+        return await loop.run_in_executor(
+            pool, lambda: self.run(*args, **kwargs)
+        )
+
     async def arun(
         self,
         config: Dict[str, Any],
@@ -72,8 +110,15 @@ class BaseFrameworkAdapter:
         task_callback: Optional[Callable] = None,
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
-        return await asyncio.to_thread(
-            self.run,
+        if not self.SUPPORTS_ASYNC:
+            logger.warning(
+                "Adapter %r has no native async path; delegating to a bounded "
+                "thread pool (max_workers=%d). Concurrent async callers will "
+                "contend for this pool.",
+                self.name or type(self).__name__,
+                self._THREAD_OFFLOAD_MAX_WORKERS,
+            )
+        return await self._thread_offload_run(
             config,
             llm_config,
             topic,
@@ -84,7 +129,10 @@ class BaseFrameworkAdapter:
         )
 
     def cleanup(self) -> None:
-        pass
+        pool = getattr(self, "_thread_pool", None)
+        if pool is not None:
+            pool.shutdown(wait=False)
+            self._thread_pool = None
 
     def resolve_alias(self) -> str:
         return self.name

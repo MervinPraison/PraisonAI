@@ -18,6 +18,8 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     name = "autogen_v2"  # Changed from "autogen" to "autogen_v2" per PR fix
     install_hint = 'pip install "praisonai-frameworks[autogen]"'  # v0.2 only
     requires_tools_extra = True
+    # AutoGen v0.2 is sync-only; arun offloads run() to a bounded pool.
+    SUPPORTS_ASYNC = False
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.2 is available for import."""

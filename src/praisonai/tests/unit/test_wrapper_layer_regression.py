@@ -178,10 +178,12 @@ class TestCliBackendValidation:
             agent = Agent(name="test", cli_backend=config)
             mock_resolve.assert_called_once_with(config)
         
-        # Test that protocol instances pass through unchanged
-        mock_instance = MagicMock()
-        mock_instance.process_turn = MagicMock()  # Duck typing for protocol
-        
+        # Test that protocol instances pass through unchanged. A CliBackendProtocol
+        # instance exposes both execute() and stream() (see cli_backend/protocols.py).
+        mock_instance = MagicMock(spec=["execute", "stream"])
+        mock_instance.execute = MagicMock()
+        mock_instance.stream = MagicMock()
+
         with patch('praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
             agent = Agent(name="test", cli_backend=mock_instance)
             # Should not call resolver for already-resolved instances

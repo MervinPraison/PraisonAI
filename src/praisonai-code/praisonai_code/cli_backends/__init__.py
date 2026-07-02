@@ -6,6 +6,16 @@ Wrapper implementations of CLI backend protocols following AGENTS.md:
 - Lazy loading to avoid heavy imports at startup
 """
 
+def _is_cli_backend_instance(obj) -> bool:
+    """Return True if ``obj`` is a pre-resolved CliBackendProtocol instance.
+
+    A CliBackendProtocol instance exposes both ``execute()`` and ``stream()``.
+    This single predicate is the one place the protocol shape is checked, so any
+    future protocol change touches exactly one function.
+    """
+    return hasattr(obj, "execute") and hasattr(obj, "stream")
+
+
 def resolve_cli_backend_config(value):
     """Resolve a YAML/Python cli_backend value (str | dict | instance) to a CliBackendProtocol.
     
@@ -22,11 +32,16 @@ def resolve_cli_backend_config(value):
     """
     if value is None:
         return None
-        
-    # If already an instance, return as-is (duck typing)
-    if callable(value) or hasattr(value, 'process_turn'):
+
+    # Pre-resolved protocol instance: a CliBackendProtocol exposes execute() + stream().
+    if _is_cli_backend_instance(value):
         return value
-        
+
+    # Factory callable (not itself a protocol instance) - return as-is; the core
+    # Agent invokes it to obtain the protocol instance.
+    if callable(value):
+        return value
+
     # Import registry functions
     from .registry import resolve_cli_backend
     
@@ -68,6 +83,7 @@ __all__ = [
     "register_cli_backend",
     "resolve_cli_backend", 
     "resolve_cli_backend_config",
+    "_is_cli_backend_instance",
     "ClaudeCodeBackend",
     "list_cli_backends"
 ]
