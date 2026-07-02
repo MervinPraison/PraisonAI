@@ -90,7 +90,8 @@ class TraceOutput:
                 else:
                     console.print(f"[dim]{ts_str}[/dim]{message}")
             else:
-                print(f"{ts_str}{message}", file=self._file)
+                from .encoding import safe_text
+                print(safe_text(f"{ts_str}{message}", self._file), file=self._file)
     
     def llm_start(self, model: str = None) -> None:
         """Record LLM call start."""
@@ -192,9 +193,10 @@ class TraceOutput:
                 else:
                     console.print(content)
             else:
+                from .encoding import safe_text
                 print("", file=self._file)
                 print("Response:", file=self._file)
-                print(content, file=self._file)
+                print(safe_text(content, self._file), file=self._file)
     
     def error(self, message: str) -> None:
         """Output error message."""
