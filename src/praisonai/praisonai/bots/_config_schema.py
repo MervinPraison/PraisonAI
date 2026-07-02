@@ -362,6 +362,15 @@ class GatewayConfigSchema(BaseModel):
     # Routing and daemon config
     routing: Optional[RoutingConfigSchema] = None
     daemon: Optional[DaemonConfigSchema] = None
+
+    # Gateway server settings (host/port, drain_timeout, admission control,
+    # etc.) and inbound trigger hooks. These are read by
+    # ``gateway/server.py::load_gateway_config`` / ``_apply_hooks_from_config``
+    # rather than modelled field-by-field here; kept permissive so a real
+    # ``gateway.yaml`` with a top-level ``gateway:``/``hooks:`` block validates
+    # through this single schema instead of being rejected. See issue #2585.
+    gateway: Optional[Dict[str, Any]] = None
+    hooks: Optional[List[Dict[str, Any]]] = None
     
     @model_validator(mode="after")
     def normalize_and_validate(self):

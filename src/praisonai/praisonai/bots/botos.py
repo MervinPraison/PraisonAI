@@ -1275,24 +1275,66 @@ class BotOS:
                 if key in agent_cfg:
                     agent_kwargs[key] = agent_cfg[key]
 
-            # Resolve tool names to real functions
+            # Resolve tool names to real functions. Delegate string names to the
+            # shared ToolResolver so BotOS honours the same resolution chain as
+            # the rest of the framework (local tools.py -> wrapper registry ->
+            # praisonaiagents -> praisonai-tools -> plugins) instead of only
+            # seeing built-in praisonaiagents.tools. See issue #2585.
             tool_names = agent_cfg.get("tools")
             if tool_names and isinstance(tool_names, list):
-                resolved_tools = []
-                for tname in tool_names:
-                    if isinstance(tname, str):
+                # Resolve string names to callables via the shared ToolResolver,
+                # falling back to the built-in praisonaiagents.tools lookup if the
+                # resolver is unavailable. Callables pass through unchanged and the
+                # original list order is preserved (order can influence tool
+                # priority/selection).
+                resolver = None
+                fallback_mod = None
+                if any(isinstance(t, str) for t in tool_names):
+                    try:
+                        # Go through the praisonai.tool_resolver shim so the
+                        # praisonai_code bootstrap runs in lean installs.
+                        from praisonai.tool_resolver import ToolResolver
+
+                        # Point the resolver at the config directory's tools.py so
+                        # config-local tools are found regardless of process cwd
+                        # (matches the recipe loader's config-relative lookup).
+                        from pathlib import Path
+
+                        tools_py_path = str(Path(path).resolve().parent / "tools.py")
+                        resolver = ToolResolver(tools_py_path=tools_py_path)
+                    except ImportError:
+                        import importlib
                         try:
-                            import importlib
-                            mod = importlib.import_module("praisonaiagents.tools")
-                            fn = getattr(mod, tname, None)
-                            if fn:
-                                resolved_tools.append(fn)
-                            else:
-                                logger.warning(f"BotOS: tool '{tname}' not found in praisonaiagents.tools")
+                            fallback_mod = importlib.import_module("praisonaiagents.tools")
                         except ImportError:
-                            logger.warning(f"BotOS: could not import tools module for '{tname}'")
+                            fallback_mod = None
+
+                resolved_tools = []
+                for tool in tool_names:
+                    if not isinstance(tool, str):
+                        # Already-callable tools pass through unchanged.
+                        resolved_tools.append(tool)
+                        continue
+                    if resolver is not None:
+                        fn = resolver.resolve(tool)
+                        if fn is not None:
+                            resolved_tools.append(fn)
+                        else:
+                            logger.warning(
+                                f"BotOS: tool '{tool}' could not be resolved "
+                                "via ToolResolver (local/praisonaiagents/"
+                                "praisonai-tools/plugins)"
+                            )
                     else:
-                        resolved_tools.append(tname)  # Already a callable
+                        fn = getattr(fallback_mod, tool, None) if fallback_mod else None
+                        if fn:
+                            resolved_tools.append(fn)
+                        else:
+                            logger.warning(
+                                f"BotOS: tool '{tool}' not found in "
+                                "praisonaiagents.tools"
+                            )
+
                 if resolved_tools:
                     agent_kwargs["tools"] = resolved_tools
 
