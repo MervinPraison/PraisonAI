@@ -695,7 +695,7 @@ class TestCLIIntegration:
         assert result.exit_code == 0
         assert "test.mdx" in result.stdout
     
-    @pytest.mark.skip(reason="--dry-run option not implemented in docs run command")
+    # @pytest.mark.skip(reason="--dry-run option not implemented in docs run command")
     def test_docs_run_dry_run(self, tmp_path):
         """Test 'praisonai docs run --dry-run' command."""
         from typer.testing import CliRunner
@@ -718,5 +718,4 @@ print(getcwd())
             "--dry-run",
             "--report-dir", str(tmp_path / "reports"),
         ])
-        
         assert result.exit_code == 0
