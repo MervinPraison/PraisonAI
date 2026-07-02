@@ -239,18 +239,22 @@ async def handle_media_stream(websocket: WebSocket):
                 """Receive events from the OpenAI Realtime API, send audio back to Twilio."""
                 nonlocal stream_sid
                 async for openai_message in openai_ws:
-                    response = json.loads(openai_message)
-                    if response['type'] in LOG_EVENT_TYPES:
-                        print(f"Received event: {response['type']}", response)
-                    if response['type'] == 'session.updated':
-                        print("Session updated successfully:", response)
+                    # Isolate per-event failures: a malformed message or an
+                    # error handling a single event must not escape into
+                    # asyncio.gather() and cancel the sibling Twilio task,
+                    # which would drop the live call. Log and keep streaming.
+                    try:
+                        response = json.loads(openai_message)
+                        if response['type'] in LOG_EVENT_TYPES:
+                            print(f"Received event: {response['type']}", response)
+                        if response['type'] == 'session.updated':
+                            print("Session updated successfully:", response)
 
-                    if response['type'] == 'response.done':
-                        await handle_response_done(response, openai_ws)
+                        if response['type'] == 'response.done':
+                            await handle_response_done(response, openai_ws)
 
-                    if response['type'] == 'response.audio.delta' and response.get('delta'):
-                        # Audio from OpenAI
-                        try:
+                        if response['type'] == 'response.audio.delta' and response.get('delta'):
+                            # Audio from OpenAI
                             audio_payload = base64.b64encode(base64.b64decode(response['delta'])).decode('utf-8')
                             audio_delta = {
                                 "event": "media",
@@ -260,8 +264,8 @@ async def handle_media_stream(websocket: WebSocket):
                                 }
                             }
                             await websocket.send_json(audio_delta)
-                        except Exception as e:
-                            logger.exception("Error processing audio data: %s", e)
+                    except Exception:
+                        logger.exception("Error processing OpenAI event; continuing stream")
 
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
     finally:

@@ -134,5 +134,15 @@ class BaseFrameworkAdapter:
             pool.shutdown(wait=False)
             self._thread_pool = None
 
+    def __del__(self) -> None:
+        # Best-effort: shut down the offload pool when the adapter is garbage
+        # collected so idle worker threads do not outlive the adapter in
+        # long-lived services that forget to call cleanup(). Guarded because
+        # __del__ can run during interpreter shutdown when globals are gone.
+        try:
+            self.cleanup()
+        except Exception:
+            pass
+
     def resolve_alias(self) -> str:
         return self.name
