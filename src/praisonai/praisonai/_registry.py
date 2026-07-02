@@ -14,7 +14,13 @@ ensure_praisonai_code()
 from praisonai_code._registry import (  # noqa: F401
     PluginRegistry,
     create_lazy_getattr,
-    logger,
 )
+
+import logging as _logging
+
+# Preserve the historical logger name so any existing log-level configuration
+# targeting ``'praisonai._registry'`` still takes effect (the canonical module's
+# logger is named ``'praisonai_code._registry'``).
+logger = _logging.getLogger(__name__)
 
 __all__ = ["PluginRegistry", "create_lazy_getattr", "logger"]
