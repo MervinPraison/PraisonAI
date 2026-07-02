@@ -76,6 +76,11 @@ mongodb = [
     "motor>=3.4.0"
 ]
 
+# Dakera decay-weighted memory server
+dakera = [
+    "dakera>=0.12.8",
+]
+
 # Authentication dependencies
 auth = [
     "PyJWT>=2.8.0",

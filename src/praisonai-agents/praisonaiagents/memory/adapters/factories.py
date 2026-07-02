@@ -101,6 +101,47 @@ def create_mongodb_memory_adapter(**kwargs) -> MemoryProtocol:
     return MongoDBMemoryAdapter(pymongo=pymongo, mongo_client=MongoClient, **kwargs)
 
 
+def create_dakera_memory_adapter(**kwargs) -> MemoryProtocol:
+    """
+    Factory function to create a Dakera memory adapter.
+
+    Lazy imports the ``dakera`` SDK and creates an adapter that wraps a
+    ``DakeraClient`` to implement ``MemoryProtocol``. Dakera is a self-hosted
+    memory server providing decay-weighted vector recall scoped by ``agent_id``.
+
+    Args:
+        **kwargs: Configuration passed to the adapter. Recognised keys (either
+            at the top level or nested under a ``"config"`` dict, mirroring the
+            mem0 adapter):
+
+            - ``url`` / ``base_url``: Dakera server URL
+              (falls back to ``DAKERA_URL`` / ``DAKERA_API_URL`` env, then
+              ``http://localhost:3000``).
+            - ``api_key``: API key (falls back to ``DAKERA_API_KEY`` env).
+            - ``agent_id``: Namespace for the agent's memories
+              (falls back to ``DAKERA_AGENT_ID`` env, then ``"praisonai"``).
+            - ``short_term_type`` / ``long_term_type``: Dakera memory types to
+              use for the two tiers (default ``"working"`` and ``"episodic"``).
+            - ``default_importance``: Importance score for stored memories
+              when none is supplied (default ``0.5``).
+
+    Returns:
+        MemoryProtocol adapter instance.
+
+    Raises:
+        ImportError: If the ``dakera`` SDK is not installed.
+    """
+    try:
+        import dakera  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            "dakera is required for the dakera adapter. "
+            "Install with: pip install 'praisonaiagents[dakera]' (or: pip install dakera)"
+        )
+
+    return DakeraMemoryAdapter(dakera_config=kwargs)
+
+
 class Mem0MemoryAdapter:
     """
     Memory adapter that wraps mem0.Memory to implement MemoryProtocol.
@@ -511,3 +552,165 @@ class MongoDBMemoryAdapter:
                 logging.warning(f"MongoDB cleanup failed: {e}")
             finally:
                 self.client = None
+
+
+class DakeraMemoryAdapter:
+    """
+    Memory adapter that wraps the Dakera SDK to implement ``MemoryProtocol``.
+
+    Dakera (https://dakera.ai) is a self-hosted memory server that provides
+    persistent, decay-weighted vector recall across sessions: memories are
+    importance-scored and decay over time, so stale context stops competing
+    with fresh, relevant facts. All memories are scoped by ``agent_id``.
+
+    Unlike a flat vector store, Dakera has a first-class ``memory_type`` field,
+    so this adapter maps PraisonAI's two tiers onto distinct Dakera types
+    (short-term -> ``"working"``, long-term -> ``"episodic"`` by default),
+    keeping recency-heavy scratch context separate from durable knowledge.
+
+    Also implements the optional ``DeletableMemoryProtocol`` (``delete_memory`` /
+    ``delete_memories``) and ``ResettableMemoryProtocol`` (``reset_short_term`` /
+    ``reset_long_term``).
+    """
+
+    def __init__(self, dakera_config: Dict[str, Any]):
+        """Initialise the Dakera memory adapter."""
+        from dakera import DakeraClient
+
+        # Support both a flat config and a nested {"config": {...}} form,
+        # mirroring Mem0MemoryAdapter.
+        config = dakera_config.get("config", dakera_config) or {}
+
+        url = (
+            config.get("url")
+            or config.get("base_url")
+            or os.getenv("DAKERA_URL")
+            or os.getenv("DAKERA_API_URL")
+            or "http://localhost:3000"
+        )
+        api_key = config.get("api_key") or os.getenv("DAKERA_API_KEY")
+
+        self.agent_id = (
+            config.get("agent_id")
+            or os.getenv("DAKERA_AGENT_ID")
+            or "praisonai"
+        )
+        self.short_term_type = config.get("short_term_type", "working")
+        self.long_term_type = config.get("long_term_type", "episodic")
+        self.default_importance = config.get("default_importance", 0.5)
+
+        self.client = DakeraClient(base_url=url, api_key=api_key)
+
+    # -- helpers ------------------------------------------------------------
+
+    def _store(self, text: str, memory_type: str,
+               metadata: Optional[Dict[str, Any]], kwargs: Dict[str, Any]) -> str:
+        """Store a memory of ``memory_type`` and return its id."""
+        meta = dict(metadata or {})
+        importance = kwargs.get("importance", meta.pop("importance", self.default_importance))
+        session_id = kwargs.get("session_id") or meta.pop("session_id", None)
+        tags = kwargs.get("tags") or meta.pop("tags", None)
+
+        result = self.client.store_memory(
+            agent_id=self.agent_id,
+            content=text,
+            memory_type=memory_type,
+            importance=importance,
+            metadata=meta or None,
+            session_id=session_id,
+            tags=tags,
+        )
+        # store_memory returns the stored memory dict.
+        return str(result.get("id", "")) if isinstance(result, dict) else str(result)
+
+    def _search(self, query: str, memory_type: str,
+                limit: int, kwargs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Recall memories of ``memory_type`` matching ``query``."""
+        response = self.client.recall(
+            agent_id=self.agent_id,
+            query=query,
+            top_k=limit,
+            memory_type=memory_type,
+            min_importance=kwargs.get("min_importance"),
+        )
+        return [self._to_result(m) for m in response.memories]
+
+    @staticmethod
+    def _to_result(memory: Any) -> Dict[str, Any]:
+        """Normalise a Dakera memory object into PraisonAI's result dict shape."""
+        return {
+            "id": str(getattr(memory, "id", "")),
+            "text": getattr(memory, "content", ""),
+            "metadata": getattr(memory, "metadata", None) or {},
+            "score": getattr(memory, "score", None),
+            "memory_type": getattr(memory, "memory_type", None),
+        }
+
+    # -- MemoryProtocol -----------------------------------------------------
+
+    def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None,
+                         **kwargs) -> str:
+        """Store content in short-term (``working``) memory."""
+        return self._store(text, self.short_term_type, metadata, kwargs)
+
+    def search_short_term(self, query: str, limit: int = 5,
+                          **kwargs) -> List[Dict[str, Any]]:
+        """Search short-term (``working``) memory."""
+        return self._search(query, self.short_term_type, limit, kwargs)
+
+    def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None,
+                        **kwargs) -> str:
+        """Store content in long-term (``episodic``) memory."""
+        return self._store(text, self.long_term_type, metadata, kwargs)
+
+    def search_long_term(self, query: str, limit: int = 5,
+                         **kwargs) -> List[Dict[str, Any]]:
+        """Search long-term (``episodic``) memory."""
+        return self._search(query, self.long_term_type, limit, kwargs)
+
+    def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
+        """Return all memories for the agent (no embedding required)."""
+        from dakera import BatchRecallRequest
+
+        limit = kwargs.get("limit", 1000)
+        response = self.client.batch_recall(
+            BatchRecallRequest(agent_id=self.agent_id, limit=limit)
+        )
+        return [self._to_result(m) for m in response.memories]
+
+    # -- DeletableMemoryProtocol -------------------------------------------
+
+    def delete_memory(self, memory_id: str,
+                      memory_type: Optional[str] = None) -> bool:
+        """Delete a specific memory by id. Returns True on success."""
+        try:
+            self.client.forget(agent_id=self.agent_id, memory_id=memory_id)
+            return True
+        except Exception as e:
+            import logging
+            logging.warning(f"Dakera delete_memory({memory_id}) failed: {e}")
+            return False
+
+    def delete_memories(self, memory_ids: List[str]) -> int:
+        """Delete multiple memories by id. Returns the number deleted."""
+        return sum(1 for mid in memory_ids if self.delete_memory(mid))
+
+    # -- ResettableMemoryProtocol ------------------------------------------
+
+    def _reset_type(self, memory_type: str) -> None:
+        from dakera import BatchForgetRequest, BatchMemoryFilter
+
+        self.client.batch_forget(
+            BatchForgetRequest(
+                agent_id=self.agent_id,
+                filter=BatchMemoryFilter(memory_type=memory_type),
+            )
+        )
+
+    def reset_short_term(self) -> None:
+        """Clear all short-term (``working``) memory for the agent."""
+        self._reset_type(self.short_term_type)
+
+    def reset_long_term(self) -> None:
+        """Clear all long-term (``episodic``) memory for the agent."""
+        self._reset_type(self.long_term_type)
