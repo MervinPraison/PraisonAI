@@ -328,12 +328,36 @@ class PermissionManager:
             reason="All shell sub-operations allowed",
         )
 
+    def suggest_scope_pattern(self, target: str) -> str:
+        """Suggest a reusable command-prefix pattern for a shell ``target``.
+
+        Derives a generalised glob (e.g. ``bash:git status`` ->
+        ``bash:git status *``) from the command-arity table so a persistent
+        approval can cover repeated invocations with different trailing args.
+        Non-shell targets (or targets already containing a glob) are returned
+        unchanged. Matching is untouched — ``fnmatch`` already handles ``*``.
+
+        Args:
+            target: The approval target, e.g. ``"bash:git status -s"``.
+
+        Returns:
+            The suggested reusable pattern, or ``target`` if no generalisation
+            applies.
+        """
+        try:
+            from .arity import derive_pattern
+            return derive_pattern(target)
+        except Exception:
+            return target
+
     def approve(
         self,
         target: str,
         approved: bool,
         scope: str = "once",
         agent_name: Optional[str] = None,
+        reusable_scope: bool = False,
+        pattern: Optional[str] = None,
     ) -> PersistentApproval:
         """
         Record an approval decision.
@@ -343,12 +367,28 @@ class PermissionManager:
             approved: Whether it was approved
             scope: Scope of approval (once, session, always)
             agent_name: Optional agent name
+            reusable_scope: When True and scope is session/always, derive a
+                reusable command-prefix pattern from ``target`` (e.g.
+                ``bash:git status`` -> ``bash:git status *``) instead of storing
+                the literal command. Ignored when an explicit ``pattern`` is
+                given. Defaults to False for backward compatibility.
+            pattern: Explicit pattern to record. Overrides both ``target`` and
+                ``reusable_scope`` derivation, letting callers (CLI/UI) present
+                and adjust the suggested scope before saving.
             
         Returns:
             The created PersistentApproval
         """
+        stored_pattern = pattern if pattern is not None else target
+        if (
+            pattern is None
+            and reusable_scope
+            and scope in ("session", "always")
+        ):
+            stored_pattern = self.suggest_scope_pattern(target)
+
         approval = PersistentApproval(
-            pattern=target,
+            pattern=stored_pattern,
             approved=approved,
             scope=scope,
             agent_name=agent_name or self.agent_name,
