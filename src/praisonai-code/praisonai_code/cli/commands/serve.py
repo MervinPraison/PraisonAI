@@ -60,10 +60,12 @@ def serve_start(
         args.append("--reload")
     
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -74,10 +76,12 @@ def serve_stop():
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(["stop"])
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -94,10 +98,12 @@ def serve_status(
         args.append("--json")
     
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -170,7 +176,9 @@ def serve_agents(
         praisonai serve agents --file my-agents.yaml --port 8000
     """
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         args = ["agents", "--host", host, "--port", str(port), "--file", file]
         if reload:
             args.append("--reload")
@@ -178,7 +186,7 @@ def serve_agents(
             args.extend(["--api-key", api_key])
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
@@ -202,14 +210,16 @@ def serve_gateway(
     output = get_output_controller()
     
     try:
-        from praisonai.cli.features.gateway import GatewayHandler
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.gateway')
+        GatewayHandler = getattr(_mod, 'GatewayHandler')
         handler = GatewayHandler()
         # ``start`` returns a sysexits-based exit code (0 OK, 75 restart,
         # 78 fatal config) so supervisors react correctly; propagate it
         # instead of swallowing fatal/transient failures as success (#2437).
         exit_code = handler.start(host=host, port=port, agent_file=agents_file)
         raise typer.Exit(exit_code or 0)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Gateway module not available: {e}")
         output.print("Install with: pip install praisonai[api]")
         raise typer.Exit(4)
@@ -396,14 +406,16 @@ def serve_ui_gateway(
     output = get_output_controller()
     
     try:
-        from praisonai.integration.gateway_host import run_integrated_gateway
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.integration.gateway_host')
+        run_integrated_gateway = getattr(_mod, 'run_integrated_gateway')
         run_integrated_gateway(
             host=host,
             port=port,
             title=title,
             style=style
         )
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"UI-Gateway module not available: {e}")
         output.print("Install with: pip install praisonai[ui]")
         raise typer.Exit(4)
@@ -532,7 +544,9 @@ def serve_recipe(
         praisonai serve recipe --port 8765 --reload
     """
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         args = ["recipe", "--host", host, "--port", str(port)]
         if recipe:
             args.extend(["--recipe", recipe])
@@ -542,7 +556,7 @@ def serve_recipe(
             args.append("--reload")
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Recipe serve module not available: {e}")
         raise typer.Exit(4)
@@ -563,11 +577,13 @@ def serve_a2a(
         praisonai serve a2a --port 8001
     """
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         args = ["a2a", "--host", host, "--port", str(port), "--file", file]
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"A2A serve module not available: {e}")
         raise typer.Exit(4)
@@ -587,11 +603,13 @@ def serve_a2u(
         praisonai serve a2u --port 8002
     """
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         args = ["a2u", "--host", host, "--port", str(port)]
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"A2U serve module not available: {e}")
         raise typer.Exit(4)
@@ -613,13 +631,15 @@ def serve_unified(
         praisonai serve unified --port 8765 --reload
     """
     try:
-        from praisonai.cli.features.serve import handle_serve_command
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        handle_serve_command = getattr(_mod, 'handle_serve_command')
         args = ["unified", "--host", host, "--port", str(port), "--file", file]
         if reload:
             args.append("--reload")
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Unified serve module not available: {e}")
         raise typer.Exit(4)
@@ -646,9 +666,17 @@ def serve_openai(
     
     try:
         import uvicorn
-        from praisonai.endpoints.providers import OpenAICompatProvider, AgentsAPIProvider
-        from praisonai.endpoints.server import create_unified_app, mount_provider_routes
-        from praisonai.cli.features.serve import _install_api_key_middleware
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.endpoints.providers')
+        OpenAICompatProvider = getattr(_mod, 'OpenAICompatProvider')
+        AgentsAPIProvider = getattr(_mod, 'AgentsAPIProvider')
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.endpoints.server')
+        create_unified_app = getattr(_mod, 'create_unified_app')
+        mount_provider_routes = getattr(_mod, 'mount_provider_routes')
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _mod = import_wrapper_module('praisonai.cli.features.serve')
+        _install_api_key_middleware = getattr(_mod, '_install_api_key_middleware')
         
         output.print_info(f"Starting OpenAI-compatible server on {host}:{port}")
         
@@ -681,7 +709,7 @@ def serve_openai(
             access_log=False,
         )
         
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"OpenAI compatibility module not available: {e}")
         output.print("Install with: pip install praisonai[api]")
         raise typer.Exit(4)

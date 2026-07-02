@@ -190,10 +190,11 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "loop": (".commands.loop", "app", "Autonomous agent execution loops"),
     "tracker": (".commands.tracker", "app", "Autonomous agent tracking with step-by-step analysis"),
     "github": (".commands.github", "app", "GitHub native context tracking and Issue triage"),
+    "audit": (".commands.audit", "audit", "Compliance auditing"),
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
     "models": (".commands.models", "app", "List and describe available models"),
 
-    # Bot/channel commands — see ``_WRAPPER_COMMANDS`` below. These entries keep
+    # Wrapper-resident commands — see ``_WRAPPER_RESIDENT_COMMANDS`` below. These entries keep
     # relative ``.commands.*`` paths so they are advertised in ``--help``, but
     # ``get_command()`` re-routes them to the absolute ``praisonai.cli.commands.*``
     # path at invocation time (the modules live in the main wrapper).
@@ -223,10 +224,11 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
 # relative ``.commands.*`` path would resolve to ``praisonai_code`` where the
 # modules do not live. The import happens lazily at invocation time only, so
 # ``praisonai_code`` keeps no static dependency on ``praisonai``.
-# C7.1 audit: wrapper-resident Typer modules only (no praisonai_code.cli.commands.*
-# copy). Do NOT add train/serve here — their impl lives in praisonai_code; bridge
-# internal wrapper imports instead. mint_link is wrapper-only but not in Typer registry.
-_WRAPPER_COMMANDS = frozenset({
+# C8: Typer modules whose implementation lives in ``praisonai.cli.commands.*`` only
+# (no ``praisonai_code.cli.commands.*`` copy). ``get_command()`` loads these via
+# absolute import when the wrapper is installed; standalone installs hide them from
+# ``--help``. Add names here as commands are repatriated from praisonai-code.
+_WRAPPER_RESIDENT_COMMANDS = frozenset({
     "bot",
     "gateway",
     "pairing",
@@ -235,7 +237,37 @@ _WRAPPER_COMMANDS = frozenset({
     "kanban",
     "dashboard",
     "claw",
+    # C8.2 Batch A — observability / integrations
+    "langfuse",
+    "langextract",
+    "flow",
+    "n8n",
+    "replay",
+    # C8.2 Batch B — training / managed / examples
+    "train",
+    "managed",
+    "examples",
+    "standardise",
+    # C8.2 Batch C — docs / schedule / batch
+    "docs",
+    "schedule",
+    "batch",
+    # C8.2 Batch D — legacy / RAG / profile
+    "rag",
+    "knowledge",
+    "realtime",
+    "profile",
+    "audit",
+    "app",
+    # C8.3 — feature-heavy commands
+    "context",
+    "recipe",
+    "mcp",
+    "validate",
 })
+
+# Backward-compatible alias (C7.1 name).
+_WRAPPER_COMMANDS = _WRAPPER_RESIDENT_COMMANDS
 
 # Special commands that need custom handling
 _SPECIAL_COMMANDS = {
@@ -261,18 +293,22 @@ class LazyCommandGroup(TyperGroup):
         wrapper_ok = wrapper_available()
         commands.update(
             name for name in _LAZY_COMMANDS
-            if wrapper_ok or name not in _WRAPPER_COMMANDS
+            if wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS
         )
         commands.update(_SPECIAL_COMMANDS.keys())
-        
-        # Add special inline commands
-        commands.add("app")
         
         # Add retrieval commands (these are registered via register_commands)
         commands.update(["index", "query", "search"])
         
-        # Add standardise/standardize
-        commands.update(["standardise", "standardize"])
+        # ``app`` and ``standardise``/``standardize`` are wrapper-resident (C8.2):
+        # their real implementations live in ``praisonai.cli.commands.*`` and are
+        # only resolvable via the bridge when the wrapper is installed. Advertise
+        # them only when the wrapper is available so a standalone ``praisonai-code``
+        # install does not surface a command that ``get_command`` returns ``None``
+        # for.
+        if wrapper_ok:
+            commands.add("app")
+            commands.update(["standardise", "standardize"])
         
         return sorted(list(commands))
     
@@ -287,7 +323,7 @@ class LazyCommandGroup(TyperGroup):
         if name in _LAZY_COMMANDS:
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
-                if name in _WRAPPER_COMMANDS:
+                if name in _WRAPPER_RESIDENT_COMMANDS:
                     if not wrapper_available():
                         return None
                     module = importlib.import_module(f"praisonai.cli.commands.{name}")
@@ -316,16 +352,32 @@ class LazyCommandGroup(TyperGroup):
                 typer.echo(f"Error loading command '{name}': {e}", err=True)
                 return None
         
-        # Handle standardise/standardize
+        # Handle standardise/standardize — impl in wrapper (C8.2)
         if name in ["standardise", "standardize"]:
+            if not wrapper_available():
+                return None
             return self._get_standardise_command()
         
-        # Handle app command
+        # Handle app command — impl in wrapper when installed (C8.2)
         if name == "app":
+            if wrapper_available():
+                try:
+                    module = importlib.import_module("praisonai.cli.commands.app")
+                    sub_app = getattr(module, "app")
+                    if isinstance(sub_app, click.Command):
+                        return sub_app
+                    return typer_get_command(sub_app)
+                except (ImportError, AttributeError):
+                    pass
             return self._get_app_command()
         
         return None
     
+    def _standardise_impl(self):
+        """Load standardise helpers from the wrapper package."""
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        return import_wrapper_module("praisonai.cli.commands.standardise")
+
     def _get_standardise_command(self) -> Optional[click.Command]:
         """Get the standardise command group."""
         try:
@@ -339,7 +391,7 @@ class LazyCommandGroup(TyperGroup):
                 ci: bool = typer.Option(False, "--ci", help="CI mode"),
             ):
                 """Check for standardisation issues."""
-                from .commands.standardise import _run_check
+                _run_check = self._standardise_impl()._run_check
                 import argparse
                 args = argparse.Namespace(path=path, feature=feature, scope=scope, ci=ci, dry_run=True)
                 _run_check(args)
@@ -352,7 +404,7 @@ class LazyCommandGroup(TyperGroup):
                 ci: bool = typer.Option(False, "--ci", help="CI mode"),
             ):
                 """Generate detailed report."""
-                from .commands.standardise import _run_report
+                _run_report = self._standardise_impl()._run_report
                 import argparse
                 args = argparse.Namespace(path=path, format=format, output=output, ci=ci, feature=None, scope="all", dry_run=True)
                 _run_report(args)
@@ -365,7 +417,7 @@ class LazyCommandGroup(TyperGroup):
                 no_backup: bool = typer.Option(False, "--no-backup", help="Don't create backups"),
             ):
                 """Fix standardisation issues."""
-                from .commands.standardise import _run_fix
+                _run_fix = self._standardise_impl()._run_fix
                 import argparse
                 args = argparse.Namespace(path=path, feature=feature, apply=apply, no_backup=no_backup, scope="all", ci=False, dry_run=not apply)
                 _run_fix(args)
@@ -377,7 +429,7 @@ class LazyCommandGroup(TyperGroup):
                 apply: bool = typer.Option(False, "--apply", help="Actually create files"),
             ):
                 """Initialise a new feature with all required artifacts."""
-                from .commands.standardise import _run_init
+                _run_init = self._standardise_impl()._run_init
                 import argparse
                 args = argparse.Namespace(feature=feature, path=path, apply=apply, scope="all", ci=False, dry_run=not apply)
                 _run_init(args)
@@ -392,7 +444,7 @@ class LazyCommandGroup(TyperGroup):
                 path: str = typer.Option(".", "--path", "-p", help="Project root path"),
             ):
                 """AI-powered generation of docs/examples."""
-                from .commands.standardise import _run_ai
+                _run_ai = self._standardise_impl()._run_ai
                 import argparse
                 args = argparse.Namespace(feature=feature, type=gen_type, apply=apply, verify=verify, model=model, path=path, scope="all", ci=False, dry_run=not apply)
                 _run_ai(args)
@@ -403,7 +455,7 @@ class LazyCommandGroup(TyperGroup):
                 path: str = typer.Option(".", "--path", "-p", help="Repository path"),
             ):
                 """Create an undo checkpoint."""
-                from .commands.standardise import _run_checkpoint
+                _run_checkpoint = self._standardise_impl()._run_checkpoint
                 import argparse
                 args = argparse.Namespace(message=message, path=path)
                 _run_checkpoint(args)
@@ -415,7 +467,7 @@ class LazyCommandGroup(TyperGroup):
                 path: str = typer.Option(".", "--path", "-p", help="Repository path"),
             ):
                 """Undo to a previous checkpoint."""
-                from .commands.standardise import _run_undo
+                _run_undo = self._standardise_impl()._run_undo
                 import argparse
                 args = argparse.Namespace(checkpoint=checkpoint, list=list_checkpoints, path=path)
                 _run_undo(args)
@@ -425,7 +477,7 @@ class LazyCommandGroup(TyperGroup):
                 path: str = typer.Option(".", "--path", "-p", help="Repository path"),
             ):
                 """Redo after an undo."""
-                from .commands.standardise import _run_redo
+                _run_redo = self._standardise_impl()._run_redo
                 import argparse
                 args = argparse.Namespace(path=path)
                 _run_redo(args)
@@ -779,7 +831,7 @@ def get_command_names():
     """
     names = set(_LAZY_COMMANDS.keys())
     # Bot/channel commands are already part of ``_LAZY_COMMANDS`` (re-routed to
-    # the main wrapper at invocation time via ``_WRAPPER_COMMANDS``).
+    # the main wrapper at invocation time via ``_WRAPPER_RESIDENT_COMMANDS``).
     # Special commands with custom handling (tui, queue)
     names.update(_SPECIAL_COMMANDS.keys())
     # Inline special commands handled outside the registries

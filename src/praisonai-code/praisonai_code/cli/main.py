@@ -95,23 +95,29 @@ def _validate_env_key(key) -> None:
 # Lazy import helpers for inbuilt_tools and config
 def _get_inbuilt_tools():
     """Lazy import inbuilt_tools only when crewai/autogen features are used."""
-    from praisonai import inbuilt_tools
-    return inbuilt_tools
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.inbuilt_tools")
 
 def _get_generate_config():
     """Lazy import generate_config only when training features are used."""
-    from praisonai.inc.config import generate_config
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    _mod = import_wrapper_module('praisonai.inc.config')
+    generate_config = getattr(_mod, 'generate_config')
     return generate_config
 
 # Lazy import helpers for heavy modules
 def _get_auto_generator():
     """Lazy import AutoGenerator to avoid loading heavy deps at CLI startup."""
-    from praisonai.auto import AutoGenerator
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    _mod = import_wrapper_module('praisonai.auto')
+    AutoGenerator = getattr(_mod, 'AutoGenerator')
     return AutoGenerator
 
 def _get_agents_generator():
     """Lazy import AgentsGenerator to avoid loading heavy deps at CLI startup."""
-    from praisonai.agents_generator import AgentsGenerator
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    _mod = import_wrapper_module('praisonai.agents_generator')
+    AgentsGenerator = getattr(_mod, 'AgentsGenerator')
     return AgentsGenerator
 
 
@@ -231,7 +237,9 @@ def _get_call_module():
         raise ImportError(
             "Call feature is not installed. Install with: pip install \"praisonai[call]\""
         )
-    from praisonai.api import call as call_module
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    _mod = import_wrapper_module('praisonai.api')
+    call_module = getattr(_mod, 'call')
     return call_module
 
 def _get_gradio():
@@ -626,7 +634,9 @@ class PraisonAI:
         if args.deploy:
             if args.schedule or args.schedule_config:
                 # Scheduled deployment
-                from praisonai.scheduler import create_scheduler
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.scheduler')
+                create_scheduler = getattr(_mod, 'create_scheduler')
                 
                 # Load configuration from file if provided
                 config = {"max_retries": args.max_retries}
@@ -717,7 +727,9 @@ class PraisonAI:
 
         if getattr(args, 'realtime', False):
             try:
-                from praisonai.cli.commands.ui import _launch_aiui_app
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.cli.commands.ui')
+                _launch_aiui_app = getattr(_mod, '_launch_aiui_app')
                 _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "127.0.0.1", None, False, "Realtime Voice")
             except ImportError:
                 print("\033[91mERROR: Realtime UI is not installed.\033[0m")
@@ -780,7 +792,9 @@ class PraisonAI:
                 config["ollama_save"] = "true"
 
             if 'init' in sys.argv:
-                from praisonai.setup.setup_conda_env import main as setup_conda_main
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.setup.setup_conda_env')
+                setup_conda_main = getattr(_mod, 'main')
                 setup_conda_main()
                 print("All packages installed")
                 return
@@ -796,7 +810,9 @@ class PraisonAI:
                     conda_env_exists = True
                 else:
                     print("Conda environment 'praison_env' not found. Setting it up...")
-                    from praisonai.setup.setup_conda_env import main as setup_conda_main
+                    from praisonai_code._wrapper_bridge import import_wrapper_module
+                    _mod = import_wrapper_module('praisonai.setup.setup_conda_env')
+                    setup_conda_main = getattr(_mod, 'main')
                     setup_conda_main()
                     print("All packages installed.")
                     # Check again if environment was created successfully
@@ -946,7 +962,9 @@ class PraisonAI:
             run_id = f"run-{uuid.uuid4().hex[:12]}"
             if save_replay:
                 try:
-                    from praisonai.replay import ContextTraceWriter
+                    from praisonai_code._wrapper_bridge import import_wrapper_module
+                    _mod = import_wrapper_module('praisonai.replay')
+                    ContextTraceWriter = getattr(_mod, 'ContextTraceWriter')
                     from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
                     
                     trace_writer = ContextTraceWriter(session_id=run_id)
@@ -1442,7 +1460,9 @@ class PraisonAI:
 
             elif args.command == 'realtime':
                 try:
-                    from praisonai.cli.commands.ui import _launch_aiui_app
+                    from praisonai_code._wrapper_bridge import import_wrapper_module
+                    _mod = import_wrapper_module('praisonai.cli.commands.ui')
+                    _launch_aiui_app = getattr(_mod, '_launch_aiui_app')
                     _launch_aiui_app("ui_realtime", "ui_realtime", 8085, "127.0.0.1", None, False, "Realtime Voice")
                 except ImportError:
                     print("\033[91mERROR: Realtime UI is not installed.\033[0m")
@@ -1893,7 +1913,9 @@ class PraisonAI:
             elif args.command == 'browser':
                 # Browser agent command - delegate to browser CLI Typer app
                 # Uses sys.argv replacement for proper arg passthrough (matches profile command pattern)
-                from praisonai.browser.cli import app as browser_app
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.browser.cli')
+                browser_app = getattr(_mod, 'app')
                 import sys as _sys
                 _sys.argv = ['praisonai', 'browser'] + unknown_args
                 try:
@@ -2888,7 +2910,9 @@ class PraisonAI:
             run_id = f"run-{uuid.uuid4().hex[:12]}"
             if save_replay:
                 try:
-                    from praisonai.replay import ContextTraceWriter
+                    from praisonai_code._wrapper_bridge import import_wrapper_module
+                    _mod = import_wrapper_module('praisonai.replay')
+                    ContextTraceWriter = getattr(_mod, 'ContextTraceWriter')
                     from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
                     from pathlib import Path
                     
@@ -3264,7 +3288,9 @@ class PraisonAI:
         print(f"[cyan]Generating {pattern} workflow for: {topic}[/cyan]")
         
         try:
-            from praisonai.auto import WorkflowAutoGenerator
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.auto')
+            WorkflowAutoGenerator = getattr(_mod, 'WorkflowAutoGenerator')
             
             generator = WorkflowAutoGenerator(
                 topic=topic,
@@ -3518,7 +3544,9 @@ class PraisonAI:
         # Also handle 'cli' subcommand group for CLI validation
         code_validation_actions = {'run', 'run-all', 'stats', 'report', 'generate', 'serve', 'cli'}
         if action in code_validation_actions:
-            from praisonai.cli.commands.docs import app as docs_app
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.cli.commands.docs')
+            docs_app = getattr(_mod, 'app')
             import typer
             # Build args list for typer
             typer_args = [action] + action_args
@@ -3727,19 +3755,25 @@ class PraisonAI:
                 
             elif action == 'serve':
                 # Start MCP server
-                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.mcp_server.cli')
+                mcp_serve_handler = getattr(_mod, 'handle_mcp_command')
                 exit_code = mcp_serve_handler(['serve'] + action_args)
                 sys.exit(exit_code)
             
             elif action == 'list-tools':
                 # List MCP tools
-                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.mcp_server.cli')
+                mcp_serve_handler = getattr(_mod, 'handle_mcp_command')
                 exit_code = mcp_serve_handler(['list-tools'] + action_args)
                 sys.exit(exit_code)
             
             elif action == 'config-generate':
                 # Generate client config
-                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                _mod = import_wrapper_module('praisonai.mcp_server.cli')
+                mcp_serve_handler = getattr(_mod, 'handle_mcp_command')
                 exit_code = mcp_serve_handler(['config-generate'] + action_args)
                 sys.exit(exit_code)
             
@@ -5708,7 +5742,9 @@ Now, {final_instruction.lower()}:"""
         Routes to the new `praisonai ui agents` subcommand.
         """
         try:
-            from praisonai.cli.commands.ui import _launch_aiui_app
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.cli.commands.ui')
+            _launch_aiui_app = getattr(_mod, '_launch_aiui_app')
             print("🤖 Launching PraisonAI Agents Dashboard (aiui)...")
             _launch_aiui_app(
                 app_dir="ui_agents",
@@ -5958,7 +5994,9 @@ Now, {final_instruction.lower()}:"""
 
         context = ""
         try:
-            from praisonai.integration.context_files import load_context_files
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.integration.context_files')
+            load_context_files = getattr(_mod, 'load_context_files')
             context = load_context_files(walk_up=True) or ""
         except ImportError:
             context = ""  # Context files helper is optional

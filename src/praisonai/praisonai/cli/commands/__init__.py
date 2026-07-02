@@ -112,4 +112,10 @@ def __getattr__(name: str):
     elif name == 'command_app':
         from .command import app as command_app
         return command_app
+    # C8: allow ``praisonai.cli.commands.<name>`` attribute access for patching
+    import importlib
+    try:
+        return importlib.import_module(f".{name}", __package__)
+    except ModuleNotFoundError:
+        pass
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

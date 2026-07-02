@@ -267,7 +267,9 @@ class InteractiveRuntime:
         
         try:
             # Lazy import ACP
-            from praisonai.acp.session import ACPSession
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _mod = import_wrapper_module('praisonai.acp.session')
+            ACPSession = getattr(_mod, 'ACPSession')
             from pathlib import Path
             
             # Create a session for the workspace
