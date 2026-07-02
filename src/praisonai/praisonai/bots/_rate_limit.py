@@ -15,9 +15,12 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, Optional
 import logging
+
+if TYPE_CHECKING:
+    from ._delivery_control_store import DeliveryControlStore
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +61,30 @@ class RateLimiter:
             await api.send_message(channel_id, msg)
     """
     
-    def __init__(self, config: Optional[RateLimitConfig] = None):
+    def __init__(
+        self,
+        config: Optional[RateLimitConfig] = None,
+        *,
+        store: Optional["DeliveryControlStore"] = None,
+        scope: str = "default",
+    ):
         """Initialize rate limiter.
-        
+
         Args:
             config: Rate limit configuration. Defaults to 1 msg/sec.
+            store: Optional shared SQLite store (``DeliveryControlStore``). When
+                provided, the token bucket and penalty windows live in SQLite so
+                multiple workers draw from ONE bucket and respect the platform's
+                global ceiling regardless of worker count (issue #2579). When
+                ``None`` (default) the fast per-process in-memory bucket is used,
+                which is correct for single-process gateways.
+            scope: Identity of the shared bucket in the store — typically the
+                platform name or a hash of the bot token. All limiters sharing a
+                token MUST use the same ``scope`` so they share the ceiling.
         """
         self._config = config or RateLimitConfig()
+        self._store = store
+        self._scope = scope
         self._tokens = float(self._config.burst_size)
         self._last_refill = time.monotonic()
         self._channel_last_send: "OrderedDict[str, float]" = OrderedDict()
@@ -76,17 +96,26 @@ class RateLimiter:
         self._lock = asyncio.Lock()
     
     @classmethod
-    def for_platform(cls, platform: str) -> "RateLimiter":
+    def for_platform(
+        cls,
+        platform: str,
+        *,
+        store: Optional["DeliveryControlStore"] = None,
+        scope: Optional[str] = None,
+    ) -> "RateLimiter":
         """Create a rate limiter with platform-specific defaults.
         
         Args:
             platform: Platform name (telegram, discord, slack, whatsapp)
+            store: Optional shared SQLite store for cross-worker limiting.
+            scope: Shared-bucket identity; defaults to the platform name so all
+                workers on the same platform share one ceiling.
             
         Returns:
             Configured RateLimiter instance
         """
         config = PLATFORM_LIMITS.get(platform.lower(), RateLimitConfig())
-        return cls(config)
+        return cls(config, store=store, scope=scope or platform.lower())
     
     async def acquire(self, channel_id: Optional[str] = None) -> None:
         """Wait until rate limit allows sending.
@@ -94,6 +123,29 @@ class RateLimiter:
         Args:
             channel_id: Optional channel ID for per-channel limiting
         """
+        # Shared-store path: reserve a slot atomically in SQLite so all workers
+        # draw from one bucket, then sleep OUTSIDE the transaction (issue #2579).
+        if self._store is not None:
+            loop = asyncio.get_event_loop()
+            total_wait = await loop.run_in_executor(
+                None,
+                lambda: self._store.reserve_tokens(
+                    self._scope,
+                    now=time.time(),
+                    burst_size=float(self._config.burst_size),
+                    messages_per_second=self._config.messages_per_second,
+                    channel_id=channel_id,
+                    per_channel_delay=self._config.per_channel_delay,
+                ),
+            )
+            if total_wait > 0:
+                logger.debug(
+                    f"Rate limit (shared): waiting {total_wait:.3f}s "
+                    f"for channel {channel_id}"
+                )
+                await asyncio.sleep(total_wait)
+            return
+
         # Phase 1: under lock, compute waits + reserve token + update last_send.
         async with self._lock:
             now = time.monotonic()
@@ -162,6 +214,18 @@ class RateLimiter:
         """
         if seconds <= 0:
             return
+        if self._store is not None:
+            loop = asyncio.get_event_loop()
+            until = time.time() + seconds
+            await loop.run_in_executor(
+                None,
+                lambda: self._store.penalise(self._scope, channel_id, until=until),
+            )
+            logger.debug(
+                f"Rate limit penalty (shared): holding off {seconds:.3f}s for "
+                f"channel {channel_id or '<global>'}"
+            )
+            return
         async with self._lock:
             until = time.monotonic() + seconds
             if channel_id:
@@ -183,6 +247,8 @@ class RateLimiter:
         self._channel_last_send.clear()
         self._channel_penalty_until.clear()
         self._global_penalty_until = 0.0
+        if self._store is not None:
+            self._store.reset_rate_limit(self._scope)
 
 
 def get_rate_limiter(platform: str) -> RateLimiter:
