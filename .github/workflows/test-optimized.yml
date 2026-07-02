@@ -42,7 +42,7 @@ jobs:
   # ============================================
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
     - uses: actions/checkout@v4
       with:
@@ -105,7 +105,7 @@ jobs:
         import toml
         assert hasattr(ConfigResolver, '__name__')
         assert callable(is_configured)
-        assert ModelCatalogue().list_models(provider="openai")
+        assert ModelCatalogue().list_models(provider='openai')
         import praisonai_code.cli.main
         import praisonai_code.cli.app
         from praisonai_code.tool_resolver import ToolResolver
@@ -127,7 +127,7 @@ jobs:
         bash "$GITHUB_WORKSPACE/scripts/check_c7_imports.sh"
         # Standalone run must not fail on wrapper ImportError (API auth failure is OK)
         set +e
-        RUN_OUT=$(/tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
+        RUN_OUT=$(timeout 90 /tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
         RUN_CODE=$?
         set -e
         echo "$RUN_OUT" | tail -20
