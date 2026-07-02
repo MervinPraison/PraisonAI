@@ -244,6 +244,82 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     
     return content.strip()
 
+def _sanitize_renderable(renderable, stream):
+    """Replace unencodable decorative glyphs in a Rich renderable/str.
+
+    On legacy consoles (e.g. Windows cp1252) glyphs such as ``▸`` (U+25B8)
+    cannot be encoded and Rich raises ``UnicodeEncodeError``. This walks the
+    common renderable types (plain ``str``, ``Text``, ``Panel``) and rewrites
+    their text through :func:`safe_text` so printing never crashes.
+    """
+    from .output.encoding import safe_text
+    try:
+        from rich.text import Text
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+    except ImportError:
+        return safe_text(renderable, stream) if isinstance(renderable, str) else renderable
+
+    if isinstance(renderable, str):
+        return safe_text(renderable, stream)
+    if isinstance(renderable, Text):
+        renderable.plain = safe_text(renderable.plain, stream)
+        return renderable
+    if isinstance(renderable, Markdown):
+        # Rebuild from sanitized markup so the rendered body drops
+        # unencodable glyphs (otherwise the LLM response would be lost).
+        return Markdown(safe_text(renderable.markup, stream))
+    if isinstance(renderable, Panel):
+        renderable.renderable = _sanitize_renderable(renderable.renderable, stream)
+        if isinstance(renderable.title, str):
+            renderable.title = safe_text(renderable.title, stream)
+        return renderable
+    return renderable
+
+def _renderable_to_plain(renderable, stream):
+    """Best-effort plain-text extraction from a Rich renderable for the
+    last-resort ``print()`` fallback, so LLM responses are never dropped.
+    """
+    from .output.encoding import safe_text
+    if isinstance(renderable, str):
+        return safe_text(renderable, stream)
+    try:
+        from rich.text import Text
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+    except ImportError:
+        return safe_text(str(getattr(renderable, "plain", renderable)), stream)
+
+    if isinstance(renderable, Text):
+        return safe_text(renderable.plain, stream)
+    if isinstance(renderable, Markdown):
+        return safe_text(renderable.markup, stream)
+    if isinstance(renderable, Panel):
+        return _renderable_to_plain(renderable.renderable, stream)
+    return safe_text(str(getattr(renderable, "plain", renderable)), stream)
+
+def _safe_console_print(console, *renderables, **kwargs):
+    """Print via Rich, falling back to ASCII-safe glyphs on encoding errors.
+
+    Rich's legacy Windows renderer encodes with the terminal encoding
+    (cp1252 by default) using strict error handling and has no fallback, so
+    decorative glyphs crash the agent loop. We first try a normal print; on
+    ``UnicodeEncodeError`` we retry with sanitized renderables so ``run`` and
+    other display paths degrade gracefully instead of failing.
+    """
+    try:
+        console.print(*renderables, **kwargs)
+    except UnicodeEncodeError:
+        stream = getattr(console, "file", None)
+        sanitized = [_sanitize_renderable(r, stream) for r in renderables]
+        try:
+            console.print(*sanitized, **kwargs)
+        except UnicodeEncodeError:
+            plain = " ".join(_renderable_to_plain(r, stream) for r in sanitized)
+            # Write to the console's own stream (which may be a captured or
+            # redirected file), not the process-wide sys.stdout.
+            print(plain, file=stream if stream is not None else None)
+
 def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None, metrics=None):
     """Synchronous version of display_interaction.
     
@@ -309,11 +385,11 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     # Format: 📝 Task message
     task_prefix = "[bold #FF9B9B]📝[/]"
     if markdown:
-        console.print(f"{task_prefix} {message}\n")
-        console.print(Panel.fit(Markdown(response_content), title=response_title, border_style=PRAISON_COLORS["response"]))
+        _safe_console_print(console, f"{task_prefix} {message}\n")
+        _safe_console_print(console, Panel.fit(Markdown(response_content), title=response_title, border_style=PRAISON_COLORS["response"]))
     else:
-        console.print(f"{task_prefix} [bold {PRAISON_COLORS['task_text']}]{message}[/]\n")
-        console.print(Panel.fit(Text(response_content, style=f"bold {PRAISON_COLORS['response_text']}"), title=response_title, border_style=PRAISON_COLORS["response"]))
+        _safe_console_print(console, f"{task_prefix} [bold {PRAISON_COLORS['task_text']}]{message}[/]\n")
+        _safe_console_print(console, Panel.fit(Text(response_content, style=f"bold {PRAISON_COLORS['response_text']}"), title=response_title, border_style=PRAISON_COLORS["response"]))
 
 def display_self_reflection(message: str, console=None):
     if not message or not message.strip():
@@ -326,7 +402,7 @@ def display_self_reflection(message: str, console=None):
     # Execute synchronous callbacks
     execute_sync_callback('self_reflection', message=message)
 
-    console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
+    _safe_console_print(console, Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
 def display_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
     if not message or not message.strip():
@@ -347,11 +423,11 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
         if agent_tools:
             tools_str = ", ".join(f"[italic #B4D4FF]{tool}[/]" for tool in agent_tools)
             agent_info += f"\n[bold #86A789]Tools:[/] {tools_str}"
-        console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
+        _safe_console_print(console, Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
 
     # Only print if log level is DEBUG
     if get_logger().getEffectiveLevel() == logging.DEBUG:
-        console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 def display_tool_call(message: str, console=None, tool_name: str = None, tool_input: dict = None, tool_output: str = None, elapsed_time: float = None, success: bool = True):
     """Display tool call information in PraisonAI's unique timeline format.
@@ -409,10 +485,10 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
                 tool_line += f" [dim]→[/] [italic]{output_str}[/]"
             
             tool_line += f" {time_str} {status_icon}"
-            console.print(tool_line)
+            _safe_console_print(console, tool_line)
         else:
             # Legacy format - simple inline
-            console.print(f"[bold #86A789]▸[/] {message}")
+            _safe_console_print(console, f"[bold #86A789]▸[/] {message}")
 
 def display_error(message: str, console=None):
     if not message or not message.strip():
@@ -426,7 +502,7 @@ def display_error(message: str, console=None):
     execute_sync_callback('error', message=message)
 
     # Use semantic error color
-    console.print(Panel.fit(
+    _safe_console_print(console, Panel.fit(
         Text(message, style=f"bold {PRAISON_COLORS['error_text']}"),
         title="⚠ Error",
         border_style=PRAISON_COLORS["error"]
@@ -482,7 +558,7 @@ def display_reasoning_steps(steps: List[str], console=None):
     
     reasoning_display = "\n".join(reasoning_lines)
     
-    console.print(Panel.fit(
+    _safe_console_print(console, Panel.fit(
         Text(reasoning_display, style=f"italic {PRAISON_COLORS['reasoning_text']}"),
         title="Reasoning",
         border_style=PRAISON_COLORS["reasoning"]
@@ -550,14 +626,14 @@ async def adisplay_interaction(message, response, markdown=True, generation_time
 
     # Rest of the display logic...
     if generation_time:
-        console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
+        _safe_console_print(console, Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
     if markdown:
-        console.print(Panel.fit(Markdown(message), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Markdown(message), title="Task", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Markdown(response), title="Response", border_style="cyan"))
     else:
-        console.print(Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
 
 async def adisplay_self_reflection(message: str, console=None):
     """Async version of display_self_reflection."""
@@ -571,7 +647,7 @@ async def adisplay_self_reflection(message: str, console=None):
     # Execute callbacks
     await execute_callback('self_reflection', message=message)
     
-    console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
+    _safe_console_print(console, Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
 async def adisplay_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
     """Async version of display_instruction."""
@@ -593,11 +669,11 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
         if agent_tools:
             tools_str = ", ".join(f"[italic #B4D4FF]{tool}[/]" for tool in agent_tools)
             agent_info += f"\n[bold #86A789]Tools:[/] {tools_str}"
-        console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
+        _safe_console_print(console, Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
     
     # Only print if log level is DEBUG
     if get_logger().getEffectiveLevel() == logging.DEBUG:
-        console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
+        _safe_console_print(console, Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 async def adisplay_tool_call(message: str, console=None):
     """Async version of display_tool_call."""
@@ -614,7 +690,7 @@ async def adisplay_tool_call(message: str, console=None):
     # Execute callbacks
     await execute_callback('tool_call', message=message)
     
-    console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
+    _safe_console_print(console, Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 async def adisplay_error(message: str, console=None):
     """Async version of display_error."""
@@ -628,7 +704,7 @@ async def adisplay_error(message: str, console=None):
     # Execute callbacks
     await execute_callback('error', message=message)
     
-    console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
+    _safe_console_print(console, Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     with _error_logs_lock:
         error_logs.append(message)
 
