@@ -297,14 +297,18 @@ class LazyCommandGroup(TyperGroup):
         )
         commands.update(_SPECIAL_COMMANDS.keys())
         
-        # Add special inline commands
-        commands.add("app")
-        
         # Add retrieval commands (these are registered via register_commands)
         commands.update(["index", "query", "search"])
         
-        # Add standardise/standardize
-        commands.update(["standardise", "standardize"])
+        # ``app`` and ``standardise``/``standardize`` are wrapper-resident (C8.2):
+        # their real implementations live in ``praisonai.cli.commands.*`` and are
+        # only resolvable via the bridge when the wrapper is installed. Advertise
+        # them only when the wrapper is available so a standalone ``praisonai-code``
+        # install does not surface a command that ``get_command`` returns ``None``
+        # for.
+        if wrapper_ok:
+            commands.add("app")
+            commands.update(["standardise", "standardize"])
         
         return sorted(list(commands))
     
