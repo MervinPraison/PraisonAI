@@ -5,7 +5,7 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 395,
-    "pythonWrapperFeatures": 5,
+    "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
     "gapCount": 101,
     "priorityP0": 2,
@@ -873,11 +873,27 @@
   "pythonWrapper": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai/praisonai",
     "cliFeatures": [
+      "acp",
+      "agent_scheduler",
+      "agent_tools",
       "approval",
+      "background",
       "bots_cli",
+      "deploy",
+      "endpoints",
+      "eval",
       "gateway",
+      "ollama",
       "onboard",
-      "serve"
+      "persistence",
+      "recipe",
+      "recipe_optimizer",
+      "registry",
+      "sandbox_cli",
+      "serve",
+      "templates",
+      "tools",
+      "workflow"
     ]
   },
   "typescriptSDK": {
