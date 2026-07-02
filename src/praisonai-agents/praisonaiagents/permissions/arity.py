@@ -125,15 +125,21 @@ def derive_pattern(
         arity_map: Optional override for the arity table.
 
     Returns:
-        A reusable pattern such as ``"bash:git status *"``. If the target is
-        not a shell target, is empty, or already contains ``*``/``?`` glob
-        characters, it is returned unchanged.
+        A reusable pattern such as ``"bash:git status *"``. The target is
+        returned **unchanged** when it is not a shell target, is empty, already
+        contains ``*``/``?`` glob characters, contains a shell control operator
+        (``&&``, ``|``, ``;``, ``$(...)`` etc.), or is a bare single-token
+        command (so a lone ``git`` never becomes ``git *``).
 
     Examples:
         >>> derive_pattern("bash:git status")
         'bash:git status *'
         >>> derive_pattern("bash:npm run build")
         'bash:npm run *'
+        >>> derive_pattern("bash:git")            # bare command stays literal
+        'bash:git'
+        >>> derive_pattern("bash:cd /tmp && rm x")  # operator -> literal
+        'bash:cd /tmp && rm x'
         >>> derive_pattern("read:/etc/hosts")
         'read:/etc/hosts'
     """
@@ -150,9 +156,26 @@ def derive_pattern(
     if "*" in command or "?" in command:
         return target
 
+    # Shell control operators / substitutions. If the command contains any of
+    # these, a globbed prefix would silently swallow a *second* command into
+    # the reusable scope (e.g. ``cd /tmp && rm -rf x`` -> ``cd *``). Refuse to
+    # generalise such commands and keep the literal target instead.
+    _SHELL_OPERATORS = ("&&", "||", "|", ";", "&", "$(", "`", ">", "<", "\n")
+    if any(op in command for op in _SHELL_OPERATORS):
+        return target
+
     tokens = command.split()
     cmd_prefix = prefix(tokens, arity_map)
     if not cmd_prefix:
+        return target
+
+    # A bare single-token command (e.g. ``git`` with no subcommand) must not be
+    # generalised to ``git *`` — that would auto-approve every subcommand,
+    # violating the documented conservative contract. Only generalise when the
+    # prefix is genuinely a prefix (i.e. there is at least one trailing token to
+    # replace with ``*``); a lone token that already equals the full command has
+    # nothing to generalise and is kept literal.
+    if len(cmd_prefix.split()) == 1 and cmd_prefix == command:
         return target
 
     return f"{matched}{cmd_prefix} *"
