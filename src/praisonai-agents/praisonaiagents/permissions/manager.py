@@ -58,6 +58,7 @@ class PermissionManager:
         storage_dir: Optional[str] = None,
         agent_name: Optional[str] = None,
         approval_callback: Optional[Callable[[str, str], bool]] = None,
+        workspace_root: Optional[str] = None,
     ):
         """
         Initialize the permission manager.
@@ -66,10 +67,19 @@ class PermissionManager:
             storage_dir: Directory for persistent storage
             agent_name: Optional agent name for filtering rules
             approval_callback: Optional callback for user approval
+            workspace_root: Optional project/workspace root. When set, shell
+                and file targets that resolve *outside* this root emit a
+                distinct ``external_dir:<parent>/*`` sub-target (default
+                ``ask``), gating out-of-workspace access with an extra
+                approval. When ``None`` (default) no boundary check runs and
+                behaviour is unchanged.
         """
         self.storage_dir = storage_dir or DEFAULT_PERMISSIONS_DIR
         self.agent_name = agent_name
         self.approval_callback = approval_callback
+        self.workspace_root = (
+            os.path.realpath(workspace_root) if workspace_root else None
+        )
         
         self._rules: List[PermissionRule] = []
         self._approvals: List[PersistentApproval] = []
@@ -200,6 +210,22 @@ class PermissionManager:
     # sub-targets before matching (command-aware permission matching).
     _SHELL_PREFIXES = ("bash:", "shell:")
 
+    # File-mutating tool prefixes whose ``<prefix>:<path>`` target must also be
+    # gated by the workspace boundary. A broad ``write_file:*`` approval should
+    # not silently permit writes outside ``workspace_root``; out-of-workspace
+    # paths emit an ``external_dir:`` ask (deny rules still win).
+    _FILE_PREFIXES = (
+        "write:",
+        "write_file:",
+        "edit:",
+        "edit_file:",
+        "apply_patch:",
+        "append:",
+        "append_file:",
+        "delete:",
+        "delete_file:",
+    )
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -224,8 +250,60 @@ class PermissionManager:
             structured = self._check_shell_command(prefix, command, agent)
             if structured is not None:
                 return structured
+            return self._check_flat(target, agent)
+
+        # File-mutating tool targets share the workspace-boundary gate so a
+        # broad ``write_file:*`` approval cannot silently escape the workspace.
+        if self.workspace_root is not None:
+            file_prefix = next(
+                (p for p in self._FILE_PREFIXES if target.startswith(p)), None
+            )
+            if file_prefix is not None:
+                boundary = self._check_file_boundary(
+                    file_prefix, target[len(file_prefix):], target, agent
+                )
+                if boundary is not None:
+                    return boundary
 
         return self._check_flat(target, agent)
+
+    def _check_file_boundary(
+        self, prefix: str, path: str, original_target: str, agent: Optional[str]
+    ) -> Optional[PermissionResult]:
+        """Apply the workspace boundary to a file-tool ``<prefix>:<path>``.
+
+        Returns ``None`` when the path is inside the workspace (defer to normal
+        flat matching) so in-workspace behaviour is unchanged. When the path
+        escapes the root, aggregates the flat file-target result with the
+        ``external_dir:`` gate using deny-wins → ask → allow, mirroring the
+        shell decomposition semantics (a deny still wins over the ask gate).
+        """
+        ext = self._external_dir_target(path)
+        if ext is None:
+            return None
+
+        file_res = self._check_flat(original_target, agent)
+        ext_res = self._check_flat(ext, agent)
+
+        # Deny wins (either an explicit file-target deny or an external_dir deny).
+        for sub_target, res in ((original_target, file_res), (ext, ext_res)):
+            if res.action == PermissionAction.DENY:
+                res.reason = f"Denied '{sub_target}' ({res.reason})"
+                res.target = original_target
+                return res
+
+        # Then ask: the external-directory gate requires approval unless it has
+        # been explicitly pre-authorised (allow rule/approval on external_dir:).
+        if ext_res.action != PermissionAction.ALLOW:
+            ext_res.reason = (
+                f"Out-of-workspace path requires approval "
+                f"('{ext}': {ext_res.reason})"
+            )
+            ext_res.target = original_target
+            return ext_res
+
+        # External path was explicitly pre-authorised; honour the file rule.
+        return file_res
 
     def _check_flat(self, target: str, agent: Optional[str]) -> PermissionResult:
         """Legacy flat matching against approvals and rules for a target."""
@@ -286,6 +364,23 @@ class PermissionManager:
                 sub_targets.append(prefix + cmd_str)
             for path in op.write_targets:
                 sub_targets.append(f"write:{path}")
+            # Workspace-boundary gate: any write target or path-like arg that
+            # resolves outside the workspace root gets a distinct
+            # ``external_dir:`` sub-target (default ``ask``).
+            if self.workspace_root is not None:
+                boundary_paths = list(op.write_targets) + op.path_args
+                # An executable referenced by path (``/tmp/tool``, ``../tool``)
+                # runs code outside the workspace; a bare name (``rm``) is
+                # PATH-resolved and must not trigger a boundary prompt.
+                if op.executable and (
+                    op.executable.startswith(("/", "~", "./", "../", "$"))
+                    or "/" in op.executable
+                ):
+                    boundary_paths.append(op.executable)
+                for path in boundary_paths:
+                    ext = self._external_dir_target(path)
+                    if ext is not None:
+                        sub_targets.append(ext)
 
         # No structured decomposition possible, or it collapses to exactly the
         # original target — defer to the existing flat matcher.
@@ -327,6 +422,57 @@ class PermissionManager:
             target=original_target,
             reason="All shell sub-operations allowed",
         )
+
+    def _external_dir_target(self, path: str) -> Optional[str]:
+        """Return an ``external_dir:<parent>/*`` target if *path* escapes root.
+
+        Resolves *path* (``~``, ``$VARS``, ``..``) against ``workspace_root``
+        using the shared ``path_safety`` containment logic. In-workspace paths
+        return ``None`` so existing flows are unaffected.
+        """
+        if self.workspace_root is None:
+            return None
+        # Fail *closed*: if the boundary check cannot be performed (import or
+        # resolution failure), gate the raw path behind ``external_dir:`` rather
+        # than silently allowing it. A deny rule still wins over this ask.
+        fail_closed = f"external_dir:{path}/*"
+        try:
+            from ..tools.path_safety import resolve_within_root, resolve_path
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "Workspace boundary check unavailable for path '%s' "
+                "(agent=%s): %s. Requiring approval instead of allowing.",
+                path, self.agent_name, e,
+            )
+            return fail_closed
+        try:
+            if resolve_within_root(path, self.workspace_root) is not None:
+                return None
+            resolved = resolve_path(path, self.workspace_root)
+            parent = os.path.dirname(resolved) or resolved
+            return f"external_dir:{parent}/*"
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Could not resolve path '%s' for workspace boundary check "
+                "(agent=%s): %s. Requiring approval.",
+                path, self.agent_name, e,
+            )
+            return fail_closed
+
+    def check_path_boundary(
+        self, path: str, agent_name: Optional[str] = None
+    ) -> Optional[PermissionResult]:
+        """Check a single file-tool target against the workspace boundary.
+
+        Shared boundary policy for file tools (``write_file``/``edit``/
+        ``apply_patch``). Returns ``None`` when no ``workspace_root`` is
+        configured or the path is inside it (i.e. no extra gate); otherwise
+        returns the ``external_dir:`` permission decision (default ``ask``).
+        """
+        ext = self._external_dir_target(path)
+        if ext is None:
+            return None
+        return self.check(ext, agent_name)
 
     def approve(
         self,

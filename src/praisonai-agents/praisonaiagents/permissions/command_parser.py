@@ -28,6 +28,49 @@ _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
 _WRITE_REDIRECTS = (">", ">>", ">|", "&>", "&>>")
 
 
+def _looks_like_path(tok: str) -> bool:
+    """Return ``True`` if *tok* is path-like enough to warrant a boundary check.
+
+    Conservative but covers common escape forms: absolute (``/x``),
+    home-relative (``~``), explicit relative (``./``, ``../``, ``..``),
+    env-prefixed (``$VAR/…``) and any bare token that embeds a ``/`` (e.g.
+    ``subdir/../../etc/passwd``). Plain flags/values without a path shape are
+    ignored so non-path args never trigger a spurious prompt.
+    """
+    if not tok:
+        return False
+    return (
+        tok.startswith("/")
+        or tok.startswith("~")
+        or tok.startswith("./")
+        or tok.startswith("../")
+        or tok == ".."
+        or tok.startswith("$")
+        or "/" in tok
+    )
+
+
+def _extract_flag_path(tok: str) -> str:
+    """Extract a path operand attached to a short flag (``-o/tmp/x``).
+
+    Handles the ``getopt`` short-option form where the value is joined to the
+    flag with no separator (e.g. ``-o/tmp/outside``, ``-I/usr/include``). The
+    leading dashes and flag letters are stripped and the first embedded
+    path-shaped segment (``/…``, ``~…``, ``$…``) is returned; otherwise ``""``.
+    Long flags (``--flag=…``) are handled separately via ``=`` splitting.
+    """
+    if not tok.startswith("-") or tok.startswith("--"):
+        return ""
+    body = tok.lstrip("-")
+    for i, ch in enumerate(body):
+        if ch in ("/", "~", "$"):
+            candidate = body[i:]
+            if _looks_like_path(candidate):
+                return candidate
+            break
+    return ""
+
+
 @dataclass
 class ShellOp:
     """A single simple-command extracted from a shell command line.
@@ -47,6 +90,38 @@ class ShellOp:
         """Reconstruct an ``<exe> <args>`` string for glob matching."""
         parts = [self.executable, *self.args]
         return " ".join(p for p in parts if p)
+
+    @property
+    def path_args(self) -> List[str]:
+        """Args that look like filesystem paths (for boundary checks).
+
+        Returns path-like tokens for boundary evaluation. Covers absolute
+        (``/x``), home-relative (``~``), parent/relative (``./``, ``../``),
+        env-prefixed (``$VAR/…``) and bare traversal/relative paths that
+        embed ``/`` (e.g. ``subdir/../../etc/passwd``). Path operands passed
+        as joined flags (``--config=/etc/x``) or short-flag-attached
+        (``-o/tmp/x``) are also unwrapped so the value is boundary-checked.
+        Plain flags and non-path values are ignored.
+        """
+        paths: List[str] = []
+        for tok in self.args:
+            if not tok:
+                continue
+            # Flag forms can hide a path operand: ``--flag=<value>`` (split on
+            # ``=``) or short getopt ``-o<value>`` (value joined to the flag).
+            if tok.startswith("-"):
+                if "=" in tok:
+                    value = tok.split("=", 1)[1]
+                    if value and _looks_like_path(value):
+                        paths.append(value)
+                    continue
+                attached = _extract_flag_path(tok)
+                if attached:
+                    paths.append(attached)
+                continue
+            if _looks_like_path(tok):
+                paths.append(tok)
+        return paths
 
 
 def _extract_substitutions(token: str) -> List[str]:
