@@ -1831,6 +1831,92 @@ Now provide your final answer using this result. Summarize the information natur
                 
         return False, None, iteration_count
 
+    def _finalise_on_limit(self, messages: List[Dict], response_text: str,
+                           temperature: float = 0.2, **kwargs) -> str:
+        """
+        Force a final tools-disabled answer when the tool-calling loop hits max_iter.
+
+        Instead of returning a canned placeholder, this performs exactly one extra
+        LLM call with tools disabled (tool_choice="none") and a short wrap-up nudge,
+        asking the model to summarise what it accomplished, what remains unfinished,
+        and any next steps using the accumulated tool results already in context.
+
+        Falls back to the prior placeholder text if the extra call fails, so behaviour
+        never regresses.
+
+        Args:
+            messages: Current message history (already contains tool results).
+            response_text: Any text emitted on the final turn (used as fallback).
+            temperature: Sampling temperature for the wrap-up call.
+
+        Returns:
+            The synthesised final answer, or a safe fallback string.
+        """
+        wrap_up = {
+            "role": "user",
+            "content": (
+                "You have reached the step limit for this task. Do not call any tools. "
+                "Provide a final answer that summarises what you accomplished, what "
+                "remains unfinished, and any suggested next steps, using the tool "
+                "results already gathered."
+            ),
+        }
+        try:
+            import litellm
+            safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+            resp = litellm.completion(
+                **self._build_completion_params(
+                    messages=messages + [wrap_up],
+                    temperature=temperature,
+                    stream=False,
+                    tool_choice="none",
+                    **safe_kwargs
+                )
+            )
+            summary = resp["choices"][0]["message"].get("content")
+            if summary and summary.strip():
+                return summary.strip()
+        except Exception as e:
+            logging.warning(f"Step-limit finalisation call failed, using fallback: {e}")
+
+        if response_text and response_text.strip():
+            return response_text.strip()
+        return "Reached the step limit before finishing this task."
+
+    async def _finalise_on_limit_async(self, messages: List[Dict], response_text: str,
+                                       temperature: float = 0.2, **kwargs) -> str:
+        """Async counterpart of :meth:`_finalise_on_limit`."""
+        wrap_up = {
+            "role": "user",
+            "content": (
+                "You have reached the step limit for this task. Do not call any tools. "
+                "Provide a final answer that summarises what you accomplished, what "
+                "remains unfinished, and any suggested next steps, using the tool "
+                "results already gathered."
+            ),
+        }
+        try:
+            import litellm
+            safe_kwargs = {k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+            resp = await litellm.acompletion(
+                **self._build_completion_params(
+                    messages=messages + [wrap_up],
+                    temperature=temperature,
+                    stream=False,
+                    tool_choice="none",
+                    **safe_kwargs
+                )
+            )
+            summary = resp["choices"][0]["message"].get("content")
+            if summary and summary.strip():
+                return summary.strip()
+        except Exception as e:
+            logging.warning(f"Step-limit finalisation call failed, using fallback: {e}")
+
+        if response_text and response_text.strip():
+            return response_text.strip()
+        return "Reached the step limit before finishing this task."
+
     def _needs_system_message_skip(self) -> bool:
         """Check if this model requires skipping system messages"""
         if not self.model:
@@ -2402,7 +2488,10 @@ Now provide your final answer using this result. Summarize the information natur
 
                             # Safety: break after max_iter iterations
                             if iteration_count >= self.max_iter:
-                                final_response_text = response_text.strip() if response_text else "Task completed."
+                                final_response_text = self._finalise_on_limit(
+                                    messages, response_text, temperature=temperature,
+                                    **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+                                )
                                 break
 
                             iteration_count += 1
@@ -3224,10 +3313,10 @@ Now provide your final answer using this result. Summarize the information natur
                         
                         # Safety check: prevent infinite loops for any provider
                         if iteration_count >= self.max_iter:
-                            if tool_results:
-                                final_response_text = "Task completed successfully based on tool execution results."
-                            else:
-                                final_response_text = response_text.strip() if response_text else "Task completed."
+                            final_response_text = self._finalise_on_limit(
+                                messages, response_text, temperature=temperature,
+                                **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+                            )
                             break
                         
                         # Otherwise, continue the loop to get final response with tool results
@@ -4164,7 +4253,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             })
 
                         if iteration_count >= self.max_iter:
-                            final_response_text = response_text.strip() if response_text else "Task completed."
+                            final_response_text = await self._finalise_on_limit_async(
+                                messages, response_text, temperature=temperature,
+                                **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+                            )
                             break
 
                         iteration_count += 1
@@ -4573,10 +4665,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count >= self.max_iter:
-                        if tool_results:
-                            final_response_text = "Task completed successfully based on tool execution results."
-                        else:
-                            final_response_text = response_text.strip() if response_text else "Task completed."
+                        final_response_text = await self._finalise_on_limit_async(
+                            messages, response_text, temperature=temperature,
+                            **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
+                        )
                         break
                     
                     # Continue the loop to check if more tools are needed
