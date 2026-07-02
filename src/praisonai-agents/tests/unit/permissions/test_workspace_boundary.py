@@ -143,6 +143,37 @@ class TestFileToolBoundary:
         assert manager.check_path_boundary(os.path.join(workspace, "a.txt")) is None
 
 
+class TestFailClosed:
+    def test_resolution_failure_asks(self, manager, monkeypatch):
+        # If path resolution raises, the boundary check must fail *closed*
+        # (emit external_dir → ask), never silently allow the operation.
+        import praisonaiagents.tools.path_safety as ps
+
+        def boom(*_a, **_k):
+            raise OSError("simulated resolution failure")
+
+        monkeypatch.setattr(ps, "resolve_within_root", boom)
+        assert manager._external_dir_target("/some/path").startswith(
+            "external_dir:"
+        )
+
+    def test_import_failure_asks(self, manager, monkeypatch):
+        # If path_safety cannot be imported, still fail closed.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **k):
+            if "path_safety" in name:
+                raise ImportError("simulated import failure")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        assert manager._external_dir_target("/some/path").startswith(
+            "external_dir:"
+        )
+
+
 class TestBackwardCompatibility:
     def test_no_workspace_root_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:

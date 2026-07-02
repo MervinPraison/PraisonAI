@@ -364,21 +364,32 @@ class PermissionManager:
         """
         if self.workspace_root is None:
             return None
+        # Fail *closed*: if the boundary check cannot be performed (import or
+        # resolution failure), gate the raw path behind ``external_dir:`` rather
+        # than silently allowing it. A deny rule still wins over this ask.
+        fail_closed = f"external_dir:{path}/*"
         try:
-            from ..tools.path_safety import is_within_root
-        except Exception:  # noqa: BLE001 - never weaken on import failure
-            return None
+            from ..tools.path_safety import resolve_within_root, resolve_path
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "Workspace boundary check unavailable for path '%s' "
+                "(agent=%s): %s. Requiring approval instead of allowing.",
+                path, self.agent_name, e,
+            )
+            return fail_closed
         try:
-            if is_within_root(path, self.workspace_root):
+            if resolve_within_root(path, self.workspace_root) is not None:
                 return None
-            expanded = os.path.expanduser(os.path.expandvars(path))
-            if not os.path.isabs(expanded):
-                expanded = os.path.join(self.workspace_root, expanded)
-            resolved = os.path.realpath(os.path.normpath(expanded))
+            resolved = resolve_path(path, self.workspace_root)
             parent = os.path.dirname(resolved) or resolved
             return f"external_dir:{parent}/*"
-        except Exception:  # noqa: BLE001 - conservative: skip on any failure
-            return None
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Could not resolve path '%s' for workspace boundary check "
+                "(agent=%s): %s. Requiring approval.",
+                path, self.agent_name, e,
+            )
+            return fail_closed
 
     def check_path_boundary(
         self, path: str, agent_name: Optional[str] = None
