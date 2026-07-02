@@ -1,0 +1,239 @@
+<!-- wp:paragraph -->
+<p><strong>v4.6.113</strong> — three Python packages, strict dependency direction, and <strong>C8 complete</strong>: reverse wrapper imports eliminated from <code>praisonai-code</code>. Tap the diagrams; tables hold the rules.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:quote -->
+<blockquote class="wp-block-quote"><p><strong>One rule (unchanged):</strong> <code>praisonai-code</code> never lists <code>praisonai</code> in <code>pyproject.toml</code>. Wrapper access is <strong>bridge-only</strong> via <code>_wrapper_bridge</code> — zero direct <code>from praisonai</code> imports remain.</p></blockquote>
+<!-- /wp:quote -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">✅ C8 validation summary</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Plan target</th><th>Before (C7.1)</th><th>After (C8 / v4.6.113)</th><th>Verdict</th></tr></thead><tbody><tr><td>Wrapper import lines</td><td>225</td><td><strong>0</strong></td><td>✅ Exceeded (~40–60 floor)</td></tr><tr><td>Allowlisted files</td><td>47</td><td><strong>0</strong> (empty)</td><td>✅</td></tr><tr><td>Regression baseline</td><td>225</td><td><strong>50</strong> (headroom gate)</td><td>✅</td></tr><tr><td>No PyPI dep on wrapper</td><td>Yes</td><td>Yes</td><td>✅</td></tr><tr><td>Hot path standalone</td><td>Yes</td><td>Yes</td><td>✅</td></tr><tr><td><code>main.py</code> ≤ 300 lines</td><td>7,454 lines</td><td>~7,492 lines</td><td>⏳ Partial — legacy helpers extracted; full decompose deferred</td></tr><tr><td>PyPI splits (bot/frameworks)</td><td>Out of scope</td><td>Out of scope</td><td>—</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p><strong>Shipped:</strong> PR <a href="https://github.com/MervinPraison/PraisonAI/pull/2590">#2590</a> merged · Release <a href="https://github.com/MervinPraison/PraisonAI/releases/tag/v4.6.113">v4.6.113</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">What C8 moved (repatriation)</h3>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Phase</th><th>What happened</th><th>Status</th></tr></thead><tbody><tr><td><strong>C8.1</strong></td><td><code>_WRAPPER_RESIDENT_COMMANDS</code>, import-gate regex fix, boundary tests</td><td>✅ Done</td></tr><tr><td><strong>C8.2</strong></td><td>Commands → wrapper: langfuse, train, docs, serve bridge, n8n, replay, …</td><td>✅ Done</td></tr><tr><td><strong>C8.3</strong></td><td>Features → wrapper: recipe, templates, deploy, eval, registry, …</td><td>✅ Done</td></tr><tr><td><strong>C8.4</strong></td><td><code>praisonai/cli/legacy/</code> + <code>prompt_dispatch.py</code> in code</td><td>✅ Partial</td></tr><tr><td><strong>C8.5</strong></td><td>Bridge normalisation + <code>TemplateStore</code> / <code>SessionStore</code> / <code>ServeHandler</code> protocols</td><td>✅ Done</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">📦 Three tiers at a glance</h2>
+<!-- /wp:heading -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+flowchart TB
+  subgraph tier1 ["Tier 1 — Core SDK"]
+    Agents["praisonaiagents<br/>Agent, tools, memory, hooks, protocols"]
+  end
+  subgraph tier2 ["Tier 2 — Terminal CLI"]
+    Code["praisonai-code<br/>run, chat, code, Typer, runtime"]
+  end
+  subgraph tier3 ["Tier 3 — Wrapper"]
+    Wrapper["praisonai<br/>gateway, bots, framework_adapters, repatriated CLI"]
+  end
+  Agents --> Code
+  Agents --> Wrapper
+  Code -.->|"bridge only<br/>0 direct imports"| Wrapper
+  classDef agent fill:#8B0000,color:#fff
+  classDef tool fill:#189AB4,color:#fff
+  classDef decision fill:#444,color:#fff
+  class Agents agent
+  class Code tool
+  class Wrapper decision
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Tier</th><th>Package</th><th>Owns</th><th>Version (v4.6.113)</th></tr></thead><tbody><tr><td><strong>1</strong></td><td><code>praisonaiagents</code></td><td>Agent, tools, memory, hooks, CLI protocols (C8.5)</td><td>1.6.113</td></tr><tr><td><strong>2</strong></td><td><code>praisonai-code</code></td><td><code>run</code>, <code>chat</code>, <code>code</code>, Typer hot path, bridge</td><td>0.0.11</td></tr><tr><td><strong>3</strong></td><td><code>praisonai</code></td><td>bots, gateway, adapters, repatriated commands/features</td><td>4.6.113</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Tier 1 — <code>praisonaiagents</code></h3>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Module</th><th>What it does</th></tr></thead><tbody><tr><td><code>agent/</code></td><td>Agent class, execution, handoffs</td></tr><tr><td><code>tools/</code></td><td><code>@tool</code>, BaseTool, registry</td></tr><tr><td><code>memory/</code>, <code>hooks/</code>, <code>llm/</code></td><td>Memory, events, model routing</td></tr><tr><td><code>frameworks/</code></td><td>Protocols only — not CrewAI/AutoGen impls</td></tr><tr><td><code>cli/protocols.py</code></td><td><strong>C8.5:</strong> TemplateStore, SessionStore, ServeHandler protocols</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Tier 2 — <code>praisonai-code</code></h3>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Component</th><th>What it does</th></tr></thead><tbody><tr><td><code>run/chat/code</code></td><td>Agentic hot path — standalone, strict gate</td></tr><tr><td><code>cli/app.py</code></td><td>Typer router + <code>_WRAPPER_RESIDENT_COMMANDS</code></td></tr><tr><td><code>_wrapper_bridge.py</code></td><td><strong>Only</strong> path to wrapper modules (string-based lazy import)</td></tr><tr><td><code>cli/commands/serve.py</code></td><td>SDK serve + bridge to wrapper gateway/endpoints</td></tr><tr><td><code>cli/features/doctor/</code></td><td>Health checks; wrapper checks SKIP if standalone</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading {"level":3} -->
+<h3 class="wp-block-heading">Tier 3 — <code>praisonai</code> (now owns repatriated CLI)</h3>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Component</th><th>What it does</th></tr></thead><tbody><tr><td><code>cli/commands/*</code></td><td>bot, gateway, train, langfuse, docs, n8n, replay, …</td></tr><tr><td><code>cli/features/*</code></td><td>recipe, templates, deploy, eval, serve orchestration</td></tr><tr><td><code>cli/legacy/</code></td><td>inbuilt_tools, framework_run (C8.4)</td></tr><tr><td><code>bots/</code>, <code>gateway/</code></td><td>Multi-platform bot orchestration</td></tr><tr><td><code>framework_adapters/</code></td><td>CrewAI, AutoGen, registry</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">🔀 CLI routing</h2>
+<!-- /wp:heading -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+flowchart LR
+  User[User] --> Entry{Entry}
+  Entry -->|praisonai-code| Hot["run / chat / code"]
+  Entry -->|praisonai| Router[Typer router]
+  Router --> App[praisonai_code.cli.app]
+  Router --> Legacy[Legacy YAML]
+  App --> Resident{_WRAPPER_RESIDENT?}
+  Resident -->|yes + wrapper| WrapCmd[praisonai.cli.commands.*]
+  Resident -->|no| CodeCmd[praisonai_code.cli.commands.*]
+  Resident -->|no wrapper| Hide[Hidden from help]
+  classDef agent fill:#8B0000,color:#fff
+  classDef tool fill:#189AB4,color:#fff
+  classDef decision fill:#444,color:#fff
+  class Hot tool
+  class WrapCmd decision
+  class Resident decision
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Command type</th><th>Loaded from</th><th>Standalone?</th></tr></thead><tbody><tr><td><code>run</code>, <code>chat</code>, <code>code</code></td><td><code>praisonai_code</code></td><td>✅</td></tr><tr><td><code>bot</code>, <code>gateway</code>, <code>train</code>, …</td><td><code>praisonai.cli.commands.*</code></td><td>❌ hidden</td></tr><tr><td>Legacy YAML / <code>--framework crewai</code></td><td><code>cli/main.py</code> + bridge</td><td>❌</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:quote -->
+<blockquote class="wp-block-quote"><p><strong>C8 change:</strong> 30+ commands are <code>_WRAPPER_RESIDENT</code> — implementation lives only in the wrapper; code package routes lazily with no duplicate modules.</p></blockquote>
+<!-- /wp:quote -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">🌉 Bridge-only access (post-C8)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+sequenceDiagram
+  participant Code as praisonai_code
+  participant Bridge as _wrapper_bridge
+  participant Wrap as praisonai
+  Code->>Bridge: import_wrapper_module("praisonai.cli.features.serve")
+  alt wrapper installed
+    Bridge->>Wrap: importlib.import_module
+    Wrap-->>Code: module handle
+  else standalone
+    Bridge-->>Code: ImportError + pip install praisonai hint
+  end
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Before C8</th><th>After C8</th></tr></thead><tbody><tr><td>225 direct <code>from praisonai</code> lines</td><td><strong>0</strong> — all bridge string imports</td></tr><tr><td>47 allowlisted files</td><td><strong>0</strong> — empty allowlist</td></tr><tr><td>Duplicate command copies in code + wrapper</td><td>Single impl in wrapper; code routes only</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">🛡️ Import gates (CI)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+flowchart TD
+  CI[CI smoke] --> Venv[Standalone venv]
+  Venv --> Hot[Hot-path gate]
+  Venv --> Script[check_c7_imports.sh]
+  Script --> Strict[Strict: run/chat/code/app]
+  Script --> Base["Baseline max 50 lines"]
+  Script --> Allow[Empty allowlist enforced]
+  Venv --> Run[praisonai-code run]
+  classDef tool fill:#189AB4,color:#fff
+  classDef agent fill:#8B0000,color:#fff
+  class CI agent
+  class Script tool
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Gate</th><th>Check</th><th>Status</th></tr></thead><tbody><tr><td>Hot path</td><td>No module-level wrapper import in main/app/run/chat/code</td><td>✅</td></tr><tr><td>Strict</td><td>Zero wrapper imports in app/run/chat/code</td><td>✅</td></tr><tr><td>Baseline</td><td>≤ <strong>50</strong> direct import lines (current: <strong>0</strong>)</td><td>✅</td></tr><tr><td>Allowlist</td><td>Any offender must be listed (list is empty)</td><td>✅</td></tr><tr><td>Smoke</td><td>Standalone <code>praisonai-code run</code></td><td>✅</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>bash scripts/check_c7_imports.sh
+pytest src/praisonai/tests/unit/test_c7_1_boundaries.py
+pytest src/praisonai/tests/unit/test_c5_backward_compat.py</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">🔌 Framework adapters</h2>
+<!-- /wp:heading -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+flowchart TB
+  subgraph sdk [praisonaiagents]
+    P[frameworks protocols]
+    CP[cli protocols C8.5]
+  end
+  subgraph wrap [praisonai]
+    R[framework_adapters registry]
+    C[CrewAI AutoGen]
+  end
+  subgraph code [praisonai-code]
+    B[_wrapper_bridge]
+  end
+  P -.-> R
+  CP -.-> wrap
+  B -->|lazy| R
+  classDef agent fill:#8B0000,color:#fff
+  classDef tool fill:#189AB4,color:#fff
+  class P agent
+  class B tool
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Layer</th><th>Location</th></tr></thead><tbody><tr><td>Framework protocols</td><td><code>praisonaiagents/frameworks/</code></td></tr><tr><td>CLI protocols (C8.5)</td><td><code>praisonaiagents/cli/protocols.py</code></td></tr><tr><td>Implementations</td><td><code>praisonai/framework_adapters/</code></td></tr><tr><td>Access from code</td><td><code>_wrapper_bridge</code> only</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">📋 Milestone status</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Milestone</th><th>State</th><th>Release</th></tr></thead><tbody><tr><td>C7 hot path</td><td>✅ Complete</td><td>—</td></tr><tr><td>C7.1 boundaries</td><td>✅ Complete</td><td>v4.6.110</td></tr><tr><td><strong>C8 reverse imports</strong></td><td>✅ Complete</td><td><strong>v4.6.113</strong></td></tr><tr><td>C8.4 full main.py split</td><td>⏳ Deferred</td><td>Future</td></tr><tr><td>PyPI splits (bot / frameworks)</td><td>⏳ Out of scope</td><td>—</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p><a href="https://github.com/MervinPraison/PraisonAI/blob/main/ARCHITECTURE.md">ARCHITECTURE.md</a> · <a href="https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai/tests/C7.1_BOUNDARIES.md">C7.1 boundaries</a> · <a href="https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai/tests/C8_BACKLOG.md">C8 backlog</a> · <a href="https://github.com/MervinPraison/PraisonAI/releases/tag/v4.6.113">v4.6.113 release</a> · <a href="https://github.com/MervinPraison/PraisonAI/pull/2590">PR #2590</a></p>
+<!-- /wp:paragraph -->
