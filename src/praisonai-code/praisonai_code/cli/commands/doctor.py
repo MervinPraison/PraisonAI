@@ -292,6 +292,38 @@ def doctor_runtime(
     raise typer.Exit(_run_doctor(args))
 
 
+@app.command("fix")
+def doctor_fix(
+    dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Show proposed changes without applying them (default: dry-run)"),
+    no_backup: bool = typer.Option(False, "--no-backup", help="Skip creating backup files before applying fixes"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="Config file to fix (default: search for YAML files in the current directory)"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
+):
+    """
+    Run safe auto-remediation for common setup issues.
+
+    Dry-run by default: lists proposed changes without modifying anything.
+    Use --execute to apply fixes (a .bak backup is created unless --no-backup).
+
+    Scope (phase 1):
+      • Migrate deprecated cli_backend YAML configuration
+
+    Examples:
+        praisonai doctor fix             # Dry-run: list proposed changes
+        praisonai doctor fix --execute   # Apply safe fixes with backup
+    """
+    args = ["fix"]
+    if not dry_run:
+        args.append("--execute")
+    if no_backup:
+        args.append("--no-backup")
+    if file:
+        args.extend(["--file", file])
+    if quiet:
+        args.append("--quiet")
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.command("troubleshoot")
 def doctor_troubleshoot():
     """
