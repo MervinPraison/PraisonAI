@@ -11,7 +11,7 @@ This is an internal module — end users import the concrete classes.
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Optional, Set
+from typing import Iterable, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def classify_keyword(text: str) -> str | None:
 
 
 def normalize_approvers(
-    allowed_approvers: Optional[Iterable[str]],
+    allowed_approvers: Optional[Union[Iterable[str], str]],
 ) -> Optional[Set[str]]:
     """Normalise an allowed-approver allowlist to a ``set`` of ``str`` IDs.
 
@@ -45,7 +45,9 @@ def normalize_approvers(
     """
     if allowed_approvers is None:
         return None
-    return {str(a) for a in allowed_approvers}
+    if isinstance(allowed_approvers, str):
+        allowed_approvers = allowed_approvers.split(",")
+    return {str(a).strip() for a in allowed_approvers if str(a).strip()}
 
 
 def is_authorized_actor(

@@ -264,7 +264,15 @@ class TelegramApproval:
                     cb = update.get("callback_query")
                     if cb:
                         cb_msg = cb.get("message", {})
-                        if cb_msg.get("message_id") == message_id:
+                        # Bind the tap to both message *and* chat so a button
+                        # with the same message_id in a different chat cannot
+                        # resolve this approval. When the callback carries no
+                        # chat id (older payloads), fall back to message-only
+                        # matching for backward compatibility.
+                        cb_chat_id = str(cb_msg.get("chat", {}).get("id", ""))
+                        if cb_msg.get("message_id") == message_id and (
+                            not cb_chat_id or cb_chat_id == str(chat_id)
+                        ):
                             cb_data = cb.get("data", "")
                             user = cb.get("from", {})
                             user_id = str(user.get("id", "unknown"))

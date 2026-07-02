@@ -74,6 +74,12 @@ class TestIsAuthorizedActor:
         allow = normalize_approvers([999])
         assert is_authorized_actor("999", allow) is True
 
+    def test_comma_separated_string_normalized(self):
+        from praisonai.bots._approval_base import normalize_approvers
+
+        assert normalize_approvers("999,111") == {"999", "111"}
+        assert normalize_approvers("999, 111 ") == {"999", "111"}
+
 
 # ── Telegram ─────────────────────────────────────────────────────────────────
 
@@ -103,7 +109,7 @@ class TestTelegramAuthorization:
                             "id": "cb1",
                             "data": "approve",
                             "from": {"id": 555, "username": "intruder"},
-                            "message": {"message_id": 42},
+                            "message": {"message_id": 42, "chat": {"id": 123}},
                         },
                     }],
                 }
@@ -135,7 +141,7 @@ class TestTelegramAuthorization:
                             "id": "cb1",
                             "data": "approve",
                             "from": {"id": 999, "username": "owner"},
-                            "message": {"message_id": 42},
+                            "message": {"message_id": 42, "chat": {"id": 123}},
                         },
                     }],
                 }
@@ -162,7 +168,7 @@ class TestTelegramAuthorization:
                             "id": "cb1",
                             "data": "approve",
                             "from": {"id": 555, "username": "anyone"},
-                            "message": {"message_id": 42},
+                            "message": {"message_id": 42, "chat": {"id": 123}},
                         },
                     }],
                 }
@@ -176,6 +182,33 @@ class TestTelegramAuthorization:
         monkeypatch.setenv("TELEGRAM_APPROVERS", "999, 111")
         backend = self._backend()
         assert backend._allowed_approvers == {"999", "111"}
+
+    def test_callback_from_different_chat_ignored(self):
+        """A tap on a same-message_id button in a DIFFERENT chat must not resolve."""
+        backend = self._backend(allowed_approvers=["999"])
+
+        async def mock_api(method, payload, **kwargs):
+            if method == "sendMessage":
+                return {"ok": True, "result": {"message_id": 42}}
+            if method == "getUpdates":
+                return {
+                    "ok": True,
+                    "result": [{
+                        "update_id": 100,
+                        "callback_query": {
+                            "id": "cb1",
+                            "data": "approve",
+                            "from": {"id": 999, "username": "owner"},
+                            "message": {"message_id": 42, "chat": {"id": 999999}},
+                        },
+                    }],
+                }
+            return {"ok": True}
+
+        backend._telegram_api = mock_api
+        decision = asyncio.run(backend.request_approval(_make_request()))
+        assert decision.approved is False
+        assert "timed out" in decision.reason.lower()
 
 
 # ── Slack ────────────────────────────────────────────────────────────────────
