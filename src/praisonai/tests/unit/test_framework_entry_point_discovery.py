@@ -88,7 +88,7 @@ roles:
     assert "echo:hello" in result
 
 
-def test_entry_point_discovery_without_manual_register():
+def test_entry_point_loaders_use_add_loader_path():
     """Entry-point loaders use the same _add_loader path as _discover_entry_points."""
     registry = FrameworkAdapterRegistry(discover_entry_points=False)
     # Mirror what _discover_entry_points does for each entry point (without
