@@ -197,22 +197,63 @@ class TestManagerReusableScope:
 
 
 class TestBarePrefixMatchScoping:
-    """The "<prefix> *" bare-match fallback is scoped to shell patterns only."""
+    """The "<prefix> *" bare-match fallback is scoped to DERIVED shell patterns.
 
-    def _approval(self, pattern, approved=True):
+    It only applies to auto-generated reusable-scope globs (``derived=True``);
+    user-authored patterns — shell or otherwise — keep exact fnmatch semantics.
+    """
+
+    def _approval(self, pattern, approved=True, derived=False):
         from praisonaiagents.permissions.rules import PersistentApproval
         return PersistentApproval(
-            pattern=pattern, approved=approved, scope="always"
+            pattern=pattern, approved=approved, scope="always", derived=derived
         )
 
-    def test_shell_prefix_matches_bare_target(self):
-        appr = self._approval("bash:git status *")
+    def test_derived_shell_prefix_matches_bare_target(self):
+        appr = self._approval("bash:git status *", derived=True)
         assert appr.matches("bash:git status") is True
         assert appr.matches("bash:git status -s") is True
+
+    def test_user_authored_shell_glob_does_not_match_bare_target(self):
+        # A user-authored shell glob like "bash:rm *" keeps exact fnmatch
+        # semantics: the bare target "bash:rm" must NOT match (it did not under
+        # plain fnmatch), even though it starts with "bash:".
+        appr = self._approval("bash:rm *", derived=False)
+        assert appr.matches("bash:rm") is False
+        assert appr.matches("bash:rm file") is True
 
     def test_non_shell_prefix_does_not_match_bare_target(self):
         # A user-authored non-shell "* " pattern keeps exact fnmatch semantics:
         # the bare target (without the trailing space+glob) must NOT match.
-        appr = self._approval("read:/secret *")
+        appr = self._approval("read:/secret *", derived=True)
         assert appr.matches("read:/secret") is False
         assert appr.matches("read:/secret file") is True
+
+    def test_derived_flag_persists_roundtrip(self):
+        from praisonaiagents.permissions.rules import PersistentApproval
+        appr = self._approval("bash:git status *", derived=True)
+        restored = PersistentApproval.from_dict(appr.to_dict())
+        assert restored.derived is True
+        assert restored.matches("bash:git status") is True
+
+    def test_manager_derived_approval_sets_flag_and_matches_bare(self):
+        from praisonaiagents.permissions.manager import PermissionManager
+        mgr = PermissionManager()
+        appr = mgr.approve(
+            "bash:git status -s", approved=True, scope="always",
+            reusable_scope=True,
+        )
+        assert appr.pattern == "bash:git status *"
+        assert appr.derived is True
+        assert appr.matches("bash:git status") is True
+
+    def test_manager_explicit_pattern_is_not_derived(self):
+        from praisonaiagents.permissions.manager import PermissionManager
+        mgr = PermissionManager()
+        appr = mgr.approve(
+            "bash:rm foo", approved=True, scope="always",
+            pattern="bash:rm *",
+        )
+        assert appr.pattern == "bash:rm *"
+        assert appr.derived is False
+        assert appr.matches("bash:rm") is False

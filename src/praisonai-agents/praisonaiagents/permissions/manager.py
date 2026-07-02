@@ -526,18 +526,26 @@ class PermissionManager:
             The created PersistentApproval
         """
         stored_pattern = pattern if pattern is not None else target
+        # ``derived`` is True only when we auto-generalise ``target`` into a
+        # reusable prefix glob here. An explicit ``pattern`` (or a literal
+        # target) is user-authored and keeps exact fnmatch semantics — the
+        # bare-prefix fallback in PersistentApproval.matches never applies to it.
+        derived = False
         if (
             pattern is None
             and reusable_scope
             and scope in ("session", "always")
         ):
-            stored_pattern = self.suggest_scope_pattern(target)
+            suggested = self.suggest_scope_pattern(target)
+            derived = suggested != target
+            stored_pattern = suggested
 
         approval = PersistentApproval(
             pattern=stored_pattern,
             approved=approved,
             scope=scope,
             agent_name=agent_name or self.agent_name,
+            derived=derived,
         )
         
         with self._lock:
