@@ -169,11 +169,13 @@ class Memory(SearchMixin, MemoryCoreMixin):
                         create_mem0_memory_adapter,
                         create_chroma_memory_adapter,
                         create_mongodb_memory_adapter,
+                        create_dakera_memory_adapter,
                     )
                     factory_map = {
                         "mem0": create_mem0_memory_adapter,
-                        "chroma": create_chroma_memory_adapter, 
+                        "chroma": create_chroma_memory_adapter,
                         "mongodb": create_mongodb_memory_adapter,
+                        "dakera": create_dakera_memory_adapter,
                     }
                     if adapter_name in factory_map:
                         # Call the factory to get ImportError with installation hint

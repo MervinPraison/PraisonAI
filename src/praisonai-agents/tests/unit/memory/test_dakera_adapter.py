@@ -172,6 +172,17 @@ class TestDakeraRegistration:
             create_dakera_memory_adapter()
         assert "dakera" in str(exc.value).lower()
 
+    def test_memory_explicit_dakera_surfaces_install_hint(self, monkeypatch):
+        # Full Memory(config={"provider": "dakera"}) path: when the SDK is
+        # missing, the explicit-provider branch must re-raise the factory's
+        # ImportError (with the install hint) rather than silently falling back
+        # to sqlite/in_memory.
+        monkeypatch.setitem(sys.modules, "dakera", None)
+        from praisonaiagents.memory.memory import Memory
+        with pytest.raises(ImportError) as exc:
+            Memory(config={"provider": "dakera"})
+        assert "dakera" in str(exc.value).lower()
+
 
 # ---------------------------------------------------------------------------
 # Configuration
