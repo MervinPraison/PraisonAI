@@ -43,7 +43,10 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from ._delivery_control_store import DeliveryControlStore
 
 logger = logging.getLogger(__name__)
 
@@ -100,17 +103,26 @@ class DeadTargetRegistry:
         max_size: int = _DEFAULT_MAX_SIZE,
         ttl_seconds: int = _DEFAULT_TTL_SECONDS,
         reprobe_seconds: int = _DEFAULT_REPROBE_SECONDS,
+        store: Optional["DeliveryControlStore"] = None,
     ) -> None:
         state_dir = Path.home() / ".praisonai" / "state"
-        self._persist_path = Path(
-            persist_path or (state_dir / "dead_targets.json")
-        ).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self.reprobe_seconds = int(reprobe_seconds)
         self._lock = threading.Lock()
         # (platform, channel_id) -> DeadTarget
         self._dead: Dict[Tuple[str, str], DeadTarget] = {}
+        # Shared SQLite store: when provided, dead targets are stored as rows
+        # (atomic upsert) that survive restart and are correct across workers,
+        # instead of the per-process in-memory dict + whole-file JSON rewrite
+        # (issue #2579). Single-process gateways keep the JSON path (default).
+        self._store = store
+        if store is not None:
+            self._persist_path = None
+            return
+        self._persist_path = Path(
+            persist_path or (state_dir / "dead_targets.json")
+        ).expanduser()
         self._load()
 
     # ── Helpers ─────────────────────────────────────────────────────
@@ -197,6 +209,14 @@ class DeadTargetRegistry:
     def is_dead(self, platform: str, channel_id: str) -> bool:
         """Return True if the target is currently suppressed as dead."""
         key = self._key(platform, channel_id)
+        if self._store is not None:
+            ts = self._store.dead_get_ts(key[0], key[1])
+            if ts is None:
+                return False
+            if self.ttl_seconds > 0 and ts < time.time() - self.ttl_seconds:
+                self._store.dead_clear(key[0], key[1])
+                return False
+            return True
         with self._lock:
             entry = self._dead.get(key)
             if entry is None:
@@ -221,6 +241,11 @@ class DeadTargetRegistry:
         if self.reprobe_seconds <= 0:
             return False
         key = self._key(platform, channel_id)
+        if self._store is not None:
+            ts = self._store.dead_get_ts(key[0], key[1])
+            if ts is None:
+                return False
+            return ts < time.time() - self.reprobe_seconds
         with self._lock:
             entry = self._dead.get(key)
             if entry is None:
@@ -230,6 +255,18 @@ class DeadTargetRegistry:
     def mark_dead(self, platform: str, channel_id: str, reason: str) -> None:
         """Record a confirmed-permanent failure, suppressing future sends."""
         key = self._key(platform, channel_id)
+        if self._store is not None:
+            already = self._store.dead_get_ts(key[0], key[1]) is not None
+            self._store.dead_mark(key[0], key[1], str(reason))
+            self._store.dead_enforce_bound(self.max_size)
+            if not already:
+                logger.warning(
+                    "DeadTargetRegistry: suppressing dead target %s:%s (%s)",
+                    key[0],
+                    key[1],
+                    reason,
+                )
+            return
         with self._lock:
             already = key in self._dead
             self._dead[key] = DeadTarget(
@@ -248,6 +285,16 @@ class DeadTargetRegistry:
     def clear(self, platform: str, channel_id: str) -> None:
         """Un-suppress a target. Called on every successful send (self-healing)."""
         key = self._key(platform, channel_id)
+        if self._store is not None:
+            if self._store.dead_get_ts(key[0], key[1]) is None:
+                return
+            self._store.dead_clear(key[0], key[1])
+            logger.info(
+                "DeadTargetRegistry: target %s:%s recovered — suppression cleared",
+                key[0],
+                key[1],
+            )
+            return
         with self._lock:
             if key not in self._dead:
                 return
@@ -261,6 +308,13 @@ class DeadTargetRegistry:
 
     def list_dead(self) -> List[DeadTarget]:
         """Return a snapshot of currently-dead targets (expired ones pruned)."""
+        if self._store is not None:
+            if self.ttl_seconds > 0:
+                self._store.dead_expire(time.time() - self.ttl_seconds)
+            return [
+                DeadTarget(platform=p, channel_id=c, reason=r, ts=t)
+                for (p, c, r, t) in self._store.dead_list()
+            ]
         with self._lock:
             if self._evict_expired_locked():
                 self._save_locked()
@@ -268,6 +322,10 @@ class DeadTargetRegistry:
 
     def size(self) -> int:
         """Number of currently-suppressed targets (expired ones pruned)."""
+        if self._store is not None:
+            if self.ttl_seconds > 0:
+                self._store.dead_expire(time.time() - self.ttl_seconds)
+            return self._store.dead_count()
         with self._lock:
             if self._evict_expired_locked():
                 self._save_locked()

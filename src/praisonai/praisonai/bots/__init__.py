@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
     from ._outbox import OutboundQueue, OutboundEntry
     from ._approval_store import ApprovalStore
+    from ._delivery_control_store import DeliveryControlStore
     from ._delivery import DurableDelivery, deliver_with_retry
     from ._durable_adapter import DurableAdapterMixin
     from ._outbound_resilience import OutboundResilienceMixin
@@ -141,6 +142,9 @@ def __getattr__(name: str):
     if name == "ApprovalStore":
         from ._approval_store import ApprovalStore
         return ApprovalStore
+    if name == "DeliveryControlStore":
+        from ._delivery_control_store import DeliveryControlStore
+        return DeliveryControlStore
     if name == "DurableDelivery":
         from ._delivery import DurableDelivery
         return DurableDelivery
@@ -188,6 +192,7 @@ __all__ = [
     "InboundJournal", "JournalEntry",
     "OutboundQueue", "OutboundEntry",
     "ApprovalStore",
+    "DeliveryControlStore",
     "DurableDelivery", "deliver_with_retry", "deliver_chunked",
     "DurableAdapterMixin",
     "OutboundResilienceMixin",
