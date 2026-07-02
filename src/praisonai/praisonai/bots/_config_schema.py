@@ -398,11 +398,21 @@ class GatewayConfigSchema(BaseModel):
             from ._registry import list_platforms
             valid_platforms = set(list_platforms())
         except Exception:
-            # Fall back to the built-in set if the registry is unavailable.
-            valid_platforms = {
-                "telegram", "discord", "slack", "whatsapp",
-                "email", "agentmail", "linear",
-            }
+            import logging
+            logging.getLogger(__name__).debug(
+                "Platform registry unavailable; falling back to built-in "
+                "platform list.", exc_info=True
+            )
+            # Fall back to the built-in set (single source of truth) if the
+            # registry is unavailable.
+            try:
+                from ._registry import _BUILTIN_PLATFORMS
+                valid_platforms = set(_BUILTIN_PLATFORMS)
+            except Exception:
+                valid_platforms = {
+                    "telegram", "discord", "slack", "whatsapp",
+                    "email", "agentmail", "linear",
+                }
         for name, channel in self.channels.items():
             platform = (channel.platform or name).lower()
             if platform not in valid_platforms:

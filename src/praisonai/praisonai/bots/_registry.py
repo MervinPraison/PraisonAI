@@ -80,12 +80,22 @@ class BotPlatformRegistry(PluginRegistry):
         """Discover channel connectors from the ``praisonai.channels`` group."""
         import logging
         from importlib.metadata import entry_points
+        logger = logging.getLogger(__name__)
         try:
             for ep in entry_points(group="praisonai.channels"):
+                # Do not let a third-party entry point silently shadow a
+                # built-in (or already-registered) channel loader.
+                if ep.name.lower() in self._loaders:
+                    logger.warning(
+                        "Skipping duplicate channel entry point %r; a loader "
+                        "with that name is already registered.", ep.name
+                    )
+                    continue
                 self._add_loader(ep.name, ep.load)
         except Exception:
-            logging.getLogger(__name__).debug(
-                "Entry points not available for group praisonai.channels"
+            logger.debug(
+                "Entry points not available for group praisonai.channels",
+                exc_info=True,
             )
     
     def register_with_capabilities(

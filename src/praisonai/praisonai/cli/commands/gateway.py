@@ -320,7 +320,7 @@ def gateway_channels(
             platforms = sorted(list_platforms())
         except Exception as exc:
             print(f"Error: could not load platform registry: {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if json_output:
             import json
