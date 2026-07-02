@@ -376,7 +376,9 @@ class DocsParityGenerator:
     def _calculate_category_parity(
         self,
         feature_groups: Dict[str, List[str]],
-        doc_groups: Dict[str, tuple[List[str], int]]
+        doc_groups: Dict[str, tuple[List[str], int]],
+        *,
+        apply_python_doc_rules: bool = False,
     ) -> tuple[DocsParitySummary, List[CategoryParity]]:
         """Calculate parity at category level, grouped by display name."""
         # Convert prefix-based groups to display-name-based groups
@@ -397,9 +399,10 @@ class DocsParityGenerator:
                 if prefix == 'other':
                     continue
                 display_name = FEATURE_CATEGORIES.get(prefix, prefix.title())
-                if display_name in PYTHON_DOC_ORPHAN_EXCLUSIONS:
-                    continue
-                display_name = DOC_FEATURE_CATEGORY_ALIASES.get(display_name, display_name)
+                if apply_python_doc_rules:
+                    if display_name in PYTHON_DOC_ORPHAN_EXCLUSIONS:
+                        continue
+                    display_name = DOC_FEATURE_CATEGORY_ALIASES.get(display_name, display_name)
                 if display_name not in result:
                     result[display_name] = ([], 0)
                 existing_names, existing_lines = result[display_name]
@@ -465,7 +468,9 @@ class DocsParityGenerator:
         doc_groups = self._group_docs(docs)
         
         # Calculate parity
-        summary, categories = self._calculate_category_parity(feature_groups, doc_groups)
+        summary, categories = self._calculate_category_parity(
+            feature_groups, doc_groups, apply_python_doc_rules=True
+        )
         
         # Build category lists - stubs are separate from documented
         documented = [c for c in categories if c.has_features and c.has_docs and not c.is_stub]

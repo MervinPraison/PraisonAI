@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (Rust)
 
-> **Categories:** 68 | **Documented:** 64 | **Parity:** 94.1%
+> **Categories:** 68 | **Documented:** 68 | **Parity:** 100.0%
 
 This report compares **Rust SDK feature categories** against **Rust documentation** (docs/rust/).
 
@@ -9,9 +9,9 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 68 |
-| **Documented Categories** | **64** |
-| **Undocumented Categories** | **4** |
-| **Parity** | **94.1%** |
+| **Documented Categories** | **68** |
+| **Undocumented Categories** | **0** |
+| **Parity** | **100.0%** |
 
 ## Documented Categories
 
@@ -26,12 +26,13 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Autonomy | 4 | 1 | 161 |
 | ✅ Bots | 10 | 1 | 66 |
 | ✅ Budget | 2 | 1 | 76 |
+| ✅ Callbacks | 1 | 1 | 178 |
 | ✅ Chunking | 3 | 1 | 103 |
 | ✅ Citations | 2 | 1 | 71 |
 | ✅ Code Execution | 5 | 1 | 104 |
 | ✅ Conditions | 1 | 1 | 132 |
 | ✅ Configuration | 2 | 1 | 130 |
-| ✅ Context Management | 21 | 2 | 272 |
+| ✅ Context Management | 21 | 1 | 83 |
 | ✅ Criteria | 4 | 1 | 70 |
 | ✅ Database | 2 | 1 | 198 |
 | ✅ Display | 12 | 1 | 64 |
@@ -46,10 +47,10 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Gateway | 8 | 1 | 76 |
 | ✅ Guardrails | 10 | 1 | 291 |
 | ✅ Handoffs | 13 | 1 | 276 |
-| ✅ Hooks | 12 | 2 | 517 |
+| ✅ Hooks | 12 | 1 | 339 |
 | ✅ Image | 4 | 1 | 85 |
 | ✅ Knowledge | 12 | 1 | 146 |
-| ✅ LLM | 10 | 2 | 279 |
+| ✅ LLM | 10 | 1 | 151 |
 | ✅ Loops | 7 | 1 | 134 |
 | ✅ MCP | 11 | 1 | 196 |
 | ✅ Memory | 11 | 1 | 273 |
@@ -59,6 +60,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Parallel Execution | 4 | 1 | 115 |
 | ✅ Planning | 10 | 1 | 193 |
 | ✅ Plugins | 11 | 1 | 62 |
+| ✅ Process | 2 | 1 | 257 |
 | ✅ Prompts | 4 | 1 | 80 |
 | ✅ Providers | 3 | 1 | 74 |
 | ✅ Query | 5 | 1 | 57 |
@@ -71,25 +73,18 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Security | 2 | 1 | 74 |
 | ✅ Sessions | 7 | 1 | 169 |
 | ✅ Skills | 5 | 1 | 66 |
+| ✅ Streaming | 6 | 1 | 128 |
 | ✅ Tasks | 8 | 1 | 68 |
 | ✅ Telemetry | 4 | 1 | 104 |
 | ✅ Templates | 1 | 1 | 66 |
+| ✅ Token Management | 2 | 1 | 189 |
 | ✅ Tools | 16 | 1 | 334 |
 | ✅ Tracing | 8 | 1 | 310 |
 | ✅ Vector Store | 2 | 1 | 222 |
 | ✅ Video | 5 | 1 | 60 |
 | ✅ Vision | 3 | 1 | 65 |
 | ✅ Web | 5 | 2 | 185 |
-| ✅ Workflows | 5 | 2 | 326 |
-
-## Undocumented Categories (Need Documentation)
-
-| Category | Features |
-|----------|----------|
-| ❌ Callbacks | 1 |
-| ❌ Process | 2 |
-| ❌ Streaming | 6 |
-| ❌ Token Management | 2 |
+| ✅ Workflows | 5 | 1 | 69 |
 
 ## Documentation Without Features
 

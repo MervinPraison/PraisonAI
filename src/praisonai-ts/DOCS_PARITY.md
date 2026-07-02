@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 75 | **Documented:** 69 | **Parity:** 92.0%
+> **Categories:** 75 | **Documented:** 75 | **Parity:** 100.0%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -9,15 +9,16 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 75 |
-| **Documented Categories** | **69** |
-| **Undocumented Categories** | **6** |
-| **Parity** | **92.0%** |
+| **Documented Categories** | **75** |
+| **Undocumented Categories** | **0** |
+| **Parity** | **100.0%** |
 
 ## Documented Categories
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 195 |
+| ✅ AI SDK | 38 | 8 | 1112 |
 | ✅ Agent | 66 | 7 | 2084 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
 | ✅ Approval | 9 | 1 | 165 |
@@ -33,7 +34,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Code Execution | 6 | 4 | 464 |
 | ✅ Conditions | 1 | 1 | 372 |
 | ✅ Configuration | 3 | 1 | 272 |
-| ✅ Context Management | 17 | 3 | 504 |
+| ✅ Context Management | 17 | 2 | 345 |
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 14 | 2 | 469 |
 | ✅ Display | 20 | 1 | 342 |
@@ -47,13 +48,15 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Gateway | 6 | 1 | 401 |
 | ✅ Guardrails | 6 | 3 | 744 |
 | ✅ Handoffs | 12 | 1 | 179 |
-| ✅ Hooks | 8 | 3 | 572 |
+| ✅ Hooks | 8 | 1 | 199 |
 | ✅ Image | 4 | 2 | 282 |
+| ✅ Jobs | 8 | 1 | 156 |
 | ✅ Knowledge | 3 | 2 | 312 |
-| ✅ LLM | 6 | 4 | 668 |
+| ✅ LLM | 6 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 180 |
 | ✅ MCP | 17 | 4 | 828 |
 | ✅ Memory | 17 | 4 | 779 |
+| ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 2 | 1 | 162 |
 | ✅ Observability | 6 | 28 | 2277 |
 | ✅ Optimizer | 1 | 1 | 162 |
@@ -71,37 +74,30 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Retrieval | 5 | 1 | 150 |
 | ✅ Routing | 1 | 1 | 153 |
 | ✅ Sandbox | 8 | 2 | 134 |
+| ✅ Scheduler | 2 | 2 | 398 |
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 3 | 2 | 429 |
 | ✅ Skills | 7 | 2 | 380 |
+| ✅ Streaming | 2 | 2 | 389 |
 | ✅ Tasks | 4 | 1 | 165 |
 | ✅ Teams | 1 | 1 | 170 |
 | ✅ Telemetry | 6 | 2 | 269 |
 | ✅ Templates | 1 | 2 | 598 |
-| ✅ Tools | 34 | 17 | 3598 |
+| ✅ Token Management | 1 | 1 | 159 |
+| ✅ Tools | 34 | 15 | 3200 |
 | ✅ Tracing | 8 | 3 | 477 |
 | ✅ Vector Store | 6 | 2 | 530 |
 | ✅ Video | 2 | 1 | 150 |
 | ✅ Vision | 2 | 1 | 155 |
 | ✅ Voice | 1 | 2 | 515 |
 | ✅ Web | 4 | 1 | 150 |
-| ✅ Workflows | 7 | 4 | 876 |
-
-## Undocumented Categories (Need Documentation)
-
-| Category | Features |
-|----------|----------|
-| ❌ AI SDK | 38 |
-| ❌ Jobs | 8 |
-| ❌ Middleware | 2 |
-| ❌ Scheduler | 2 |
-| ❌ Streaming | 2 |
-| ❌ Token Management | 1 |
+| ✅ Workflows | 7 | 3 | 720 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
+- ℹ️ Callbacks (1 docs, 211 lines)
 - ℹ️ Deep Research (2 docs, 292 lines)
 
 ---
