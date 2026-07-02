@@ -124,7 +124,7 @@ jobs:
           fi
         done
         echo "C7 hot-path import gate ok"
-        bash scripts/check_c7_imports.sh
+        bash "$GITHUB_WORKSPACE/scripts/check_c7_imports.sh"
         # Standalone run must not fail on wrapper ImportError (API auth failure is OK)
         set +e
         RUN_OUT=$(/tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
