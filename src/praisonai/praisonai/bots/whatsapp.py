@@ -438,7 +438,11 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     timestamp=float(timestamp) if timestamp else time.time(),
                 )
 
-                self.fire_message_received(bot_message)
+                decision = self.fire_message_received(bot_message)
+                if decision.get("drop"):
+                    logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+                    return
+                content = decision.get("content", content)
 
                 # Fire registered message handlers
                 for handler in self._message_handlers:
@@ -741,7 +745,11 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             timestamp=float(timestamp) if timestamp else time.time(),
         )
 
-        self.fire_message_received(bot_message)
+        decision = self.fire_message_received(bot_message)
+        if decision.get("drop"):
+            logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+            return
+        content = decision.get("content", content)
 
         # Fire registered message handlers (e.g., gateway routing)
         for handler in self._message_handlers:

@@ -1793,8 +1793,10 @@ async def process_inbound_telegram_message(
     # Set channel type for pairing system
     message._channel_type = "telegram"
     
-    # Fire message received event
-    bot.fire_message_received(message)
+    # Fire message received event (inbound gate: may drop or redact)
+    if bot.fire_message_received(message).get("drop"):
+        logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+        return None
     
     # 1. Channel allowlist check
     channel_id = message.channel.channel_id if message.channel else ""
