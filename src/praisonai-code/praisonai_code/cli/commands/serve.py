@@ -65,7 +65,7 @@ def serve_start(
         handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -81,7 +81,7 @@ def serve_stop():
         handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(["stop"])
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -103,7 +103,7 @@ def serve_status(
         handle_serve_command = getattr(_mod, 'handle_serve_command')
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
 
@@ -186,7 +186,7 @@ def serve_agents(
             args.extend(["--api-key", api_key])
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Serve module not available: {e}")
         raise typer.Exit(4)
@@ -219,7 +219,7 @@ def serve_gateway(
         # instead of swallowing fatal/transient failures as success (#2437).
         exit_code = handler.start(host=host, port=port, agent_file=agents_file)
         raise typer.Exit(exit_code or 0)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"Gateway module not available: {e}")
         output.print("Install with: pip install praisonai[api]")
         raise typer.Exit(4)
@@ -415,7 +415,7 @@ def serve_ui_gateway(
             title=title,
             style=style
         )
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"UI-Gateway module not available: {e}")
         output.print("Install with: pip install praisonai[ui]")
         raise typer.Exit(4)
@@ -556,7 +556,7 @@ def serve_recipe(
             args.append("--reload")
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Recipe serve module not available: {e}")
         raise typer.Exit(4)
@@ -583,7 +583,7 @@ def serve_a2a(
         args = ["a2a", "--host", host, "--port", str(port), "--file", file]
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"A2A serve module not available: {e}")
         raise typer.Exit(4)
@@ -609,7 +609,7 @@ def serve_a2u(
         args = ["a2u", "--host", host, "--port", str(port)]
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"A2U serve module not available: {e}")
         raise typer.Exit(4)
@@ -639,7 +639,7 @@ def serve_unified(
             args.append("--reload")
         exit_code = handle_serve_command(args)
         raise typer.Exit(exit_code)
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output = get_output_controller()
         output.print_error(f"Unified serve module not available: {e}")
         raise typer.Exit(4)
@@ -709,7 +709,7 @@ def serve_openai(
             access_log=False,
         )
         
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         output.print_error(f"OpenAI compatibility module not available: {e}")
         output.print("Install with: pip install praisonai[api]")
         raise typer.Exit(4)
