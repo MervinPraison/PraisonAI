@@ -232,7 +232,13 @@ class PersistentApproval:
         # cover the bare command too (e.g. "bash:git status" with no trailing
         # args), which a plain "<prefix> *" glob would miss. Match the prefix
         # exactly as well, without altering the general matching hot path.
-        if self.pattern.endswith(" *"):
+        #
+        # Scoped narrowly to shell command-prefix patterns ("bash:"/"shell:")
+        # so user-authored non-shell patterns (e.g. "read:/secret *") keep
+        # their exact fnmatch semantics and this never changes their decisions.
+        if self.pattern.endswith(" *") and self.pattern.startswith(
+            ("bash:", "shell:")
+        ):
             bare = self.pattern[:-2]
             if target == bare:
                 return True
