@@ -111,6 +111,33 @@ def _detect_auth_error(text: Optional[str]) -> Optional[str]:
     return None
 
 
+def _extract_response_output(response) -> Optional[str]:
+    """Extract user-visible text from an agent response.
+
+    Handles plain strings as well as wrapper objects such as
+    ``AutonomyResult`` returned by ``agent.astart()`` which expose the
+    generated text via an ``output`` attribute.
+    """
+    if response is None:
+        return None
+    output = getattr(response, "output", None)
+    if output is not None:
+        text = str(output).strip()
+        return text or None
+    text = str(response).strip()
+    return text or None
+
+
+def _is_empty_agent_response(response) -> bool:
+    """True when the agent produced no user-visible output.
+
+    ``agent.astart()`` may return a truthy wrapper object (e.g.
+    ``AutonomyResult(success=True, output='')``) even on auth failure, so a
+    plain ``not response`` check is insufficient (issue #2568).
+    """
+    return _extract_response_output(response) is None
+
+
 class _LogCapture(logging.Handler):
     """Lightweight logging handler that records messages for failure detection."""
 
@@ -852,12 +879,28 @@ Example: /handoff code "refactor the auth module" """
             # Detect silent failures: some providers log an auth/permission
             # error and return None instead of raising. Surface these so the
             # CLI can exit with a non-zero status (issue #2562).
+            #
+            # NOTE: agent.astart() may return a truthy wrapper object such as
+            # AutonomyResult(success=True, output='') even on auth failure, so
+            # we must inspect the actual output rather than the object's
+            # truthiness (issue #2568).
+            output_text = _extract_response_output(response)
             auth_error = log_capture.find_auth_error()
-            if auth_error and not response:
+            if auth_error and output_text is None:
                 self._last_error = RuntimeError(auth_error)
                 return f"Error: {auth_error}"
 
-            return str(response) if response else None
+            # Surface explicit failures reported by wrapper objects even when
+            # no auth signature matched (e.g. AutonomyResult.success is False).
+            result_error = getattr(response, "error", None)
+            if result_error:
+                self._last_error = RuntimeError(str(result_error))
+                return f"Error: {result_error}"
+            if getattr(response, "success", None) is False:
+                self._last_error = RuntimeError("Agent execution failed")
+                return f"Error: Agent execution failed"
+
+            return output_text
         except Exception as e:
             logger.error(f"Error executing prompt: {e}", exc_info=True)
             self._last_error = e
