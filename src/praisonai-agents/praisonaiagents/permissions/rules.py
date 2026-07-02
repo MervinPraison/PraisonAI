@@ -225,7 +225,25 @@ class PersistentApproval:
         if self.agent_name and agent_name and self.agent_name != agent_name:
             return False
         
-        return fnmatch.fnmatch(target, self.pattern)
+        if fnmatch.fnmatch(target, self.pattern):
+            return True
+
+        # A reusable command-prefix scope like "bash:git status *" is meant to
+        # cover the bare command too (e.g. "bash:git status" with no trailing
+        # args), which a plain "<prefix> *" glob would miss. Match the prefix
+        # exactly as well, without altering the general matching hot path.
+        #
+        # Scoped narrowly to shell command-prefix patterns ("bash:"/"shell:")
+        # so user-authored non-shell patterns (e.g. "read:/secret *") keep
+        # their exact fnmatch semantics and this never changes their decisions.
+        if self.pattern.endswith(" *") and self.pattern.startswith(
+            ("bash:", "shell:")
+        ):
+            bare = self.pattern[:-2]
+            if target == bare:
+                return True
+
+        return False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert approval to dictionary."""
