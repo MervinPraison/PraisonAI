@@ -34,6 +34,8 @@ _ASCII_FALLBACKS = {
 
 def can_encode(stream: Optional[TextIO], text: str) -> bool:
     """Return True if ``text`` can be encoded by ``stream``'s encoding."""
+    if not isinstance(text, str):
+        return True
     encoding = getattr(stream, "encoding", None) or getattr(sys.stdout, "encoding", None) or "ascii"
     if encoding.lower() in ("utf-8", "utf8"):
         return True
@@ -63,6 +65,8 @@ def safe_text(text: str, stream: Optional[TextIO] = None) -> str:
     Return ``text`` with any unencodable decorative glyphs replaced by ASCII
     fallbacks so it can be printed without raising ``UnicodeEncodeError``.
     """
+    if not isinstance(text, str):
+        return text
     target = stream if stream is not None else sys.stdout
     if can_encode(target, text):
         return text
