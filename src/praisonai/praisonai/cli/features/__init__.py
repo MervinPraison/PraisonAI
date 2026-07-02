@@ -30,8 +30,7 @@ try:  # pragma: no cover - defensive
     for _code_dir in getattr(_code_features, "__path__", []):
         if _code_dir not in __path__:
             __path__.append(_code_dir)
-    del _code_dir
-except Exception:  # pragma: no cover - code package optional at import time
+except ImportError:  # pragma: no cover - code package optional at import time
     _code_features = None
 
 
