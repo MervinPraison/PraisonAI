@@ -33,3 +33,14 @@ class ServeHandlerProtocol(Protocol):
 
     def handle(self, args: list[str]) -> int:
         ...
+
+
+@runtime_checkable
+class BotGatewayFacadeProtocol(Protocol):
+    """Future praisonai-bot package entry for gateway/bot CLI (C8.4 Phase 9)."""
+
+    def handle_gateway(self, args: list[str]) -> int:
+        ...
+
+    def handle_bot(self, args: list[str]) -> int:
+        ...
