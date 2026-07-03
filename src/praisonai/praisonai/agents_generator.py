@@ -64,6 +64,7 @@ def _normalize_yaml_config(config: dict) -> dict:
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
+        bucket_from_roles = "roles" in config
         bucket = config.get("roles") or config.get("agents") or {}
         if not isinstance(bucket, dict):
             bucket = {}
@@ -71,14 +72,18 @@ def _normalize_yaml_config(config: dict) -> dict:
             if not isinstance(task, dict):
                 continue
             agent_key = task.get("agent")
-            if not agent_key or agent_key not in bucket:
+            if not agent_key or agent_key not in bucket or not isinstance(bucket[agent_key], dict):
+                logger.warning(
+                    "Task %r references unknown agent %r; skipping.",
+                    task.get("name", f"task_{i}"), agent_key,
+                )
                 continue
             entry = bucket[agent_key].setdefault("tasks", {})
             entry[task.get("name", f"task_{i}")] = {
                 k: v for k, v in task.items() if k != "agent"
             }
-        if "roles" not in config and bucket:
-            config["roles"] = bucket
+        if not bucket_from_roles and bucket:
+            config["roles"] = {k: v for k, v in bucket.items()}
         config.pop("tasks", None)
 
     return config

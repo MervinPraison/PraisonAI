@@ -217,7 +217,7 @@ async def test_session_context_visible_to_tool(tmp_path: Path, model: str) -> bo
         agent, "tg-99",
         "You must call the whoami tool immediately and report its output.",
         chat_id="100", user_name="Alice",
-        stream_callback=lambda _event: asyncio.sleep(0),
+        stream_callback=lambda _event: None,
     )
     print(f"[Agent] {out}")
     print(f"[Tool captured] platform={captured.get('platform')!r} "
