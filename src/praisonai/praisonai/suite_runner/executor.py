@@ -51,6 +51,7 @@ class SuiteExecutor:
             timeout: Per-item timeout in seconds.
             fail_fast: Stop on first failure.
             stream_output: Stream output to terminal.
+            dry_run: Detect runnable items without executing them.
             max_items: Maximum items to process.
             require_env: Global required env vars.
             env_overrides: Environment variable overrides.
@@ -179,7 +180,6 @@ class SuiteExecutor:
                         on_item_end(result, idx, total)
                     continue
             if self.dry_run:
-                
                 result = RunResult(
                     item_id=item.item_id,
                     suite=item.suite,
