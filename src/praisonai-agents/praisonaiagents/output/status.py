@@ -312,6 +312,11 @@ class StatusOutput:
                 # the agent loop. Sanitize the message to ASCII-safe glyphs
                 # when the target stream cannot encode them.
                 safe_msg = safe_text(message, self._file)
+                # Escape markup-like sequences (e.g. tool args "['x']" or error
+                # text containing "[/tag]") so Rich does not treat dynamic
+                # message content as markup and raise MarkupError.
+                from rich.markup import escape as _escape
+                safe_msg = _escape(safe_msg)
                 if style:
                     console.print(f"[dim]{ts_str}[/dim][{style}]{safe_msg}[/{style}]")
                 else:

@@ -98,6 +98,32 @@ def test_status_output_rich_color_preserves_unicode_on_utf8():
     assert "\u25b8" in stream.getvalue()  # glyph preserved on utf-8
 
 
+def test_status_output_rich_color_strict_cp1252_stream_no_unicode_error():
+    # Higher-fidelity regression: a real strict cp1252 TextIOWrapper reproduces
+    # the exact production crash (Rich encodes against real bytes), unlike a
+    # StringIO mock. StatusOutput builds its Rich Console with file=self._file,
+    # so this drives the true crash path from issue #2603.
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.llm_start(model="gpt-4o-mini")  # emits "▸ AI → thinking..."
+    out.agent_start("assistant")  # emits ▶ (U+25B6)
+    out.agent_end("assistant", duration_ms=12.0)  # emits ◀ (U+25C0)
+    stream.flush()  # must not raise UnicodeEncodeError
+
+
+def test_status_output_rich_color_markup_in_message_no_markup_error():
+    # Dynamic message content (tool args like "['x']" or error text containing
+    # "[/tag]") must not be parsed as Rich markup, which would raise MarkupError.
+    stream = _Utf8Stream()
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.tool_start("get_weather", {"cities": ["Paris"]})
+    out.tool_end(
+        "get_weather", status="error", error_message="bad [/close] tag [oops]"
+    )  # must not raise MarkupError
+    rendered = stream.getvalue()
+    assert "get_weather" in rendered
+
+
 def test_status_output_final_output_no_unicode_error_on_cp1252(monkeypatch):
     # StatusOutput.output() prints the final content to sys.stdout, so patch it.
     stdout = _Cp1252Stream()
