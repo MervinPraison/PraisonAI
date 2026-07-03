@@ -118,10 +118,10 @@ def test_allowlist_rehydrates_on_restart(store_path):
 
 
 def test_allowlist_non_durable_is_memory_only(store_path):
-    al = PermissionAllowlist(durable=False)
+    al = PermissionAllowlist(path=store_path, durable=False)
     al.add_scoped(agent_id="agent-a", tool_name="shell")
     assert al.allows(agent_id="agent-a", tool_name="shell") is True
-    # Nothing was persisted.
+    # Nothing was persisted to the configured path.
     assert not store_path.exists()
 
 
@@ -191,6 +191,54 @@ async def test_manager_allow_always_can_widen_to_any_agent(store_path):
     )
     res = await fut
     assert res.approved is True
+
+
+@pytest.mark.allow_sleep
+def test_store_allows_enforces_ttl(store_path):
+    # A grant older than the TTL must not authorise a call.
+    store = ScopedAllowlistStore(path=store_path, ttl_seconds=1)
+    store.add(agent_id="agent-a", tool_name="shell")
+    assert store.allows(agent_id="agent-a", tool_name="shell") is True
+
+    import time as _t
+    _t.sleep(1.3)
+    assert store.allows(agent_id="agent-a", tool_name="shell") is False
+
+
+@pytest.mark.allow_sleep
+def test_store_list_commits_eviction(store_path):
+    store = ScopedAllowlistStore(path=store_path, ttl_seconds=1)
+    store.add(agent_id="agent-a", tool_name="shell")
+
+    import time as _t
+    _t.sleep(1.3)
+    # list() should evict AND persist the eviction.
+    assert store.list() == []
+    # A brand-new store instance (no in-memory state) confirms the row is gone.
+    store2 = ScopedAllowlistStore(path=store_path, ttl_seconds=0)
+    assert store2.list() == []
+
+
+@pytest.mark.asyncio
+async def test_manager_skips_scoped_grant_without_agent(store_path):
+    # A scoped allow_always with no agent identity must NOT become a global grant.
+    mgr = ExecApprovalManager(allowlist_path=store_path)
+    req_id, future = await mgr.register(
+        tool_name="shell", arguments={},  # no agent_name
+    )
+    mgr.resolve(req_id, Resolution(approved=True, allow_always=True))
+    await future
+
+    # No global grant leaked.
+    assert "shell" not in mgr.allowlist
+    # A different agent is still not auto-approved.
+    _id, fut = await mgr.register(
+        tool_name="shell", arguments={}, agent_name="agent-z",
+    )
+    assert _id != "auto"
+    assert not fut.done()
+    mgr.resolve(_id, Resolution(approved=False))
+    await fut
 
 
 @pytest.mark.asyncio

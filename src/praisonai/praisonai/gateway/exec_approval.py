@@ -222,6 +222,13 @@ class ScopedAllowlistStore:
         sig_keys = {"", sig} if sig else {""}
         placeholders_a = ",".join("?" for _ in agent_keys)
         placeholders_s = ",".join("?" for _ in sig_keys)
+        # Enforce TTL on read so an expired grant never authorises a call, even
+        # when queried directly against the store.
+        cutoff = (time.time() - self.ttl_seconds) if self.ttl_seconds > 0 else None
+        ttl_clause = " AND created_at > ?" if cutoff is not None else ""
+        params = [tool_name, *agent_keys, *sig_keys]
+        if cutoff is not None:
+            params.append(cutoff)
         with self._lock, closing(self._connect()) as conn:
             row = conn.execute(
                 f"""
@@ -229,9 +236,10 @@ class ScopedAllowlistStore:
                 WHERE tool_name = ?
                   AND agent_id IN ({placeholders_a})
                   AND arg_signature IN ({placeholders_s})
+                  {ttl_clause}
                 LIMIT 1
                 """,
-                (tool_name, *agent_keys, *sig_keys),
+                params,
             ).fetchone()
         return row is not None
 
@@ -275,7 +283,10 @@ class ScopedAllowlistStore:
     def list(self, *, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List grants, optionally filtered to one ``agent_id``."""
         with self._lock, closing(self._connect()) as conn:
-            self._evict_expired_locked(conn)
+            if self._evict_expired_locked(conn):
+                # Persist the eviction; otherwise sqlite rolls back the implicit
+                # transaction on connection close and expired rows never leave.
+                conn.commit()
             if agent_id is None:
                 rows = conn.execute(
                     "SELECT agent_id, tool_name, arg_signature, created_at, approver "
@@ -513,9 +524,16 @@ class PermissionAllowlist:
         return self.allows(agent_id=ANY_AGENT, tool_name=tool_name)
 
     def list(self) -> List[str]:
-        """Legacy: sorted list of tool names with any grant."""
+        """Legacy: sorted tool names granted globally (``ANY_AGENT``).
+
+        Only global grants are returned so this preserves its historical
+        meaning of "tools that skip approval for every agent". Agent-scoped
+        grants are exposed via :meth:`list_scoped` / the ``grants`` view.
+        """
         with self._lock:
-            return sorted({key[1] for key in self._allowed})
+            return sorted(
+                {key[1] for key in self._allowed if key[0] == ANY_AGENT}
+            )
 
 
 # ── Main manager ─────────────────────────────────────────────────────
@@ -638,28 +656,34 @@ class ExecApprovalManager:
         if resolution.allow_always:
             # Scope the grant safely-by-default: to the requesting agent unless
             # the resolver explicitly widened it, and optionally to its
-            # argument signature.
-            agent_id = (
-                (req.agent_name or ANY_AGENT)
-                if resolution.scope_to_agent
-                else ANY_AGENT
-            )
-            arg_sig = (
-                make_arg_signature(req.arguments)
-                if resolution.scope_to_args
-                else None
-            )
-            self.allowlist.add_scoped(
-                agent_id=agent_id,
-                tool_name=req.tool_name,
-                arg_signature=arg_sig,
-                approver="gateway:human",
-            )
-            logger.info(
-                "Tool '%s' added to allow-always list (agent=%s, args=%s)",
-                req.tool_name, agent_id,
-                "scoped" if arg_sig else "any",
-            )
+            # argument signature. ``ANY_AGENT`` (a global grant) is only used
+            # when the resolver explicitly opts out of agent scoping — never as
+            # a silent fallback for a request that lacks an agent identity.
+            if resolution.scope_to_agent and not req.agent_name:
+                logger.warning(
+                    "Skipping scoped allow-always grant for tool '%s': no agent "
+                    "identity on the request. Set scope_to_agent=False to grant "
+                    "globally.",
+                    req.tool_name,
+                )
+            else:
+                agent_id = req.agent_name if resolution.scope_to_agent else ANY_AGENT
+                arg_sig = (
+                    make_arg_signature(req.arguments)
+                    if resolution.scope_to_args
+                    else None
+                )
+                self.allowlist.add_scoped(
+                    agent_id=agent_id,
+                    tool_name=req.tool_name,
+                    arg_signature=arg_sig,
+                    approver="gateway:human",
+                )
+                logger.info(
+                    "Tool '%s' added to allow-always list (agent=%s, args=%s)",
+                    req.tool_name, agent_id,
+                    "scoped" if arg_sig else "any",
+                )
 
         if req._future and not req._future.done() and req._loop:
             req._loop.call_soon_threadsafe(

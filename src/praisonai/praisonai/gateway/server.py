@@ -1223,6 +1223,8 @@ class WebSocketGateway:
                 approved=bool(body.get("approved", False)),
                 reason=str(body.get("reason", "")),
                 allow_always=bool(body.get("allow_always", False)),
+                scope_to_agent=bool(body.get("scope_to_agent", True)),
+                scope_to_args=bool(body.get("scope_to_args", False)),
             )
 
             found = _approval_mgr.resolve(request_id, resolution)
@@ -1262,7 +1264,7 @@ class WebSocketGateway:
                     try:
                         resp["grants"] = list_scoped()
                     except Exception:
-                        pass
+                        logger.exception("Failed to list scoped approval grants")
                 return JSONResponse(resp)
 
             # Mutating the approval allow-list is security-sensitive. Check the
@@ -1292,7 +1294,14 @@ class WebSocketGateway:
                     {"error": "tool_name is required"}, status_code=400,
                 )
 
-            agent_id = body.get("agent_id") or None
+            agent_id = body.get("agent_id")
+            if agent_id is not None:
+                if not isinstance(agent_id, str) or not agent_id.strip():
+                    return JSONResponse(
+                        {"error": "agent_id must be a non-empty string"},
+                        status_code=400,
+                    )
+                agent_id = agent_id.strip()
 
             if request.method == "POST":
                 if agent_id and hasattr(_approval_mgr.allowlist, "add_scoped"):
