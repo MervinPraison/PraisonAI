@@ -5,7 +5,6 @@ This module patches the warnings module to intercept specific messages.
 
 import warnings
 import functools
-import sys
 
 # Apply aggressive warning filters first
 warnings.filterwarnings("ignore", message=".*There is no current event loop.*", category=DeprecationWarning)
@@ -68,10 +67,7 @@ def _patched_warn_explicit(message, category, filename, lineno, module=None, reg
     _original_warn_explicit(message, category, filename, lineno, module, registry, module_globals, source)
 
 # Apply the patches
+# Note: `warnings` IS `sys.modules['warnings']`, so these assignments patch the
+# exact module object every importer sees via `import warnings`.
 warnings.warn = _patched_warn
 warnings.warn_explicit = _patched_warn_explicit
-
-# Also patch sys.modules warnings if it exists
-if 'warnings' in sys.modules:
-    sys.modules['warnings'].warn = _patched_warn
-    sys.modules['warnings'].warn_explicit = _patched_warn_explicit
