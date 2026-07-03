@@ -590,6 +590,10 @@ class ExecApprovalManager:
         self._lock = threading.Lock()  # threading.Lock for cross-thread safety
         self._pending: Dict[str, PendingRequest] = {}
         self._store = store
+        # Strong refs to in-flight durable-write tasks so the event loop's
+        # weak task tracking cannot GC them mid-execution (see CPython docs
+        # for asyncio.create_task).
+        self._bg_tasks: Set[asyncio.Task] = set()
         self.allowlist = allowlist or PermissionAllowlist(
             durable=durable, path=allowlist_path,
         )
@@ -618,12 +622,29 @@ class ExecApprovalManager:
             for approval_id, req in pending:
                 if approval_id in self._pending:
                     continue
+                # Preserve the ORIGINAL deadline. The store persisted
+                # ``expires_at`` at registration; deriving created_at back from
+                # it keeps the in-memory TTL aligned with the durable expiry so
+                # a restart cannot extend an almost-expired approval by a full
+                # ttl. Fall back to now only if the store can't surface it.
+                created_at = time.time()
+                get = getattr(self._store, "get", None)
+                if callable(get):
+                    try:
+                        row = get(approval_id)
+                        if row and row.get("expires_at") is not None:
+                            created_at = float(row["expires_at"]) - self._ttl
+                    except Exception:
+                        logger.debug(
+                            "Could not read stored expiry for %s", approval_id
+                        )
                 self._pending[approval_id] = PendingRequest(
                     request_id=approval_id,
                     tool_name=req.tool_name,
                     arguments=req.arguments,
                     agent_name=req.agent_name or "",
                     risk_level=req.risk_level,
+                    created_at=created_at,
                 )
                 count += 1
         if count:
@@ -793,7 +814,12 @@ class ExecApprovalManager:
             loop = None
 
         if loop is not None:
-            loop.create_task(coro)
+            # Keep a strong reference until the task completes; the event loop
+            # only holds a weak ref, so a discarded Task can be GC'd before the
+            # audit-trail write runs (CPython asyncio docs warn about this).
+            task = loop.create_task(coro)
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._on_bg_task_done)
             return
         try:
             asyncio.run(coro)
@@ -801,6 +827,15 @@ class ExecApprovalManager:
             logger.exception(
                 "Failed to persist resolution for %s to durable store", request_id
             )
+
+    def _on_bg_task_done(self, task: "asyncio.Task") -> None:
+        """Drop the task ref and surface any error from the durable write."""
+        self._bg_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Durable resolution write failed: %r", exc)
 
     # ── Explicit removal (for timeout cleanup) ────────────────────────
 
@@ -857,7 +892,44 @@ class ExecApprovalManager:
                     )
                 except RuntimeError:
                     pass  # loop already closed
+            # Mark the durable row terminal so the audit trail records the
+            # 'expired' state instead of leaving it 'pending' until the store's
+            # own eviction TTL fires.
+            self._record_expiry(rid)
             logger.debug("Expired approval request: %s", rid)
+
+    def _record_expiry(self, request_id: str) -> None:
+        """Best-effort mark of an expired approval in the durable store."""
+        if self._store is None:
+            return
+        try:
+            from praisonaiagents.approval import ApprovalDecision
+
+            decision = ApprovalDecision(
+                approved=False,
+                reason="expired",
+                approver="gateway",
+                metadata={"terminal": "expired"},
+            )
+            coro = self._store.resolve(request_id, decision)
+        except Exception:
+            logger.debug("Could not build expiry decision for %s", request_id)
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            task = loop.create_task(coro)
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._on_bg_task_done)
+        else:
+            try:
+                asyncio.run(coro)
+            except Exception:
+                logger.debug("Failed to record expiry for %s", request_id)
 
 
 # ── Durable store helpers ────────────────────────────────────────────

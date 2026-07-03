@@ -104,8 +104,12 @@ def test_resolve_records_audit_and_removes_pending(tmp_path):
             arguments={"cmd": "rm -rf /tmp/x"},
         )
         mgr.resolve(rid, Resolution(approved=True, reason="ok"))
-        # Let the scheduled durable-resolve task run.
-        await asyncio.sleep(0.05)
+        # Wait for the scheduled durable-resolve task to complete instead of a
+        # fixed sleep (poll the store's pending count with a bounded timeout).
+        for _ in range(100):
+            if store.pending_count() == 0:
+                break
+            await asyncio.sleep(0.01)
         return rid, await future
 
     rid, resolution = asyncio.run(go())
@@ -129,6 +133,51 @@ def test_no_store_is_in_memory_only():
     res = asyncio.run(go())
     assert res.approved is False
     assert asyncio.run(mgr.rehydrate()) == 0
+
+
+def test_rehydrate_preserves_original_expiry(tmp_path):
+    """Rehydrated entries keep the original deadline, not a fresh TTL."""
+    store = ApprovalStore(path=tmp_path / "approvals.sqlite")
+
+    async def register_only():
+        mgr = ExecApprovalManager(ttl=300, store=store)
+        rid, _ = await mgr.register(tool_name="deploy", arguments={})
+        return rid
+
+    rid = asyncio.run(register_only())
+    original_expires = store.get(rid)["expires_at"]
+
+    async def restart_and_rehydrate():
+        mgr2 = ExecApprovalManager(ttl=300, store=store)
+        await mgr2.rehydrate()
+        return mgr2.get_pending(rid)
+
+    req = asyncio.run(restart_and_rehydrate())
+    assert req is not None
+    # created_at derived from stored expiry keeps the in-memory TTL aligned.
+    assert abs((req.created_at + 300) - original_expires) < 1.0
+
+
+def test_prune_marks_store_row_expired(tmp_path):
+    """An in-memory prune marks the durable row 'expired' for the audit trail."""
+    store = ApprovalStore(path=tmp_path / "approvals.sqlite")
+    # ttl=0 so the entry is immediately expired on the next prune, regardless
+    # of wall-clock timing (robust under any test event loop).
+    mgr = ExecApprovalManager(ttl=0, store=store)
+
+    async def go():
+        rid, _ = await mgr.register(tool_name="deploy", arguments={})
+        # Trigger a prune via a query; expiry write is scheduled on the loop.
+        assert mgr.list_pending() == []  # entry pruned
+        # Await the scheduled durable-expiry task(s) so the assertion is
+        # deterministic rather than timing-dependent.
+        assert mgr._bg_tasks, "prune should schedule a durable expiry task"
+        await asyncio.gather(*list(mgr._bg_tasks), return_exceptions=True)
+        return store.get(rid)
+
+    row = asyncio.run(go())
+    assert row is not None
+    assert row["status"] == "expired"
 
 
 def test_allow_always_grant_persists_across_manager_restart(tmp_path):
