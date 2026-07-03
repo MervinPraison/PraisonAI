@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-code"
-version = "0.0.14"
+version = "0.0.15"
 description = "Agentic terminal CLI for PraisonAI — the terminal-native agent (run, chat, code, runtime, cli backends) extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
