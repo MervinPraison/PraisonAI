@@ -34,7 +34,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Conditions | 1 | 3 | 1124 |
 | ✅ Configuration | 3 | 7 | 2299 |
 | ✅ Context Management | 16 | 33 | 11478 |
-| ✅ Database | 1 | 40 | 5744 |
+| ✅ Database | 1 | 40 | 5748 |
 | ✅ Deep Research | 8 | 2 | 497 |
 | ✅ Display | 6 | 3 | 648 |
 | ✅ Embeddings | 6 | 23 | 1990 |
@@ -47,28 +47,28 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Gateway | 7 | 38 | 13639 |
 | ✅ Guardrails | 4 | 4 | 1642 |
 | ✅ Handoffs | 11 | 6 | 2654 |
-| ✅ Hooks | 2 | 9 | 3633 |
+| ✅ Hooks | 2 | 9 | 3660 |
 | ✅ Image | 1 | 11 | 1113 |
-| ✅ Knowledge | 4 | 12 | 3658 |
+| ✅ Knowledge | 4 | 12 | 3687 |
 | ✅ LLM | 3 | 12 | 4292 |
 | ✅ Loops | 4 | 3 | 797 |
 | ✅ MCP | 1 | 52 | 11155 |
-| ✅ Memory | 6 | 17 | 6141 |
+| ✅ Memory | 6 | 17 | 6211 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2768 |
 | ✅ Optimizer | 1 | 2 | 750 |
 | ✅ Output | 3 | 5 | 1102 |
-| ✅ Parallel Execution | 3 | 2 | 392 |
+| ✅ Parallel Execution | 3 | 2 | 419 |
 | ✅ Planning | 6 | 6 | 1418 |
 | ✅ Plugins | 8 | 3 | 994 |
 | ✅ Prompts | 2 | 7 | 1201 |
 | ✅ Providers | 1 | 54 | 7047 |
 | ✅ Query | 1 | 2 | 623 |
-| ✅ RAG | 5 | 15 | 2891 |
+| ✅ RAG | 5 | 15 | 2908 |
 | ✅ Realtime | 2 | 5 | 584 |
 | ✅ Reflection | 3 | 3 | 665 |
 | ✅ Retrieval | 2 | 5 | 915 |
-| ✅ Routing | 1 | 2 | 390 |
+| ✅ Routing | 1 | 2 | 413 |
 | ✅ Sandbox | 5 | 6 | 2464 |
 | ✅ Security | 1 | 3 | 2787 |
 | ✅ Sessions | 4 | 12 | 4292 |
@@ -76,13 +76,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2715 |
 | ✅ Telemetry | 1 | 2 | 576 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 125 | 31421 |
+| ✅ Tools | 12 | 125 | 31449 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
 | ✅ Web | 3 | 8 | 1910 |
-| ✅ Workflows | 5 | 16 | 6764 |
+| ✅ Workflows | 5 | 16 | 6915 |
 
 ## Documentation Without Features
 
