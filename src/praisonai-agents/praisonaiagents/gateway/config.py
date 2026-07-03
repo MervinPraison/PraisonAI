@@ -260,6 +260,15 @@ class GatewayConfig:
     max_concurrent_runs: int = 0  # Aggregate concurrency ceiling (0 = unlimited)
     queue_depth: int = 0  # Bounded wait queue when at the ceiling
     overflow_policy: str = "reject"  # reject | queue | shed_oldest
+    # Issue #2620: pre-auth edge protections for internet-exposed deployments.
+    # Cap concurrent *unauthenticated* WebSocket connections per source IP so a
+    # hostile client cannot park many half-open sockets up to max_connections
+    # (0 = disabled). Loopback is always exempt at the enforcement layer.
+    preauth_max_connections_per_ip: int = 32
+    # Close a connection after this many unauthorized frames and log-sample the
+    # rest so a hostile client cannot flood logs / burn per-frame work
+    # (0 = disabled).
+    max_unauthorized_frames: int = 10
     push: PushConfig = field(default_factory=PushConfig)
     auth_scopes: Optional[Dict[str, List[str]]] = None
 
@@ -290,6 +299,16 @@ class GatewayConfig:
         if self.overflow_policy not in ("reject", "queue", "shed_oldest"):
             raise ValueError(
                 "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
+            )
+        if self.preauth_max_connections_per_ip < 0:
+            raise ValueError(
+                "preauth_max_connections_per_ip must be >= 0 (use 0 to disable "
+                "the pre-auth connection budget)"
+            )
+        if self.max_unauthorized_frames < 0:
+            raise ValueError(
+                "max_unauthorized_frames must be >= 0 (use 0 to disable the "
+                "unauthorized-frame flood guard)"
             )
 
     @property
@@ -362,6 +381,8 @@ class GatewayConfig:
             "max_concurrent_runs": self.max_concurrent_runs,
             "queue_depth": self.queue_depth,
             "overflow_policy": self.overflow_policy,
+            "preauth_max_connections_per_ip": self.preauth_max_connections_per_ip,
+            "max_unauthorized_frames": self.max_unauthorized_frames,
             "push": self.push.to_dict(),
             "scope_policy_enabled": self.has_scope_policy,
         }
@@ -543,6 +564,12 @@ class MultiChannelGatewayConfig:
             max_concurrent_runs=int(gw_data.get("max_concurrent_runs", 0) or 0),
             queue_depth=int(gw_data.get("queue_depth", 0) or 0),
             overflow_policy=str(gw_data.get("overflow_policy", "reject") or "reject"),
+            preauth_max_connections_per_ip=int(
+                gw_data.get("preauth_max_connections_per_ip", 32)
+            ),
+            max_unauthorized_frames=int(
+                gw_data.get("max_unauthorized_frames", 10)
+            ),
             auth_scopes=auth_scopes,
         )
         

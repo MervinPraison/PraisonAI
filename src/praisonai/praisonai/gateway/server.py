@@ -573,6 +573,12 @@ class WebSocketGateway:
             overflow_policy=str(
                 gateway_config.get("overflow_policy", "reject") or "reject"
             ),
+            preauth_max_connections_per_ip=int(
+                gateway_config.get("preauth_max_connections_per_ip", 32)
+            ),
+            max_unauthorized_frames=int(
+                gateway_config.get("max_unauthorized_frames", 10)
+            ),
             session_config=session_config,
         )
         
@@ -1045,6 +1051,45 @@ class WebSocketGateway:
                     logger.warning(f"WebSocket upgrade rate limited for {client_ip} (retry in {retry:.0f}s)")
                     return
 
+            # Pre-auth concurrent-connection budget (Issue #2620). Bound the
+            # number of *unauthenticated* sockets one source IP may hold open at
+            # once so a hostile client cannot park many half-open connections up
+            # to max_connections. Loopback is exempt so local CLIs are never
+            # locked out. The slot is released on auth-success or on close.
+            _ip_is_loopback = is_loopback(client_ip) or is_loopback(self._host)
+            _released = {"done": False}
+
+            def _release_budget():
+                # Release the pre-auth slot exactly once (on auth-success or
+                # close), so an authenticated connection no longer counts
+                # against the unauthenticated budget.
+                if not _released["done"] and not _ip_is_loopback:
+                    _released["done"] = True
+                    _preauth_budget.release(client_ip)
+
+            if not _ip_is_loopback:
+                if not _preauth_budget.acquire(client_ip):
+                    await _reject_connection(
+                        websocket,
+                        close_code=4029,
+                        error=HelloError(
+                            code=ConnectErrorCode.RATE_LIMITED,
+                            message="Too many unauthenticated connections",
+                            next_step=ConnectRecoveryStep.WAIT_THEN_RETRY,
+                        ),
+                    )
+                    logger.warning(
+                        f"WebSocket pre-auth connection budget exhausted for {client_ip}"
+                    )
+                    return
+
+            try:
+                await _connect_ws(websocket, client_ip, _release_budget)
+            finally:
+                _release_budget()
+            return
+
+        async def _connect_ws(websocket, client_ip, _release_budget):
             # Origin validation (CSWSH defense)
             origin = websocket.headers.get("origin")
             try:
@@ -1113,11 +1158,22 @@ class WebSocketGateway:
                     return
             
             await websocket.accept()
+            # Auth succeeded: release the pre-auth budget slot so this now
+            # authenticated connection no longer counts against the
+            # unauthenticated per-IP budget.
+            _release_budget()
             client_id = str(uuid.uuid4())
             self._clients[client_id] = websocket
             self._register_client_conn(client_id, websocket)
             # Resolve operator scopes for this connection (all scopes if no policy).
             self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
+            # Per-connection unauthorized-frame flood guard (Issue #2620).
+            from .rate_limiter import UnauthorizedFloodGuard
+            _flood_guard = UnauthorizedFloodGuard(
+                max_unauthorized=getattr(
+                    self.config, "max_unauthorized_frames", 10
+                ),
+            )
             
             logger.info(f"Client connected: {client_id}")
             
@@ -1130,7 +1186,26 @@ class WebSocketGateway:
             try:
                 while True:
                     data = await websocket.receive_json()
-                    await self._handle_client_message(client_id, data)
+                    unauthorized = await self._handle_client_message(client_id, data)
+                    if unauthorized:
+                        _should_close = _flood_guard.note_unauthorized()
+                        if _flood_guard.should_log():
+                            logger.warning(
+                                "Unauthorized frame from client %s (%d total, "
+                                "%d suppressed)",
+                                client_id,
+                                _flood_guard.count,
+                                _flood_guard.suppressed,
+                            )
+                        if _should_close:
+                            logger.warning(
+                                "Closing client %s: unauthorized-frame flood "
+                                "(%d frames)",
+                                client_id,
+                                _flood_guard.count,
+                            )
+                            await websocket.close(code=4028)
+                            break
             except WebSocketDisconnect:
                 logger.info(f"Client disconnected: {client_id}")
             except Exception as e:
@@ -1159,6 +1234,13 @@ class WebSocketGateway:
         _approval_mgr = get_exec_approval_manager()
         _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
         _ws_upgrade_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
+        # Issue #2620: pre-auth concurrent-connection budget per source IP.
+        from .rate_limiter import PreauthConnectionBudget
+        _preauth_budget = PreauthConnectionBudget(
+            max_per_ip=getattr(
+                self.config, "preauth_max_connections_per_ip", 32
+            ),
+        )
 
         # Create pairing routes
         _pairing_routes = create_pairing_routes(
@@ -1698,8 +1780,14 @@ class WebSocketGateway:
         
         logger.info("Gateway stopped")
     
-    async def _handle_client_message(self, client_id: str, data: Dict[str, Any]) -> None:
-        """Handle a message from a client."""
+    async def _handle_client_message(self, client_id: str, data: Dict[str, Any]) -> bool:
+        """Handle a message from a client.
+
+        Returns ``True`` when the frame was rejected as unauthorized (e.g.
+        insufficient scope) so the caller's per-connection flood guard can
+        count it; ``False``/``None`` otherwise. Existing callers that ignore
+        the return value are unaffected.
+        """
         msg_type = data.get("type", "message")
         
         # Handle versioned handshake
@@ -2017,7 +2105,7 @@ class WebSocketGateway:
                     "message": "insufficient scope",
                     "required_scope": OperatorScope.WRITE.value,
                 })
-                return
+                return True
             session_id = self._client_sessions.get(client_id)
             if session_id:
                 session = self._sessions.get(session_id)
