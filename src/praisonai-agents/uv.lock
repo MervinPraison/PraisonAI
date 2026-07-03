@@ -920,6 +920,19 @@ wheels = [
 ]
 
 [[package]]
+name = "dakera"
+version = "0.12.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/45/26bb87c2288463cec5a22dac81d84a0cb539477a136563873fa2f3f82d80/dakera-0.12.9.tar.gz", hash = "sha256:cf9642a9947be335111a2390b84f57792fcdabaf1492e3b438c96755c3d08335", size = 136912, upload-time = "2026-07-02T20:24:05.228Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/df/98e9aeb7dcd078cd4f8da6dc649c233725bd61d33ed78d5949d4ce15e7c8/dakera-0.12.9-py3-none-any.whl", hash = "sha256:5da629fb4746416fbcdd480491c3819231d15ddd2b5c067da58ebe2006d7f1b9", size = 88831, upload-time = "2026-07-02T20:24:03.222Z" },
+]
+
+[[package]]
 name = "ddgs"
 version = "9.11.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3125,7 +3138,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.114"
+version = "1.6.115"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3184,6 +3197,9 @@ crawl = [
     { name = "crawl4ai" },
     { name = "playwright" },
 ]
+dakera = [
+    { name = "dakera" },
+]
 graph = [
     { name = "chromadb" },
     { name = "mem0ai", extra = ["graph"] },
@@ -3241,6 +3257,7 @@ requires-dist = [
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = ">=1.0.0" },
     { name = "chromadb", marker = "extra == 'memory'", specifier = ">=1.0.0" },
     { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.4.0" },
+    { name = "dakera", marker = "extra == 'dakera'", specifier = ">=0.12.8" },
     { name = "ddgs", marker = "extra == 'search'", specifier = ">=9.0.0" },
     { name = "docker", marker = "extra == 'sandbox-docker'", specifier = ">=7.0.0" },
     { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=1.0.0" },
@@ -3288,7 +3305,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "auth", "autonomy", "search", "crawl", "sandbox", "a2ui", "sandbox-docker", "all"]
+provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "sandbox", "a2ui", "sandbox-docker", "all"]
 
 [[package]]
 name = "primp"
@@ -4981,11 +4998,11 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.3.0"
+version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/aa/63/e53da845320b757bf29ef6a9062f5c669fe997973f966045cb019c3f4b66/urllib3-2.3.0.tar.gz", hash = "sha256:f8c5449b3cf0861679ce7e0503c7b44b5ec981bec0d1d3795a07f1ba96f0204d", size = 307268, upload-time = "2024-12-22T07:47:30.032Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/19/4ec628951a74043532ca2cf5d97b7b14863931476d117c471e8e2b1eb39f/urllib3-2.3.0-py3-none-any.whl", hash = "sha256:1cee9ad369867bfdbbb48b7dd50374c0967a0bb7710050facf0dd6911440e3df", size = 128369, upload-time = "2024-12-22T07:47:28.074Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
 ]
 
 [[package]]
