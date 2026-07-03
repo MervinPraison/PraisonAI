@@ -185,7 +185,7 @@ class TestBarePositionalPrompt:
         with patch.object(PraisonAI, "parse_args", return_value=(base_args, [])), \
              patch.object(PraisonAI, "read_stdin_if_available", return_value=None), \
              patch.object(PraisonAI, "read_file_if_provided", return_value=None), \
-             patch("praisonai.cli.main._get_agents_generator", return_value=lambda *a, **k: mock_generator), \
+             patch("praisonai_code.cli.legacy.praison_ai._get_agents_generator", return_value=lambda *a, **k: mock_generator), \
              patch.object(PraisonAI, "handle_direct_prompt", return_value="OK") as mock_prompt:
             result = instance.run()
         return instance, mock_prompt, result, mock_generator
