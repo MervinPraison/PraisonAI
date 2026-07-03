@@ -100,21 +100,31 @@ class _ThreadBindingBot:
     def __init__(self, bot: Any, thread_id: Any) -> None:
         self._bot = bot
         self._thread_id = thread_id
+        # Whether the wrapped bot accepts ``thread_id`` is stable for the life
+        # of this object, so introspect once here instead of on every send
+        # (the router calls ``send_message`` on the hot scheduled path).
+        self._accepts_thread_id = self._compute_accepts_thread_id(bot)
+
+    @staticmethod
+    def _compute_accepts_thread_id(bot: Any) -> bool:
+        try:
+            import inspect as _inspect
+
+            params = _inspect.signature(bot.send_message).parameters
+            return "thread_id" in params or any(
+                p.kind == _inspect.Parameter.VAR_KEYWORD
+                for p in params.values()
+            )
+        except (TypeError, ValueError):
+            return False
 
     async def send_message(self, channel_id: str, text: str, **kwargs: Any) -> Any:
-        if self._thread_id is not None and "thread_id" not in kwargs:
-            try:
-                import inspect as _inspect
-
-                params = _inspect.signature(self._bot.send_message).parameters
-                accepts = "thread_id" in params or any(
-                    p.kind == _inspect.Parameter.VAR_KEYWORD
-                    for p in params.values()
-                )
-            except (TypeError, ValueError):
-                accepts = False
-            if accepts:
-                kwargs["thread_id"] = self._thread_id
+        if (
+            self._thread_id is not None
+            and self._accepts_thread_id
+            and "thread_id" not in kwargs
+        ):
+            kwargs["thread_id"] = self._thread_id
         return await self._bot.send_message(channel_id, text, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
@@ -2472,7 +2482,21 @@ class WebSocketGateway:
             The bot instance or None if not found
         """
         return self._channel_bots.get(name)
-    
+
+    def _resolve_channel_bot(self, name: str) -> Optional[Any]:
+        """Resolve a channel bot with the gateway's case-insensitive fallback.
+
+        Mirrors the lookup the ``_deliver_*`` fallbacks use so a configured
+        "Telegram" resolves a "telegram" target and vice versa.
+        """
+        bot = self._channel_bots.get(name)
+        if bot is not None:
+            return bot
+        for candidate_name, candidate in self._channel_bots.items():
+            if candidate_name.lower() == name.lower():
+                return candidate
+        return None
+
     def has_channel_bot(self, name: str) -> bool:
         """Check if a channel bot is registered.
         
@@ -3276,27 +3300,48 @@ class WebSocketGateway:
             # ``session_id`` (``cron_<job.id>`` for scheduled runs) is folded
             # into the idempotency key so a crash-and-resume that re-fires the
             # same job result to the same target is deduplicated in-process.
-            send_router = router
-            if thread_id is not None:
-                # Preserve threaded delivery without mutating the shared router:
-                # build a one-off router over a thread-binding view of the bot,
-                # sharing the same dead-target registry so suppression/self-heal
-                # state is consistent across threaded and non-threaded sends.
-                resolved = router._botos.get_bot(channel)
-                if resolved is not None:
-                    thread_botos = _ChannelBotOS(
-                        {channel: _ThreadBindingBot(resolved, thread_id)}
-                    )
-                    send_router = router.__class__(
-                        thread_botos, dead_targets=self._dead_targets,
-                    )
             idem = (
                 f"sched:{channel}:{channel_id}:{session_id or ''}:"
                 f"{_delivery_text_digest(text)}"
             )
-            delivered = await send_router.deliver(
-                f"{channel}:{channel_id}", text, idempotency_key=idem,
-            )
+            if thread_id is None:
+                delivered = await router.deliver(
+                    f"{channel}:{channel_id}", text, idempotency_key=idem,
+                )
+            else:
+                # Threaded delivery still needs the SHARED router's dedup so a
+                # re-fired threaded job does not double-post. We check/record the
+                # idempotency key on the shared router directly (its bounded LRU
+                # is the single source of truth) and route the actual send
+                # through a one-off thread-binding router that shares the same
+                # dead-target registry — so suppression/self-heal stays
+                # consistent while the shared LRU still owns dedup.
+                resolved = self._resolve_channel_bot(channel)
+                if resolved is None:
+                    logger.warning(
+                        "No channel bot '%s' found for scheduled delivery", channel,
+                    )
+                    return
+                if router.is_duplicate_key(idem):
+                    logger.info(
+                        "Suppressing duplicate threaded scheduled result to %s:%s",
+                        channel, channel_id,
+                    )
+                    return
+                thread_botos = _ChannelBotOS(
+                    {channel: _ThreadBindingBot(resolved, thread_id)}
+                )
+                send_router = router.__class__(
+                    thread_botos, dead_targets=self._dead_targets,
+                )
+                delivered = await send_router.deliver(
+                    f"{channel}:{channel_id}", text,
+                )
+                # Record on the shared router only after a confirmed success so
+                # a failed threaded send stays retryable, mirroring the router's
+                # own guard.
+                if delivered:
+                    router.remember_key(idem)
             if delivered:
                 logger.info(
                     "Delivered scheduled result to %s:%s", channel, channel_id,

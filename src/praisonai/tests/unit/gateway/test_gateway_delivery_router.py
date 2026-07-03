@@ -84,6 +84,41 @@ def test_scheduled_delivery_preserves_thread_id():
     assert bot.sends == [("-100123", "threaded", "42")]
 
 
+def test_scheduled_delivery_dedupes_refired_threaded_job():
+    """A re-fired *threaded* job is deduplicated by the shared router LRU.
+
+    Regression for issue #2624: the threaded path must not build a throw-away
+    router (whose empty LRU never dedups) — it records/checks the idempotency
+    key on the shared router so a re-fire cannot double-post.
+    """
+    bot = _RecordingBot()
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id="42",
+        session_id="cron_job1",
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "same threaded text"))
+    asyncio.run(gw._deliver_scheduled_result(delivery, "same threaded text"))
+
+    assert bot.sends == [("-100123", "same threaded text", "42")]
+
+
+def test_scheduled_delivery_failed_threaded_send_stays_retryable():
+    """A failed *threaded* send does not record the key, so a retry re-sends."""
+    bot = _RecordingBot(fail_times=1)
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id="42",
+        session_id="cron_job1",
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "retry threaded"))
+    asyncio.run(gw._deliver_scheduled_result(delivery, "retry threaded"))
+
+    assert bot.sends == [("-100123", "retry threaded", "42")]
+
+
 def test_scheduled_delivery_failed_send_stays_retryable():
     """A failed send does not record the idempotency key, so retry re-sends."""
     bot = _RecordingBot(fail_times=1)
