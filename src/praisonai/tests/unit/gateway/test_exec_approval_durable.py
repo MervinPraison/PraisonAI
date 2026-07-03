@@ -3,7 +3,7 @@
 Verifies that:
   - pending approvals persisted to an ``ApprovalStoreProtocol`` store survive a
     simulated restart and are rehydrated on boot;
-  - ``allow_always`` grants persisted to a JSON allowlist survive a restart;
+  - ``allow_always`` grants persisted to a durable allowlist survive a restart;
   - the default in-memory path is unchanged when no store is configured.
 """
 
@@ -20,16 +20,16 @@ from praisonai.gateway.exec_approval import (
 
 
 def test_allowlist_in_memory_default(tmp_path):
-    """Without a path the allowlist is in-memory only (no file created)."""
-    al = PermissionAllowlist()
+    """With durable=False the allowlist is in-memory only (no file created)."""
+    al = PermissionAllowlist(durable=False)
     al.add("shell_exec")
     assert "shell_exec" in al
     assert not list(tmp_path.iterdir())
 
 
 def test_allowlist_persists_and_reloads(tmp_path):
-    """allow_always grants survive a restart via the JSON allowlist file."""
-    path = tmp_path / "allow.json"
+    """allow_always grants survive a restart via the durable allowlist file."""
+    path = tmp_path / "allow.sqlite"
     al = PermissionAllowlist(path=path)
     al.add("shell_exec")
     assert path.exists()
@@ -47,7 +47,9 @@ def test_allowlist_persists_and_reloads(tmp_path):
 def test_register_persists_to_store(tmp_path):
     """register() writes the pending approval to the durable store."""
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
-    mgr = ExecApprovalManager(ttl=300, store=store)
+    mgr = ExecApprovalManager(
+        ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+    )
 
     async def go():
         rid, _future = await mgr.register(
@@ -69,7 +71,9 @@ def test_rehydrate_reloads_pending_after_restart(tmp_path):
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
 
     async def register_only():
-        mgr = ExecApprovalManager(ttl=300, store=store)
+        mgr = ExecApprovalManager(
+            ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+        )
         rid, _ = await mgr.register(
             tool_name="deploy",
             arguments={"env": "prod"},
@@ -81,7 +85,9 @@ def test_rehydrate_reloads_pending_after_restart(tmp_path):
 
     # Simulate restart: brand-new manager, same store.
     async def restart_and_rehydrate():
-        mgr2 = ExecApprovalManager(ttl=300, store=store)
+        mgr2 = ExecApprovalManager(
+            ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+        )
         count = await mgr2.rehydrate()
         return count, mgr2
 
@@ -96,7 +102,9 @@ def test_rehydrate_reloads_pending_after_restart(tmp_path):
 def test_resolve_records_audit_and_removes_pending(tmp_path):
     """resolve() clears the pending row and records the decision durably."""
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
-    mgr = ExecApprovalManager(ttl=300, store=store)
+    mgr = ExecApprovalManager(
+        ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+    )
 
     async def go():
         rid, future = await mgr.register(
@@ -122,7 +130,7 @@ def test_resolve_records_audit_and_removes_pending(tmp_path):
 
 def test_no_store_is_in_memory_only():
     """Without a store the manager behaves exactly as before."""
-    mgr = ExecApprovalManager(ttl=300)
+    mgr = ExecApprovalManager(ttl=300, durable=False)
 
     async def go():
         rid, future = await mgr.register(tool_name="t", arguments={})
@@ -140,7 +148,9 @@ def test_rehydrate_preserves_original_expiry(tmp_path):
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
 
     async def register_only():
-        mgr = ExecApprovalManager(ttl=300, store=store)
+        mgr = ExecApprovalManager(
+            ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+        )
         rid, _ = await mgr.register(tool_name="deploy", arguments={})
         return rid
 
@@ -148,7 +158,9 @@ def test_rehydrate_preserves_original_expiry(tmp_path):
     original_expires = store.get(rid)["expires_at"]
 
     async def restart_and_rehydrate():
-        mgr2 = ExecApprovalManager(ttl=300, store=store)
+        mgr2 = ExecApprovalManager(
+            ttl=300, store=store, allowlist_path=tmp_path / "allow.sqlite"
+        )
         await mgr2.rehydrate()
         return mgr2.get_pending(rid)
 
@@ -163,7 +175,9 @@ def test_prune_marks_store_row_expired(tmp_path):
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
     # ttl=0 so the entry is immediately expired on the next prune, regardless
     # of wall-clock timing (robust under any test event loop).
-    mgr = ExecApprovalManager(ttl=0, store=store)
+    mgr = ExecApprovalManager(
+        ttl=0, store=store, allowlist_path=tmp_path / "allow.sqlite"
+    )
 
     async def go():
         rid, _ = await mgr.register(tool_name="deploy", arguments={})
@@ -183,14 +197,19 @@ def test_prune_marks_store_row_expired(tmp_path):
 def test_allow_always_grant_persists_across_manager_restart(tmp_path):
     """allow_always via resolve() persists and short-circuits after restart."""
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
-    allow_path = tmp_path / "allow.json"
+    allow_path = tmp_path / "allow.sqlite"
 
     async def grant():
         mgr = ExecApprovalManager(
             ttl=300, store=store, allowlist_path=allow_path
         )
         rid, future = await mgr.register(tool_name="safe_tool", arguments={})
-        mgr.resolve(rid, Resolution(approved=True, allow_always=True))
+        # scope_to_agent=False grants globally (any agent), matching the
+        # legacy "allow-always for this tool everywhere" behaviour.
+        mgr.resolve(
+            rid,
+            Resolution(approved=True, allow_always=True, scope_to_agent=False),
+        )
         await future
 
     asyncio.run(grant())
