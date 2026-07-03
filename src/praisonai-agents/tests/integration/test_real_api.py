@@ -185,7 +185,7 @@ class TestAnthropicAPI:
         agent = Agent(
             name="ClaudeAgent",
             instructions="You are a helpful assistant. Keep responses very brief.",
-            llm="claude-3-5-sonnet-20241022",
+            llm="anthropic/claude-3-5-haiku-latest",
         )
         
         response = agent.chat("Say 'hello' and nothing else.")
@@ -218,7 +218,7 @@ class TestGoogleAPI:
         agent = Agent(
             name="GeminiAgent",
             instructions="You are a helpful assistant. Keep responses very brief.",
-            llm="gemini/gemini-2.0-flash",
+            llm="gemini/gemini-2.0-flash-exp",
         )
         
         response = agent.chat("Say 'hello' and nothing else.")

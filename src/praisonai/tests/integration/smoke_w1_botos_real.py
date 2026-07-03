@@ -37,12 +37,11 @@ async def main() -> int:
     )
     from praisonai.bots import Bot, BotOS
 
-    if os.getenv("ANTHROPIC_API_KEY"):
-        model = "claude-3-5-haiku-latest"
-    elif os.getenv("GOOGLE_API_KEY"):
-        model = "gemini-1.5-flash"
-    else:
-        model = "gpt-4o-mini"
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    if _dir not in sys.path:
+        sys.path.insert(0, _dir)
+    from _smoke_utils import pick_smoke_model
+    model = pick_smoke_model()
     print(f"Using model: {model}")
 
     agent = Agent(

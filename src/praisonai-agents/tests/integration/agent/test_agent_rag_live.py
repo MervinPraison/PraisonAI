@@ -12,6 +12,8 @@ import pytest
 import tempfile
 from pathlib import Path
 
+pytest.importorskip("chromadb")
+
 
 @pytest.fixture
 def sample_documents():

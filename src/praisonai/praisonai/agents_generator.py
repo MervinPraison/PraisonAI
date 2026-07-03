@@ -34,6 +34,56 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
+def _normalize_yaml_config(config: dict) -> dict:
+    """Normalise list-format agents/tasks YAML to dict format expected by merge/run."""
+    if not isinstance(config, dict):
+        return config
+
+    agents = config.get("agents")
+    if isinstance(agents, list):
+        config["agents"] = {
+            (a.get("name") or f"agent_{i}"): a
+            for i, a in enumerate(agents)
+            if isinstance(a, dict)
+        }
+
+    for bucket_key in ("agents", "roles"):
+        bucket = config.get(bucket_key)
+        if isinstance(bucket, dict):
+            for agent_config in bucket.values():
+                if isinstance(agent_config, dict) and "instructions" in agent_config and "backstory" not in agent_config:
+                    agent_config["backstory"] = agent_config["instructions"]
+
+    roles = config.get("roles")
+    if isinstance(roles, list):
+        config["roles"] = {
+            (r.get("name") or f"role_{i}"): r
+            for i, r in enumerate(roles)
+            if isinstance(r, dict)
+        }
+
+    tasks = config.get("tasks")
+    if isinstance(tasks, list):
+        bucket = config.get("roles") or config.get("agents") or {}
+        if not isinstance(bucket, dict):
+            bucket = {}
+        for i, task in enumerate(tasks):
+            if not isinstance(task, dict):
+                continue
+            agent_key = task.get("agent")
+            if not agent_key or agent_key not in bucket:
+                continue
+            entry = bucket[agent_key].setdefault("tasks", {})
+            entry[task.get("name", f"task_{i}")] = {
+                k: v for k, v in task.items() if k != "agent"
+            }
+        if "roles" not in config and bucket:
+            config["roles"] = bucket
+        config.pop("tasks", None)
+
+    return config
+
+
 def _get_default_adapter_registry():
     """Lazy import for the adapter registry — defers entry-point discovery."""
     from .framework_adapters.registry import get_default_registry
@@ -675,7 +725,9 @@ class AgentsGenerator:
             except FileNotFoundError:
                 _rich_print(f"File not found: {self.agent_file}")
                 return None
-        
+
+        config = _normalize_yaml_config(config or {})
+
         # Apply CLI config overrides to both paths (agent_yaml and agent_file)
         if self.cli_config:
             self._merge_cli_config(config, self.cli_config)

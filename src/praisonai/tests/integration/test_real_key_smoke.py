@@ -30,7 +30,8 @@ pytestmark = pytest.mark.skipif(
 # Paths
 PRAISONAI_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PRAISONAI_AGENTS_PATH = os.path.join(os.path.dirname(PRAISONAI_PATH), "praisonai-agents")
-PYTHONPATH = f"{PRAISONAI_PATH}:{PRAISONAI_AGENTS_PATH}"
+PRAISONAI_CODE_PATH = os.path.join(os.path.dirname(PRAISONAI_PATH), "praisonai-code")
+PYTHONPATH = os.pathsep.join([PRAISONAI_AGENTS_PATH, PRAISONAI_CODE_PATH, PRAISONAI_PATH])
 
 
 def run_python_code(code: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -47,6 +48,8 @@ def run_python_code(code: str, timeout: int = 30) -> subprocess.CompletedProcess
     )
 
 
+@pytest.mark.provider_openai
+@pytest.mark.network
 class TestSDKRealKey:
     """Test SDK functionality with real API keys."""
     
@@ -106,6 +109,8 @@ print("SUCCESS" if response and ":" in response else "PARTIAL")
         assert "SUCCESS" in result.stdout or "PARTIAL" in result.stdout, f"Tool test output: {result.stdout}"
 
 
+@pytest.mark.provider_openai
+@pytest.mark.network
 class TestCLIRealKey:
     """Test CLI functionality with real API keys."""
     
@@ -135,6 +140,8 @@ print("CLASS_OK")
         assert "CLASS_OK" in result.stdout
 
 
+@pytest.mark.provider_openai
+@pytest.mark.network
 class TestPerformanceWithRealKey:
     """Test that performance optimizations work with real usage."""
     
@@ -179,6 +186,8 @@ else:
 class TestMultiProvider:
     """Test multiple LLM providers if keys available."""
     
+    @pytest.mark.provider_anthropic
+    @pytest.mark.network
     @pytest.mark.skipif(
         not os.environ.get("ANTHROPIC_API_KEY"),
         reason="ANTHROPIC_API_KEY not set"
@@ -191,7 +200,7 @@ from praisonaiagents import Agent
 
 agent = Agent(
     instructions="Reply with exactly: ANTHROPIC_OK",
-    llm="claude-3-haiku-20240307",
+    llm="anthropic/claude-3-5-haiku-latest",
 )
 response = agent.chat("Respond")
 print("SUCCESS" if "ANTHROPIC_OK" in response or response else "FAIL")
@@ -200,8 +209,10 @@ print("SUCCESS" if "ANTHROPIC_OK" in response or response else "FAIL")
         # May fail if Anthropic not configured, that's OK
         print(f"Anthropic test: {result.stdout}")
     
+    @pytest.mark.provider_google
+    @pytest.mark.network
     @pytest.mark.skipif(
-        not os.environ.get("GOOGLE_API_KEY"),
+        not os.environ.get("GOOGLE_API_KEY") and not os.environ.get("GEMINI_API_KEY"),
         reason="GOOGLE_API_KEY not set"
     )
     def test_google_agent(self):
@@ -212,7 +223,7 @@ from praisonaiagents import Agent
 
 agent = Agent(
     instructions="Reply with exactly: GOOGLE_OK",
-    llm="gemini/gemini-1.5-flash",
+    llm="gemini/gemini-2.0-flash-exp",
 )
 response = agent.chat("Respond")
 print("SUCCESS" if response else "FAIL")

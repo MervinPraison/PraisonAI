@@ -127,6 +127,7 @@ EXCLUDED_PATHS = (
     '_pytest_plugins',
     '_meta',
     'test_test_command',
+    'test_real_key_smoke',
     'test_gating',
     'test_network_guard',
     'conftest',

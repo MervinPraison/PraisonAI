@@ -1902,10 +1902,10 @@ class ToolExecutionMixin:
         if not isinstance(tools, (list, tuple)):
             tools = []  # MCP or single tool instance - no tool-level policy lookup
         for tool in tools:
-            if (callable(tool) and 
-                getattr(tool, '__name__', '') == tool_name and
-                hasattr(tool, 'retry_policy')):
-                return tool.retry_policy
+            tool_name_attr = getattr(tool, '__name__', None) or getattr(tool, 'name', None)
+            tool_policy = getattr(tool, 'retry_policy', None) if hasattr(tool, 'retry_policy') else None
+            if tool_name_attr == tool_name and tool_policy is not None:
+                return tool_policy
         
         # Check for agent-level retry policy
         agent_policy = getattr(self, '_tool_retry_policy', None)
@@ -1932,7 +1932,7 @@ class ToolExecutionMixin:
             error_msg = error_dict.get("error", "").lower()
             if "timeout" in error_msg or "timed out" in error_msg:
                 return "timeout"
-            elif "rate" in error_msg and "limit" in error_msg:
+            elif ("rate" in error_msg and "limit" in error_msg) or "too many requests" in error_msg:
                 return "rate_limit"
             elif "connection" in error_msg or "network" in error_msg:
                 return "connection_error"
@@ -1944,7 +1944,7 @@ class ToolExecutionMixin:
             
             if "timeout" in exc_msg or "timeout" in exc_type:
                 return "timeout"
-            elif "rate" in exc_msg and "limit" in exc_msg:
+            elif ("rate" in exc_msg and "limit" in exc_msg) or "too many requests" in exc_msg:
                 return "rate_limit"  
             elif ("connection" in exc_msg or "network" in exc_msg or 
                   "connection" in exc_type):
