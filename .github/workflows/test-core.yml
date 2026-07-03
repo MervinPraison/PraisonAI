@@ -89,6 +89,7 @@ jobs:
               tests/unit/bots/
               tests/unit/gateway/
               tests/unit/cli/
+              tests/unit/daemon/
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
@@ -117,7 +118,6 @@ jobs:
               tests/unit/orchestration/
               tests/unit/dev/
               tests/unit/_dev/
-              tests/unit/daemon/
               tests/unit/context/
               tests/unit/adapters/
               tests/unit/templates/
