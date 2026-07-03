@@ -21,6 +21,9 @@ from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
+# NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
+# (Issue #2644). It is kept in the MRO for backward compatibility during the
+# deprecation cycle and will be removed afterwards.
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
