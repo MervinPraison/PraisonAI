@@ -975,7 +975,12 @@ Format:
 
 Keep the first line under 72 characters.
 Be specific about what changed and why.""",
-            llm=os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+            llm=(
+                getattr(getattr(self, 'args', None), 'llm', None)
+                or os.environ.get("MODEL_NAME")
+                or os.environ.get("OPENAI_MODEL_NAME")
+                or "gpt-4o-mini"
+            )
         )
         
         prompt = f"""Generate a commit message for these changes:
@@ -1194,7 +1199,8 @@ def handle_research_command(self, query: str, model: str = None, verbose: bool =
                 goal="Gather relevant information using available tools",
                 backstory="You are an expert at using tools to gather information for research.",
                 tools=tools_list,
-                llm="gpt-4o-mini", output="minimal"
+                llm=(model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")),
+                output="minimal"
             )
             
             # Create task to gather initial information

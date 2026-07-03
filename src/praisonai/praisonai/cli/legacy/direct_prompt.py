@@ -22,7 +22,8 @@ def _ensure_availability_flags():
 
 
 def _get_autogen():
-    return _cli_main._get_autogen()
+    from praisonai_code.cli.legacy.praison_ai import _get_autogen as _pa_get_autogen
+    return _pa_get_autogen()
 
 
 def _availability_flag(name: str):
