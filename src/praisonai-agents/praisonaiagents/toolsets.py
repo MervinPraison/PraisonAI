@@ -275,7 +275,7 @@ class ToolsetRegistry:
                 "grep", "glob", "execute_command",
                 "todo_add", "todo_list", "todo_update",
             ],
-            description="Safe coding workflow using diff-based edits with LSP diagnostics"
+            description="Coding workflow with diff-based edits (edit_file for existing files, apply_patch to create new files), code search, and shell execution"
         )
 
         logger.debug("Loaded prebuilt toolsets: web, files, code, system, scraping, research, safe, development, coding")
