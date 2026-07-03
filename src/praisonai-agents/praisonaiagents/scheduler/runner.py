@@ -8,11 +8,11 @@ payload is the caller's responsibility (keeping the runner lightweight).
 import logging
 from praisonaiagents._logging import get_logger
 import time
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from .models import ScheduleJob
 from .protocols import ScheduleStoreProtocol
+from .due import is_due as _is_due_shared
 
 logger = get_logger(__name__)
 
@@ -29,7 +29,12 @@ class ScheduleRunner:
     # ── public ───────────────────────────────────────────────────────
 
     def get_due_jobs(self) -> List[ScheduleJob]:
-        """Return all enabled jobs that are due for execution *now*."""
+        """Return all enabled jobs that are due for execution *now*.
+
+        Non-atomic: two tickers polling the same store may each see the same
+        job as due. For at-most-once semantics across processes/hosts use
+        :meth:`claim_due_jobs` when the store supports it.
+        """
         now = time.time()
         due: List[ScheduleJob] = []
         for job in self._store.list():
@@ -38,6 +43,39 @@ class ScheduleRunner:
             if self._is_due(job, now):
                 due.append(job)
         return due
+
+    def supports_atomic_claim(self) -> bool:
+        """Whether the backing store offers an atomic cross-process claim."""
+        return callable(getattr(self._store, "claim_due", None))
+
+    def claim_due_jobs(
+        self,
+        owner_id: str,
+        lease_seconds: float = 300.0,
+    ) -> List[ScheduleJob]:
+        """Atomically claim due jobs so each fires at most once across tickers.
+
+        When the store implements ``claim_due`` this reserves each due job
+        (advancing its schedule and taking a short lease) under a cross-process
+        lock and returns only the jobs *this* caller won; competitors get an
+        empty list and skip silently. When the store does not support atomic
+        claims this falls back to :meth:`get_due_jobs` (non-atomic).
+
+        Args:
+            owner_id: Stable identifier for this ticker (process/host).
+            lease_seconds: Lease window; a claim not completed expires after
+                this so a crashed run is eventually retried.
+        """
+        claim = getattr(self._store, "claim_due", None)
+        if callable(claim):
+            return claim(time.time(), owner_id, lease_seconds)
+        return self.get_due_jobs()
+
+    def complete_run(self, job_id: str, owner_id: str) -> None:
+        """Release a claimed job's lease after its run finishes (best-effort)."""
+        complete = getattr(self._store, "complete", None)
+        if callable(complete):
+            complete(job_id, owner_id)
 
     def mark_run(
         self,
@@ -80,49 +118,4 @@ class ScheduleRunner:
     # ── internals ────────────────────────────────────────────────────
 
     def _is_due(self, job: ScheduleJob, now: float) -> bool:
-        sched = job.schedule
-
-        if sched.kind == "every":
-            if sched.every_seconds is None:
-                return False
-            if job.last_run_at is None:
-                return True  # Never run → due immediately
-            return (now - job.last_run_at) >= sched.every_seconds
-
-        if sched.kind == "at":
-            if sched.at is None:
-                return False
-            if job.last_run_at is not None:
-                return False  # Already ran
-            try:
-                target = datetime.fromisoformat(sched.at)
-                if target.tzinfo is None:
-                    target = target.replace(tzinfo=timezone.utc)
-                return datetime.now(timezone.utc) >= target
-            except (ValueError, TypeError):
-                logger.warning("Invalid 'at' timestamp for job %s: %s", job.id, sched.at)
-                return False
-
-        if sched.kind == "cron":
-            return self._cron_is_due(job, now)
-
-        return False
-
-    @staticmethod
-    def _cron_is_due(job: ScheduleJob, now: float) -> bool:
-        """Check cron schedule. Requires optional ``croniter``."""
-        if job.schedule.cron_expr is None:
-            return False
-        try:
-            from croniter import croniter  # type: ignore[import-untyped]
-        except ImportError:
-            logger.warning(
-                "croniter not installed — cron schedules are unavailable. "
-                "Install with: pip install croniter"
-            )
-            return False
-
-        base_time = job.last_run_at or job.created_at
-        cron = croniter(job.schedule.cron_expr, base_time)
-        next_run = cron.get_next(float)
-        return now >= next_run
+        return _is_due_shared(job, now)

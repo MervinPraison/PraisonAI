@@ -218,6 +218,13 @@ class ScheduleJob:
             d["pre_run"] = self.pre_run
         if self.condition is not None:
             d["condition"] = self.condition
+        # Atomic-claim lease metadata (set dynamically by stores that support
+        # ``claim_due``). Persisted so a lease is visible across processes and
+        # survives a restart; omitted when no lease is held.
+        lease_until = getattr(self, "_lease_until", 0.0) or 0.0
+        if lease_until:
+            d["lease_until"] = lease_until
+            d["lease_owner"] = getattr(self, "_lease_owner", None)
         return d
 
     @classmethod
@@ -225,7 +232,7 @@ class ScheduleJob:
         sched_data = d.get("schedule", {})
         delivery_data = d.get("delivery")
         origin_data = d.get("origin")
-        return cls(
+        job = cls(
             id=d.get("id", uuid.uuid4().hex[:12]),
             name=d.get("name", ""),
             schedule=Schedule.from_dict(sched_data) if isinstance(sched_data, dict) else Schedule(),
@@ -241,3 +248,7 @@ class ScheduleJob:
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
         )
+        # Restore atomic-claim lease metadata if present (see ``to_dict``).
+        job._lease_until = d.get("lease_until", 0.0) or 0.0
+        job._lease_owner = d.get("lease_owner")
+        return job

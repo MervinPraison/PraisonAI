@@ -32,7 +32,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -124,6 +126,8 @@ class ScheduledAgentExecutor:
         on_failure: Optional[Callable[..., None]] = None,
         run_policy: Optional["RunPolicy"] = None,
         condition_resolver: Any = None,
+        owner_id: Optional[str] = None,
+        lease_seconds: float = 300.0,
     ) -> None:
         self._runner = runner
         self._resolve = agent_resolver
@@ -134,6 +138,11 @@ class ScheduledAgentExecutor:
         # ``None`` → use the default shell gate resolver; ``False`` → disable
         # gating; otherwise a user-supplied ``(job) -> gate | None`` callable.
         self._condition_resolver = condition_resolver
+        # Stable-per-process identity for atomic job claims so a due job fires
+        # at most once across tickers/processes/hosts when the store supports
+        # ``claim_due``. Defaults to host+pid+uuid.
+        self._owner_id = owner_id or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        self._lease_seconds = lease_seconds
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -146,11 +155,33 @@ class ScheduledAgentExecutor:
 
         Yields:
             :class:`JobResult` for each due job.
+
+        When the backing store supports an atomic claim (``claim_due``), each
+        due job is reserved under a cross-process lock before running so it
+        fires **at most once** across all tickers/processes/hosts. Stores
+        without that support fall back to the non-atomic ``get_due_jobs`` path.
         """
-        due_jobs: List["ScheduleJob"] = self._runner.get_due_jobs()
+        claim = getattr(self._runner, "claim_due_jobs", None)
+        if callable(claim):
+            due_jobs: List["ScheduleJob"] = claim(self._owner_id, self._lease_seconds)
+            atomic = getattr(self._runner, "supports_atomic_claim", None)
+            atomic_claim = bool(atomic()) if callable(atomic) else False
+        else:  # pragma: no cover - older runner without claim support
+            due_jobs = self._runner.get_due_jobs()
+            atomic_claim = False
 
         for job in due_jobs:
-            result = await self._execute_one(job)
+            try:
+                result = await self._execute_one(job)
+            finally:
+                if atomic_claim:
+                    # Release the lease so it does not linger until expiry.
+                    try:
+                        self._runner.complete_run(job.id, self._owner_id)
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.warning(
+                            "Failed to release lease for job '%s': %s", job.id, e,
+                        )
             yield result
 
     async def tick_all(self) -> List[JobResult]:
