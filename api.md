@@ -813,7 +813,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, __version__, arun, run, run_integrated_gateway
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, __version__, arun, run
 ```
 
 # CLI
@@ -827,21 +827,7 @@ Methods:
 * <code title="cli">praisonai batch list <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
 * <code title="cli">praisonai batch report <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
 * <code title="cli">praisonai batch stats <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
-* <code title="cli">praisonai bot agentmail <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot bot-callback <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot discord <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot email <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot install-daemon <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot linear <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot list <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot purge <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot replay <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot start <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
-* <code title="cli">praisonai bot whatsapp <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai chat <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
-* <code title="cli">praisonai claw claw <a href="./src/praisonai/praisonai/cli/commands/claw.py">--help</a></code>
 * <code title="cli">praisonai code <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai context add <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context clear <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
@@ -873,36 +859,6 @@ Methods:
 * <code title="cli">praisonai flow import <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
 * <code title="cli">praisonai flow list <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
 * <code title="cli">praisonai flow version <a href="./src/praisonai/praisonai/cli/commands/flow.py">--help</a></code>
-* <code title="cli">praisonai gateway channels <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway doctor <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway gateway-callback <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway install <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway logs <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway mint-link <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway pause <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway reconnect <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway resume <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway stop <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai gateway uninstall <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
-* <code title="cli">praisonai identity import <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
-* <code title="cli">praisonai identity link <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
-* <code title="cli">praisonai identity list <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
-* <code title="cli">praisonai identity unlink <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
-* <code title="cli">praisonai kanban block <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban boards <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban comment <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban complete <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban create <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban dispatch <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban link <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban list <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban move <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban reclaim <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban show <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
-* <code title="cli">praisonai kanban unblock <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
 * <code title="cli">praisonai knowledge add <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge index <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge list <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
@@ -950,11 +906,6 @@ Methods:
 * <code title="cli">praisonai n8n pull <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n push <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n test <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
-* <code title="cli">praisonai onboard onboard-callback <a href="./src/praisonai/praisonai/cli/commands/onboard.py">--help</a></code>
-* <code title="cli">praisonai pairing approve <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
-* <code title="cli">praisonai pairing clear <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
-* <code title="cli">praisonai pairing list <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
-* <code title="cli">praisonai pairing revoke <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
 * <code title="cli">praisonai profile imports <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile optimize <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
 * <code title="cli">praisonai profile profile-callback <a href="./src/praisonai/praisonai/cli/commands/profile.py">--help</a></code>
