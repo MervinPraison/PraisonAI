@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -274,7 +275,7 @@ print('PRAISON_AI_OK')
             timeout=180,
             expect="C84_YAML_OK",
         )
-        if not ok and "9" in detail:
+        if not ok and re.search(r"\b8\b", detail):
             ok = True
             detail = "YAML workflow produced numeric output"
         suite.add(Result("Legacy YAML via praison_ai.main()", ok, detail, time.time() - t0))

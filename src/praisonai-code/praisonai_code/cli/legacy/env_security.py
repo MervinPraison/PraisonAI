@@ -31,9 +31,15 @@ _BLOCKED_ENV_KEYS = frozenset({
 _BLOCKED_ENV_KEYS_UPPER = frozenset(k.upper() for k in _BLOCKED_ENV_KEYS)
 
 
+_env_loaded: bool = False
+
+
 def _load_env_once():
     """Load environment variables from .env file once at CLI startup."""
-    load_dotenv()
+    global _env_loaded
+    if not _env_loaded:
+        load_dotenv()
+        _env_loaded = True
 
 
 def _validate_env_key(key) -> None:

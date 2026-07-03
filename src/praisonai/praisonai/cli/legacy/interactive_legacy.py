@@ -46,7 +46,7 @@ def _start_interactive_mode(self, args):
         self._interactive_mode = True
         
         # Load interactive tools
-        tools_list = _load_interactive_tools(self, )
+        tools_list = _load_interactive_tools(self)
         
         # Import message queue components
         from ..features.message_queue import (
@@ -466,7 +466,8 @@ def _start_interactive_mode(self, args):
                         continue
                     elif cmd == "status":
                         # Show current processing status
-                        current = worker_state.get('current_prompt')
+                        current_task = worker_state.get('current_task')
+                        current = current_task.get('question') if current_task else None
                         queue_size = execution_queue.qsize()
                         if current:
                             console.print(f"[cyan]Processing:[/cyan] {current}")
@@ -1236,7 +1237,7 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
 
                         # Auto-load AGENTS.md/CLAUDE.md project context (unless --no-context)
-                        if not getattr(args, 'no_context', False):
+                        if not getattr(getattr(self, 'args', None), 'no_context', False):
                             project_context = _load_cli_project_context(self)
                             if project_context:
                                 backstory += "\n\n# Project Context\n" + project_context

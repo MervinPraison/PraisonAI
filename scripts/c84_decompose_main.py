@@ -79,7 +79,11 @@ DELEGATE_METHODS = {
         "_save_output",
         "handle_direct_prompt",
     ],
-    "interactive_legacy": ["_start_interactive_mode"],
+    "interactive_legacy": [
+        "_start_interactive_mode",
+        "_load_interactive_tools",
+        "_run_chat_mode",
+    ],
 }
 
 

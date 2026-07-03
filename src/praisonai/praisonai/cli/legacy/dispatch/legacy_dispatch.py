@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from argparse import Namespace
+    from praisonai_code.cli.main import PraisonAI
 
 HandlerFn = Callable[["PraisonAI", "Namespace", list[str]], Optional[int]]
 

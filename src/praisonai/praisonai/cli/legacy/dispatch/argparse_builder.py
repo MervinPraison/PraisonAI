@@ -299,9 +299,4 @@ def build_argument_parser(in_test_env: bool):
         args, unknown_args = parser.parse_known_args([])
     else:
         args, unknown_args = parser.parse_known_args()
-
-    if in_test_env:
-        args, unknown_args = parser.parse_known_args([])
-    else:
-        args, unknown_args = parser.parse_known_args()
     return args, unknown_args, special_commands

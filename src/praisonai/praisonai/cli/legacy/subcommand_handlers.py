@@ -756,6 +756,7 @@ _SENSITIVE_PATTERNS = None
 
 def _get_sensitive_patterns():
     """Lazy-load and compile sensitive patterns only when needed."""
+    global _SENSITIVE_PATTERNS
     if _SENSITIVE_PATTERNS is None:
         import re
         _SENSITIVE_PATTERNS = [

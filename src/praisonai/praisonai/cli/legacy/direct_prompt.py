@@ -84,8 +84,14 @@ def _rewrite_query(self, query: str, rewrite_tools: str = None, verbose: bool = 
                 except ImportError:
                     print("[yellow]Warning: Could not import tools module[/yellow]")
         
+        rewrite_model = (
+            getattr(getattr(self, 'args', None), 'llm', None)
+            or os.environ.get("MODEL_NAME")
+            or os.environ.get("OPENAI_MODEL_NAME")
+            or "gpt-4o-mini"
+        )
         rewriter = QueryRewriterAgent(
-            model="gpt-4o-mini", 
+            model=rewrite_model,
             verbose=verbose, 
             tools=rewrite_tools_list if rewrite_tools_list else None
         )
@@ -173,8 +179,14 @@ def _expand_prompt(self, prompt: str, expand_tools: str = None, verbose: bool = 
                 except ImportError:
                     print("[yellow]Warning: Could not import tools module[/yellow]")
         
+        expand_model = (
+            getattr(getattr(self, 'args', None), 'llm', None)
+            or os.environ.get("MODEL_NAME")
+            or os.environ.get("OPENAI_MODEL_NAME")
+            or "gpt-4o-mini"
+        )
         expander = PromptExpanderAgent(
-            model="gpt-4o-mini", 
+            model=expand_model,
             verbose=verbose, 
             tools=expand_tools_list if expand_tools_list else None
         )
@@ -899,7 +911,7 @@ def handle_direct_prompt(self, prompt):
                 from praisonai_code.cli_backends import resolve_cli_backend
                 agent_config["cli_backend"] = resolve_cli_backend(self.args.cli_backend)
             except Exception as e:
-                self.logger.warning(f"Failed to resolve CLI backend '{self.args.cli_backend}': {e}")
+                logging.warning(f"Failed to resolve CLI backend '{self.args.cli_backend}': {e}")
         
         # Flow Display - Visual workflow tracking
         if hasattr(self, 'args') and getattr(self.args, 'flow_display', False):

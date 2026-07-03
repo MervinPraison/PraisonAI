@@ -959,7 +959,7 @@ class PraisonAI:
         args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
 
         # Handle special cases first
-        if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
+        if len(unknown_args) >= 2 and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
             args.command = 'agents.yaml'
         if args.command == 'api:app' or args.command == '/app/api:app':
             args.command = 'agents.yaml'
