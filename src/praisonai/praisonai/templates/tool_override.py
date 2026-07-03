@@ -6,15 +6,48 @@ Supports runtime tool registration with context manager pattern.
 """
 
 import ast
-import importlib.util
+import importlib
 import logging
 import os
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _load_user_module_safe(path: Path, *, name: str):
+    """Load a user ``.py`` file through the canonical safe loader.
+
+    This routes the actual ``exec_module`` through
+    :func:`praisonai_code._safe_loader.load_user_module`, so the wrapper no
+    longer maintains a second, divergent loader with a raw
+    ``spec.loader.exec_module`` call. There is now a single owner for
+    user-module execution and a single security gate.
+
+    Callers of ``load_from_file`` / ``load_from_directory`` pass explicit,
+    user-provided paths (the wrapper's historical contract only rejects
+    remote URLs). To preserve that behaviour on top of the canonical gate --
+    which requires ``PRAISONAI_ALLOW_LOCAL_TOOLS=true`` -- we authorize this
+    single explicit load in-process via ``skip_env_check=True`` and use
+    ``allow_outside_cwd=True`` (the same treatment the canonical resolver
+    gives explicit ``--tools`` paths in
+    :meth:`ToolResolver.load_functions_from_module`).
+
+    ``skip_env_check`` is a thread-safe, per-call opt-in: unlike temporarily
+    mutating the process-wide ``PRAISONAI_ALLOW_LOCAL_TOOLS`` env var, it does
+    not leak authorization to concurrent threads that read the gate. The
+    implicit ``tools.py`` autoload path keeps its own
+    ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` opt-in layered above this helper.
+    """
+    from praisonai._bootstrap import ensure_praisonai_code
+
+    ensure_praisonai_code()
+    from praisonai_code._safe_loader import load_user_module
+
+    return load_user_module(
+        str(path), name=name, allow_outside_cwd=True, skip_env_check=True
+    )
 
 
 def _autoload_tools_enabled() -> bool:
@@ -101,17 +134,13 @@ class ToolOverrideLoader:
         if not path.suffix == ".py":
             raise ValueError(f"Tool file must be a Python file (.py): {path}")
         
-        # Load the module
-        spec = importlib.util.spec_from_file_location(
-            f"custom_tools_{path.stem}",
-            path
-        )
-        if spec is None or spec.loader is None:
+        # Load the module through the canonical safe loader (single owner of
+        # user-module execution + single security gate). See
+        # ``_load_user_module_safe`` for how the wrapper's explicit-load
+        # contract is preserved on top of the canonical opt-in.
+        module = _load_user_module_safe(path, name=f"custom_tools_{path.stem}")
+        if module is None:
             raise ImportError(f"Could not load module from: {path}")
-        
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
         
         # Extract callable functions (tools)
         tools = {}

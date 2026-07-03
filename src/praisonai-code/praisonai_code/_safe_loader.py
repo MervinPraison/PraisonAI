@@ -25,6 +25,7 @@ def load_user_module(
     *,
     name: str,
     allow_outside_cwd: bool = False,
+    skip_env_check: bool = False,
 ) -> ModuleType | None:
     """Load a user-supplied .py file with the same opt-in tool_resolver enforces.
 
@@ -34,6 +35,13 @@ def load_user_module(
         allow_outside_cwd: When True, skip the CWD boundary check. Only pass
             this for paths the user provided explicitly (e.g. a ``--tools``
             CLI argument), never for API/network-derived paths.
+        skip_env_check: When True, bypass the ``PRAISONAI_ALLOW_LOCAL_TOOLS``
+            environment gate for this single, in-process call. This is the
+            thread-safe way for an explicit-load caller to authorize a load it
+            already trusts, without mutating the process-wide env var (which
+            would leak the authorization to concurrent threads). Only pass this
+            for paths the caller provided explicitly, never for
+            API/network-derived paths.
 
     Returns:
         Loaded module or None if loading is disabled or the file is missing.
@@ -41,7 +49,7 @@ def load_user_module(
     Raises:
         LocalToolsDisabled: If caller wants strict behavior when disabled.
     """
-    if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+    if not skip_env_check and os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
         logger.warning(
             "Refusing to exec %s: set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.",
             module_path,
