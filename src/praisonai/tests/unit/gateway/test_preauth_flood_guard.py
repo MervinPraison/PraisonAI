@@ -9,6 +9,8 @@ Unit tests for Issue #2620 gateway edge protections:
   the key map is saturated while preserving existing lockouts.
 """
 
+import time
+
 import pytest
 
 try:
@@ -127,6 +129,29 @@ class TestRateLimiterOverflowFailClosed:
             limiter.allow("ep", f"attacker-{i}")
         # Victim is still locked out.
         assert limiter.allow("ep", "victim") is False
+
+    def test_expired_lockout_recovers_under_saturation(self):
+        # A client with an *expired* lockout must be able to reconnect and clear
+        # its stale lockout entry even while the key map is saturated, rather
+        # than being trapped by the overflow fail-closed check.
+        limiter = AuthRateLimiter(
+            max_attempts=1,
+            window_seconds=1000,
+            lockout_seconds=1000,
+            max_keys=2,
+        )
+        # Lock out "returning".
+        assert limiter.allow("ep", "returning") is True
+        assert limiter.allow("ep", "returning") is False  # triggers lockout
+        # Saturate the map with another key so overflow protection is active.
+        assert limiter.allow("ep", "other") is True
+        # Force the "returning" lockout to have already expired (deterministic;
+        # avoids sleeping / wall-clock flakiness).
+        limiter._lockouts[("ep", "returning")] = time.time() - 1.0
+        # The returning client's lockout has expired: it must be admitted and its
+        # stale lockout entry cleared, not blocked by the overflow guard.
+        assert limiter.allow("ep", "returning") is True
+        assert ("ep", "returning") not in limiter._lockouts
 
 
 if __name__ == "__main__":

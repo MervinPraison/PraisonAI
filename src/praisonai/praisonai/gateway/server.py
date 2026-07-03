@@ -1188,6 +1188,7 @@ class WebSocketGateway:
                     data = await websocket.receive_json()
                     unauthorized = await self._handle_client_message(client_id, data)
                     if unauthorized:
+                        _should_close = _flood_guard.note_unauthorized()
                         if _flood_guard.should_log():
                             logger.warning(
                                 "Unauthorized frame from client %s (%d total, "
@@ -1196,14 +1197,14 @@ class WebSocketGateway:
                                 _flood_guard.count,
                                 _flood_guard.suppressed,
                             )
-                        if _flood_guard.note_unauthorized():
+                        if _should_close:
                             logger.warning(
                                 "Closing client %s: unauthorized-frame flood "
                                 "(%d frames)",
                                 client_id,
                                 _flood_guard.count,
                             )
-                            await websocket.close(code=4008)
+                            await websocket.close(code=4028)
                             break
             except WebSocketDisconnect:
                 logger.info(f"Client disconnected: {client_id}")

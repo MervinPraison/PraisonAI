@@ -91,9 +91,13 @@ class AuthRateLimiter:
             # after pruning and this is a *new* key, reject it closed rather than
             # admitting it (and evicting real state). Existing lockouts are
             # preserved above, so a fresh-IP flood can neither exhaust memory nor
-            # evict a genuine lockout.
+            # evict a genuine lockout. Keys already present in ``_lockouts`` (even
+            # ones whose lockout has just expired) are allowed through so a
+            # returning client can clear its stale lockout entry below rather than
+            # being permanently trapped until the next prune cycle.
             if (
                 key not in self._buckets
+                and key not in self._lockouts
                 and (len(self._buckets) + len(self._lockouts)) >= self._max_keys
             ):
                 return False
@@ -274,11 +278,12 @@ class UnauthorizedFloodGuard:
 
         guard = UnauthorizedFloodGuard(max_unauthorized=10)
         # inside the receive loop, when a frame is unauthorized:
-        if guard.note_unauthorized():
-            await websocket.close(code=4008)   # unauthorized flood -> close
-            return
+        should_close = guard.note_unauthorized()
         if guard.should_log():
             logger.warning("unauthorized frame (%d suppressed)", guard.suppressed)
+        if should_close:
+            await websocket.close(code=4028)   # unauthorized flood -> close
+            return
     """
 
     def __init__(self, max_unauthorized: int = 10, log_every: int = 5) -> None:
