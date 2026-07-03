@@ -144,24 +144,48 @@ def _resolve_position(safe_path: str, line: Optional[int],
     return None, None, f"Error: symbol not found in file: {symbol!r}"
 
 
-def _uri_to_display(uri: str) -> str:
-    """Convert a ``file://`` URI to a workspace-relative (or plain) path."""
-    path = uri[7:] if uri.startswith("file://") else uri
+def _uri_path(uri: str) -> str:
+    """Strip a ``file://`` prefix from *uri*, returning the bare path."""
+    return uri[7:] if uri.startswith("file://") else uri
+
+
+def _within_workspace(path: str) -> Optional[str]:
+    """Return the absolute *path* if it is inside the workspace root, else None.
+
+    Language servers can return locations anywhere on disk; this guards any
+    server-provided path before it is read or surfaced, so a misbehaving server
+    can never leak files outside the workspace.
+    """
+    abs_path = os.path.abspath(path)
+    root = os.path.abspath(os.getcwd())
     try:
-        rel = os.path.relpath(path, os.getcwd())
-        # Prefer the relative form only when it stays inside the workspace.
-        if not rel.startswith(".."):
-            return rel
+        if os.path.commonpath([root, abs_path]) != root:
+            return None
     except ValueError:
-        pass
-    return path
+        return None
+    return abs_path
+
+
+def _uri_to_display(uri: str) -> str:
+    """Convert a ``file://`` URI to a workspace-relative (or marked) path."""
+    path = _uri_path(uri)
+    abs_path = _within_workspace(path)
+    if abs_path is None:
+        return "<outside-workspace>"
+    return os.path.relpath(abs_path, os.getcwd())
 
 
 def _snippet(uri: str, line: int) -> str:
-    """Return the trimmed source line at *line* (0-indexed) for *uri*, if any."""
-    path = uri[7:] if uri.startswith("file://") else uri
+    """Return the trimmed source line at *line* (0-indexed) for *uri*, if any.
+
+    Only reads paths inside the workspace; server-returned paths that escape the
+    workspace yield no snippet rather than leaking file contents.
+    """
+    abs_path = _within_workspace(_uri_path(uri))
+    if abs_path is None:
+        return ""
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
             for idx, text in enumerate(f):
                 if idx == line:
                     return text.strip()
@@ -192,11 +216,15 @@ def _format_locations(locations: List, header: str) -> str:
     return "\n".join(lines)
 
 
-def _run_lsp(language: str, coro_factory):
+def _run_lsp(language: str, coro_factory, open_path: Optional[str] = None):
     """Spawn an LSP client for *language*, open the doc, run *coro_factory*.
 
     ``coro_factory`` is an ``async def(client) -> result``.  Handles start/stop
-    and never re-enters a running event loop (returns a clear message instead).
+    and, when *open_path* is given, the ``didOpen``/``didClose`` document
+    lifecycle around the query (per the LSP spec).
+    Runs on its own event loop; when called from within an already-running loop
+    (e.g. an async agent context) it transparently offloads to a worker thread
+    so it never blocks or re-enters the caller's loop.
     Returns ``(result, None)`` on success or ``(None, message)`` on failure.
     """
     import asyncio
@@ -206,30 +234,40 @@ def _run_lsp(language: str, coro_factory):
     except Exception as e:  # pragma: no cover - import guarded
         return None, f"Error: LSP client unavailable: {e}"
 
-    # Refuse to nest inside an already-running loop (async agent context) to
-    # avoid re-entrancy; the caller can invoke from a sync context.
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        return None, ("Error: lsp navigation cannot run inside an active event "
-                      "loop; call it from a synchronous context")
-
     async def _driver():
         client = LSPClient(language=language)
         client.config.timeout = min(client.config.timeout, _LSP_TIMEOUT)
+        opened = False
         try:
             if not await client.start():
                 return None, f"Error: could not start {language} language server"
+            if open_path is not None:
+                await client.open_document(open_path)
+                opened = True
             return await coro_factory(client), None
         finally:
+            if opened:
+                try:
+                    await client.close_document(open_path)
+                except Exception:
+                    pass
             await client.stop()
 
-    try:
+    def _run() -> Tuple[Optional[object], Optional[str]]:
         return asyncio.run(
             asyncio.wait_for(_driver(), timeout=_LSP_TIMEOUT + 5)
         )
+
+    try:
+        # If a loop is already running in this thread, we cannot call
+        # asyncio.run() here; offload to a dedicated thread with its own loop.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return _run()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_run).result(timeout=_LSP_TIMEOUT + 10)
     except Exception as e:
         logger.debug("LSP navigation error (%s): %s", language, e)
         return None, f"Error: lsp navigation failed: {e}"
@@ -285,10 +323,9 @@ def lsp_definition(file_path: str, line: Optional[int] = None,
         return perr
 
     async def _query(client):
-        await client.open_document(safe_path)
         return await client.get_definition(safe_path, resolved_line, resolved_char)
 
-    result, rerr = _run_lsp(language, _query)
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     return _format_locations(result or [], "Definition")
@@ -321,12 +358,11 @@ def lsp_references(file_path: str, line: Optional[int] = None,
         return perr
 
     async def _query(client):
-        await client.open_document(safe_path)
         return await client.get_references(
             safe_path, resolved_line, resolved_char,
             include_declaration=include_declaration)
 
-    result, rerr = _run_lsp(language, _query)
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     return _format_locations(result or [], "References")
@@ -349,10 +385,9 @@ def lsp_hover(file_path: str, line: int, character: int) -> str:
         return err
 
     async def _query(client):
-        await client.open_document(safe_path)
         return await client.get_hover(safe_path, line, character)
 
-    result, rerr = _run_lsp(language, _query)
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     if not result:
@@ -360,14 +395,34 @@ def lsp_hover(file_path: str, line: int, character: int) -> str:
     return f"Hover:\n{result.strip()}"
 
 
+def _flatten_symbols(symbols: List, container: Optional[str] = None) -> List:
+    """Flatten hierarchical ``DocumentSymbol`` trees into a single list.
+
+    ``textDocument/documentSymbol`` servers may nest methods/functions under a
+    class via ``children``; flattening ensures those inner symbols are surfaced,
+    tagging each with its parent's name as ``containerName`` for context.
+    """
+    flat: List = []
+    for sym in symbols:
+        if not isinstance(sym, dict):
+            continue
+        current = sym
+        if container and "containerName" not in current:
+            current = {**current, "containerName": container}
+        flat.append(current)
+        children = sym.get("children")
+        if isinstance(children, list) and children:
+            flat.extend(_flatten_symbols(children, sym.get("name", container)))
+    return flat
+
+
 def _format_symbols(symbols: List, header: str, include_container: bool = False) -> str:
     """Render document/workspace symbol dicts compactly."""
     if not symbols:
         return f"{header}: none found"
+    flattened = _flatten_symbols(symbols)
     lines = [header + ":"]
-    for sym in symbols[:_MAX_RESULTS]:
-        if not isinstance(sym, dict):
-            continue
+    for sym in flattened[:_MAX_RESULTS]:
         name = sym.get("name", "?")
         kind = _SYMBOL_KIND.get(sym.get("kind"), "symbol")
         # documentSymbol carries ``range``; workspace/symbol carries ``location``.
@@ -392,8 +447,8 @@ def _format_symbols(symbols: List, header: str, include_container: bool = False)
             prefix = f"{display}:" if display else ""
             entry += f"  {prefix}{ln}:{col}"
         lines.append(entry)
-    if len(symbols) > _MAX_RESULTS:
-        lines.append(f"  ... ({len(symbols) - _MAX_RESULTS} more; narrow your query)")
+    if len(flattened) > _MAX_RESULTS:
+        lines.append(f"  ... ({len(flattened) - _MAX_RESULTS} more; narrow your query)")
     return "\n".join(lines)
 
 
@@ -412,10 +467,9 @@ def lsp_document_symbols(file_path: str) -> str:
         return err
 
     async def _query(client):
-        await client.open_document(safe_path)
         return await client.get_document_symbols(safe_path)
 
-    result, rerr = _run_lsp(language, _query)
+    result, rerr = _run_lsp(language, _query, open_path=safe_path)
     if rerr:
         return rerr
     return _format_symbols(result or [], "Document symbols")

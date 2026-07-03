@@ -138,6 +138,47 @@ def test_format_symbols_document(tmp_path):
     assert "class Bar" in out
 
 
+def test_format_symbols_flattens_children():
+    from praisonaiagents.tools import lsp_tools
+    symbols = [
+        {"name": "Widget", "kind": 5,
+         "range": {"start": {"line": 0, "character": 0}},
+         "children": [
+             {"name": "render", "kind": 6,
+              "range": {"start": {"line": 2, "character": 4}}},
+         ]},
+    ]
+    out = lsp_tools._format_symbols(symbols, "Document symbols")
+    assert "class Widget" in out
+    assert "method render" in out  # nested child must be surfaced
+
+
+# ---------------------------------------------------------------------------
+# Workspace containment for server-returned paths
+# ---------------------------------------------------------------------------
+
+def test_within_workspace_rejects_outside(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_tools
+    monkeypatch.chdir(tmp_path)
+    assert lsp_tools._within_workspace("/etc/passwd") is None
+    inside = tmp_path / "mod.py"
+    inside.write_text("x = 1\n")
+    assert lsp_tools._within_workspace(str(inside)) == os.path.abspath(str(inside))
+
+
+def test_snippet_refuses_outside_workspace(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_tools
+    monkeypatch.chdir(tmp_path)
+    # A server-returned URI pointing outside the workspace must not be read.
+    assert lsp_tools._snippet("file:///etc/passwd", 0) == ""
+
+
+def test_uri_display_marks_outside_workspace(tmp_path, monkeypatch):
+    from praisonaiagents.tools import lsp_tools
+    monkeypatch.chdir(tmp_path)
+    assert lsp_tools._uri_to_display("file:///etc/passwd") == "<outside-workspace>"
+
+
 # ---------------------------------------------------------------------------
 # Live pylsp integration (opt-in: only runs when pylsp is installed)
 # ---------------------------------------------------------------------------
