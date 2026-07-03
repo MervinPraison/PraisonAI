@@ -2053,6 +2053,23 @@ class WebSocketGateway:
         asyncio.create_task(self._run_session_queue(session, agent, client_id))
         return "Started processing."
 
+    @staticmethod
+    async def _dispatch_agent_turn(agent: Any, content: str) -> Any:
+        """Execute a single agent turn.
+
+        Prefers the agent's native async entry point (``arun``/``achat``) so
+        turns run directly on the event loop, giving native asyncio concurrency,
+        cleaner cancellation/timeout and true async streaming. Falls back to
+        offloading the synchronous ``chat`` onto the default thread pool only
+        when no async entry point is available (sync-only agents).
+        """
+        for _name in ("arun", "achat"):
+            _fn = getattr(agent, _name, None)
+            if _fn is not None and asyncio.iscoroutinefunction(_fn):
+                return await _fn(content)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, agent.chat, content)
+
     async def _run_session_queue(self, session: GatewaySession, agent: Any, client_id: str) -> None:
         """Background task loop that constantly pulls from `_inbox` and executes the agent task."""
         try:
@@ -2069,7 +2086,6 @@ class WebSocketGateway:
                     emitter.add_callback(relay_callback)
                 
                 try:
-                    loop = asyncio.get_event_loop()
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
                         # Gateway-wide inbound admission ceiling (#2454). The
@@ -2078,15 +2094,13 @@ class WebSocketGateway:
                         from ..bots._admission import AdmissionRejected
                         try:
                             async with gate.admit(session_id=session.session_id):
-                                response = await loop.run_in_executor(
-                                    None, agent.chat, content
+                                response = await self._dispatch_agent_turn(
+                                    agent, content
                                 )
                         except AdmissionRejected as rej:
                             response = rej.message
                     else:
-                        response = await loop.run_in_executor(
-                            None, agent.chat, content
-                        )
+                        response = await self._dispatch_agent_turn(agent, content)
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
@@ -2586,7 +2600,6 @@ class WebSocketGateway:
         message = hook.resolve_message(payload) or ""
 
         try:
-            loop = asyncio.get_running_loop()
             gate = getattr(self, "_admission_gate", None)
             if gate is not None and getattr(gate, "enabled", False):
                 # Gateway-wide inbound admission ceiling (#2454). Hook-triggered
@@ -2596,9 +2609,7 @@ class WebSocketGateway:
                 from ..bots._admission import AdmissionRejected
                 try:
                     async with gate.admit(session_id=session_key):
-                        reply = await loop.run_in_executor(
-                            None, agent.chat, message
-                        )
+                        reply = await self._dispatch_agent_turn(agent, message)
                 except AdmissionRejected as rej:
                     return {
                         "ok": False,
@@ -2609,7 +2620,7 @@ class WebSocketGateway:
                         "rejected": True,
                     }
             else:
-                reply = await loop.run_in_executor(None, agent.chat, message)
+                reply = await self._dispatch_agent_turn(agent, message)
         except Exception as e:  # noqa: BLE001 - report run failure to caller
             logger.error("Hook '%s' agent run failed: %s", hook.path, e)
             return {"ok": False, "error": str(e), "session": session_key}
