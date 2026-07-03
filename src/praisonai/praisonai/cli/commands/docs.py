@@ -138,10 +138,10 @@ def docs_run(
         help="Python executable to use (default: current interpreter)",
     ),
     dry_run: bool = typer.Option(
-    False,
-    "--dry-run",
-    help="Extract code blocks without executing them",
-),
+        False,
+        "--dry-run",
+        help="Extract code blocks without executing them",
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet", "-q",
@@ -856,6 +856,11 @@ def docs_generate(
         "--update-nav",
         help="Update docs.json navigation",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview without writing files",
+    ),
 ):
     """
     Generate SDK reference documentation from Python source code.
@@ -1151,7 +1156,6 @@ def cli_run_all(
         "--quiet", "-q",
         help="Minimal output",
     ),
-      
     ci: bool = typer.Option(
         False,
         "--ci",
