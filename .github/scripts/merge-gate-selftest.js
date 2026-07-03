@@ -136,23 +136,25 @@ assert('issues event never blocks', !mg.hasBlockingClaudeRunForPr(
   'my-branch'
 ));
 
-// Conflict rebase clears after bot completion + FINAL on HEAD
+// Conflict rebase clears after bot completion + FINAL on HEAD (within 12h cooldown)
+const conflictNowMs = Date.now();
+const conflictIso = (offsetMs) => new Date(conflictNowMs + offsetMs).toISOString();
 const conflictTrigger = {
   user: { login: 'MervinPraison' },
   body: '@claude this PR has merge conflicts with main. Please rebase',
-  created_at: '2026-06-26T10:30:38Z',
+  created_at: conflictIso(-30 * 60 * 1000),
 };
 const rebaseDone = {
   user: { login: 'praisonai-triage-agent[bot]' },
   body: 'Rebase complete — PR #2308 onto latest main',
-  created_at: '2026-06-26T10:30:55Z',
+  created_at: conflictIso(-29 * 60 * 1000),
 };
 const finalAfterRebase = {
   user: { login: 'MervinPraison' },
   body: '@claude You are the FINAL architecture reviewer.',
-  created_at: '2026-06-26T10:39:43Z',
+  created_at: conflictIso(-20 * 60 * 1000),
 };
-const headAfterRebase = '2026-06-26T10:39:25Z';
+const headAfterRebase = conflictIso(-21 * 60 * 1000);
 const rebaseComments = [conflictTrigger, rebaseDone, finalAfterRebase];
 assert('conflict blocks before rebase done', mg.hasRecentConflictComment([conflictTrigger], headAfterRebase));
 assert('conflict clears after rebase + FINAL on HEAD', !mg.hasRecentConflictComment(rebaseComments, headAfterRebase));
