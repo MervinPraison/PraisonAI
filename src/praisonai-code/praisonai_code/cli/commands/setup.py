@@ -14,6 +14,10 @@ from ..output.console import get_output_controller
 
 app = typer.Typer(help="Interactive onboarding / configuration wizard")
 
+# Source the OpenAI default from the single source of truth so setup never
+# re-declares the terminal fallback literal.
+from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL as _OPENAI_DEFAULT_MODEL
+
 # Default PRAISON_HOME directory
 def get_praison_home() -> Path:
     """Get the PraisonAI home directory."""
@@ -27,7 +31,7 @@ ENV_FILE = PRAISON_HOME / ".env"
 
 # Provider configurations
 PROVIDERS = {
-    "1": ("openai",    "OPENAI_API_KEY",    "gpt-4o-mini"),
+    "1": ("openai",    "OPENAI_API_KEY",    _OPENAI_DEFAULT_MODEL),
     "2": ("anthropic", "ANTHROPIC_API_KEY", "claude-3-5-sonnet-latest"),
     "3": ("google",    "GEMINI_API_KEY",    "gemini-2.0-flash"),
     "4": ("ollama",    None,                "llama3.2"),
@@ -35,7 +39,7 @@ PROVIDERS = {
 }
 
 PROVIDER_NAMES = {
-    "openai": ("OpenAI", "OPENAI_API_KEY", "gpt-4o-mini"),
+    "openai": ("OpenAI", "OPENAI_API_KEY", _OPENAI_DEFAULT_MODEL),
     "anthropic": ("Anthropic", "ANTHROPIC_API_KEY", "claude-3-5-sonnet-latest"),
     "google": ("Google", "GEMINI_API_KEY", "gemini-2.0-flash"),
     "ollama": ("Ollama", None, "llama3.2"),

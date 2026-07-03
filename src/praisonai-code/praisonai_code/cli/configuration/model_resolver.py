@@ -22,6 +22,19 @@ from typing import Optional
 from .paths import get_user_config_dir
 
 
+def _fallback_model() -> str:
+    """Return the terminal fallback model from its single source of truth.
+
+    Kept out of this module so no CLI entry point ever re-declares the literal;
+    they route through :func:`resolve_default_model` instead.
+    """
+    try:
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+        return DEFAULT_FALLBACK_MODEL
+    except Exception:
+        return "gpt-4o-mini"
+
+
 def _state_dir() -> Path:
     """Return the user state directory (``~/.praison/state``)."""
     return get_user_config_dir() / "state"
@@ -140,7 +153,7 @@ def resolve_default_model(
         from praisonai_code.llm.env import default_model_for_available_provider
         model = default_model_for_available_provider()
     except Exception:
-        model = "gpt-4o-mini"
+        model = _fallback_model()
 
     if notify:
         provider = _provider_for_model(model)

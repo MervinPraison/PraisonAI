@@ -35,7 +35,12 @@ _PROVIDER_MAP = {
 # Documented, single precedence list. Add new providers here only.
 _MODEL_VARS = ("MODEL_NAME", "OPENAI_MODEL_NAME")
 _BASE_URL_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OLLAMA_API_BASE")
-_DEFAULT_MODEL = "gpt-4o-mini"
+# Single source of truth for the terminal fallback model, used only when no
+# explicit model, recency, env override, or provider credential is available.
+# CLI entry points must route through resolve_default_model() rather than
+# re-declaring this literal.
+DEFAULT_FALLBACK_MODEL = "gpt-4o-mini"
+_DEFAULT_MODEL = DEFAULT_FALLBACK_MODEL
 _DEFAULT_BASE = "https://api.openai.com/v1"
 _DEFAULT_KEY_VAR = "OPENAI_API_KEY"
 

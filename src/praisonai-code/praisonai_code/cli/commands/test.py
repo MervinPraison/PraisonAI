@@ -24,6 +24,10 @@ from typing import Optional, List
 
 import typer
 
+# Source the default judge/agent model from the single source of truth so the
+# test harness never re-declares the terminal fallback literal.
+from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL as _DEFAULT_TEST_MODEL
+
 app = typer.Typer(help="Run PraisonAI test suite with tier and provider options")
 
 
@@ -288,11 +292,11 @@ def interactive(
         help="Built-in test suite: smoke, tools, refactor, multi_agent"
     ),
     model: str = typer.Option(
-        "gpt-4o-mini", "--model", "-m",
+        _DEFAULT_TEST_MODEL, "--model", "-m",
         help="LLM model for agent"
     ),
     judge_model: str = typer.Option(
-        "gpt-4o-mini", "--judge-model",
+        _DEFAULT_TEST_MODEL, "--judge-model",
         help="LLM model for judge"
     ),
     workspace: Optional[str] = typer.Option(
@@ -449,7 +453,7 @@ def interactive(
 
 
 def _run_advanced_suite(
-    model: str = "gpt-4o-mini",
+    model: str = _DEFAULT_TEST_MODEL,
     artifacts_dir = None,
     keep_artifacts: bool = True,
     verbose: bool = True,
