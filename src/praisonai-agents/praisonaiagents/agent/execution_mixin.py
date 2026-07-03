@@ -1153,7 +1153,10 @@ Write the complete compiled report:"""
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
-                    result = await loop.run_in_executor(None, lambda: func(**arguments))
+                    from ..trace.context_events import copy_context_to_callable
+                    result = await loop.run_in_executor(
+                        None, copy_context_to_callable(lambda: func(**arguments))
+                    )
                 
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")

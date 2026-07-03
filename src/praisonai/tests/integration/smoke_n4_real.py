@@ -30,13 +30,11 @@ from pathlib import Path
 
 
 def _pick_model() -> str:
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "anthropic/claude-haiku-4-5"
-    if os.getenv("GOOGLE_API_KEY"):
-        return "gemini/gemini-2.5-flash"
-    raise RuntimeError(
-        "No supported API key found. Set ANTHROPIC_API_KEY or GOOGLE_API_KEY to run smoke tests."
-    )
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    if _dir not in sys.path:
+        sys.path.insert(0, _dir)
+    from _smoke_utils import pick_smoke_model
+    return pick_smoke_model()
 
 
 async def main() -> int:

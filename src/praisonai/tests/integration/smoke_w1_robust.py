@@ -31,11 +31,11 @@ from pathlib import Path
 
 
 def _pick_model() -> str:
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "anthropic/claude-haiku-4-5"
-    if os.getenv("GOOGLE_API_KEY"):
-        return "gemini/gemini-2.5-flash"
-    return "gpt-4o-mini"
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    if _dir not in sys.path:
+        sys.path.insert(0, _dir)
+    from _smoke_utils import pick_smoke_model
+    return pick_smoke_model()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,8 +215,9 @@ async def test_session_context_visible_to_tool(tmp_path: Path, model: str) -> bo
 
     out = await mgr.chat(
         agent, "tg-99",
-        "Please call the whoami tool and tell me what you see.",
+        "You must call the whoami tool immediately and report its output.",
         chat_id="100", user_name="Alice",
+        stream_callback=lambda _event: None,
     )
     print(f"[Agent] {out}")
     print(f"[Tool captured] platform={captured.get('platform')!r} "

@@ -20,10 +20,14 @@ import sys
 
 
 def _pick_model() -> str:
+    if os.getenv("TEST_MODEL") or os.getenv("OPENAI_MODEL_NAME"):
+        return os.getenv("TEST_MODEL") or os.getenv("OPENAI_MODEL_NAME")  # type: ignore[return-value]
+    if os.getenv("OPENAI_API_KEY"):
+        return "gpt-4o-mini"
     if os.getenv("ANTHROPIC_API_KEY"):
-        return "anthropic/claude-haiku-4-5"
-    if os.getenv("GOOGLE_API_KEY"):
-        return "gemini/gemini-2.5-flash"
+        return "anthropic/claude-3-5-haiku-latest"
+    if os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"):
+        return "gemini/gemini-2.0-flash-exp"
     return "gpt-4o-mini"
 
 

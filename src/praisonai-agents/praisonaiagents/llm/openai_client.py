@@ -1927,11 +1927,16 @@ class OpenAIClient:
                     if asyncio.iscoroutinefunction(execute_tool_fn):
                         tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=_tool_call_id)
                     else:
-                        # Run sync function in executor
+                        # Run sync function in executor (preserve ContextVars e.g. SessionContext)
                         loop = asyncio.get_running_loop()
+                        from ..trace.context_events import copy_context_to_callable
                         tool_result = await loop.run_in_executor(
-                            None, 
-                            lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(fn, args, tool_call_id=tcid)
+                            None,
+                            copy_context_to_callable(
+                                lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(
+                                    fn, args, tool_call_id=tcid
+                                )
+                            ),
                         )
                     
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"

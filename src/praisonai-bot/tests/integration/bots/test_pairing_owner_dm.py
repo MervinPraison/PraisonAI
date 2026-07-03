@@ -258,7 +258,7 @@ class TestPairingOwnerDM:
         )
         
         # Now simulate the agent responding to the approved user
-        response = agent.start("Say hello in one sentence")
+        response = await agent.astart("Say hello in one sentence")
         print(f"Agent response: {response}")
         
         # Verify we got a real LLM response
