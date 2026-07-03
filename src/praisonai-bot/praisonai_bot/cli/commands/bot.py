@@ -721,11 +721,15 @@ def dlq_replay(
     failed entries are kept for the next attempt.
     """
     import asyncio
+    import yaml
     from praisonai_bot.bots import InboundDLQ, BotSessionManager
-    from praisonai_bot.cli.features.bots_cli import _load_bot_config, _build_agent
+    from praisonai_bot.cli.features.bots_cli import BotHandler
 
-    cfg = _load_bot_config(config)
-    agent = _build_agent(cfg)
+    with open(config, "r") as f:
+        cfg = yaml.safe_load(f) or {}
+
+    agent_config_dict = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else None
+    agent = BotHandler()._load_agent(config, agent_config_dict=agent_config_dict)
     platform = cfg.get("platform", "")
 
     dlq = InboundDLQ(path=_resolve_dlq_path(path))

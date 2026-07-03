@@ -111,7 +111,6 @@ class LockMap:
                 # Continue trying to evict other unlocked entries
                 continue
             bucket.popitem(last=False)
-            break
     
     def _cleanup_dead_loops_locked(self) -> None:
         """Remove buckets for event loops that no longer exist.
