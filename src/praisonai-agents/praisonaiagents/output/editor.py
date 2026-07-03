@@ -137,10 +137,17 @@ class EditorOutput:
 
     def llm_indicator(self, phase: str = "thinking") -> None:
         """Display a subtle LLM activity indicator between steps."""
+        from .encoding import safe_text
         if self._use_rich:
-            self._console.print(f"[dim]▸ {phase.capitalize()}...[/dim]")
+            # Rich's legacy Windows renderer encodes with the terminal encoding
+            # (cp1252 by default) using strict error handling, so the ▸ glyph
+            # (U+25B8) crashes on legacy consoles. Sanitize to an ASCII-safe
+            # fallback when the target stream cannot encode it.
+            stream = getattr(self._console, "file", None)
+            indicator = safe_text(f"▸ {phase.capitalize()}...", stream)
+            self._console.print(f"[dim]{indicator}[/dim]")
         else:
-            print(f"▸ {phase.capitalize()}...")
+            print(safe_text(f"▸ {phase.capitalize()}..."))
 
     def output(self, content: str, agent_name: Optional[str] = None) -> None:
         """Display final agent output."""
