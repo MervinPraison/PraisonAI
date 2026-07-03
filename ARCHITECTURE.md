@@ -114,10 +114,11 @@ flowchart LR
 ### Import gates (CI enforced)
 
 - **Hot path:** no module-level `from praisonai` in `main.py`, `app.py`, `run.py`, `chat.py`, `code.py`
-- **Regression baseline:** 225 wrapper import lines max (`scripts/check_c7_imports.sh`)
-- **Allowlist:** reviewed files only (`scripts/c7_wrapper_import_allowlist.txt`)
+- **Regression baseline:** 50 direct wrapper import lines max (`scripts/check_c7_imports.sh`; C8 achieved **0**)
+- **Allowlist:** reviewed files only (`scripts/c7_wrapper_import_allowlist.txt`; empty post-C8)
+- **Hybrid audit:** `scripts/audit_hybrid_modules.py` — repatriated cross-tier import paths
 
-### C7 / C7.1 status
+### C7 / C7.1 / C8 status
 
 | Milestone | Status |
 |-----------|--------|
@@ -125,7 +126,9 @@ flowchart LR
 | `_wrapper_bridge` hardening | **Complete** |
 | Import gate + allowlist | **Complete** |
 | Boundary tests + CI smoke | **Complete** |
-| C8+ (zero lazy imports, package splits) | **Future** — see [`C8_BACKLOG.md`](src/praisonai/tests/C8_BACKLOG.md) |
+| C8 reverse import elimination (225 → 0 direct imports) | **Complete** — see [`C8_BACKLOG.md`](src/praisonai/tests/C8_BACKLOG.md) |
+| C8.4 main.py physical decomposition | **Deferred** (separate epic) |
+| PyPI package splits (`praisonai-bot`, etc.) | **Out of scope** |
 
 ---
 
