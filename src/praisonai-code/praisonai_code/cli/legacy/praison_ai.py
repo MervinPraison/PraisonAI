@@ -641,11 +641,6 @@ class PraisonAI:
                 print("\npip install \"praisonai[train]\"")
                 print("Or run: praisonai train init\n")
                 sys.exit(1)
-            # The training wrapper scripts live inside the ``praisonai`` wrapper
-            # package, not next to this dispatcher (which moved to cli/legacy/
-            # during the CLI package split). Resolve them via the wrapper package.
-            import praisonai as _praisonai_wrapper
-            package_root = os.path.dirname(os.path.abspath(_praisonai_wrapper.__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
             if not os.path.exists(config_yaml_destination):
@@ -725,6 +720,12 @@ class PraisonAI:
             # (``praisonai.train.llm.trainer``); vision fine-tuning uses the
             # dedicated wrapper script located inside the wrapper package.
             if is_vision_model:
+                # The vision training wrapper script lives inside the ``praisonai``
+                # wrapper package, not next to this dispatcher (which moved to
+                # cli/legacy/ during the CLI package split). Resolve it via the
+                # wrapper package. Only the vision path needs this lookup.
+                import praisonai as _praisonai_wrapper
+                package_root = os.path.dirname(os.path.abspath(_praisonai_wrapper.__file__))
                 train_invocation = [os.path.join(package_root, 'train_vision.py'), 'train']
                 print("Using vision training script for VL model...")
             else:
