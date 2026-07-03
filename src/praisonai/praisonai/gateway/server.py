@@ -57,6 +57,94 @@ from .supervisor import ChannelSupervisor
 SLOW_CONSUMER_CLOSE_CODE = 1013
 
 
+class _ChannelBotOS:
+    """Minimal ``BotOS``-shaped view over the gateway's channel bots.
+
+    Issue #2624: the gateway owns a flat ``{channel_name: bot}`` registry
+    rather than a :class:`~praisonai.bots.botos.BotOS`, but the resilient
+    :class:`~praisonai.bots.delivery.DeliveryRouter` only needs ``get_bot`` /
+    ``list_bots``. This thin adapter exposes exactly that surface — with the
+    same case-insensitive lookup the gateway's own ``_deliver_*`` paths used —
+    so the scheduled/hook delivery path can reuse the router unchanged.
+    """
+
+    def __init__(self, channel_bots: Dict[str, Any]) -> None:
+        self._channel_bots = channel_bots
+
+    def list_bots(self) -> List[str]:
+        return list(self._channel_bots.keys())
+
+    def get_bot(self, platform: str) -> Optional[Any]:
+        bot = self._channel_bots.get(platform)
+        if bot is not None:
+            return bot
+        # Case-insensitive fallback mirrors the gateway's prior lookup so a
+        # configured "Telegram" resolves a "telegram" target and vice versa.
+        for name, candidate in self._channel_bots.items():
+            if name.lower() == platform.lower():
+                return candidate
+        return None
+
+
+class _ThreadBindingBot:
+    """Wrap a channel bot so the router's ``send_message`` carries a thread id.
+
+    Issue #2624: :meth:`DeliveryRouter.deliver` calls ``bot.send_message(
+    channel_id, text)`` with no ``thread_id``, but scheduled deliveries may be
+    threaded. This transparent proxy binds the delivery's ``thread_id`` onto
+    ``send_message`` (only when the underlying bot accepts it) while delegating
+    every other attribute — including ``adapter`` / ``_rate_limiter`` used for
+    limiter reuse — to the wrapped bot.
+    """
+
+    def __init__(self, bot: Any, thread_id: Any) -> None:
+        self._bot = bot
+        self._thread_id = thread_id
+        # Whether the wrapped bot accepts ``thread_id`` is stable for the life
+        # of this object, so introspect once here instead of on every send
+        # (the router calls ``send_message`` on the hot scheduled path).
+        self._accepts_thread_id = self._compute_accepts_thread_id(bot)
+
+    @staticmethod
+    def _compute_accepts_thread_id(bot: Any) -> bool:
+        try:
+            import inspect as _inspect
+
+            params = _inspect.signature(bot.send_message).parameters
+            return "thread_id" in params or any(
+                p.kind == _inspect.Parameter.VAR_KEYWORD
+                for p in params.values()
+            )
+        except (TypeError, ValueError):
+            return False
+
+    async def send_message(self, channel_id: str, text: str, **kwargs: Any) -> Any:
+        if (
+            self._thread_id is not None
+            and self._accepts_thread_id
+            and "thread_id" not in kwargs
+        ):
+            kwargs["thread_id"] = self._thread_id
+        return await self._bot.send_message(channel_id, text, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._bot, name)
+
+
+def _delivery_text_digest(text: str) -> str:
+    """Short, stable digest of a delivery body for idempotency keys.
+
+    Issue #2624: the scheduler/hook delivery callbacks receive only the target
+    and text (not the job id), so a crash-and-resume that re-fires the *same*
+    result to the *same* target produces the same key and is deduplicated by
+    the router's bounded LRU, preventing a double-post. A genuinely different
+    result (different text) yields a different key and is delivered.
+    """
+    import hashlib
+
+    return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 class _ClientConn:
     """Per-connection outbound delivery with a bounded buffer.
 
@@ -680,6 +768,13 @@ class WebSocketGateway:
         
         # Multi-bot lifecycle
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
+        # Issue #2624: resilient outbound delivery for the gateway's own
+        # scheduled/hook path. Lazily built (see ``delivery_router``) so the
+        # scheduled-job and hook replies share the same token-bucket rate
+        # limiting, LRU idempotency dedup, and dead-target suppression the
+        # interactive BotOS path already uses, instead of a bare send.
+        self._delivery_router: Optional[Any] = None
+        self._dead_targets: Optional[Any] = None
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
         self._routing_bindings: Dict[str, List[Any]] = {}  # channel_name -> [RouteBinding] (Issue #2225)
         self._channel_tasks: Dict[str, asyncio.Task] = {}  # channel_name -> asyncio task
@@ -2528,7 +2623,21 @@ class WebSocketGateway:
             The bot instance or None if not found
         """
         return self._channel_bots.get(name)
-    
+
+    def _resolve_channel_bot(self, name: str) -> Optional[Any]:
+        """Resolve a channel bot with the gateway's case-insensitive fallback.
+
+        Mirrors the lookup the ``_deliver_*`` fallbacks use so a configured
+        "Telegram" resolves a "telegram" target and vice versa.
+        """
+        bot = self._channel_bots.get(name)
+        if bot is not None:
+            return bot
+        for candidate_name, candidate in self._channel_bots.items():
+            if candidate_name.lower() == name.lower():
+                return candidate
+        return None
+
     def has_channel_bot(self, name: str) -> bool:
         """Check if a channel bot is registered.
         
@@ -2777,11 +2886,51 @@ class WebSocketGateway:
             "delivered": delivered,
         }
 
-    async def _deliver_hook_reply(self, deliver_to: str, text: str) -> bool:
-        """Deliver a hook reply to a ``channel:target`` via a channel bot.
+    @property
+    def delivery_router(self) -> Optional[Any]:
+        """Resilient outbound router for the gateway's scheduled/hook path.
 
-        Reuses the same channel-bot send path as scheduled delivery so hooks
-        and the scheduler route outbound messages identically.
+        Issue #2624: previously ``_deliver_scheduled_result`` and
+        ``_deliver_hook_reply`` called ``bot.send_message()`` directly, so the
+        gateway's unattended-automation path had weaker guarantees than the
+        interactive BotOS path — a re-fired job could double-post, a burst
+        could trip 429s unthrottled, and a permanently-gone chat was retried
+        forever. Routing both paths through the existing
+        :class:`~praisonai.bots.delivery.DeliveryRouter` gives them the same
+        token-bucket rate limiting, LRU idempotency dedup, and self-healing
+        dead-target suppression.
+
+        Built lazily so it always reflects the current ``_channel_bots`` and so
+        the import cost is only paid when a scheduled/hook delivery occurs.
+        Returns ``None`` (callers fall back to a bare send) only if the router
+        cannot be imported, preserving delivery even without the bots package.
+        """
+        if self._delivery_router is not None:
+            return self._delivery_router
+        try:
+            from praisonai.bots.delivery import DeliveryRouter
+            from praisonai.bots import DeadTargetRegistry
+        except Exception as e:  # pragma: no cover - defensive import guard
+            logger.debug(
+                "DeliveryRouter unavailable for gateway delivery: %s", e,
+            )
+            return None
+        try:
+            self._dead_targets = DeadTargetRegistry()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("DeadTargetRegistry unavailable: %s", e)
+            self._dead_targets = None
+        botos = _ChannelBotOS(self._channel_bots)
+        self._delivery_router = DeliveryRouter(botos, dead_targets=self._dead_targets)
+        return self._delivery_router
+
+    async def _deliver_hook_reply(self, deliver_to: str, text: str) -> bool:
+        """Deliver a hook reply to a ``channel:target`` via the router.
+
+        Issue #2624: routes through :attr:`delivery_router` so hook replies gain
+        rate-limiting, idempotency dedup, and dead-target suppression identical
+        to the scheduled path. Falls back to the prior bare send only if the
+        router cannot be constructed.
         """
         if ":" not in deliver_to:
             logger.warning(
@@ -2790,6 +2939,21 @@ class WebSocketGateway:
             )
             return False
         channel, target = [p.strip() for p in deliver_to.split(":", 1)]
+
+        router = self.delivery_router
+        if router is not None:
+            delivered = await router.deliver(
+                f"{channel}:{target}",
+                text,
+                idempotency_key=f"hook:{channel}:{target}:{_delivery_text_digest(text)}",
+            )
+            if delivered:
+                logger.info("Hook delivered reply to %s:%s", channel, target)
+            else:
+                logger.error("Hook delivery to %s:%s failed", channel, target)
+            return delivered
+
+        # Fallback: router unavailable — preserve the prior bare-send behaviour.
         bot = self.get_channel_bot(channel)
         if bot is None:
             for name, b in self._channel_bots.items():
@@ -3261,11 +3425,72 @@ class WebSocketGateway:
         channel = getattr(delivery, "channel", "") or ""
         channel_id = getattr(delivery, "channel_id", "") or ""
         thread_id = getattr(delivery, "thread_id", None)
+        session_id = getattr(delivery, "session_id", None)
 
         if not channel or not channel_id:
             logger.warning("Delivery target missing channel or channel_id, skipping")
             return
 
+        router = self.delivery_router
+        if router is not None:
+            # Route through the resilient router (issue #2624): token-bucket
+            # throttle + LRU idempotency dedup + dead-target skip/self-heal.
+            # ``session_id`` (``cron_<job.id>`` for scheduled runs) is folded
+            # into the idempotency key so a crash-and-resume that re-fires the
+            # same job result to the same target is deduplicated in-process.
+            idem = (
+                f"sched:{channel}:{channel_id}:{session_id or ''}:"
+                f"{_delivery_text_digest(text)}"
+            )
+            if thread_id is None:
+                delivered = await router.deliver(
+                    f"{channel}:{channel_id}", text, idempotency_key=idem,
+                )
+            else:
+                # Threaded delivery still needs the SHARED router's dedup so a
+                # re-fired threaded job does not double-post. We check/record the
+                # idempotency key on the shared router directly (its bounded LRU
+                # is the single source of truth) and route the actual send
+                # through a one-off thread-binding router that shares the same
+                # dead-target registry — so suppression/self-heal stays
+                # consistent while the shared LRU still owns dedup.
+                resolved = self._resolve_channel_bot(channel)
+                if resolved is None:
+                    logger.warning(
+                        "No channel bot '%s' found for scheduled delivery", channel,
+                    )
+                    return
+                if router.is_duplicate_key(idem):
+                    logger.info(
+                        "Suppressing duplicate threaded scheduled result to %s:%s",
+                        channel, channel_id,
+                    )
+                    return
+                thread_botos = _ChannelBotOS(
+                    {channel: _ThreadBindingBot(resolved, thread_id)}
+                )
+                send_router = router.__class__(
+                    thread_botos, dead_targets=self._dead_targets,
+                )
+                delivered = await send_router.deliver(
+                    f"{channel}:{channel_id}", text,
+                )
+                # Record on the shared router only after a confirmed success so
+                # a failed threaded send stays retryable, mirroring the router's
+                # own guard.
+                if delivered:
+                    router.remember_key(idem)
+            if delivered:
+                logger.info(
+                    "Delivered scheduled result to %s:%s", channel, channel_id,
+                )
+            else:
+                logger.error(
+                    "Failed to deliver scheduled result to %s:%s", channel, channel_id,
+                )
+            return
+
+        # Fallback: router unavailable — preserve the prior bare-send behaviour.
         bot = self.get_channel_bot(channel)
         if bot is None:
             # Try case-insensitive lookup
