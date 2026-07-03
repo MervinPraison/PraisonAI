@@ -2,7 +2,7 @@
 Pairing types and protocols for bot user approval.
 
 Contains lightweight types and protocols for the pairing approval system.
-Heavy implementations are in the wrapper package.
+Heavy implementations are in the ``praisonai-bot`` package.
 """
 
 from dataclasses import dataclass

@@ -7,7 +7,7 @@ Channels render the presentation via the existing per-platform renderers and
 fall back to text where rich UI is unsupported.
 
 This is a core protocol with no heavy implementations: channel rendering and
-session wiring live in the wrapper (praisonai). Producers return one of:
+session wiring live in ``praisonai-bot`` (``praisonai_bot.bots``). Producers return one of:
 
 * ``str``                     -> plain text (unchanged, fully backward compatible)
 * ``MessagePresentation``     -> interactive UI (text fallback derived from text blocks)

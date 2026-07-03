@@ -5,7 +5,8 @@ Defines the interfaces for messaging bot implementations.
 These protocols enable agents to communicate through messaging platforms
 like Telegram, Discord, Slack, etc.
 
-All implementations should live in the praisonai wrapper package.
+All implementations live in the ``praisonai-bot`` package (``praisonai_bot.bots``).
+Backward-compatible imports: ``from praisonai.bots import Bot`` via wrapper shims.
 """
 
 from __future__ import annotations
@@ -179,7 +180,7 @@ class WebhookVerifierProtocol(Protocol):
     ``PlatformCapabilities.accepts_webhooks`` must expose a verifier and that
     verifier must pass before dispatch.
 
-    Implementations live in the ``praisonai`` wrapper package and typically
+    Implementations live in the ``praisonai-bot`` package (``praisonai_bot.bots``) and
     wrap an HMAC comparison over the raw request body.
 
     Example:
@@ -668,8 +669,10 @@ class BotProtocol(Protocol):
     - Webhook/polling management
     - User and channel management
     
-    Example usage (implementation in praisonai wrapper):
-        from praisonai.bots import TelegramBot
+    Example usage (implementation in praisonai-bot):
+
+        from praisonai_bot.bots.telegram import TelegramBot
+        # or: from praisonai.bots import TelegramBot  # wrapper shim
         
         bot = TelegramBot(token="...", agent=my_agent)
         await bot.start()
@@ -1118,7 +1121,7 @@ class BotOSProtocol(Protocol):
         └── Bot  (single platform)
             └── Agent / AgentTeam / AgentFlow  (AI brain)
 
-    Implementations live in the ``praisonai`` wrapper package.
+    Implementations live in the ``praisonai-bot`` package (``praisonai_bot.bots``).
     """
 
     @property

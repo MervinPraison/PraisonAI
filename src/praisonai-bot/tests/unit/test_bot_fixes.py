@@ -224,8 +224,11 @@ class TestLegacyApprovalDeprecation:
         import sys
         import importlib
         
-        # Remove from cache to force re-import when not already loaded
-        if 'praisonai.bots._approval' in sys.modules:
+        # Skip if loaded via bot package or wrapper shim (deprecation only on first import)
+        if (
+            "praisonai.bots._approval" in sys.modules
+            or "praisonai_bot.bots._approval" in sys.modules
+        ):
             pytest.skip("Module already imported in this process; deprecation emitted earlier")
 
         with warnings.catch_warnings(record=True) as w:
