@@ -113,7 +113,11 @@ class LSPClient:
                         "hover": {},
                         "definition": {},
                         "references": {},
+                        "documentSymbol": {},
                         "publishDiagnostics": {}
+                    },
+                    "workspace": {
+                        "symbol": {}
                     }
                 },
                 "initializationOptions": self.config.initialization_options
@@ -372,6 +376,54 @@ class LSPClient:
             )
         
         return None
+    
+    async def get_document_symbols(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Get the symbols defined in a document.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            List of symbol dicts (name, kind, location/range) as returned by
+            the language server, or an empty list when unavailable.
+        """
+        if not self._initialized:
+            return []
+        
+        uri = f"file://{os.path.abspath(file_path)}"
+        
+        result = await self._send_request("textDocument/documentSymbol", {
+            "textDocument": {"uri": uri}
+        })
+        
+        if not result:
+            return []
+        
+        return result if isinstance(result, list) else []
+    
+    async def get_workspace_symbols(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search for symbols across the workspace.
+        
+        Args:
+            query: Symbol name (or substring) to search for
+            
+        Returns:
+            List of symbol dicts (name, kind, location) as returned by the
+            language server, or an empty list when unavailable.
+        """
+        if not self._initialized:
+            return []
+        
+        result = await self._send_request("workspace/symbol", {
+            "query": query
+        })
+        
+        if not result:
+            return []
+        
+        return result if isinstance(result, list) else []
     
     async def _send_request(self, method: str, params: Any) -> Any:
         """Send a request and wait for response."""
