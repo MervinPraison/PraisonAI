@@ -122,7 +122,7 @@ async def test_gateway_approval_backend():
 
 @pytest.mark.asyncio
 async def test_exec_approval_allowlist():
-    mgr = ExecApprovalManager()
+    mgr = ExecApprovalManager(durable=False)
     backend = GatewayApprovalBackend(mgr)
     
     # Add to allowlist
