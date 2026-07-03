@@ -52,7 +52,11 @@ class FileScheduleStore:
 
     def add(self, job: ScheduleJob) -> None:
         """Add a job. Raises ``ValueError`` if id already exists."""
-        with self._lock:
+        with self._lock, self._file_lock():
+            # Reload under the cross-process lock so we don't overwrite lease
+            # / last_run_at written by a concurrent ``claim_due`` in another
+            # process before applying our change.
+            self._reload_locked()
             if job.id in self._jobs:
                 raise ValueError(f"Job '{job.id}' already exists")
             self._jobs[job.id] = job
@@ -77,12 +81,22 @@ class FileScheduleStore:
         return jobs
 
     def update(self, job: ScheduleJob) -> None:
-        with self._lock:
+        with self._lock, self._file_lock():
+            # Reload latest on-disk state, then preserve any active lease held
+            # for this job (written by a concurrent ``claim_due``) so a plain
+            # ``update`` from a stale in-memory copy cannot silently drop it.
+            self._reload_locked()
+            existing = self._jobs.get(job.id)
+            if existing is not None:
+                if not getattr(job, "_lease_until", 0.0):
+                    job._lease_until = getattr(existing, "_lease_until", 0.0) or 0.0
+                    job._lease_owner = getattr(existing, "_lease_owner", None)
             self._jobs[job.id] = job
             self._save()
 
     def remove(self, job_id: str) -> bool:
-        with self._lock:
+        with self._lock, self._file_lock():
+            self._reload_locked()
             if job_id in self._jobs:
                 del self._jobs[job_id]
                 self._save()
@@ -90,7 +104,8 @@ class FileScheduleStore:
             return False
 
     def remove_by_name(self, name: str) -> bool:
-        with self._lock:
+        with self._lock, self._file_lock():
+            self._reload_locked()
             for jid, job in list(self._jobs.items()):
                 if job.name == name:
                     del self._jobs[jid]

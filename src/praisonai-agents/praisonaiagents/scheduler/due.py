@@ -43,7 +43,9 @@ def is_due(job: Any, now: float) -> bool:
             target = datetime.fromisoformat(sched.at)
             if target.tzinfo is None:
                 target = target.replace(tzinfo=timezone.utc)
-            return datetime.now(timezone.utc) >= target
+            # Evaluate against the caller-supplied ``now`` (not wall-clock) so
+            # one-shot jobs are deterministic and consistent with every/cron.
+            return now >= target.timestamp()
         except (ValueError, TypeError):
             logger.warning("Invalid 'at' timestamp for job %s: %s", job.id, sched.at)
             return False
@@ -60,8 +62,17 @@ def is_due(job: Any, now: float) -> bool:
             )
             return False
         base_time = job.last_run_at or job.created_at
-        cron = croniter(sched.cron_expr, base_time)
-        next_run = cron.get_next(float)
+        try:
+            cron = croniter(sched.cron_expr, base_time)
+            next_run = cron.get_next(float)
+        except (ValueError, KeyError, TypeError) as e:
+            # A malformed cron expression must not abort the whole tick loop
+            # (which iterates all jobs) — treat this job as not-due instead.
+            logger.warning(
+                "Invalid cron expression for job %s (%r): %s",
+                job.id, sched.cron_expr, e,
+            )
+            return False
         return now >= next_run
 
     return False
