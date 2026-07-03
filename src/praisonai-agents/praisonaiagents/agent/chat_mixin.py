@@ -2611,13 +2611,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Parse the JSON manually
                                 reflection_data = json.loads(cleaned_json)
                                 
-                                # Create a reflection output object manually
-                                class CustomReflectionOutput:
-                                    def __init__(self, data):
-                                        self.reflection = data.get('reflection', '')
-                                        self.satisfactory = data.get('satisfactory', 'no').lower()
-                                
-                                reflection_output = _get_display_functions()['ReflectionOutput'](reflection_data)
+                                reflection_output = _get_display_functions()['ReflectionOutput'](**reflection_data)
                             else:
                                 # Use OpenAI's structured output for OpenAI models
                                 reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
