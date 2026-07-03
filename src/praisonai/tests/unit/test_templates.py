@@ -1416,17 +1416,21 @@ def custom_search(query: str) -> str:
         # After context, original state should be restored
         # (implementation detail - registry should be isolated)
     
+
     def test_default_custom_dirs(self):
         """Test that default custom tool directories are defined."""
         from praisonai.templates.tool_override import ToolOverrideLoader
-        
+
         loader = ToolOverrideLoader()
         default_dirs = loader.get_default_tool_dirs()
-        
+
         assert len(default_dirs) >= 2
-        assert any(".praison/tools" in str(d) for d in default_dirs)
-        assert any(".config/praison/tools" in str(d) or ".praison/tools" in str(d) for d in default_dirs)
-    
+        assert any(".praison/tools" in Path(d).as_posix() for d in default_dirs)
+        assert any(
+            ".config/praison/tools" in Path(d).as_posix()
+            or ".praison/tools" in Path(d).as_posix()
+            for d in default_dirs
+        )
     def test_no_scanning_on_import(self):
         """Test that no filesystem scanning occurs on import."""
         import sys
