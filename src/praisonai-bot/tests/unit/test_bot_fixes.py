@@ -224,12 +224,18 @@ class TestLegacyApprovalDeprecation:
         import sys
         import importlib
         
-        # Skip if loaded via bot package or wrapper shim (deprecation only on first import)
-        if (
-            "praisonai.bots._approval" in sys.modules
-            or "praisonai_bot.bots._approval" in sys.modules
-        ):
-            pytest.skip("Module already imported in this process; deprecation emitted earlier")
+        # Drop any prior imports so the module-level DeprecationWarning fires on
+        # a fresh re-import (the wrapper shim re-exports the bot package module).
+        sys.modules.pop("praisonai.bots._approval", None)
+        sys.modules.pop("praisonai_bot.bots._approval", None)
+        # warn_deprecated_param() dedupes once per process via a module-level
+        # set; clear our key so the re-import reliably re-emits the warning.
+        try:
+            from praisonaiagents.utils import deprecation as _dep
+
+            _dep._warned_params.discard("BotApprovalBackend module:1.0.0")
+        except Exception:
+            pass
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")

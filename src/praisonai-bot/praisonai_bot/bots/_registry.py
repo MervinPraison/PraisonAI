@@ -69,26 +69,38 @@ class BotPlatformRegistry(PluginRegistry):
             builtins=_BUILTIN_PLATFORMS,
             discover_entry_points=False,
         )
-        # Discover third-party channel connectors without shadowing builtins.
-        self._discover_channel_entry_points()
-        # Store capabilities for each platform
+        # Store capabilities for each platform (initialised before entry-point
+        # discovery so any future capability-aware discovery is safe).
         self._capabilities: Dict[str, PlatformCapabilities] = {}
         self._capabilities_lock = threading.Lock()
+        # Discover third-party channel connectors without shadowing builtins.
+        self._discover_channel_entry_points()
 
     def _discover_channel_entry_points(self) -> None:
         """Discover channel connectors from the ``praisonai.channels`` group."""
         import logging
         from importlib.metadata import entry_points
         logger = logging.getLogger(__name__)
+        # Names this package ships as builtins are also declared as entry points
+        # (for external discoverability), so a duplicate here is expected and not
+        # a conflict — log those at DEBUG and only warn for genuine third-party
+        # shadowing attempts.
+        builtin_names = set(_BUILTIN_PLATFORMS)
         try:
             for ep in entry_points(group="praisonai.channels"):
                 # Do not let a third-party entry point silently shadow a
                 # built-in (or already-registered) channel loader.
                 if ep.name.lower() in self._loaders:
-                    logger.warning(
-                        "Skipping duplicate channel entry point %r; a loader "
-                        "with that name is already registered.", ep.name
-                    )
+                    if ep.name.lower() in builtin_names:
+                        logger.debug(
+                            "Channel entry point %r matches a built-in loader; "
+                            "keeping the built-in.", ep.name
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping duplicate channel entry point %r; a loader "
+                            "with that name is already registered.", ep.name
+                        )
                     continue
                 self._add_loader(ep.name, ep.load)
         except Exception:
