@@ -1,6 +1,6 @@
 # praisonai-bot Boundary Manifest (C9 — implemented)
 
-> **Status:** Implemented in C9. PyPI package `praisonai-bot` (currently 0.0.4+). Wrapper shims preserve `praisonai.bots.*` / `praisonai.gateway.*` imports.
+> **Status:** Implemented in C9. PyPI package `praisonai-bot` (currently 0.0.6+). Wrapper shims preserve `praisonai.bots.*` / `praisonai.gateway.*` imports.
 
 ## Four-tier stack
 
@@ -28,6 +28,7 @@ praisonaiagents → praisonai-code + praisonai-bot → praisonai (wrapper)
 | `praisonai_bot/kanban/*` | SQLite store for kanban dispatcher |
 | `praisonai_bot/claw/*` | Claw default app |
 | `praisonai_bot/tools/audio.py` | Telegram STT/TTS |
+| `praisonai_bot/scheduler/*` | Gateway scheduled-job tick (`ScheduledAgentExecutor`) |
 
 ### CLI
 
@@ -46,6 +47,7 @@ Console script: `praisonai-bot`
 | `praisonai.gateway` | `alias_package` → `praisonai_bot.gateway` |
 | `praisonai.daemon` | `alias_package` → `praisonai_bot.daemon` |
 | `praisonai.cli.commands.{bot,gateway,...}` | `sys.modules` → `praisonai_bot.cli.commands.*` |
+| `praisonai.scheduler.executor` | Re-export → `praisonai_bot.scheduler.executor` |
 
 ## Stays in `praisonaiagents` (protocols only)
 
@@ -66,7 +68,8 @@ Console script: `praisonai-bot`
 
 - `cli/commands/dashboard.py` (unified flow+claw+ui launcher)
 - `cli/features/serve.py` (HTTP agents/mcp/a2a serve — not gateway recipe)
-- `scheduler/*` (gateway polls via `_wrapper_bridge` when co-installed)
+- `scheduler/run_policy.py` (optional safety gate for unattended runs)
+- `jobs/*` (async runs API — lazy `praisonai` + recipe deps; UI bridge only)
 - Framework adapters, train, deploy
 
 ## Install matrix

@@ -3538,11 +3538,7 @@ class WebSocketGateway:
                     ScheduleRunner,
                     FileScheduleStore,
                 )
-                from praisonai_bot._wrapper_bridge import import_wrapper_module
-
-                ScheduledAgentExecutor = import_wrapper_module(
-                    "praisonai.scheduler.executor"
-                ).ScheduledAgentExecutor
+                from praisonai_bot.scheduler.executor import ScheduledAgentExecutor
             except ImportError as e:
                 logger.warning(
                     "Scheduler dependencies not available, skipping tick: %s", e,

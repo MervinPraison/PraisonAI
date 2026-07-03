@@ -230,32 +230,19 @@ claw = [
     # Install: pip install "praisonai[claw]"
     "aiui[all]>=0.3.121,<0.4",
     "praisonaiagents[all]>=1.5.40",
+    "praisonai-bot[gateway,bot]>=0.0.6",
     # UI + persistence
     "flask>=3.0.0",
-    # Gateway
-    "fastapi>=0.115.0",
-    "uvicorn>=0.34.0",
-    "sse-starlette>=1.6.0",
     # Search + browsing
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0",    # required by crawl4ai — browsers still need: playwright install chromium
-    "websockets>=12.0",
     "ddgs>=9.0.0",
-    # Shell tools
-    "psutil>=5.9.0",
     # Observability
     "langfuse>=3.0.0",
-    # Bot channels (Telegram, Discord, Slack)
-    "python-telegram-bot>=20.0",
-    "discord.py>=2.0.0",
-    "slack_sdk>=3.0.0",
-    "slack-bolt>=1.18.0",
-    "brotlicffi>=1.0.0",
-    "aiohttp>=3.8.0",
     # Storage backends
     "redis>=5.0.0",
-    "pymongo>=4.6.0", 
+    "pymongo>=4.6.0",
     "psycopg2-binary>=2.9.0",
     "boto3>=1.35.0",
     # n8n integration

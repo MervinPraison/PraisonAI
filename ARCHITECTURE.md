@@ -90,11 +90,14 @@ paths remain as `alias_package` shims to `praisonai_bot.*`.
 
 | Tier | Package | Owns | Must not depend on |
 |------|---------|------|-------------------|
-| 1 | `src/praisonai-agents/` | Agent, tools, memory, hooks, `frameworks/` protocols | `praisonai`, `praisonai-code` |
-| 2 | `src/praisonai-code/` | `run`/`chat`/`code`, Typer, runtime, LLM, tool resolution | **`praisonai` as a PyPI dependency** (optional lazy imports via `_wrapper_bridge` only) |
-| 3 | `src/praisonai/` | Gateway, bots, `framework_adapters/`, capabilities, train, serve | — |
+| 1 | `src/praisonai-agents/` | Agent, tools, memory, hooks, `frameworks/` protocols | `praisonai`, `praisonai-code`, `praisonai-bot` |
+| 2a | `src/praisonai-code/` | `run`/`chat`/`code`, Typer, runtime, LLM, tool resolution | **`praisonai` as a PyPI dependency** (optional lazy imports via `_wrapper_bridge` only) |
+| 2b | `src/praisonai-bot/` | Bots, gateway, channel CLI, OS daemon, gateway scheduler tick | **`praisonai` as a PyPI dependency** (optional lazy `_wrapper_bridge` for jobs/UI) |
+| 3 | `src/praisonai/` | `framework_adapters/`, train, serve, dashboard, async jobs API | — |
 
-**Publish order:** `praisonaiagents` → `praisonai-code` → `praisonai`
+**Config kernel:** Phase 0 `praisonai/common/` was skipped; shared config lives in
+`praisonai_code/cli/configuration/` and is reached by the bot tier via lazy
+`_code_bridge` (see `src/praisonai/tests/CONFIG_KERNEL.md`).
 
 ### Dependency rule (validated)
 

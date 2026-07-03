@@ -1,0 +1,18 @@
+# Standalone bot + gateway (praisonai-bot first)
+#
+# pip install praisonaiagents "praisonai-bot[gateway,bot]"
+# export OPENAI_API_KEY=...
+# praisonai-bot gateway start --host 127.0.0.1 --port 8765
+
+agent:
+  name: assistant
+  instructions: You are a helpful assistant.
+  llm: gpt-4o-mini
+
+gateway:
+  host: 127.0.0.1
+  port: 8765
+
+platforms:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}

@@ -7,10 +7,10 @@ runtime-assembled skill/recipe content.  :class:`RunPolicy` lets a deployment
 declare what an unattended run may do *before* the agent is handed the toolset
 and prompt at run construction.
 
-Lives in the **wrapper** layer (alongside the scheduler executor) because the
+Lives in the **wrapper** layer (alongside the scheduler executor shim) because the
 executor is the enforcement point — it is the only place that constructs the
 run and therefore the only place that can scope the toolset and scan the
-fully-assembled prompt.
+fully-assembled prompt. The executor implementation lives in ``praisonai_bot.scheduler``.
 
 Usage::
 

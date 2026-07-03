@@ -81,8 +81,12 @@ jobs:
         cd src/praisonai
         python -m pytest tests/unit/test_c5_backward_compat.py \
           tests/unit/test_c7_1_boundaries.py \
+          tests/unit/test_c9_backward_compat.py \
+          tests/unit/test_c9_1_boundaries.py \
           -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
+          ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
+          ../praisonai-bot/tests/unit/cli/test_onboard_non_interactive.py \
           -m "not slow and not network" \
           -q --tb=line \
           --timeout=30 \
@@ -147,11 +151,13 @@ jobs:
         import praisonai_bot
         from praisonai_bot.bots import Bot
         from praisonai_bot.bots._registry import resolve_adapter
+        from praisonai_bot.scheduler.executor import ScheduledAgentExecutor
         from praisonai_bot.gateway import WebSocketGateway
         assert praisonai_bot.__version__ == pkg_version
         telegram = resolve_adapter('telegram')
         assert telegram.__name__ == 'TelegramBot'
         assert telegram.__module__.startswith('praisonai_bot.bots.')
+        assert ScheduledAgentExecutor.__module__.startswith('praisonai_bot.')
         print('bot standalone ok', praisonai_bot.__version__, telegram.__name__)
         "
         /tmp/praisonai-bot-standalone/bin/praisonai-bot --help
@@ -659,14 +665,14 @@ jobs:
           tests/unit/test_kanban_sqlite_store.py
           tests/unit/test_job_workflow_agent_steps.py
           tests/unit/test_hybrid_workflow.py
-          tests/unit/test_gateway_session.py
-          tests/unit/test_gateway_gaps.py
+          ../praisonai-bot/tests/unit/test_gateway_session.py
+          ../praisonai-bot/tests/unit/test_gateway_gaps.py
           tests/unit/test_discord_approval.py
           tests/unit/test_decorator_simple.py
           tests/unit/test_db_adapter_tracing_init.py
-          tests/unit/test_bot_wiring.py
-          tests/unit/test_bot_history.py
-          tests/unit/test_bot_fixes.py
+          ../praisonai-bot/tests/unit/test_bot_wiring.py
+          ../praisonai-bot/tests/unit/test_bot_history.py
+          ../praisonai-bot/tests/unit/test_bot_fixes.py
           tests/unit/test_auto_lazy_loading.py
           tests/unit/test_async_daemon_deployment.py
           tests/unit/test_approval_interactive.py

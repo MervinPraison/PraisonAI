@@ -221,15 +221,9 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "up": (".commands.up", "app", "🚀 Start unified PraisonAI stack (Langfuse + Langflow)"),
 }
 
-# Bot/channel commands that intentionally stay in the main ``praisonai``
-# wrapper (they import ``praisonai.bots`` / ``praisonai.gateway``). Their
-# entries remain in ``_LAZY_COMMANDS`` above (so ``--help`` and command
-# discovery advertise them), but ``get_command()`` intercepts these names and
-# imports them via the *absolute* ``praisonai.cli.commands.*`` path — the
-# relative ``.commands.*`` path would resolve to ``praisonai_code`` where the
-# modules do not live. The import happens lazily at invocation time only, so
-# ``praisonai_code`` keeps no static dependency on ``praisonai``.
 # C9: Bot/channel commands implemented in ``praisonai_bot.cli.commands.*``.
+# ``get_command()`` loads them via ``praisonai_bot.cli.commands.{name}`` when the
+# bot package is installed; standalone ``praisonai-code`` hides them from ``--help``.
 _BOT_RESIDENT_COMMANDS = frozenset({
     "bot",
     "gateway",
