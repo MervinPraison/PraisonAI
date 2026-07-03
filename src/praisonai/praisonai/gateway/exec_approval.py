@@ -33,6 +33,7 @@ treated as an "any agent" (``agent_id="*"``) grant.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -42,7 +43,10 @@ import threading
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from praisonaiagents.approval import ApprovalStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -576,6 +580,7 @@ class ExecApprovalManager:
     def __init__(
         self,
         ttl: float = 300.0,
+        store: Optional["ApprovalStoreProtocol"] = None,
         *,
         durable: bool = True,
         allowlist_path: Optional[Union[str, Path]] = None,
@@ -584,9 +589,46 @@ class ExecApprovalManager:
         self._ttl = ttl
         self._lock = threading.Lock()  # threading.Lock for cross-thread safety
         self._pending: Dict[str, PendingRequest] = {}
+        self._store = store
         self.allowlist = allowlist or PermissionAllowlist(
             durable=durable, path=allowlist_path,
         )
+
+    # ── Durable rehydration ───────────────────────────────────────────
+
+    async def rehydrate(self) -> int:
+        """Reload outstanding approvals from the durable store on boot.
+
+        Rehydrated requests have no live ``asyncio.Future`` (the awaiting
+        caller was lost with the previous process) but remain visible via
+        :meth:`list_pending` and resolvable via :meth:`resolve`, which records
+        the decision to the durable audit trail. Returns the number of
+        approvals reloaded. A no-op when no store is configured.
+        """
+        if self._store is None:
+            return 0
+        try:
+            pending = await self._store.list_pending()
+        except Exception:
+            logger.exception("Failed to rehydrate pending approvals from store")
+            return 0
+
+        count = 0
+        with self._lock:
+            for approval_id, req in pending:
+                if approval_id in self._pending:
+                    continue
+                self._pending[approval_id] = PendingRequest(
+                    request_id=approval_id,
+                    tool_name=req.tool_name,
+                    arguments=req.arguments,
+                    agent_name=req.agent_name or "",
+                    risk_level=req.risk_level,
+                )
+                count += 1
+        if count:
+            logger.info("Rehydrated %d pending gateway approval(s)", count)
+        return count
 
     # ── Registration ──────────────────────────────────────────────────
 
@@ -632,6 +674,27 @@ class ExecApprovalManager:
         with self._lock:
             self._prune()
             self._pending[request_id] = req
+
+        # Durably persist so a restart can rehydrate this pending approval.
+        if self._store is not None:
+            try:
+                from praisonaiagents.approval import ApprovalRequest
+
+                await self._store.persist(
+                    request_id,
+                    ApprovalRequest(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        risk_level=risk_level,
+                        agent_name=agent_name or None,
+                        approval_id=request_id,
+                    ),
+                    expires_at=time.time() + self._ttl,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist approval %s to durable store", request_id
+                )
 
         logger.info(
             "Approval request registered: %s (tool=%s, agent=%s)",
@@ -690,12 +753,54 @@ class ExecApprovalManager:
                 req._future.set_result, resolution,
             )
 
+        # Record the decision to the durable audit trail (best-effort).
+        self._record_resolution(request_id, resolution)
+
         logger.info(
             "Approval resolved: %s -> %s",
             request_id,
             "approved" if resolution.approved else "denied",
         )
         return True
+
+    def _record_resolution(self, request_id: str, resolution: Resolution) -> None:
+        """Persist a decision to the durable store (sync, best-effort).
+
+        Called from :meth:`resolve`, which may run on any thread. The store's
+        ``resolve`` is async, so we schedule it on a running loop when one is
+        available and otherwise run it synchronously.
+        """
+        if self._store is None:
+            return
+        try:
+            from praisonaiagents.approval import ApprovalDecision
+
+            decision = ApprovalDecision(
+                approved=resolution.approved,
+                reason=resolution.reason,
+                approver="gateway",
+            )
+            coro = self._store.resolve(request_id, decision)
+        except Exception:
+            logger.exception(
+                "Failed to build durable resolution for %s", request_id
+            )
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            loop.create_task(coro)
+            return
+        try:
+            asyncio.run(coro)
+        except Exception:
+            logger.exception(
+                "Failed to persist resolution for %s to durable store", request_id
+            )
 
     # ── Explicit removal (for timeout cleanup) ────────────────────────
 
@@ -755,6 +860,41 @@ class ExecApprovalManager:
             logger.debug("Expired approval request: %s", rid)
 
 
+# ── Durable store helpers ────────────────────────────────────────────
+
+def _gateway_state_dir() -> Path:
+    """Return the gateway state directory (mirrors the secure CLI path)."""
+    import os
+
+    base = os.environ.get("PRAISONAI_HOME")
+    root = Path(base) if base else Path.home() / ".praisonai"
+    return root / "state"
+
+
+def _build_default_store() -> Optional["ApprovalStoreProtocol"]:
+    """Build the default durable approval store, or ``None`` on failure.
+
+    Reuses the wrapper's SQLite ``ApprovalStore`` at the standard state path
+    so the gateway path shares durability semantics with the chat-native and
+    secure CLI approval paths.
+    """
+    try:
+        from praisonai.bots import ApprovalStore
+
+        return ApprovalStore(path=_gateway_state_dir() / "approvals.sqlite")
+    except Exception:
+        logger.exception("Failed to build default durable approval store")
+        return None
+
+
+def _durable_enabled() -> bool:
+    """Whether durable gateway approvals are opted in via env var."""
+    import os
+
+    val = os.environ.get("PRAISONAI_GATEWAY_DURABLE_APPROVALS", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
 # ── Manager accessor (non-singleton) ─────────────────────────────────
 
 # Default manager for CLI/backward compatibility
@@ -764,10 +904,15 @@ _manager_lock = threading.Lock()
 
 def get_default_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
     """Get the default exec approval manager (for CLI and backward compatibility).
-    
+
+    When ``PRAISONAI_GATEWAY_DURABLE_APPROVALS`` is truthy the default manager
+    is backed by a durable :class:`ApprovalStoreProtocol` store and a persisted
+    allow-always list, so pending approvals and ``allow_always`` grants survive
+    a gateway restart. Otherwise behaviour is unchanged (in-memory only).
+
     Args:
         ttl: Seconds before approval requests auto-expire (default 5 min).
-        
+
     Returns:
         The default ExecApprovalManager instance.
     """
@@ -775,7 +920,14 @@ def get_default_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager
     if _default_manager is None:
         with _manager_lock:
             if _default_manager is None:
-                _default_manager = ExecApprovalManager(ttl=ttl)
+                if _durable_enabled():
+                    _default_manager = ExecApprovalManager(
+                        ttl=ttl,
+                        store=_build_default_store(),
+                        allowlist_path=_gateway_state_dir() / "approval_allowlist.json",
+                    )
+                else:
+                    _default_manager = ExecApprovalManager(ttl=ttl)
     return _default_manager
 
 
@@ -784,13 +936,19 @@ def get_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
     return get_default_exec_approval_manager(ttl)
 
 
-def create_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
+def create_exec_approval_manager(
+    ttl: float = 300.0,
+    store: Optional["ApprovalStoreProtocol"] = None,
+    allowlist_path: Optional[Union[str, Path]] = None,
+) -> ExecApprovalManager:
     """Create a new exec approval manager instance (for per-agent use).
-    
+
     Args:
         ttl: Seconds before approval requests auto-expire (default 5 min).
-        
+        store: Optional durable store implementing ``ApprovalStoreProtocol``.
+        allowlist_path: Optional JSON file to persist allow-always grants.
+
     Returns:
         A new ExecApprovalManager instance.
     """
-    return ExecApprovalManager(ttl=ttl)
+    return ExecApprovalManager(ttl=ttl, store=store, allowlist_path=allowlist_path)

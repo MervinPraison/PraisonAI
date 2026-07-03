@@ -1232,6 +1232,13 @@ class WebSocketGateway:
         from .pairing_routes import create_pairing_routes
 
         _approval_mgr = get_exec_approval_manager()
+        # Rehydrate any pending approvals persisted by a previous process so a
+        # restart doesn't silently drop in-flight human approvals. No-op when
+        # the manager has no durable store configured.
+        try:
+            await _approval_mgr.rehydrate()
+        except Exception:
+            logger.exception("Failed to rehydrate pending gateway approvals")
         _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
         _ws_upgrade_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
         # Issue #2620: pre-auth concurrent-connection budget per source IP.
