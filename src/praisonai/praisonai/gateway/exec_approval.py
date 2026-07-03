@@ -1,25 +1,89 @@
 """
 Async approval-request queue for the PraisonAI gateway.
 
-Manages pending approval requests, resolution, and an optional allow-always
-permission list so users don't have to re-approve the same tool repeatedly.
+Manages pending approval requests, resolution, and a durable, scoped
+allow-always permission list so users don't have to re-approve the same tool
+repeatedly — and so those grants survive a gateway restart and stay scoped to
+the agent they were granted for.
 
 This is a *heavy implementation* and lives in the wrapper, not the core SDK.
 The core SDK only provides :class:`ApprovalProtocol` in
 ``praisonaiagents.approval.protocols``.
+
+Durability & scoping
+--------------------
+Historically the allow-list was a bare in-memory ``Set[str]`` of tool names,
+so every "allow always" grant was lost on restart and applied to *every* agent
+with *any* arguments. This module now backs the allow-list with an optional
+SQLite :class:`ScopedAllowlistStore` (mirroring the durable, fail-closed
+``bots/_approval_store.py`` pattern) that keys grants by
+``(agent_id, tool_name, arg_signature)``:
+
+  - **Durable** — grants survive restart / hot-reload (SQLite WAL).
+  - **Scoped** — a grant for one agent does not authorise every agent; an
+    optional argument signature can narrow it further.
+  - **Fail-closed rehydration** — on startup the manager reads persisted grants
+    back into an explicit allow-list rather than defaulting open.
+
+Backward compatibility is preserved: the previous name-only API
+(``allowlist.add("tool")`` / ``"tool" in allowlist``) still works and is
+treated as an "any agent" (``agent_id="*"``) grant.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sqlite3
 import time
 import secrets
 import threading
+from contextlib import closing
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
+
+# Sentinel agent id meaning "applies to any agent". Used for the legacy
+# name-only grant path so old callers keep working.
+ANY_AGENT = "*"
+
+# 90 days default — long enough to be useful, bounded so the store can't grow
+# without limit. 0 (or negative) disables TTL eviction.
+_DEFAULT_GRANT_TTL_SECONDS = 90 * 86400
+
+
+def _default_store_path() -> Path:
+    """Return the default durable allow-list SQLite path.
+
+    Honours ``PRAISONAI_HOME`` (falling back to ``~/.praisonai``) and lives
+    under ``state/gateway/approvals.sqlite`` per the SDK's SQLite-first
+    runtime-state guidance.
+    """
+    base = os.environ.get("PRAISONAI_HOME")
+    root = Path(base).expanduser() if base else Path.home() / ".praisonai"
+    return root / "state" / "gateway" / "approvals.sqlite"
+
+
+def make_arg_signature(arguments: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Build a stable, order-independent signature for a set of arguments.
+
+    Returns ``None`` for empty/absent arguments (i.e. an unsigned, tool-level
+    grant). The signature is deterministic across processes so a persisted
+    grant matches a later identical call.
+    """
+    if not arguments:
+        return None
+    import hashlib
+    import json
+
+    try:
+        canonical = json.dumps(arguments, sort_keys=True, default=str)
+    except Exception:
+        canonical = repr(sorted((str(k), str(v)) for k, v in arguments.items()))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 # ── Data classes ──────────────────────────────────────────────────────
@@ -47,40 +111,429 @@ class Resolution:
     approved: bool
     reason: str = ""
     allow_always: bool = False  # add tool to permanent allow-list
+    # If True, an ``allow_always`` grant is scoped to the requesting agent (and
+    # optionally its argument signature). If False, the grant applies to any
+    # agent (legacy behaviour). Default True = safe-by-default scoping.
+    scope_to_agent: bool = True
+    # If True, also key the grant by the request's argument signature.
+    scope_to_args: bool = False
+
+
+# ── Durable, scoped allow-list store ─────────────────────────────────
+
+class ScopedAllowlistStore:
+    """SQLite-backed durable store of scoped "allow always" grants.
+
+    Grants are keyed by ``(agent_id, tool_name, arg_signature)`` where
+    ``agent_id`` may be :data:`ANY_AGENT` (``"*"``) for a legacy global grant
+    and ``arg_signature`` may be ``None`` for a tool-level (argument-agnostic)
+    grant. This mirrors the durable, fail-closed discipline of
+    ``bots/_approval_store.py``.
+
+    Thread-safe: a per-instance :class:`threading.Lock` guards SQLite writes so
+    both the async ``register`` path and the sync ``resolve`` path are safe.
+
+    Args:
+        path: SQLite file path. Parent dirs are created. Defaults to
+            ``~/.praisonai/state/gateway/approvals.sqlite``.
+        ttl_seconds: Grants older than this are evicted (0 disables eviction).
+    """
+
+    def __init__(
+        self,
+        path: Optional[Union[str, Path]] = None,
+        *,
+        ttl_seconds: int = _DEFAULT_GRANT_TTL_SECONDS,
+    ) -> None:
+        self.path = Path(path).expanduser() if path is not None else _default_store_path()
+        self.ttl_seconds = int(ttl_seconds)
+        self._lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    # ── Schema ──────────────────────────────────────────────────────
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            return conn
+        except Exception:
+            conn.close()
+            raise
+
+    def _init_schema(self) -> None:
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS allow_grants (
+                    agent_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    arg_signature TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    approver TEXT,
+                    PRIMARY KEY (agent_id, tool_name, arg_signature)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_grant_tool ON allow_grants(tool_name)"
+            )
+            conn.commit()
+
+    # ── Mutations ───────────────────────────────────────────────────
+    def add(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+        approver: Optional[str] = None,
+    ) -> None:
+        """Persist a scoped allow-always grant (idempotent)."""
+        sig = arg_signature or ""
+        with self._lock, closing(self._connect()) as conn:
+            self._evict_expired_locked(conn)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO allow_grants
+                    (agent_id, tool_name, arg_signature, created_at, approver)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (agent_id, tool_name, sig, time.time(), approver),
+            )
+            conn.commit()
+
+    def allows(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+    ) -> bool:
+        """Return True if a matching grant exists.
+
+        A call is allowed when there is a grant that is at least as broad as the
+        call: an ``ANY_AGENT`` grant covers every agent, and a tool-level
+        (empty ``arg_signature``) grant covers any arguments.
+        """
+        sig = arg_signature or ""
+        agent_keys = {agent_id, ANY_AGENT}
+        sig_keys = {"", sig} if sig else {""}
+        placeholders_a = ",".join("?" for _ in agent_keys)
+        placeholders_s = ",".join("?" for _ in sig_keys)
+        # Enforce TTL on read so an expired grant never authorises a call, even
+        # when queried directly against the store.
+        cutoff = (time.time() - self.ttl_seconds) if self.ttl_seconds > 0 else None
+        ttl_clause = " AND created_at > ?" if cutoff is not None else ""
+        params = [tool_name, *agent_keys, *sig_keys]
+        if cutoff is not None:
+            params.append(cutoff)
+        with self._lock, closing(self._connect()) as conn:
+            row = conn.execute(
+                f"""
+                SELECT 1 FROM allow_grants
+                WHERE tool_name = ?
+                  AND agent_id IN ({placeholders_a})
+                  AND arg_signature IN ({placeholders_s})
+                  {ttl_clause}
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+        return row is not None
+
+    def revoke(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+    ) -> bool:
+        """Remove a specific grant. Returns True if a row was deleted.
+
+        If ``arg_signature`` is ``None`` all argument-scoped grants for the
+        ``(agent_id, tool_name)`` pair are removed.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            if arg_signature is None:
+                cur = conn.execute(
+                    "DELETE FROM allow_grants WHERE agent_id = ? AND tool_name = ?",
+                    (agent_id, tool_name),
+                )
+            else:
+                cur = conn.execute(
+                    "DELETE FROM allow_grants WHERE agent_id = ? AND tool_name = ? "
+                    "AND arg_signature = ?",
+                    (agent_id, tool_name, arg_signature),
+                )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
+
+    def revoke_tool(self, tool_name: str) -> bool:
+        """Remove every grant for ``tool_name`` across all agents."""
+        with self._lock, closing(self._connect()) as conn:
+            cur = conn.execute(
+                "DELETE FROM allow_grants WHERE tool_name = ?", (tool_name,)
+            )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
+
+    # ── Introspection ───────────────────────────────────────────────
+    def list(self, *, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List grants, optionally filtered to one ``agent_id``."""
+        with self._lock, closing(self._connect()) as conn:
+            if self._evict_expired_locked(conn):
+                # Persist the eviction; otherwise sqlite rolls back the implicit
+                # transaction on connection close and expired rows never leave.
+                conn.commit()
+            if agent_id is None:
+                rows = conn.execute(
+                    "SELECT agent_id, tool_name, arg_signature, created_at, approver "
+                    "FROM allow_grants ORDER BY tool_name, agent_id"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT agent_id, tool_name, arg_signature, created_at, approver "
+                    "FROM allow_grants WHERE agent_id = ? ORDER BY tool_name",
+                    (agent_id,),
+                ).fetchall()
+        return [
+            {
+                "agent_id": r[0],
+                "tool_name": r[1],
+                "arg_signature": r[2] or None,
+                "created_at": r[3],
+                "approver": r[4],
+            }
+            for r in rows
+        ]
+
+    def list_tools(self) -> List[str]:
+        """Return the sorted set of tool names with any grant (legacy view)."""
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT tool_name FROM allow_grants ORDER BY tool_name"
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def _evict_expired_locked(self, conn: sqlite3.Connection) -> int:
+        if self.ttl_seconds <= 0:
+            return 0
+        cutoff = time.time() - self.ttl_seconds
+        cur = conn.execute(
+            "DELETE FROM allow_grants WHERE created_at <= ?", (cutoff,)
+        )
+        return int(cur.rowcount or 0)
+
+    def purge(self) -> int:
+        with self._lock, closing(self._connect()) as conn:
+            n = conn.execute("SELECT COUNT(*) FROM allow_grants").fetchone()[0]
+            conn.execute("DELETE FROM allow_grants")
+            conn.commit()
+            return int(n)
 
 
 # ── Permission allow-list ────────────────────────────────────────────
 
 class PermissionAllowlist:
-    """Thread-safe set of tool names that are permanently allowed.
+    """Scoped, optionally-durable allow-list of permitted tool grants.
 
-    When a user resolves a request with ``allow_always=True``, the tool
-    is added here so future calls skip approval.
+    When a user resolves a request with ``allow_always=True`` the corresponding
+    grant is recorded here so future calls skip approval. Grants are keyed by
+    ``(agent_id, tool_name, arg_signature)`` — a grant for one agent does not
+    silently authorise every other agent.
+
+    Durability: when constructed with ``durable=True`` (the default) grants are
+    persisted to a SQLite :class:`ScopedAllowlistStore` and survive a restart.
+    A fast in-memory mirror is kept for hot-path checks; it is rehydrated from
+    the store on construction (fail-closed: only persisted grants are re-applied).
+
+    Backward compatibility: the historical name-only API is preserved.
+    ``add("tool")`` / ``"tool" in allowlist`` / ``remove("tool")`` / ``list()``
+    keep working and are treated as :data:`ANY_AGENT` grants.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        durable: bool = True,
+        store: Optional[ScopedAllowlistStore] = None,
+        path: Optional[Union[str, Path]] = None,
+    ) -> None:
         self._lock = threading.Lock()
-        self._allowed: Set[str] = set()
+        # In-memory mirror of grant keys (agent_id, tool_name, arg_signature)
+        self._allowed: Set[tuple] = set()
+        self._store: Optional[ScopedAllowlistStore] = None
+        if durable:
+            try:
+                self._store = store or ScopedAllowlistStore(path=path)
+                self._rehydrate()
+            except Exception:
+                # Fail-closed on the persistence path: if the store cannot be
+                # opened we fall back to a purely in-memory allow-list rather
+                # than crashing the gateway. Grants simply won't survive restart.
+                logger.exception(
+                    "Durable allow-list store unavailable; falling back to "
+                    "in-memory only (grants will not survive restart)"
+                )
+                self._store = None
 
-    def add(self, tool_name: str) -> None:
+    # ── Rehydration (fail-closed) ────────────────────────────────────
+    def _rehydrate(self) -> None:
+        if self._store is None:
+            return
+        for grant in self._store.list():
+            key = (
+                grant["agent_id"],
+                grant["tool_name"],
+                grant.get("arg_signature") or "",
+            )
+            self._allowed.add(key)
+        if self._allowed:
+            logger.info(
+                "Rehydrated %d durable allow-list grant(s) from %s",
+                len(self._allowed), self._store.path,
+            )
+
+    # ── Scoped API ───────────────────────────────────────────────────
+    def add_scoped(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+        approver: Optional[str] = None,
+    ) -> None:
+        """Add a scoped grant, persisting it when durable."""
+        key = (agent_id, tool_name, arg_signature or "")
         with self._lock:
-            self._allowed.add(tool_name)
+            self._allowed.add(key)
+        if self._store is not None:
+            try:
+                self._store.add(
+                    agent_id=agent_id,
+                    tool_name=tool_name,
+                    arg_signature=arg_signature,
+                    approver=approver,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist allow-list grant (agent=%s tool=%s)",
+                    agent_id, tool_name,
+                )
+
+    def allows(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+    ) -> bool:
+        """Return True if a matching grant covers this call.
+
+        A grant covers the call when it is at least as broad: an
+        :data:`ANY_AGENT` grant covers every agent and a tool-level grant
+        (empty signature) covers any arguments.
+        """
+        sig = arg_signature or ""
+        with self._lock:
+            for a in (agent_id, ANY_AGENT):
+                if (a, tool_name, "") in self._allowed:
+                    return True
+                if sig and (a, tool_name, sig) in self._allowed:
+                    return True
+        return False
+
+    def revoke_scoped(
+        self,
+        *,
+        agent_id: str = ANY_AGENT,
+        tool_name: str,
+        arg_signature: Optional[str] = None,
+    ) -> bool:
+        """Remove a scoped grant. Returns True if anything was removed."""
+        removed = False
+        with self._lock:
+            if arg_signature is None:
+                for key in list(self._allowed):
+                    if key[0] == agent_id and key[1] == tool_name:
+                        self._allowed.discard(key)
+                        removed = True
+            else:
+                key = (agent_id, tool_name, arg_signature)
+                if key in self._allowed:
+                    self._allowed.discard(key)
+                    removed = True
+        if self._store is not None:
+            try:
+                store_removed = self._store.revoke(
+                    agent_id=agent_id,
+                    tool_name=tool_name,
+                    arg_signature=arg_signature,
+                )
+                removed = removed or store_removed
+            except Exception:
+                logger.exception(
+                    "Failed to revoke persisted grant (agent=%s tool=%s)",
+                    agent_id, tool_name,
+                )
+        return removed
+
+    def list_scoped(self, *, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List grants as dicts, optionally filtered by ``agent_id``."""
+        if self._store is not None:
+            try:
+                return self._store.list(agent_id=agent_id)
+            except Exception:
+                logger.exception("Failed to list persisted grants; using memory")
+        with self._lock:
+            items = [
+                {
+                    "agent_id": a,
+                    "tool_name": t,
+                    "arg_signature": s or None,
+                }
+                for (a, t, s) in self._allowed
+                if agent_id is None or a == agent_id
+            ]
+        return sorted(items, key=lambda d: (d["tool_name"], d["agent_id"]))
+
+    # ── Legacy name-only API (backward compatible) ───────────────────
+    def add(self, tool_name: str) -> None:
+        """Legacy: add a global (any-agent) tool grant."""
+        self.add_scoped(agent_id=ANY_AGENT, tool_name=tool_name)
 
     def remove(self, tool_name: str) -> bool:
+        """Legacy: remove every grant for ``tool_name`` (all agents)."""
+        removed = False
         with self._lock:
+            for key in list(self._allowed):
+                if key[1] == tool_name:
+                    self._allowed.discard(key)
+                    removed = True
+        if self._store is not None:
             try:
-                self._allowed.remove(tool_name)
-                return True
-            except KeyError:
-                return False
+                removed = self._store.revoke_tool(tool_name) or removed
+            except Exception:
+                logger.exception("Failed to revoke persisted tool %s", tool_name)
+        return removed
 
     def __contains__(self, tool_name: str) -> bool:
-        with self._lock:
-            return tool_name in self._allowed
+        """Legacy: True if any global grant exists for this tool name."""
+        return self.allows(agent_id=ANY_AGENT, tool_name=tool_name)
 
     def list(self) -> List[str]:
+        """Legacy: sorted tool names granted globally (``ANY_AGENT``).
+
+        Only global grants are returned so this preserves its historical
+        meaning of "tools that skip approval for every agent". Agent-scoped
+        grants are exposed via :meth:`list_scoped` / the ``grants`` view.
+        """
         with self._lock:
-            return sorted(self._allowed)
+            return sorted(
+                {key[1] for key in self._allowed if key[0] == ANY_AGENT}
+            )
 
 
 # ── Main manager ─────────────────────────────────────────────────────
@@ -98,6 +551,9 @@ class ExecApprovalManager:
 
     Args:
         ttl: Seconds before a pending request auto-expires (default 300 = 5 min).
+        durable: Persist "allow always" grants to SQLite so they survive
+            restart (default True).
+        allowlist_path: Optional override for the durable store path.
 
     Example::
 
@@ -117,11 +573,20 @@ class ExecApprovalManager:
         resolution = await future
     """
 
-    def __init__(self, ttl: float = 300.0) -> None:
+    def __init__(
+        self,
+        ttl: float = 300.0,
+        *,
+        durable: bool = True,
+        allowlist_path: Optional[Union[str, Path]] = None,
+        allowlist: Optional[PermissionAllowlist] = None,
+    ) -> None:
         self._ttl = ttl
         self._lock = threading.Lock()  # threading.Lock for cross-thread safety
         self._pending: Dict[str, PendingRequest] = {}
-        self.allowlist = PermissionAllowlist()
+        self.allowlist = allowlist or PermissionAllowlist(
+            durable=durable, path=allowlist_path,
+        )
 
     # ── Registration ──────────────────────────────────────────────────
 
@@ -134,11 +599,17 @@ class ExecApprovalManager:
     ) -> tuple:
         """Create a pending request and return ``(request_id, future)``.
 
-        If the tool is in the :attr:`allowlist`, the future is resolved
-        immediately with ``approved=True``.
+        If a matching allow-always grant exists (scoped to this agent, or a
+        legacy global grant), the future is resolved immediately with
+        ``approved=True``.
         """
-        # Fast path: already permanently allowed
-        if tool_name in self.allowlist:
+        # Fast path: already permanently allowed (scoped to this agent, its
+        # argument signature, or a legacy global grant).
+        agent_id = agent_name or ANY_AGENT
+        arg_sig = make_arg_signature(arguments)
+        if self.allowlist.allows(
+            agent_id=agent_id, tool_name=tool_name, arg_signature=arg_sig,
+        ):
             loop = asyncio.get_running_loop()
             future: asyncio.Future = loop.create_future()
             future.set_result(Resolution(approved=True, reason="allow-always"))
@@ -183,8 +654,36 @@ class ExecApprovalManager:
             return False
 
         if resolution.allow_always:
-            self.allowlist.add(req.tool_name)
-            logger.info("Tool '%s' added to allow-always list", req.tool_name)
+            # Scope the grant safely-by-default: to the requesting agent unless
+            # the resolver explicitly widened it, and optionally to its
+            # argument signature. ``ANY_AGENT`` (a global grant) is only used
+            # when the resolver explicitly opts out of agent scoping — never as
+            # a silent fallback for a request that lacks an agent identity.
+            if resolution.scope_to_agent and not req.agent_name:
+                logger.warning(
+                    "Skipping scoped allow-always grant for tool '%s': no agent "
+                    "identity on the request. Set scope_to_agent=False to grant "
+                    "globally.",
+                    req.tool_name,
+                )
+            else:
+                agent_id = req.agent_name if resolution.scope_to_agent else ANY_AGENT
+                arg_sig = (
+                    make_arg_signature(req.arguments)
+                    if resolution.scope_to_args
+                    else None
+                )
+                self.allowlist.add_scoped(
+                    agent_id=agent_id,
+                    tool_name=req.tool_name,
+                    arg_signature=arg_sig,
+                    approver="gateway:human",
+                )
+                logger.info(
+                    "Tool '%s' added to allow-always list (agent=%s, args=%s)",
+                    req.tool_name, agent_id,
+                    "scoped" if arg_sig else "any",
+                )
 
         if req._future and not req._future.done() and req._loop:
             req._loop.call_soon_threadsafe(

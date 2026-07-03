@@ -1223,6 +1223,8 @@ class WebSocketGateway:
                 approved=bool(body.get("approved", False)),
                 reason=str(body.get("reason", "")),
                 allow_always=bool(body.get("allow_always", False)),
+                scope_to_agent=bool(body.get("scope_to_agent", True)),
+                scope_to_args=bool(body.get("scope_to_args", False)),
             )
 
             found = _approval_mgr.resolve(request_id, resolution)
@@ -1241,18 +1243,29 @@ class WebSocketGateway:
         async def approval_allowlist(request):
             """GET/POST/DELETE /api/approval/allow-list
 
-            GET    → list allow-listed tools
-            POST   → add a tool: {"tool_name": "..."}
-            DELETE → remove a tool: {"tool_name": "..."}
+            GET    → list allow-listed tools (and scoped grants)
+            POST   → add a tool: {"tool_name": "...", "agent_id": "..."}
+            DELETE → remove a tool: {"tool_name": "...", "agent_id": "..."}
+
+            ``agent_id`` is optional. When omitted the grant applies to any
+            agent (legacy behaviour); when provided the grant is scoped to that
+            agent only. Grants are durable and survive gateway restarts.
             """
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
 
             if request.method == "GET":
-                return JSONResponse({
-                    "allow_list": _approval_mgr.allowlist.list(),
-                })
+                resp = {"allow_list": _approval_mgr.allowlist.list()}
+                list_scoped = getattr(
+                    _approval_mgr.allowlist, "list_scoped", None
+                )
+                if callable(list_scoped):
+                    try:
+                        resp["grants"] = list_scoped()
+                    except Exception:
+                        logger.exception("Failed to list scoped approval grants")
+                return JSONResponse(resp)
 
             # Mutating the approval allow-list is security-sensitive. Check the
             # scope *before* consuming the rate-limit budget so a read-only
@@ -1281,10 +1294,36 @@ class WebSocketGateway:
                     {"error": "tool_name is required"}, status_code=400,
                 )
 
+            agent_id = body.get("agent_id")
+            if agent_id is not None:
+                if not isinstance(agent_id, str) or not agent_id.strip():
+                    return JSONResponse(
+                        {"error": "agent_id must be a non-empty string"},
+                        status_code=400,
+                    )
+                agent_id = agent_id.strip()
+
             if request.method == "POST":
+                if agent_id and hasattr(_approval_mgr.allowlist, "add_scoped"):
+                    _approval_mgr.allowlist.add_scoped(
+                        agent_id=agent_id, tool_name=tool_name,
+                        approver="gateway:operator",
+                    )
+                    return JSONResponse({"added": tool_name, "agent_id": agent_id})
                 _approval_mgr.allowlist.add(tool_name)
                 return JSONResponse({"added": tool_name})
             elif request.method == "DELETE":
+                if agent_id and hasattr(_approval_mgr.allowlist, "revoke_scoped"):
+                    removed = _approval_mgr.allowlist.revoke_scoped(
+                        agent_id=agent_id, tool_name=tool_name,
+                    )
+                    if not removed:
+                        return JSONResponse(
+                            {"error": f"'{tool_name}' not granted for agent "
+                                      f"'{agent_id}'"},
+                            status_code=404,
+                        )
+                    return JSONResponse({"removed": tool_name, "agent_id": agent_id})
                 removed = _approval_mgr.allowlist.remove(tool_name)
                 if not removed:
                     return JSONResponse(
