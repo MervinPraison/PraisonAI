@@ -641,7 +641,6 @@ class PraisonAI:
                 print("\npip install \"praisonai[train]\"")
                 print("Or run: praisonai train init\n")
                 sys.exit(1)
-            package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
             if not os.path.exists(config_yaml_destination):
@@ -716,13 +715,22 @@ class PraisonAI:
             model_name = config.get("model_name", "").lower()
             is_vision_model = any(x in model_name for x in ["-vl-", "-vl", "vl-", "-vision-", "-vision", "vision-", "visionmodel"])
             
-            # Choose appropriate training script
+            # Choose appropriate training invocation. The standard LLM
+            # fine-tuner is the canonical package module
+            # (``praisonai.train.llm.trainer``); vision fine-tuning uses the
+            # dedicated wrapper script located inside the wrapper package.
             if is_vision_model:
-                train_script_path = os.path.join(package_root, 'train_vision.py')
+                # The vision training wrapper script lives inside the ``praisonai``
+                # wrapper package, not next to this dispatcher (which moved to
+                # cli/legacy/ during the CLI package split). Resolve it via the
+                # wrapper package. Only the vision path needs this lookup.
+                import praisonai as _praisonai_wrapper
+                package_root = os.path.dirname(os.path.abspath(_praisonai_wrapper.__file__))
+                train_invocation = [os.path.join(package_root, 'train_vision.py'), 'train']
                 print("Using vision training script for VL model...")
             else:
-                train_script_path = os.path.join(package_root, 'train.py')
-                print("Using standard training script...")
+                train_invocation = ['-m', 'praisonai.train.llm.trainer', 'train']
+                print("Using standard training module...")
 
             # Set environment variables
             env = os.environ.copy()
@@ -732,14 +740,14 @@ class PraisonAI:
             if conda_available and conda_env_exists:
                 try:
                     print("Attempting to run training using conda environment...")
-                    stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
+                    stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', *train_invocation], env=env)
                 except subprocess.CalledProcessError as e:
                     print(f"Conda run failed with error: {e}")
                     print("Falling back to direct Python execution...")
-                    stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
+                    stream_subprocess([sys.executable, '-u', *train_invocation], env=env)
             else:
                 print("Conda environment not available, using direct Python execution...")
-                stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
+                stream_subprocess([sys.executable, '-u', *train_invocation], env=env)
             return
 
         if args.auto or self.auto:
