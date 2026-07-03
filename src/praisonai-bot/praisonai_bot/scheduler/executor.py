@@ -23,19 +23,20 @@ Usage::
     )
 
     # In your async event loop:
-    async for job, result in executor.tick():
-        print(f"Job {job.name}: {result}")
+    async for job_result in executor.tick():
+        print(f"Job {job_result.job.name}: {job_result.result}")
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import socket
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     Any,
     AsyncIterator,
@@ -229,7 +230,7 @@ class ScheduledAgentExecutor:
     async def _execute_one(self, job: "ScheduleJob") -> JobResult:
         """Execute a single job and return the result."""
         started = time.time()
-        message = getattr(job, "message", "") or ""
+        message = str(getattr(job, "message", "") or "")
         agent_id = getattr(job, "agent_id", None)
 
         # Skip jobs with no message
@@ -332,7 +333,7 @@ class ScheduledAgentExecutor:
                 result = JobResult(
                     job=job, status="failed", error=err, duration=duration,
                 )
-                self._audit_output(job, result)
+                await asyncio.to_thread(self._audit_output, job, result)
                 await self._maybe_deliver_failure(job, result)
                 return result
 
@@ -354,15 +355,14 @@ class ScheduledAgentExecutor:
             # actually accepts it (Core SDK's Agent.chat signature does
             # not currently expose session_id; older assumption caused a
             # TypeError on every scheduled job).
-            import inspect as _inspect
             chat_kwargs: Dict[str, Any] = {}
             try:
-                chat_params = _inspect.signature(agent.chat).parameters
+                chat_params = inspect.signature(agent.chat).parameters
             except (TypeError, ValueError):  # C-callable or builtin
                 chat_params = {}
             supports_session_id = (
                 "session_id" in chat_params
-                or any(p.kind == _inspect.Parameter.VAR_KEYWORD
+                or any(p.kind == inspect.Parameter.VAR_KEYWORD
                        for p in chat_params.values())
             )
             if supports_session_id:
@@ -385,7 +385,7 @@ class ScheduledAgentExecutor:
             failed = JobResult(
                 job=job, status="failed", error=err, duration=duration,
             )
-            self._audit_output(job, failed)
+            await asyncio.to_thread(self._audit_output, job, failed)
             await self._maybe_deliver_failure(job, failed)
             return failed
         finally:
@@ -403,7 +403,7 @@ class ScheduledAgentExecutor:
             status="succeeded",
             duration=duration,
         )
-        self._audit_output(job, job_result)
+        await asyncio.to_thread(self._audit_output, job, job_result)
 
         # Deliver to channel bot if delivery target exists
         delivered = False
@@ -412,7 +412,7 @@ class ScheduledAgentExecutor:
         if delivery and self._deliver:
             try:
                 coro = self._deliver(delivery, result_str)
-                if asyncio.iscoroutine(coro):
+                if inspect.isawaitable(coro):
                     await coro
                 delivered = True
                 logger.info(
@@ -588,7 +588,7 @@ class ScheduledAgentExecutor:
         )
         try:
             coro = self._deliver(delivery, summary)
-            if asyncio.iscoroutine(coro):
+            if inspect.isawaitable(coro):
                 await coro
             logger.info("Delivered failure summary for job '%s'", job.id)
         except Exception as e:

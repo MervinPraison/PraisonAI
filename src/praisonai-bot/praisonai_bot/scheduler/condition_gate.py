@@ -29,6 +29,7 @@ supply any object implementing ``JobConditionProtocol`` — the executor accepts
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 from typing import Any
@@ -36,6 +37,10 @@ from typing import Any
 from praisonaiagents.scheduler.protocols import GateResult
 
 logger = logging.getLogger(__name__)
+
+# On POSIX, start the shell in its own session so a timeout can kill the whole
+# process group (shell + any children it spawned) rather than orphaning them.
+_POSIX = os.name == "posix"
 
 # Cap captured gate output so a chatty pre-run script cannot blow up the prompt.
 _MAX_CONTEXT_CHARS = 8000
@@ -62,15 +67,42 @@ class ShellConditionGate:
             # No gate configured → always run (unconditional, as today).
             return GateResult(run=True)
 
+        # On POSIX, run the shell in a new session (its own process group) so a
+        # timeout kills the whole group — otherwise ``subprocess.run`` only kills
+        # the shell and leaves any children it spawned running as orphans.
+        popen_kwargs: dict = {}
+        if _POSIX:
+            popen_kwargs["start_new_session"] = True
+
+        proc = None
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 command,
                 shell=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self._timeout,
+                **popen_kwargs,
+            )
+            stdout, stderr = proc.communicate(timeout=self._timeout)
+            completed = subprocess.CompletedProcess(
+                command, proc.returncode, stdout, stderr,
             )
         except subprocess.TimeoutExpired:
+            # Kill the whole process group (POSIX) so children don't orphan,
+            # then reap the shell to avoid a zombie.
+            if proc is not None:
+                try:
+                    if _POSIX:
+                        os.killpg(os.getpgid(proc.pid), 9)
+                    else:  # pragma: no cover - non-POSIX
+                        proc.kill()
+                except (ProcessLookupError, PermissionError, OSError):  # pragma: no cover
+                    proc.kill()
+                try:
+                    proc.communicate(timeout=5)
+                except Exception:  # pragma: no cover - best-effort reap
+                    pass
             logger.warning(
                 "Pre-run gate timed out for job '%s' (>%.0fs); skipping tick",
                 getattr(job, "id", "?"), self._timeout,
