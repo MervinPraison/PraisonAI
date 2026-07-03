@@ -212,7 +212,8 @@ def chat_main(
         from ..configuration.model_resolver import resolve_default_model
         resolved_model = resolve_default_model(model)
     except Exception:
-        resolved_model = model or "gpt-4o-mini"
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+        resolved_model = model or DEFAULT_FALLBACK_MODEL
 
     tui_config = AsyncTUIConfig(
         model=resolved_model,

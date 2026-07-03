@@ -16,6 +16,10 @@ from typer.main import get_command as typer_get_command
 from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
 
+# Single source of truth for the terminal fallback model; entry points route
+# through resolve_default_model() and never re-declare this literal.
+from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL as _DEFAULT_MODEL
+
 
 def _setup_langfuse_observability(*, verbose: bool = False) -> None:
     """Set up Langfuse observability by wiring TraceSink to action emitter."""
@@ -440,7 +444,7 @@ class LazyCommandGroup(TyperGroup):
                 gen_type: str = typer.Option("all", "--type", "-t", help="Type: docs, examples, all"),
                 apply: bool = typer.Option(False, "--apply", help="Actually create files"),
                 verify: bool = typer.Option(False, "--verify", help="Verify with AI"),
-                model: str = typer.Option("gpt-4o-mini", "--model", help="LLM model"),
+                model: str = typer.Option(_DEFAULT_MODEL, "--model", help="LLM model"),
                 path: str = typer.Option(".", "--path", "-p", help="Project root path"),
             ):
                 """AI-powered generation of docs/examples."""
@@ -800,9 +804,18 @@ def main_callback(
                 raise typer.Exit(0)
         
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
-        
+
+        # Route the bare-TUI launch through the shared resolver so a user with
+        # only, say, ANTHROPIC_API_KEY set is defaulted to an appropriate model
+        # rather than an OpenAI one — matching `run`, `chat`, and `init`.
+        try:
+            from .configuration.model_resolver import resolve_default_model
+            resolved_model = resolve_default_model(None)
+        except Exception:
+            resolved_model = _DEFAULT_MODEL
+
         tui_config = AsyncTUIConfig(
-            model="gpt-4o-mini",
+            model=resolved_model,
             show_logo=True,
             show_status_bar=state.output_format != OutputFormat.json,
         )

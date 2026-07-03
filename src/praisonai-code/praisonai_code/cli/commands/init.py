@@ -10,7 +10,7 @@ Project scaffolding command for the `.praisonai/` convention.
       commands/review.md     # working starter command using $ARGUMENTS / @file
 
 The scaffolded files are immediately discoverable and runnable via
-`praisonai agent run assistant ...` and `praisonai command run review ...`.
+`praisonai run --agent assistant ...` and `praisonai run --command review ...`.
 """
 
 from pathlib import Path
@@ -118,12 +118,16 @@ def init(
         base = (get_git_root() or Path.cwd()) / ".praisonai"
 
     # Scaffold the default model that matches the user's detected provider
-    # credential. Falls back to the OpenAI default when none is detected.
+    # credential via the shared resolver, so init stays consistent with `run`,
+    # the bare TUI, and `setup`. Falls back to the terminal default when none is
+    # detected. persist/notify are disabled: scaffolding must not record a
+    # recency choice or emit the run-time inference notice.
     try:
-        from praisonai_code.llm.env import default_model_for_available_provider
-        detected_model = default_model_for_available_provider()
+        from ..configuration.model_resolver import resolve_default_model
+        detected_model = resolve_default_model(None, persist=False, notify=False)
     except Exception:
-        detected_model = "gpt-4o-mini"
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+        detected_model = DEFAULT_FALLBACK_MODEL
 
     provider_detected = _any_provider_credential()
     scaffold_model = detected_model
@@ -166,8 +170,8 @@ def init(
                 f"OLLAMA_HOST, then update the model if needed."
             )
         output.print_info("You can now run:")
-        output.print_info('  praisonai agent run assistant "hello"')
-        output.print_info('  praisonai command run review "src/foo.py"')
+        output.print_info('  praisonai run --agent assistant "hello"')
+        output.print_info('  praisonai run --command review "src/foo.py"')
     elif skipped:
         output.print_info(
             "Nothing to do — .praisonai/ already initialised. Use --force to overwrite."
