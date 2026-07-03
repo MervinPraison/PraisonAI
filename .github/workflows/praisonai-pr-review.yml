@@ -16,16 +16,20 @@ jobs:
   review:
     runs-on: ubuntu-latest
     if: >
-      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && 
-       github.event.issue.pull_request && 
-       contains(github.event.comment.body, '@praisonai') &&
-       github.actor != 'github-actions[bot]' &&
-       github.event.comment.user.type != 'Bot' &&
-       (github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'COLLABORATOR'))
+      secrets.PRAISONAI_APP_ID != '' &&
+      secrets.PRAISONAI_APP_PRIVATE_KEY != '' &&
+      (
+        (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request &&
+         contains(github.event.comment.body, '@praisonai') &&
+         github.actor != 'github-actions[bot]' &&
+         github.event.comment.user.type != 'Bot' &&
+         (github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR'))
+      )
     
     steps:
       - name: Determine checkout ref
