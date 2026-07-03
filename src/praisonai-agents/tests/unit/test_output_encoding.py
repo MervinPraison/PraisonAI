@@ -63,6 +63,41 @@ def test_status_output_no_unicode_error_on_cp1252():
     stream.getvalue().encode("cp1252")  # must not raise
 
 
+def test_status_output_rich_color_llm_start_no_unicode_error_on_cp1252():
+    # Production default is use_color=True, which routes through the Rich
+    # branch of _emit_text. This is the live `praisonai run` crash path
+    # (issue #2603) that earlier use_color=False tests never exercised.
+    stream = _Cp1252Stream()
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.llm_start(model="gpt-4o-mini")  # emits "▸ AI → thinking..."
+    stream.getvalue().encode("cp1252")  # must not raise
+    assert "\u25b8" not in stream.getvalue()
+
+
+def test_status_output_rich_color_agent_lifecycle_no_unicode_error_on_cp1252():
+    # agent_start/agent_end emit ▶ (U+25B6) / ◀ (U+25C0) via the Rich branch.
+    stream = _Cp1252Stream()
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.agent_start("assistant")
+    out.agent_end("assistant", duration_ms=12.0)
+    stream.getvalue().encode("cp1252")  # must not raise
+
+
+def test_status_output_rich_color_tool_end_no_unicode_error_on_cp1252():
+    stream = _Cp1252Stream()
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.tool_start("get_weather", {"city": "Paris"})
+    out.tool_end("get_weather", status="error", error_message="boom")
+    stream.getvalue().encode("cp1252")  # must not raise
+
+
+def test_status_output_rich_color_preserves_unicode_on_utf8():
+    stream = _Utf8Stream()
+    out = StatusOutput(file=stream, use_color=True, show_timestamps=False)
+    out.llm_start(model="gpt-4o-mini")
+    assert "\u25b8" in stream.getvalue()  # glyph preserved on utf-8
+
+
 def test_status_output_final_output_no_unicode_error_on_cp1252(monkeypatch):
     # StatusOutput.output() prints the final content to sys.stdout, so patch it.
     stdout = _Cp1252Stream()
@@ -70,6 +105,19 @@ def test_status_output_final_output_no_unicode_error_on_cp1252(monkeypatch):
     out = StatusOutput(file=_Cp1252Stream(), use_color=False, show_timestamps=False)
     out.output("\u25b8 done \u2192 ok")
     stdout.getvalue().encode("cp1252")  # must not raise
+
+
+def test_editor_llm_indicator_no_unicode_error_on_cp1252():
+    # EditorDisplay.llm_indicator emits "▸ Thinking..." via a Rich console
+    # (issue #2603 latent path). It must not crash on a cp1252 stream.
+    from rich.console import Console
+    from praisonaiagents.output.editor import EditorOutput
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+    console = Console(file=stream, force_terminal=True)
+    out = EditorOutput(console=console, use_rich=True)
+    out.llm_indicator("thinking")
+    stream.flush()  # must not raise UnicodeEncodeError
 
 
 def test_trace_output_no_unicode_error_on_cp1252():

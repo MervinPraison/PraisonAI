@@ -304,13 +304,19 @@ class StatusOutput:
         
         with self._lock:  # Thread-safe output
             console = self._get_console()
+            from .encoding import safe_text
             if console and self._use_color:
+                # Rich's legacy Windows renderer encodes with the terminal
+                # encoding (cp1252 by default) using strict error handling and
+                # has no fallback, so decorative glyphs (e.g. ▸ U+25B8) crash
+                # the agent loop. Sanitize the message to ASCII-safe glyphs
+                # when the target stream cannot encode them.
+                safe_msg = safe_text(message, self._file)
                 if style:
-                    console.print(f"[dim]{ts_str}[/dim][{style}]{message}[/{style}]")
+                    console.print(f"[dim]{ts_str}[/dim][{style}]{safe_msg}[/{style}]")
                 else:
-                    console.print(f"[dim]{ts_str}[/dim]{message}")
+                    console.print(f"[dim]{ts_str}[/dim]{safe_msg}")
             else:
-                from .encoding import safe_text
                 print(safe_text(f"{ts_str}{message}", self._file), file=self._file)
     
     def _emit_jsonl(self, event_type: str, **kwargs) -> None:
