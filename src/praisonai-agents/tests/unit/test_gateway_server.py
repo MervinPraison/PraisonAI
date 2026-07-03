@@ -481,3 +481,53 @@ class TestGatewaySession:
         assert session.is_active is True
         session.close()
         assert session.is_active is False
+
+
+class TestGatewayDispatch:
+    """Test the gateway agent-turn dispatch helper (native async vs sync fallback)."""
+
+    def _get_gateway_class(self):
+        try:
+            from praisonai.gateway import WebSocketGateway
+            return WebSocketGateway
+        except ImportError:
+            return None
+
+    def test_dispatch_prefers_async_entry_point(self):
+        """When the agent exposes an async entry point, it is awaited directly."""
+        import asyncio as _asyncio
+
+        cls = self._get_gateway_class()
+        if cls is None:
+            __import__("pytest").skip("praisonai wrapper not installed")
+
+        calls = {"arun": 0, "chat": 0}
+
+        class AsyncAgent:
+            async def arun(self, content):
+                calls["arun"] += 1
+                return f"async:{content}"
+
+            def chat(self, content):  # pragma: no cover - must not be used
+                calls["chat"] += 1
+                return f"sync:{content}"
+
+        result = _asyncio.run(cls._dispatch_agent_turn(AsyncAgent(), "hi"))
+        assert result == "async:hi"
+        assert calls["arun"] == 1
+        assert calls["chat"] == 0
+
+    def test_dispatch_falls_back_to_sync_chat(self):
+        """Sync-only agents keep working via the thread-pool fallback."""
+        import asyncio as _asyncio
+
+        cls = self._get_gateway_class()
+        if cls is None:
+            __import__("pytest").skip("praisonai wrapper not installed")
+
+        class SyncAgent:
+            def chat(self, content):
+                return f"sync:{content}"
+
+        result = _asyncio.run(cls._dispatch_agent_turn(SyncAgent(), "hi"))
+        assert result == "sync:hi"
