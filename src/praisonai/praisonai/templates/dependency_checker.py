@@ -62,6 +62,7 @@ class DependencyChecker:
         self._tool_cache: Dict[str, DependencyStatus] = {}
         self._resolver = None
         self._resolver_loaded = False
+        self._sources_cache: Optional[Dict[str, str]] = None
     
     def _get_resolver(self):
         """Lazily construct a shared ToolResolver (the canonical resolution chain).
@@ -157,15 +158,33 @@ class DependencyChecker:
             if not resolver.has_tool(tool_name):
                 return None
             # Prefer the resolver's own source attribution when available.
-            try:
-                sources = resolver.list_available_sources()
-                if tool_name in sources:
-                    return sources[tool_name]
-            except Exception:
-                pass
+            # The full source scan is cached once so verifying N tools does
+            # not trigger N full enumerations.
+            sources = self._resolver_sources()
+            if tool_name in sources:
+                return sources[tool_name]
             return "resolver"
         except Exception:
             return None
+
+    def _resolver_sources(self) -> Dict[str, str]:
+        """Return the resolver's full source map, cached for reuse.
+
+        Caches :meth:`ToolResolver.list_available_sources` so repeated
+        ``check_tool`` calls reuse a single enumeration. Returns an empty
+        mapping when the resolver is unavailable or the scan fails.
+        """
+        if self._sources_cache is not None:
+            return self._sources_cache
+        sources: Dict[str, str] = {}
+        resolver = self._get_resolver()
+        if resolver is not None:
+            try:
+                sources = dict(resolver.list_available_sources())
+            except Exception:
+                sources = {}
+        self._sources_cache = sources
+        return sources
     
     def _check_builtin_tool(self, tool_name: str) -> Optional[str]:
         """Check if tool exists in built-in registry."""

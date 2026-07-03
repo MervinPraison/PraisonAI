@@ -147,8 +147,8 @@ class ToolsDoctor:
         ``TOOL_MAPPINGS`` scan when the resolver is unavailable.
         """
         buckets = self._resolver_sources()
-        if buckets:
-            return sorted(buckets.get("builtin", []))
+        if "builtin" in buckets:
+            return sorted(buckets["builtin"])
         tools = []
         try:
             from praisonaiagents.tools import TOOL_MAPPINGS
@@ -165,8 +165,8 @@ class ToolsDoctor:
         when the resolver is unavailable.
         """
         buckets = self._resolver_sources()
-        if buckets:
-            return sorted(buckets.get("external", []))
+        if "external" in buckets:
+            return sorted(buckets["external"])
         tools = []
         try:
             import praisonai_tools

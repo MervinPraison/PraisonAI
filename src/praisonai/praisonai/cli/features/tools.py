@@ -128,8 +128,18 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         }
         
         for name, desc in tool_descriptions.items():
-            if name not in tools:
-                tools[name] = {"description": desc, "available": name in tools}
+            if name in tools:
+                # Overlay the human-readable description onto entries already
+                # discovered by the resolver (stored as {"source": ...}) so
+                # `tools list` shows the description instead of "No description".
+                entry = tools[name]
+                if isinstance(entry, dict):
+                    entry.setdefault("description", desc)
+                    entry.setdefault("available", True)
+                else:
+                    tools[name] = {"description": desc, "available": True}
+            else:
+                tools[name] = {"description": desc, "available": False}
         
         return tools
     
