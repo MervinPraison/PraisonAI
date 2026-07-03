@@ -39,7 +39,8 @@ function hasQodoReview(comments, reviews = []) {
   return reviews.some((r) => loginOf(r).includes('qodo'));
 }
 
-function hasGeminiReview(comments) {
+function hasGeminiReview(comments, reviews = []) {
+  if (reviews.some((r) => loginOf(r).includes('gemini'))) return true;
   return comments.some((c) => {
     if (loginOf(c).includes('gemini')) return true;
     const body = bodyOf(c);
@@ -54,7 +55,7 @@ const PRIOR_CHECKS = {
   coderabbit: (comments) => hasCoderabbitSummary(comments),
   greptile: (comments) => hasGreptileReview(comments),
   qodo: (comments, reviews) => hasQodoReview(comments, reviews),
-  gemini: (comments) => hasGeminiReview(comments),
+  gemini: (comments, reviews) => hasGeminiReview(comments, reviews),
 };
 
 function priorReviewerStatus(comments, reviews = []) {
@@ -157,6 +158,23 @@ function claudeFinalReady(comments, reviews = [], options = {}) {
     return { ready: true, reason: 'copilot timeout fallback', copilotSkipped: true };
   }
   return { ready: false, reason: copilot.reason };
+}
+
+/** Post @copilot when prior reviewers are ready, then @claude FINAL when Copilot done (or timeout). */
+async function advanceReviewChain(github, owner, repo, prNumber, finalBody, core, options = {}) {
+  const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+  const chainOpts = {
+    prCreatedAt: pr.created_at,
+    optionalWaitMs: options.optionalWaitMs ?? 0,
+  };
+  const copilot = options.skipCopilot
+    ? { triggered: false, reason: 'skipped' }
+    : await maybeTriggerCopilot(github, owner, repo, prNumber, core, chainOpts);
+  const claude = await maybeTriggerClaudeFinal(
+    github, owner, repo, prNumber, finalBody, core,
+    { ...options, ...chainOpts }
+  );
+  return { copilot, claude };
 }
 
 async function maybeTriggerClaudeFinal(github, owner, repo, prNumber, finalBody, core, options = {}) {
@@ -262,6 +280,8 @@ module.exports = {
   isFinalClaudeTriggerComment,
   maybeTriggerCopilot,
   maybeTriggerClaudeFinal,
+  advanceReviewChain,
   pollCopilotResponse,
+  hasGeminiReview,
   listCommentsAndReviews,
 };
