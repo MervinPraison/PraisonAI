@@ -5,8 +5,8 @@
  */
 
 function isSkipCopilot(options = {}) {
-  if (options.skipCopilot === true) return true;
-  if (options.skipCopilot === false) return false;
+  if (options?.skipCopilot === true) return true;
+  if (options?.skipCopilot === false) return false;
   return process.env.REVIEW_CHAIN_SKIP_COPILOT === '1';
 }
 
@@ -177,7 +177,7 @@ async function advanceReviewChain(github, owner, repo, prNumber, finalBody, core
     prCreatedAt: pr.created_at,
     optionalWaitMs: options.optionalWaitMs ?? 0,
   };
-  const copilot = options.skipCopilot
+  const copilot = isSkipCopilot(options)
     ? { triggered: false, reason: 'skipped' }
     : await maybeTriggerCopilot(github, owner, repo, prNumber, core, chainOpts);
   const claude = await maybeTriggerClaudeFinal(
@@ -194,6 +194,7 @@ async function maybeTriggerClaudeFinal(github, owner, repo, prNumber, finalBody,
     prCreatedAt: pr.created_at,
     optionalWaitMs: options.optionalWaitMs,
     allowCopilotTimeout: options.allowCopilotTimeout !== false,
+    skipCopilot: options.skipCopilot,
   });
   if (!gate.ready) {
     core?.info?.(`PR #${prNumber}: skip Claude FINAL — ${gate.reason}`);

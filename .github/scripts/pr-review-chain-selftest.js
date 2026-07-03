@@ -65,7 +65,11 @@ assert(
   'REVIEW_CHAIN_SKIP_COPILOT env skips copilot',
   chain.claudeFinalReady([coderabbit, greptile], [], {}).ready
 );
-process.env.REVIEW_CHAIN_SKIP_COPILOT = prev;
+if (prev === undefined) {
+  delete process.env.REVIEW_CHAIN_SKIP_COPILOT;
+} else {
+  process.env.REVIEW_CHAIN_SKIP_COPILOT = prev;
+}
 
 const geminiReview = {
   user: { login: 'gemini-code-assist[bot]' },
