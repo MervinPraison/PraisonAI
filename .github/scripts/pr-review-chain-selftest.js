@@ -55,6 +55,17 @@ assert(
   'no timeout fallback without copilot trigger',
   !chain.claudeFinalReady([coderabbit, greptile], [], { allowCopilotTimeout: true }).ready
 );
+assert(
+  'skipCopilot proceeds after prior reviewers',
+  chain.claudeFinalReady([coderabbit, greptile], [], { skipCopilot: true }).ready
+);
+const prev = process.env.REVIEW_CHAIN_SKIP_COPILOT;
+process.env.REVIEW_CHAIN_SKIP_COPILOT = '1';
+assert(
+  'REVIEW_CHAIN_SKIP_COPILOT env skips copilot',
+  chain.claudeFinalReady([coderabbit, greptile], [], {}).ready
+);
+process.env.REVIEW_CHAIN_SKIP_COPILOT = prev;
 
 const geminiReview = {
   user: { login: 'gemini-code-assist[bot]' },

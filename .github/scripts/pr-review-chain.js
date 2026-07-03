@@ -1,7 +1,14 @@
 /**
- * PR review pipeline: CodeRabbit / Qodo / Gemini / Greptile → Copilot → Claude (FINAL).
+ * PR review pipeline: CodeRabbit / Greptile (+ optional Qodo/Gemini) → Claude (FINAL).
+ * Copilot step optional — set REVIEW_CHAIN_SKIP_COPILOT=1 or skipCopilot: true to bypass.
  * @see .github/workflows/auto-pr-comment.yml
  */
+
+function isSkipCopilot(options = {}) {
+  if (options.skipCopilot === true) return true;
+  if (options.skipCopilot === false) return false;
+  return process.env.REVIEW_CHAIN_SKIP_COPILOT === '1';
+}
 
 const COPILOT_TRIGGER_LOGINS = new Set(['MervinPraison', 'github-actions[bot]']);
 const CLAUDE_TRIGGER_LOGINS = new Set(['MervinPraison', 'github-actions[bot]']);
@@ -150,6 +157,9 @@ function claudeFinalReady(comments, reviews = [], options = {}) {
   if (!prior.ready) {
     return { ready: false, reason: prior.reason };
   }
+  if (isSkipCopilot(options)) {
+    return { ready: true, reason: 'copilot skipped', copilotSkipped: true };
+  }
   const copilot = copilotReviewReady(comments, reviews);
   if (copilot.ready) {
     return { ready: true, reason: '' };
@@ -268,6 +278,7 @@ async function pollCopilotResponse(github, owner, repo, prNumber, options = {}) 
 }
 
 module.exports = {
+  isSkipCopilot,
   REQUIRED_PRIOR,
   OPTIONAL_PRIOR,
   COPILOT_REVIEW_BODY,
