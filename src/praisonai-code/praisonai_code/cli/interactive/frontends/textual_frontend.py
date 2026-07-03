@@ -57,7 +57,9 @@ class TextualFrontend:
     async def run(self) -> None:
         """Run the Textual TUI."""
         try:
-            from ..features.tui.app import TUIApp
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+
+            TUIApp = import_wrapper_module("praisonai.cli.features.tui.app").TUIApp
             
             # Create app with our core
             self._app = TUIApp(

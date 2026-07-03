@@ -126,3 +126,42 @@ def test_run_file_crewai_requires_wrapper():
     combined = result.stdout + result.stderr
     assert result.returncode != 0
     assert "pip install praisonai" in combined.lower() or "import" in combined.lower()
+
+
+def test_c8_hybrid_module_imports():
+    """Critical repatriated / hybrid paths must resolve when wrapper is installed."""
+    import importlib
+
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if not wrapper_available():
+        pytest.skip("requires praisonai wrapper installed")
+
+    paths = [
+        ("praisonai.cli.features.tui.app", "TUIApp"),
+        ("praisonai.cli.features.tools", "ToolsHandler"),
+        ("praisonai.cli.features.workflow", "WorkflowHandler"),
+        ("praisonai.cli.interactive.core", "InteractiveCore"),
+        ("praisonai_code.cli.interactive.async_tui", "AsyncTUI"),
+        ("praisonai_code.cli.features.workflow", "WorkflowHandler"),
+    ]
+    for module_name, attr in paths:
+        mod = importlib.import_module(module_name)
+        assert hasattr(mod, attr), f"{module_name} missing {attr}"
+
+
+def test_textual_frontend_tui_app_import():
+    """TextualFrontend.run() must resolve TUIApp via hybrid wrapper package."""
+    import importlib
+
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if not wrapper_available():
+        pytest.skip("requires praisonai wrapper installed")
+
+    mod = importlib.import_module(
+        "praisonai_code.cli.interactive.frontends.textual_frontend"
+    )
+    source = importlib.import_module("inspect").getsource(mod.TextualFrontend.run)
+    assert "import_wrapper_module" in source
+    assert "praisonai.cli.features.tui.app" in source
