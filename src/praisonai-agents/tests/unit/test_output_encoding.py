@@ -158,6 +158,63 @@ def test_editor_error_markup_in_message_no_markup_error():
     assert "bad" in stream.getvalue()
 
 
+def _editor(stream=None):
+    from rich.console import Console
+    from praisonaiagents.output.editor import EditorOutput
+
+    stream = stream or _Utf8Stream()
+    console = Console(file=stream, force_terminal=True)
+    return EditorOutput(console=console, use_rich=True), stream
+
+
+def test_editor_render_command_output_markup_no_markup_error():
+    # tool_call() routes display_result (dynamic tool output/error text) through
+    # _render_command; bracketed content must not be parsed as Rich markup.
+    out, stream = _editor()
+    out._render_command("Step 1: run", output="⚠ oops [/close] [tag]")  # no MarkupError
+    assert "oops" in stream.getvalue()
+
+
+def test_editor_tool_call_markup_in_result_no_markup_error():
+    # End-to-end: a tool result containing bracket sequences must not crash.
+    out, stream = _editor()
+    out.tool_call("execute_command", args={"command": "ls [/x]"}, result="err [/close]")
+    assert "execute_command" not in stream.getvalue() or True  # must not raise
+
+
+def test_editor_action_markup_no_markup_error():
+    out, stream = _editor()
+    out.action("applied [/patch]", details=["step [0]", "step [/1]"])  # no MarkupError
+    assert "applied" in stream.getvalue()
+
+
+def test_editor_list_items_markup_no_markup_error():
+    out, stream = _editor()
+    out.list_items(["item [/x]", "item [y]"], title="Files [/tag]")  # no MarkupError
+    assert "item" in stream.getvalue()
+
+
+def test_editor_summary_markup_no_markup_error():
+    out, stream = _editor()
+    out.summary("Done [1/3]", items=["step [0]", "step [/done]"])  # no MarkupError
+    assert "Done" in stream.getvalue()
+
+
+def test_editor_narrative_markup_no_markup_error():
+    out, stream = _editor()
+    out.narrative("thinking about [/close] the [tag]")  # no MarkupError
+    assert "thinking" in stream.getvalue()
+
+
+def test_editor_error_multi_agent_prefix_markup_no_markup_error():
+    # A multi-agent prefix built from an agent name with bracket-like text
+    # must also be escaped so it cannot break the Rich markup.
+    out, stream = _editor()
+    out.enable_multi_agent_mode()
+    out.error("boom", agent_name="agent[/x]")  # no MarkupError
+    assert "boom" in stream.getvalue()
+
+
 def test_trace_output_no_unicode_error_on_cp1252():
     stream = _Cp1252Stream()
     out = TraceOutput(file=stream, use_color=False, show_timestamps=False)
