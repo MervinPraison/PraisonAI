@@ -531,13 +531,15 @@ class AgentsGenerator:
         a shared tool dict). Returns ``None`` when nothing declares a timeout.
         """
         cli_timeout = (self.cli_config or {}).get("tool_timeout")
-        if isinstance(cli_timeout, (int, float)):
+        if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
             return float(cli_timeout)
 
         entities = {**config.get("roles", {}), **config.get("agents", {})}
         timeouts = [
             e.get("tool_timeout") for e in entities.values()
-            if isinstance(e, dict) and isinstance(e.get("tool_timeout"), (int, float))
+            if isinstance(e, dict)
+            and isinstance(e.get("tool_timeout"), (int, float))
+            and not isinstance(e.get("tool_timeout"), bool)
         ]
         return float(max(timeouts)) if timeouts else None
     

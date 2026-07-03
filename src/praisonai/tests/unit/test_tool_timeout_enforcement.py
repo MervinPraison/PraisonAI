@@ -10,6 +10,7 @@ naked callables and ``_wrap_tool_with_timeout`` had zero call sites.
 """
 
 import json
+import logging
 import threading
 
 import pytest
@@ -26,6 +27,7 @@ def _make_generator():
     gen._tool_timeout_executor = None
     gen._owns_tool_timeout_executor = True
     gen._tool_timeout_executor_lock = threading.Lock()
+    gen.logger = logging.getLogger(__name__)
     return gen
 
 
@@ -52,6 +54,18 @@ def test_effective_timeout_none_when_absent():
     gen = _make_generator()
     assert gen._resolve_effective_tool_timeout({"roles": {"a": {}}}) is None
     assert gen._resolve_effective_tool_timeout({}) is None
+
+
+def test_effective_timeout_ignores_bool_values():
+    # ``bool`` subclasses ``int``; ``tool_timeout: yes`` (YAML -> True) must not
+    # be treated as a 1-second timeout applied to every tool.
+    gen = _make_generator()
+    gen.cli_config = {"tool_timeout": True}
+    assert gen._resolve_effective_tool_timeout({}) is None
+
+    gen.cli_config = {}
+    config = {"roles": {"a": {"tool_timeout": True}, "b": {"tool_timeout": False}}}
+    assert gen._resolve_effective_tool_timeout(config) is None
 
 
 def test_build_tools_dict_wraps_with_timeout():
@@ -87,7 +101,8 @@ def test_build_tools_dict_no_wrap_when_no_timeout():
     gen = _make_generator()
     gen.cli_config = {}
 
-    sentinel = lambda: "ok"
+    def sentinel():
+        return "ok"
 
     class _FakeResolver:
         def resolve_all_from_yaml(self, config):
