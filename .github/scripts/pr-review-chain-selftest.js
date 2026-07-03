@@ -70,4 +70,54 @@ assert(
   chain.priorReviewersReady([coderabbit, greptile], [geminiReview], { optionalWaitMs: 0 }).ready
 );
 
-process.exit(failed ? 1 : 0);
+assert(
+  'hasGeminiReview tolerates undefined reviews',
+  chain.hasGeminiReview([]) === false
+);
+
+async function advanceReviewChainOrderTest() {
+  const now = '2026-07-03T09:00:00Z';
+  const posted = [];
+  let state = [coderabbit, greptile];
+  const github = {
+    rest: {
+      pulls: {
+        get: async () => ({ data: { created_at: '2026-07-03T07:00:00Z' } }),
+        listReviews: async () => ({ data: [geminiReview] }),
+      },
+      issues: {
+        listComments: async () => ({ data: state }),
+        createComment: async ({ body }) => {
+          posted.push(body);
+          if (body.includes('@copilot')) {
+            state = state.concat({
+              user: { login: 'MervinPraison' },
+              body,
+              created_at: now,
+            });
+          }
+        },
+      },
+    },
+  };
+  const result = await chain.advanceReviewChain(
+    github, 'o', 'r', 1, '@claude FINAL architecture reviewer', null,
+    { allowCopilotTimeout: true, optionalWaitMs: 0 }
+  );
+  assert('advanceReviewChain triggers copilot', result.copilot.triggered === true);
+  assert(
+    'advanceReviewChain defers claude when copilot just triggered',
+    result.claude.posted === false
+  );
+  assert(
+    'advanceReviewChain posts only @copilot in same pass',
+    posted.length === 1 && posted[0].includes('@copilot')
+  );
+}
+
+advanceReviewChainOrderTest()
+  .then(() => process.exit(failed ? 1 : 0))
+  .catch((err) => {
+    console.error('FAIL: advanceReviewChain order test threw', err);
+    process.exit(1);
+  });

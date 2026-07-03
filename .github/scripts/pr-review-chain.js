@@ -40,7 +40,7 @@ function hasQodoReview(comments, reviews = []) {
 }
 
 function hasGeminiReview(comments, reviews = []) {
-  if (reviews.some((r) => loginOf(r).includes('gemini'))) return true;
+  if ((reviews || []).some((r) => loginOf(r).includes('gemini'))) return true;
   return comments.some((c) => {
     if (loginOf(c).includes('gemini')) return true;
     const body = bodyOf(c);
@@ -172,7 +172,11 @@ async function advanceReviewChain(github, owner, repo, prNumber, finalBody, core
     : await maybeTriggerCopilot(github, owner, repo, prNumber, core, chainOpts);
   const claude = await maybeTriggerClaudeFinal(
     github, owner, repo, prNumber, finalBody, core,
-    { ...options, ...chainOpts }
+    {
+      ...options,
+      ...chainOpts,
+      allowCopilotTimeout: copilot.triggered ? false : (options.allowCopilotTimeout !== false),
+    }
   );
   return { copilot, claude };
 }
