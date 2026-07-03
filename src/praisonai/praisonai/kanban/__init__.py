@@ -1,14 +1,7 @@
-# Kanban module for PraisonAI - persistent task management
-from .sqlite_store import SQLiteKanbanStore
-from .models import TaskStatus, Task, TaskEvent, TaskRun, RunOutcome
-from .paths import get_kanban_db_path
+"""Backward-compatibility shim for :mod:`praisonai.kanban`."""
+from praisonai._bootstrap import ensure_praisonai_bot
 
-__all__ = [
-    'SQLiteKanbanStore',
-    'TaskStatus', 
-    'Task',
-    'TaskEvent',
-    'TaskRun',
-    'RunOutcome',
-    'get_kanban_db_path'
-]
+ensure_praisonai_bot()
+from praisonai.cli._shim import alias_package
+
+alias_package("praisonai.kanban", "praisonai_bot.kanban")

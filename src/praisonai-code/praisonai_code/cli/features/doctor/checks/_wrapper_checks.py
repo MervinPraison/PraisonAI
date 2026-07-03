@@ -32,7 +32,7 @@ def skip_if_no_wrapper(
 
 
 def bots_config_schema():
-    """Load ``praisonai.bots._config_schema`` via the wrapper bridge."""
-    from praisonai_code._wrapper_bridge import import_wrapper_module
+    """Load ``praisonai_bot.bots._config_schema`` via the bot bridge."""
+    from praisonai_code._bot_bridge import import_bot_module
 
-    return import_wrapper_module("praisonai.bots._config_schema")
+    return import_bot_module("praisonai_bot.bots._config_schema")

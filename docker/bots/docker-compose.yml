@@ -17,7 +17,7 @@ services:
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
       PRAISON_CONFIG_DIR: /root/.praison
-    command: [ "praisonai", "bot", "slack" ]
+    command: [ "praisonai-bot", "bot", "slack" ]
     restart: unless-stopped
 
   # Discord Bot
@@ -31,7 +31,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
       PRAISON_CONFIG_DIR: /root/.praison
-    command: [ "praisonai", "bot", "discord" ]
+    command: [ "praisonai-bot", "bot", "discord" ]
     restart: unless-stopped
 
   # Telegram Bot
@@ -45,7 +45,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       PRAISON_CONFIG_DIR: /root/.praison
-    command: [ "praisonai", "bot", "telegram" ]
+    command: [ "praisonai-bot", "bot", "telegram" ]
     restart: unless-stopped
 
 volumes:

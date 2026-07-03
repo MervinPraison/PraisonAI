@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Backends that require the optional wrapper package (``praisonai.bots``).
+# Backends that require praisonai-bot (channel approval handlers).
 _WRAPPER_BACKENDS = frozenset(
     {"slack", "telegram", "discord", "webhook", "http", "secure", "presentation"}
 )
@@ -80,13 +80,10 @@ def resolve_approval_backend(
         return AgentApproval(approver_agent=reviewer)
 
     if name in _WRAPPER_BACKENDS:
-        from praisonai_code._wrapper_bridge import import_wrapper_module
-        mod = import_wrapper_module("praisonai.cli.features.approval")
-        return mod.resolve_approval_backend(
-            value,
-            non_interactive=non_interactive,
-            permissions_config=permissions_config,
-        )
+        from praisonai_code._bot_bridge import import_bot_module
+
+        mod = import_bot_module("praisonai_bot.cli.approval_backends")
+        return mod.resolve_channel_approval_backend(name)
 
     from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend  # noqa: F401
     valid = (

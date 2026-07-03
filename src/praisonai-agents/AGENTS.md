@@ -84,11 +84,11 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      praisonai (Wrapper)                        │
-│  Bot/channel CLI • Gateway • Integrations • Heavy impls         │
-├─────────────────────────────────────────────────────────────────┤
-│                    praisonai-code (Terminal agent)              │
-│  run • chat • code • doctor • runtime • cli_backends • Typer    │
-├─────────────────────────────────────────────────────────────────┤
+│  Integrations • framework_adapters • train • serve • dashboard  │
+├──────────────────────────────┬──────────────────────────────────┤
+│   praisonai-code (Terminal)  │   praisonai-bot (Channels)       │
+│   run • chat • code • doctor │   bots • gateway • BotOS • CLI   │
+├──────────────────────────────┴──────────────────────────────────┤
 │                    praisonaiagents (Core SDK)                   │
 │  Protocols • Hooks • Adapters • Base Classes • Decorators       │
 ├─────────────────────────────────────────────────────────────────┤
@@ -99,13 +99,14 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 
 ### 2.3 `praisonai-code` — Agentic Terminal CLI Split (C5/C6)
 
-The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends, Typer app) lives in the separate **`praisonai-code`** PyPI package (`praisonai_code`). The **`praisonai`** wrapper keeps bot/channel orchestration, gateway, and heavy integrations. **`pip install praisonai`** still installs everything; old import paths are preserved via shims.
+The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends, Typer app) lives in **`praisonai-code`** (`praisonai_code`). **Bots, gateway, and channel CLI** live in **`praisonai-bot`** (`praisonai_bot`) after C9. The **`praisonai`** wrapper keeps integrations, framework adapters, train, serve, and dashboard. **`pip install praisonai`** still installs everything; old import paths are preserved via shims.
 
 | Product | Location | Stays out of |
 |---------|----------|--------------|
 | Agentic terminal CLI | `src/praisonai-code/praisonai_code/` | Must **not** depend on `praisonai` (PyPI cycle) |
-| Bot/channel runtime | `src/praisonai/praisonai/` | Gateway, BotOS, onboarding, dashboard |
+| Bot/channel runtime | `src/praisonai-bot/praisonai_bot/` | Must **not** PyPI-depend on `praisonai` or `praisonai-code` |
 | Core SDK | `src/praisonai-agents/praisonaiagents/` | Heavy CLI / integrations |
+| Wrapper shims | `src/praisonai/praisonai/bots`, `gateway`, … | `alias_package` → `praisonai_bot` |
 
 **Moved into `praisonai_code` (~304 modules):**
 
@@ -966,9 +967,9 @@ Tokens are resolved in order: `explicit token=` > env var > empty string.
 |------|-------|
 | BotOSProtocol | `praisonaiagents/bots/protocols.py` |
 | BotOSConfig | `praisonaiagents/bots/config.py` |
-| Bot class | `praisonai/bots/bot.py` |
-| BotOS class | `praisonai/bots/botos.py` |
-| Platform registry | `praisonai/bots/_registry.py` |
+| Bot class | `praisonai_bot/bots/bot.py` (shim: `praisonai/bots/bot.py`) |
+| BotOS class | `praisonai_bot/bots/botos.py` (shim: `praisonai/bots/botos.py`) |
+| Platform registry | `praisonai_bot/bots/_registry.py` |
 | Unit tests | `tests/unit/test_botos_protocol.py` |
 | Integration tests | `tests/unit/test_botos_integration.py` |
 

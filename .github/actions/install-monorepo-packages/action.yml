@@ -35,6 +35,7 @@ runs:
         fi
         AGENTS_PKG="${BASE}src/praisonai-agents"
         CODE_PKG="${BASE}src/praisonai-code"
+        BOT_PKG="${BASE}src/praisonai-bot"
         WRAPPER_PKG="${BASE}src/praisonai"
 
         normalise_extras() {
@@ -54,12 +55,16 @@ runs:
           uv pip install --system -e "${AGENTS_SUFFIX}"
           cd "$CODE_PKG"
           uv pip install --system -e .
+          cd "$BOT_PKG"
+          uv pip install --system -e .
           cd "$WRAPPER_PKG"
           uv pip install --system "${WRAPPER_SUFFIX}"
         else
           cd "$AGENTS_PKG"
           pip install -e "${AGENTS_SUFFIX}"
           cd "$CODE_PKG"
+          pip install -e .
+          cd "$BOT_PKG"
           pip install -e .
           cd "$WRAPPER_PKG"
           pip install -e "${WRAPPER_SUFFIX}"

@@ -130,24 +130,36 @@ def __getattr__(name: str):
     
     if name == "WebSocketGateway":
         try:
+            from praisonai_bot.gateway import WebSocketGateway
+            _lazy_cache[name] = WebSocketGateway
+            return WebSocketGateway
+        except ImportError:
+            pass
+        try:
             from praisonai.gateway import WebSocketGateway
             _lazy_cache[name] = WebSocketGateway
             return WebSocketGateway
         except ImportError:
             raise ImportError(
-                "WebSocketGateway requires the praisonai wrapper package. "
-                "Install with: pip install praisonai"
+                "WebSocketGateway requires praisonai-bot or praisonai. "
+                "Install with: pip install praisonai-bot or pip install praisonai"
             )
-    
+
     if name == "GatewaySession":
+        try:
+            from praisonai_bot.gateway import GatewaySession
+            _lazy_cache[name] = GatewaySession
+            return GatewaySession
+        except ImportError:
+            pass
         try:
             from praisonai.gateway import GatewaySession
             _lazy_cache[name] = GatewaySession
             return GatewaySession
         except ImportError:
             raise ImportError(
-                "GatewaySession requires the praisonai wrapper package. "
-                "Install with: pip install praisonai"
+                "GatewaySession requires praisonai-bot or praisonai. "
+                "Install with: pip install praisonai-bot or pip install praisonai"
             )
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

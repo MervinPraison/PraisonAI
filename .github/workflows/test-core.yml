@@ -84,10 +84,13 @@ jobs:
               tests/unit/tui/
             extra_ignore: --ignore=tests/unit/cli/test_message_queue.py
           - shard: bots-gateway
+            workdir: src/praisonai-bot
             paths: >-
               tests/unit/bots/
               tests/unit/gateway/
             extra_ignore: ""
+            pythonpath: >-
+              ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
@@ -156,7 +159,11 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        cd src/praisonai
+        WORKDIR="${{ matrix.workdir || 'src/praisonai' }}"
+        cd "$WORKDIR"
+        if [ -n "${{ matrix.pythonpath || '' }}" ]; then
+          export PYTHONPATH="${{ matrix.pythonpath }}:${PYTHONPATH:-}"
+        fi
         PYTEST_ARGS=(
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere"
           -q --tb=line --disable-warnings

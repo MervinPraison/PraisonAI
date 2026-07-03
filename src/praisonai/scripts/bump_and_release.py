@@ -23,9 +23,10 @@ This script:
 8. Pushes to GitHub (with rebase if needed)
 9. Creates GitHub release (latest)
 
-Three-package publish order: praisonaiagents → praisonai-code → praisonai
+Three-package publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai
 Use --code to bump code package; --code-pin to pin wrapper after code publish.
-Use --wait for agents PyPI propagation; --wait-code for praisonai-code.
+Use --bot to bump bot package; --bot-pin to pin wrapper after bot publish.
+Use --wait for agents PyPI propagation; --wait-code for praisonai-code; --wait-bot for praisonai-bot.
 """
 
 import re
@@ -53,6 +54,11 @@ def get_praisonai_dir() -> Path:
 def get_praisonai_code_dir() -> Path:
     """Get the praisonai-code package directory."""
     return get_project_root() / "src/praisonai-code"
+
+
+def get_praisonai_bot_dir() -> Path:
+    """Get the praisonai-bot package directory."""
+    return get_project_root() / "src/praisonai-bot"
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
@@ -138,11 +144,14 @@ def bump_version(
     agents_version: Optional[str] = None,
     code_version: Optional[str] = None,
     code_pin_only: bool = False,
+    bot_version: Optional[str] = None,
+    bot_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
     code_dir = get_praisonai_code_dir()
+    bot_dir = get_praisonai_bot_dir()
     
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
@@ -223,6 +232,32 @@ def bump_version(
             ],
             root
         )
+
+    if bot_version:
+        if bot_pin_only:
+            print(f"\n📦 Pinning praisonai-bot dependency to >={bot_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-bot to {bot_version}:")
+            update_file(
+                bot_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{bot_version}"')],
+                root,
+            )
+            update_file(
+                bot_dir / "praisonai_bot/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{bot_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-bot(?:>=[0-9.]+)?"',
+                    f'"praisonai-bot>={bot_version}"',
+                )
+            ],
+            root,
+        )
     
     print("\n✨ Version bump complete!")
 
@@ -233,16 +268,19 @@ def validate_dependencies(
     use_frozen: bool = False,
     agents_version: Optional[str] = None,
     code_version: Optional[str] = None,
+    bot_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version:
+    if agents_version or code_version or bot_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
         if code_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-code=={code_version}"])
+        if bot_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-bot=={bot_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -326,6 +364,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai-code/pyproject.toml",
         "src/praisonai-code/praisonai_code/__init__.py",
         "src/praisonai-code/uv.lock",
+        "src/praisonai-bot/pyproject.toml",
+        "src/praisonai-bot/praisonai_bot/_version.py",
+        "src/praisonai-bot/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -437,6 +478,21 @@ Examples:
         default=None
     )
     parser.add_argument(
+        "--bot", "-b",
+        help="Bump praisonai-bot version (pyproject + _version.py) and pin wrapper dep",
+        default=None
+    )
+    parser.add_argument(
+        "--bot-pin",
+        help="Pin praisonai-bot>= in wrapper pyproject only (after CI bot publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-bot",
+        action="store_true",
+        help="Wait for the specified praisonai-bot version to be available on PyPI"
+    )
+    parser.add_argument(
         "--force", "-f",
         action="store_true",
         help="Skip pre-flight checks (use with caution)"
@@ -475,10 +531,20 @@ Examples:
         print("❌ Use only one of --code or --code-pin")
         sys.exit(1)
 
+    if args.bot and args.bot_pin:
+        print("❌ Use only one of --bot or --bot-pin")
+        sys.exit(1)
+
     code_version = args.code or args.code_pin
+    bot_version = args.bot or args.bot_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
+        sys.exit(1)
+
+    if bot_version and not re.match(r'^\d+\.\d+\.\d+$', bot_version):
+        print(f"❌ Invalid bot version format: {bot_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.2)")
         sys.exit(1)
     
     # Pre-flight checks
@@ -506,6 +572,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-code", code_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-code was published successfully")
             sys.exit(1)
+
+    if args.wait_bot and bot_version:
+        if not wait_for_pypi_version("praisonai-bot", bot_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-bot was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -513,6 +584,8 @@ Examples:
         args.agents,
         code_version=code_version,
         code_pin_only=bool(args.code_pin and not args.code),
+        bot_version=bot_version,
+        bot_pin_only=bool(args.bot_pin and not args.bot),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -523,6 +596,7 @@ Examples:
         use_frozen=patch_release,
         agents_version=args.agents,
         code_version=code_version,
+        bot_version=bot_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

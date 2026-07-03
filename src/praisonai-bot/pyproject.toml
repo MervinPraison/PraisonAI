@@ -1,0 +1,73 @@
+[project]
+name = "praisonai-bot"
+version = "0.0.1"
+description = "Bots, gateway, and channel CLI for PraisonAI — messaging platforms and WebSocket control plane extracted from the praisonai wrapper."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.117",
+    "rich>=13.7",
+    "typer>=0.12.0",
+    "click>=8.4.2",
+    "PyYAML>=6.0",
+    "python-dotenv>=0.19.0",
+    "pydantic>=2.0.0",
+    "aiohttp>=3.8.0",
+]
+
+[project.optional-dependencies]
+gateway = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "sse-starlette>=1.6.0",
+    "websockets>=12.0",
+    "watchdog>=3.0.0",
+    "redis>=5.0.0",
+]
+bot = [
+    "python-telegram-bot>=20.0",
+    "discord.py>=2.0.0",
+    "slack_sdk>=3.0.0",
+    "slack-bolt>=1.18.0",
+    "brotlicffi>=1.0.0",
+    "psutil>=5.9.0",
+    "ddgs>=9.0.0",
+]
+bot-whatsapp-web = [
+    "neonize>=0.3.14",
+    "qrcode>=7.0",
+]
+all = [
+    "praisonai-bot[gateway,bot]",
+]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[project.scripts]
+praisonai-bot = "praisonai_bot.__main__:main"
+
+[project.entry-points."praisonai.channels"]
+telegram = "praisonai_bot.bots.telegram:TelegramBot"
+discord = "praisonai_bot.bots.discord:DiscordBot"
+slack = "praisonai_bot.bots.slack:SlackBot"
+whatsapp = "praisonai_bot.bots.whatsapp:WhatsAppBot"
+linear = "praisonai_bot.bots.linear:LinearBot"
+email = "praisonai_bot.bots.email:EmailBot"
+agentmail = "praisonai_bot.bots.agentmail:AgentMailBot"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_bot*"]

@@ -17,29 +17,29 @@ HandlerFn = Callable[["PraisonAI", "Namespace", list[str]], Optional[int]]
 
 
 def dispatch_gateway(praison, args: "Namespace", unknown_args: list[str]) -> int:
-    """Route gateway to wrapper feature handler via bridge."""
-    from praisonai_code._wrapper_bridge import import_wrapper_module, wrapper_available
+    """Route gateway to bot feature handler via bridge."""
+    from praisonai_code._bot_bridge import bot_package_available, import_bot_module
 
-    if not wrapper_available():
-        print("Gateway requires the full PraisonAI wrapper. Install with: pip install praisonai")
+    if not bot_package_available():
+        print("Gateway requires praisonai-bot. Install with: pip install praisonai-bot")
         print("Or use: praisonai gateway ...")
         return 1
-    mod = import_wrapper_module("praisonai.cli.features.gateway")
+    mod = import_bot_module("praisonai_bot.cli.features.gateway")
     return mod.handle_gateway_command(unknown_args)
 
 
 def dispatch_bot(praison, args: "Namespace", unknown_args: list[str]) -> int:
-    """Route bot to wrapper feature handler via bridge."""
-    from praisonai_code._wrapper_bridge import import_wrapper_module, wrapper_available
+    """Route bot to bot feature handler via bridge."""
+    from praisonai_code._bot_bridge import bot_package_available, import_bot_module
 
-    if not wrapper_available():
-        print("Bot commands require the full PraisonAI wrapper. Install with: pip install praisonai")
+    if not bot_package_available():
+        print("Bot commands require praisonai-bot. Install with: pip install praisonai-bot")
         print("Or use: praisonai bot ...")
         return 1
     bot_args = list(unknown_args)
     if getattr(args, "model", None) and "--model" not in bot_args and "-m" not in bot_args:
         bot_args.extend(["--model", args.model])
-    mod = import_wrapper_module("praisonai.cli.features.bots_cli")
+    mod = import_bot_module("praisonai_bot.cli.features.bots_cli")
     return mod.handle_bot_command(bot_args)
 
 
