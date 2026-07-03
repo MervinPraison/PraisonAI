@@ -60,10 +60,35 @@ class DependencyChecker:
         """
         self._custom_tool_dirs = custom_tool_dirs or []
         self._tool_cache: Dict[str, DependencyStatus] = {}
+        self._resolver = None
+        self._resolver_loaded = False
+        self._sources_cache: Optional[Dict[str, str]] = None
+    
+    def _get_resolver(self):
+        """Lazily construct a shared ToolResolver (the canonical resolution chain).
+
+        Returns None if the resolver cannot be imported/constructed, so the
+        legacy partial checks remain available as a fallback.
+        """
+        if self._resolver_loaded:
+            return self._resolver
+        self._resolver_loaded = True
+        try:
+            from praisonai.tool_resolver import ToolResolver
+            self._resolver = ToolResolver()
+        except Exception:
+            self._resolver = None
+        return self._resolver
     
     def check_tool(self, tool_name: str) -> Dict[str, Any]:
         """
         Check if a tool is available.
+        
+        Delegates the "is this tool resolvable?" decision to the canonical
+        :class:`ToolResolver` (full local/builtin/external/registered chain)
+        so the diagnostic matches what actually loads at run time. Install
+        hints are computed only for genuinely-missing tools as a presentation
+        overlay on top of the resolver's buckets.
         
         Args:
             tool_name: Name of the tool to check
@@ -80,30 +105,23 @@ class DependencyChecker:
                 "install_hint": status.install_hint
             }
         
-        # Check built-in tools
-        source = self._check_builtin_tool(tool_name)
-        if source:
-            status = DependencyStatus(
-                name=tool_name,
-                available=True,
-                source=source
+        # Delegate to the canonical resolver's full source chain. This covers
+        # local tools.py, wrapper ToolRegistry, praisonaiagents built-ins,
+        # praisonai-tools, and the core registry / entry-point plugins.
+        source = self._check_resolver(tool_name)
+        # Fall back to the legacy partial checks only when the resolver is
+        # unavailable, so custom tool directories keep working standalone.
+        if source is None and self._get_resolver() is None:
+            source = (
+                self._check_builtin_tool(tool_name)
+                or self._check_praisonai_tools(tool_name)
+                or self._check_custom_dirs(tool_name)
             )
-            self._tool_cache[tool_name] = status
-            return {"available": True, "source": source, "install_hint": None}
+        # Custom directories are not part of the resolver chain; always honor
+        # them so template-local tool dirs resolve regardless.
+        if source is None:
+            source = self._check_custom_dirs(tool_name)
         
-        # Check praisonai-tools
-        source = self._check_praisonai_tools(tool_name)
-        if source:
-            status = DependencyStatus(
-                name=tool_name,
-                available=True,
-                source=source
-            )
-            self._tool_cache[tool_name] = status
-            return {"available": True, "source": source, "install_hint": None}
-        
-        # Check custom directories
-        source = self._check_custom_dirs(tool_name)
         if source:
             status = DependencyStatus(
                 name=tool_name,
@@ -126,6 +144,47 @@ class DependencyChecker:
         )
         self._tool_cache[tool_name] = status
         return {"available": False, "source": None, "install_hint": install_hint}
+    
+    def _check_resolver(self, tool_name: str) -> Optional[str]:
+        """Resolve via the canonical ToolResolver, returning its source bucket.
+
+        Returns the resolver's stable source identifier (``local`` / ``builtin``
+        / ``external`` / ``registered``) when the tool is resolvable, else None.
+        """
+        resolver = self._get_resolver()
+        if resolver is None:
+            return None
+        try:
+            if not resolver.has_tool(tool_name):
+                return None
+            # Prefer the resolver's own source attribution when available.
+            # The full source scan is cached once so verifying N tools does
+            # not trigger N full enumerations.
+            sources = self._resolver_sources()
+            if tool_name in sources:
+                return sources[tool_name]
+            return "resolver"
+        except Exception:
+            return None
+
+    def _resolver_sources(self) -> Dict[str, str]:
+        """Return the resolver's full source map, cached for reuse.
+
+        Caches :meth:`ToolResolver.list_available_sources` so repeated
+        ``check_tool`` calls reuse a single enumeration. Returns an empty
+        mapping when the resolver is unavailable or the scan fails.
+        """
+        if self._sources_cache is not None:
+            return self._sources_cache
+        sources: Dict[str, str] = {}
+        resolver = self._get_resolver()
+        if resolver is not None:
+            try:
+                sources = dict(resolver.list_available_sources())
+            except Exception:
+                sources = {}
+        self._sources_cache = sources
+        return sources
     
     def _check_builtin_tool(self, tool_name: str) -> Optional[str]:
         """Check if tool exists in built-in registry."""

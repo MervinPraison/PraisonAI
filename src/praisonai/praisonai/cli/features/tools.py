@@ -25,6 +25,20 @@ class ToolsHandler(CommandHandler):
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
         self._registry = None
+        self._resolver = None
+        self._resolver_loaded = False
+
+    def _get_resolver(self):
+        """Lazily construct the canonical ToolResolver (None if unavailable)."""
+        if self._resolver_loaded:
+            return self._resolver
+        self._resolver_loaded = True
+        try:
+            from praisonai.tool_resolver import ToolResolver
+            self._resolver = ToolResolver()
+        except Exception:
+            self._resolver = None
+        return self._resolver
     
     @property
     def feature_name(self) -> str:
@@ -71,13 +85,30 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         return self._registry
     
     def _get_builtin_tools(self) -> Dict[str, Any]:
-        """Get dictionary of built-in tools."""
-        tools = {}
-        try:
-            from praisonaiagents.tools import TOOL_MAPPINGS
-            tools.update(TOOL_MAPPINGS)
-        except ImportError:
-            pass
+        """Get dictionary of available tools.
+
+        Seeds the tool set from the canonical :class:`ToolResolver` so every
+        resolvable source (local tools.py, wrapper registry, praisonaiagents
+        built-ins, praisonai-tools, core registry / entry-point plugins) is
+        surfaced — not just ``TOOL_MAPPINGS``. Falls back to a direct
+        ``TOOL_MAPPINGS`` scan when the resolver is unavailable. The
+        human-readable description table below is kept as a presentation
+        overlay.
+        """
+        tools: Dict[str, Any] = {}
+        resolver = self._get_resolver()
+        if resolver is not None:
+            try:
+                tools.update({name: {"source": src}
+                              for name, src in resolver.list_available_sources().items()})
+            except Exception:
+                pass
+        if not tools:
+            try:
+                from praisonaiagents.tools import TOOL_MAPPINGS
+                tools.update(TOOL_MAPPINGS)
+            except ImportError:
+                pass
         
         # Add common tool descriptions
         tool_descriptions = {
@@ -97,8 +128,18 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         }
         
         for name, desc in tool_descriptions.items():
-            if name not in tools:
-                tools[name] = {"description": desc, "available": name in tools}
+            if name in tools:
+                # Overlay the human-readable description onto entries already
+                # discovered by the resolver (stored as {"source": ...}) so
+                # `tools list` shows the description instead of "No description".
+                entry = tools[name]
+                if isinstance(entry, dict):
+                    entry.setdefault("description", desc)
+                    entry.setdefault("available", True)
+                else:
+                    tools[name] = {"description": desc, "available": True}
+            else:
+                tools[name] = {"description": desc, "available": False}
         
         return tools
     
@@ -377,6 +418,21 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             discovered["praisonaiagents.tools"] = list(TOOL_MAPPINGS.keys())[:20]  # Limit
         except ImportError:
             pass
+        
+        # Surface registered / entry-point plugin tools via the canonical
+        # resolver so discovery matches the full runtime resolution chain
+        # instead of only the two partial sources scanned above.
+        resolver = self._get_resolver()
+        if resolver is not None:
+            try:
+                registered = [
+                    name for name, src in resolver.list_available_sources().items()
+                    if src == "registered"
+                ]
+                if registered:
+                    discovered["registered"] = registered[:20]
+            except Exception:
+                pass
         
         # Additional packages from --include
         for pkg in include_packages:

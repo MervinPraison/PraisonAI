@@ -47,6 +47,42 @@ class ToolsDoctor:
             custom_dirs: Additional custom tool directories to check
         """
         self._custom_dirs = custom_dirs or []
+        self._resolver = None
+        self._resolver_loaded = False
+        self._sources_by_bucket: Optional[Dict[str, List[str]]] = None
+    
+    def _get_resolver(self):
+        """Lazily construct the canonical ToolResolver (None if unavailable)."""
+        if self._resolver_loaded:
+            return self._resolver
+        self._resolver_loaded = True
+        try:
+            from praisonai.tool_resolver import ToolResolver
+            self._resolver = ToolResolver()
+        except Exception:
+            self._resolver = None
+        return self._resolver
+    
+    def _resolver_sources(self) -> Dict[str, List[str]]:
+        """Group the resolver's discovered tools by their source bucket.
+
+        Buckets mirror :meth:`ToolResolver.list_available_sources` values:
+        ``local`` / ``builtin`` / ``external`` / ``registered``. Returns an
+        empty mapping when the resolver is unavailable so callers fall back
+        to the legacy per-source listing.
+        """
+        if self._sources_by_bucket is not None:
+            return self._sources_by_bucket
+        buckets: Dict[str, List[str]] = {}
+        resolver = self._get_resolver()
+        if resolver is not None:
+            try:
+                for name, src in resolver.list_available_sources().items():
+                    buckets.setdefault(src, []).append(name)
+            except Exception:
+                buckets = {}
+        self._sources_by_bucket = buckets
+        return buckets
     
     def diagnose(self) -> Dict[str, Any]:
         """
@@ -103,7 +139,16 @@ class ToolsDoctor:
         return spec is not None
     
     def _get_builtin_tools(self) -> List[str]:
-        """Get list of built-in tools."""
+        """Get list of built-in tools.
+
+        Delegates to the canonical :class:`ToolResolver` (the ``builtin``
+        bucket of :meth:`ToolResolver.list_available_sources`) so this matches
+        the runtime resolution chain, falling back to a direct
+        ``TOOL_MAPPINGS`` scan when the resolver is unavailable.
+        """
+        buckets = self._resolver_sources()
+        if "builtin" in buckets:
+            return sorted(buckets["builtin"])
         tools = []
         try:
             from praisonaiagents.tools import TOOL_MAPPINGS
@@ -113,7 +158,15 @@ class ToolsDoctor:
         return tools
     
     def _get_praisonai_tools_list(self) -> List[str]:
-        """Get list of tools from praisonai-tools package."""
+        """Get list of tools from praisonai-tools package.
+
+        Delegates to the resolver's ``external`` bucket so it mirrors what the
+        resolver would actually load, falling back to a direct package scan
+        when the resolver is unavailable.
+        """
+        buckets = self._resolver_sources()
+        if "external" in buckets:
+            return sorted(buckets["external"])
         tools = []
         try:
             import praisonai_tools
