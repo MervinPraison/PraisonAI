@@ -146,6 +146,18 @@ def test_editor_llm_indicator_no_unicode_error_on_cp1252():
     stream.flush()  # must not raise UnicodeEncodeError
 
 
+def test_editor_error_markup_in_message_no_markup_error():
+    # Dynamic error text must not be parsed as Rich markup (parity with StatusOutput).
+    from rich.console import Console
+    from praisonaiagents.output.editor import EditorOutput
+
+    stream = _Utf8Stream()
+    console = Console(file=stream, force_terminal=True)
+    out = EditorOutput(console=console, use_rich=True)
+    out.error("bad [/close] tag [oops]")  # must not raise MarkupError
+    assert "bad" in stream.getvalue()
+
+
 def test_trace_output_no_unicode_error_on_cp1252():
     stream = _Cp1252Stream()
     out = TraceOutput(file=stream, use_color=False, show_timestamps=False)

@@ -285,7 +285,11 @@ class EditorOutput:
         """
         prefix = self._get_prefix(agent_name)
         if self._use_rich:
-            self._console.print(f"[red]{prefix}✗ Error: {message}[/red]")
+            from .encoding import safe_text
+            from rich.markup import escape as _escape
+            stream = getattr(self._console, "file", None)
+            safe_msg = _escape(safe_text(message, stream))
+            self._console.print(f"[red]{prefix}✗ Error: {safe_msg}[/red]")
         else:
             print(f"{prefix}✗ Error: {message}")
 
@@ -416,7 +420,11 @@ class EditorOutput:
 
     def _render_command(self, cmd: str, output: Optional[str] = None):
         if self._use_rich:
-            self._console.print(f"[dim]{cmd}[/dim]")
+            from .encoding import safe_text
+            from rich.markup import escape as _escape
+            stream = getattr(self._console, "file", None)
+            safe_cmd = _escape(safe_text(cmd, stream))
+            self._console.print(f"[dim]{safe_cmd}[/dim]")
             if output:
                 self._console.print(output)
         else:
@@ -505,10 +513,8 @@ def enable_editor_output(
     def on_error(message: str = None, **kwargs):
         if not _editor_output_enabled or _editor_output is None:
             return
-        if message and _editor_output._use_rich:
-            _editor_output._console.print(f"[red]✗ Error: {message}[/red]")
-        elif message:
-            print(f"✗ Error: {message}")
+        if message:
+            _editor_output.error(message)
 
     def on_llm_start(model: str = None, agent_name: str = None, **kwargs):
         if not _editor_output_enabled or _editor_output is None:
