@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from praisonai_bot.cli.commands.gateway import app
 
 
-@patch("praisonai.daemon.install_daemon")
+@patch("praisonai_bot.daemon.install_daemon")
 def test_gateway_install_success(mock_install):
     """Test successful gateway install command."""
     mock_install.return_value = {"ok": True, "message": "Installed successfully"}
@@ -23,8 +23,8 @@ def test_gateway_install_success(mock_install):
     assert result.exit_code == 0
 
 
-@patch("praisonai.cli._paths.resolve_bot_config_path", return_value="bot.yaml")
-@patch("praisonai.daemon.install_daemon")
+@patch("praisonai_code.cli._paths.resolve_bot_config_path", return_value="bot.yaml")
+@patch("praisonai_bot.daemon.install_daemon")
 def test_gateway_install_failure(mock_install, mock_resolve):
     """Test failed gateway install command."""
     mock_install.return_value = {"ok": False, "error": "Installation failed"}
@@ -36,7 +36,7 @@ def test_gateway_install_failure(mock_install, mock_resolve):
     assert result.exit_code == 1
 
 
-@patch("praisonai.daemon.uninstall_daemon")
+@patch("praisonai_bot.daemon.uninstall_daemon")
 def test_gateway_uninstall_success(mock_uninstall):
     """Test successful gateway uninstall command."""
     mock_uninstall.return_value = {"ok": True, "message": "Uninstalled successfully"}
@@ -48,7 +48,7 @@ def test_gateway_uninstall_success(mock_uninstall):
     assert result.exit_code == 0
 
 
-@patch("praisonai.daemon.uninstall_daemon")
+@patch("praisonai_bot.daemon.uninstall_daemon")
 def test_gateway_uninstall_failure(mock_uninstall):
     """Test failed gateway uninstall command."""
     mock_uninstall.return_value = {"ok": False, "error": "Uninstallation failed"}
@@ -60,8 +60,8 @@ def test_gateway_uninstall_failure(mock_uninstall):
     assert result.exit_code == 1
 
 
-@patch("praisonai.daemon._detect_platform", return_value="systemd")
-@patch("praisonai.daemon.systemd.get_logs")
+@patch("praisonai_bot.daemon._detect_platform", return_value="systemd")
+@patch("praisonai_bot.daemon.systemd.get_logs")
 def test_gateway_logs_systemd(mock_get_logs, mock_detect):
     """Test gateway logs command on systemd."""
     mock_get_logs.return_value = "test log output"
@@ -73,8 +73,8 @@ def test_gateway_logs_systemd(mock_get_logs, mock_detect):
     assert result.exit_code == 0
 
 
-@patch("praisonai.daemon._detect_platform", return_value="launchd")
-@patch("praisonai.daemon.launchd.get_logs")
+@patch("praisonai_bot.daemon._detect_platform", return_value="launchd")
+@patch("praisonai_bot.daemon.launchd.get_logs")
 def test_gateway_logs_launchd(mock_get_logs, mock_detect):
     """Test gateway logs command on launchd."""
     mock_get_logs.return_value = "test log output"
@@ -86,8 +86,8 @@ def test_gateway_logs_launchd(mock_get_logs, mock_detect):
     assert result.exit_code == 0
 
 
-@patch("praisonai.daemon._detect_platform", return_value="windows")
-@patch("praisonai.daemon.windows.get_logs")
+@patch("praisonai_bot.daemon._detect_platform", return_value="windows")
+@patch("praisonai_bot.daemon.windows.get_logs")
 def test_gateway_logs_windows(mock_get_logs, mock_detect):
     """Test gateway logs command on Windows."""
     mock_get_logs.return_value = "Log viewing not yet implemented for Windows"
@@ -99,8 +99,8 @@ def test_gateway_logs_windows(mock_get_logs, mock_detect):
     assert result.exit_code == 0
 
 
-@patch("praisonai.daemon.get_daemon_status")
-@patch("praisonai.cli.features.gateway.GatewayHandler")
+@patch("praisonai_bot.daemon.get_daemon_status")
+@patch("praisonai_bot.cli.features.gateway.GatewayHandler")
 def test_gateway_status_with_daemon(mock_handler_class, mock_status):
     """Test gateway status command includes daemon status."""
     mock_status.return_value = {

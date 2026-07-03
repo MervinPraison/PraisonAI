@@ -23,6 +23,7 @@ output
 !src/praisonai/praisonai/cli/output/
 !src/praisonai-agents/praisonaiagents/output/
 !src/praisonai-code/praisonai_code/cli/output/
+!src/praisonai-bot/praisonai_bot/cli/output/
 
 .files
 threads.db

@@ -34,8 +34,8 @@ def test_detect_platform_unknown():
         assert _detect_platform() == 'unknown'
 
 
-@patch('praisonai.daemon._detect_platform', return_value='systemd')
-@patch('praisonai.daemon.systemd.install')
+@patch('praisonai_bot.daemon._detect_platform', return_value='systemd')
+@patch('praisonai_bot.daemon.systemd.install')
 def test_install_daemon_routes_to_systemd(mock_systemd_install, mock_detect):
     """Test that install_daemon routes to systemd on Linux."""
     mock_systemd_install.return_value = {"ok": True, "message": "Installed"}
@@ -46,8 +46,8 @@ def test_install_daemon_routes_to_systemd(mock_systemd_install, mock_detect):
     assert result["ok"] is True
 
 
-@patch('praisonai.daemon._detect_platform', return_value='launchd')
-@patch('praisonai.daemon.launchd.install')
+@patch('praisonai_bot.daemon._detect_platform', return_value='launchd')
+@patch('praisonai_bot.daemon.launchd.install')
 def test_install_daemon_routes_to_launchd(mock_launchd_install, mock_detect):
     """Test that install_daemon routes to launchd on macOS."""
     mock_launchd_install.return_value = {"ok": True, "message": "Installed"}
@@ -58,8 +58,8 @@ def test_install_daemon_routes_to_launchd(mock_launchd_install, mock_detect):
     assert result["ok"] is True
 
 
-@patch('praisonai.daemon._detect_platform', return_value='windows')
-@patch('praisonai.daemon.windows.install')
+@patch('praisonai_bot.daemon._detect_platform', return_value='windows')
+@patch('praisonai_bot.daemon.windows.install')
 def test_install_daemon_routes_to_windows(mock_windows_install, mock_detect):
     """Test that install_daemon routes to windows backend."""
     mock_windows_install.return_value = {"ok": True, "message": "Installed"}
@@ -70,7 +70,7 @@ def test_install_daemon_routes_to_windows(mock_windows_install, mock_detect):
     assert result["ok"] is True
 
 
-@patch('praisonai.daemon._detect_platform', return_value='unknown')
+@patch('praisonai_bot.daemon._detect_platform', return_value='unknown')
 def test_install_daemon_unsupported_platform(mock_detect):
     """Test that install_daemon handles unsupported platforms."""
     result = install_daemon(config_path="test.yaml")
@@ -79,8 +79,8 @@ def test_install_daemon_unsupported_platform(mock_detect):
     assert "Unsupported platform" in result["error"]
 
 
-@patch('praisonai.daemon._detect_platform', return_value='systemd')
-@patch('praisonai.daemon.systemd.get_status')
+@patch('praisonai_bot.daemon._detect_platform', return_value='systemd')
+@patch('praisonai_bot.daemon.systemd.get_status')
 def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
     """Test that get_daemon_status routes to systemd on Linux."""
     mock_systemd_status.return_value = {"installed": True, "running": True}
@@ -91,7 +91,7 @@ def test_get_daemon_status_routes_to_systemd(mock_systemd_status, mock_detect):
     assert result["installed"] is True
 
 
-@patch('praisonai.daemon.windows.subprocess.run')
+@patch('praisonai_bot.daemon.windows.subprocess.run')
 def test_windows_scheduled_task_command_is_well_formed(mock_run):
     """Test Windows scheduled task command format is valid."""
     mock_run.return_value = MagicMock(stdout="ok")

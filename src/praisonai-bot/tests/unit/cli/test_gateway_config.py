@@ -124,9 +124,32 @@ def test_schema_accepts_gateway_and_hooks_blocks():
 def test_doctor_checks():
     """Test doctor check structure."""
     print("\n=== Testing Doctor Checks ===")
-    
+
+    # Resolve the wrapper package directory robustly. ``praisonai.__file__`` can
+    # be ``None`` (namespace package) or transiently patched by sibling tests, so
+    # fall back to ``__path__`` and finally to importlib's spec.
+    import importlib.util
+
+    pkg_dir = None
+    pkg_file = getattr(praisonai, "__file__", None)
+    if pkg_file:
+        pkg_dir = Path(pkg_file).parent
+    elif getattr(praisonai, "__path__", None):
+        pkg_dir = Path(list(praisonai.__path__)[0])
+    else:
+        spec = importlib.util.find_spec("praisonai")
+        if spec and spec.origin:
+            pkg_dir = Path(spec.origin).parent
+        elif spec and spec.submodule_search_locations:
+            pkg_dir = Path(list(spec.submodule_search_locations)[0])
+
+    if pkg_dir is None:
+        import pytest
+
+        pytest.skip("praisonai wrapper package not installed")
+
     # Verify doctor checks file exists
-    doctor_checks_path = Path(praisonai.__file__).parent / "cli" / "features" / "doctor" / "checks" / "gateway_checks.py"
+    doctor_checks_path = pkg_dir / "cli" / "features" / "doctor" / "checks" / "gateway_checks.py"
     
     if doctor_checks_path.exists():
         print("✓ gateway_checks.py exists")

@@ -57,7 +57,7 @@ class TestLegacyModuleImports:
 
     def test_wrapper_legacy_modules_importable(self):
         from praisonai.cli.legacy import subcommand_handlers
-        from praisonai_bot.cli.legacy.dispatch import argparse_builder, legacy_dispatch
+        from praisonai.cli.legacy.dispatch import argparse_builder, legacy_dispatch
 
         assert hasattr(subcommand_handlers, "handle_memory_command")
         assert hasattr(argparse_builder, "build_argument_parser")
@@ -122,12 +122,12 @@ class TestFeatureImportPaths:
 
 class TestLegacyDispatch:
     def test_gateway_dispatch_without_wrapper(self):
-        from praisonai_bot.cli.legacy.dispatch.legacy_dispatch import dispatch_gateway
+        from praisonai.cli.legacy.dispatch.legacy_dispatch import dispatch_gateway
         from praisonai_code.cli.main import PraisonAI
         import argparse
 
         args = argparse.Namespace(model=None)
-        with patch("praisonai_code._wrapper_bridge.wrapper_available", return_value=False):
+        with patch("praisonai_code._bot_bridge.bot_package_available", return_value=False):
             code = dispatch_gateway(PraisonAI(), args, ["start"])
         assert code == 1
 
