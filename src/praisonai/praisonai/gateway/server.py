@@ -2063,10 +2063,11 @@ class WebSocketGateway:
         offloading the synchronous ``chat`` onto the default thread pool only
         when no async entry point is available (sync-only agents).
         """
-        arun = getattr(agent, "arun", None) or getattr(agent, "achat", None)
-        if arun is not None and asyncio.iscoroutinefunction(arun):
-            return await arun(content)
-        loop = asyncio.get_event_loop()
+        for _name in ("arun", "achat"):
+            _fn = getattr(agent, _name, None)
+            if _fn is not None and asyncio.iscoroutinefunction(_fn):
+                return await _fn(content)
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, agent.chat, content)
 
     async def _run_session_queue(self, session: GatewaySession, agent: Any, client_id: str) -> None:

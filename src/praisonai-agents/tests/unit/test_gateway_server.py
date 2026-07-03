@@ -531,3 +531,51 @@ class TestGatewayDispatch:
 
         result = _asyncio.run(cls._dispatch_agent_turn(SyncAgent(), "hi"))
         assert result == "sync:hi"
+
+    def test_dispatch_uses_achat_when_no_arun(self):
+        """Agents exposing only async ``achat`` are awaited directly."""
+        import asyncio as _asyncio
+
+        cls = self._get_gateway_class()
+        if cls is None:
+            __import__("pytest").skip("praisonai wrapper not installed")
+
+        calls = {"achat": 0, "chat": 0}
+
+        class AchatAgent:
+            async def achat(self, content):
+                calls["achat"] += 1
+                return f"achat:{content}"
+
+            def chat(self, content):  # pragma: no cover - must not be used
+                calls["chat"] += 1
+                return f"sync:{content}"
+
+        result = _asyncio.run(cls._dispatch_agent_turn(AchatAgent(), "hi"))
+        assert result == "achat:hi"
+        assert calls["achat"] == 1
+        assert calls["chat"] == 0
+
+    def test_dispatch_prefers_async_achat_over_sync_arun(self):
+        """A sync ``arun`` must not shadow an async ``achat`` (#2618)."""
+        import asyncio as _asyncio
+
+        cls = self._get_gateway_class()
+        if cls is None:
+            __import__("pytest").skip("praisonai wrapper not installed")
+
+        calls = {"arun": 0, "achat": 0}
+
+        class MixedAgent:
+            def arun(self, content):  # sync attribute, must be skipped
+                calls["arun"] += 1
+                return f"sync-arun:{content}"
+
+            async def achat(self, content):
+                calls["achat"] += 1
+                return f"achat:{content}"
+
+        result = _asyncio.run(cls._dispatch_agent_turn(MixedAgent(), "hi"))
+        assert result == "achat:hi"
+        assert calls["achat"] == 1
+        assert calls["arun"] == 0
