@@ -56,4 +56,18 @@ assert(
   !chain.claudeFinalReady([coderabbit, greptile], [], { allowCopilotTimeout: true }).ready
 );
 
+const geminiReview = {
+  user: { login: 'gemini-code-assist[bot]' },
+  body: '## Code Review\n\nThis pull request decomposes the large main.py file',
+  submitted_at: '2026-07-03T08:08:00Z',
+};
+assert(
+  'gemini pull review counts as prior reviewer',
+  chain.hasGeminiReview([], [geminiReview])
+);
+assert(
+  'prior ready with gemini review only (no gemini comment)',
+  chain.priorReviewersReady([coderabbit, greptile], [geminiReview], { optionalWaitMs: 0 }).ready
+);
+
 process.exit(failed ? 1 : 0);

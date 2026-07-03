@@ -42,7 +42,10 @@ jobs:
          contains(github.event.comment.user.login, 'qodo-code-review')
        )) ||
       (github.event_name == 'pull_request_review' &&
-       contains(github.event.review.user.login, 'qodo-code-review'))
+       (
+         contains(github.event.review.user.login, 'qodo-code-review') ||
+         contains(github.event.review.user.login, 'gemini-code-assist')
+       ))
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -97,7 +100,7 @@ jobs:
       - name: Wait for review chain (25 min)
         run: sleep 1500
 
-      - name: Post Claude FINAL (prior reviewers + Copilot timeout OK)
+      - name: Advance review chain (Copilot then Claude FINAL)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -106,11 +109,27 @@ jobs:
             const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pr-review-chain.js'));
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const pr = context.payload.pull_request.number;
-            await chain.maybeTriggerClaudeFinal(
-              github, context.repo.owner, context.repo.repo, pr,
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const result = await chain.advanceReviewChain(
+              github, owner, repo, pr,
               mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
               { allowCopilotTimeout: true, optionalWaitMs: 0 }
             );
+            if (result.copilot.triggered) {
+              const poll = await chain.pollCopilotResponse(github, owner, repo, pr, {
+                maxAttempts: parseInt(process.env.MAX_POLL_ATTEMPTS, 10),
+                delayMs: parseInt(process.env.POLL_DELAY_MS, 10),
+              });
+              core.info(`Copilot poll after fallback trigger: ${poll.ready ? 'ready' : poll.reason}`);
+            }
+            if (!result.claude.posted) {
+              await chain.maybeTriggerClaudeFinal(
+                github, owner, repo, pr,
+                mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
+                { allowCopilotTimeout: true, optionalWaitMs: 0 }
+              );
+            }
 
   # ================================================================
   # Claude FINAL — only after Copilot responds (prior reviewers already done)
@@ -315,14 +334,16 @@ jobs:
                 }
               }
 
-              const result = await chain.maybeTriggerClaudeFinal(
+              const result = await chain.advanceReviewChain(
                 github, owner, repo, pr.number,
                 mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
                 { allowCopilotTimeout: true, optionalWaitMs: 0 }
               );
-              if (result.posted) {
+              if (result.copilot.triggered || result.claude.posted) {
                 posted++;
-                core.info(`Posted Claude FINAL on PR #${pr.number}`);
+                core.info(
+                  `PR #${pr.number}: copilot=${result.copilot.triggered}, claude=${result.claude.posted}`
+                );
               }
               if (posted >= 10) break;
             }
