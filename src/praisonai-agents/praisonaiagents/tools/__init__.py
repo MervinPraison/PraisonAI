@@ -214,6 +214,13 @@ TOOL_MAPPINGS = {
     'todo_update': ('.todo_tools', None),
     'create_todo_tools': ('.todo_tools', None),
     'todo_tools': ('.todo_tools', None),
+
+    # LSP Navigation Tools (language-server-accurate code navigation)
+    'lsp_definition': ('.lsp_tools', None),
+    'lsp_references': ('.lsp_tools', None),
+    'lsp_hover': ('.lsp_tools', None),
+    'lsp_document_symbols': ('.lsp_tools', None),
+    'lsp_workspace_symbols': ('.lsp_tools', None),
     
     # Memory Tools (active memory store/search for agents)
     'store_memory': ('.memory', None),
@@ -389,6 +396,7 @@ def __getattr__(name: str) -> Any:
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'edit_file', 'apply_patch', 'create_edit_tools',
             'todo_add', 'todo_list', 'todo_update', 'create_todo_tools',
+            'lsp_definition', 'lsp_references', 'lsp_hover', 'lsp_document_symbols', 'lsp_workspace_symbols',
             'store_memory', 'search_memory',
             'store_learning', 'search_learning',
             'session_search', 'create_session_tools',
