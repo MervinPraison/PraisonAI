@@ -897,22 +897,24 @@ BotOS is the multi-platform bot orchestration layer for PraisonAI. It follows th
 |-------|---------|---------|
 | `BotOSProtocol` | `praisonaiagents` (Core SDK) | Interface contract — lightweight |
 | `BotOSConfig` | `praisonaiagents` (Core SDK) | Configuration dataclass |
-| `Bot` | `praisonai` (Wrapper) | Single-platform bot wrapper |
-| `BotOS` | `praisonai` (Wrapper) | Multi-platform orchestrator |
-| `_registry` | `praisonai` (Wrapper) | Platform adapter registry |
+| `Bot`, `BotOS`, adapters | `praisonai-bot` (Tier 2b) | Platform bots and multi-bot orchestration |
+| `_registry` | `praisonai_bot.bots._registry` | Platform adapter registry (entry-point `praisonai.channels`) |
+| Shims | `praisonai.bots` / `praisonai.gateway` | Backward-compat `alias_package` re-exports |
 
 ### 12.3 Usage Patterns
 
 ```python
 # === Level 1: Single bot, 3 lines ===
-from praisonai.bots import Bot
+from praisonai_bot.bots import Bot
 from praisonaiagents import Agent
 
 bot = Bot("telegram", agent=Agent(name="assistant", instructions="Be helpful"))
 bot.run()
 
+# Shims: ``from praisonai.bots import Bot`` still works when the wrapper is installed.
+
 # === Level 2: Multi-platform, shared agent ===
-from praisonai.bots import BotOS
+from praisonai_bot.bots import BotOS
 from praisonaiagents import Agent
 
 agent = Agent(name="assistant", instructions="Be helpful")
@@ -920,7 +922,7 @@ botos = BotOS(agent=agent, platforms=["telegram", "discord"])
 botos.run()
 
 # === Level 3: AgentTeam in BotOS ===
-from praisonai.bots import BotOS, Bot
+from praisonai_bot.bots import BotOS, Bot
 from praisonaiagents import Agent, AgentTeam, Task
 
 researcher = Agent(name="researcher", instructions="Research topics")

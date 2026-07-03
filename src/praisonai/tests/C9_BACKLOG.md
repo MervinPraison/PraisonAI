@@ -13,13 +13,13 @@ Epic branch: `feat/c9-praisonai-bot`
 | C9.3 | done | `daemon/`, `integration/` partial |
 | C9.4 | done | CLI commands/features, `_BOT_RESIDENT_COMMANDS` |
 | C9.5 | done | pyproject extras, wrapper dep |
-| C9.5b | partial | kanban/claw/tools/audio moved; scheduler via `_wrapper_bridge` |
+| C9.5b | done | scheduler in bot; jobs/UI stay wrapper via `_wrapper_bridge` |
 | C9.6 | done | `_bot_bridge`, SDK lazy re-export, doctor/approval |
 | C9.6b | partial | serve gateway/recipe retarget done; HTTP serve stays in wrapper |
 | C9.7 | done | test_c9_backward_compat, install action, boundary tests |
 | C9.7b | done | pypi-release 4th package, `publish_all.py`, wrapper pin |
 | C9.8 | done | entry-points `praisonai.channels` |
-| C9.9 | partial | ARCHITECTURE/AGENTS updated; Mintlify standalone install TBD |
+| C9.9 | done | ARCHITECTURE/AGENTS/Mintlify four-tier install |
 | C9.10 | done | registry standalone fix, backlog/manifest reconciliation |
 
 ## Post-C9 gap fixes (2026-07-03)
@@ -29,11 +29,13 @@ Epic branch: `feat/c9-praisonai-bot`
 - [x] `praisonai_bot.__init__.__version__` synced from `_version.py`
 - [x] SDK docstrings → canonical `praisonai-bot` home
 - [x] Standalone CI smoke + `test_bot_registry_resolves_without_wrapper`
+- [x] Gateway scheduler → `praisonai_bot.scheduler` (no wrapper bridge)
+- [x] `[claw]` extra composes `praisonai-bot[gateway,bot]`
+- [x] CI legacy paths + `test_c9_*` smoke; duplicate onboard tests removed
 
 ## Deferred (optional follow-on)
 
-- [ ] Move gateway scheduler subset out of wrapper bridge (`praisonai.scheduler.executor`)
-- [ ] Mintlify + examples: first-class `pip install praisonai-bot[gateway,bot]`
+- [ ] `praisonai.jobs/*` move — stays wrapper-owned (lazy `praisonai` + recipe deps)
 - [ ] C9.11 gateway `server.py` thinning (optional)
 
 ## Gates
