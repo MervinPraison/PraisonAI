@@ -20,6 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 _LEGACY_PYTHONPATH = os.pathsep.join(
     [
         str(REPO_ROOT / "src" / "praisonai-agents"),
+        str(REPO_ROOT / "src" / "praisonai-code"),
+        str(REPO_ROOT / "src" / "praisonai-bot"),
         str(REPO_ROOT / "src" / "praisonai"),
     ]
 )
@@ -176,24 +178,22 @@ class TestCliEntryPoints:
         assert result.stdout.strip()
 
 
-class TestBotLayerUnchanged:
-    """Bot/channel modules must remain real wrapper implementations, not shims."""
+class TestBotLayerShimmed:
+    """C9: bot/gateway CLI modules are shims to praisonai_bot."""
 
     @pytest.mark.parametrize(
-        "module_path,marker",
+        "shim_path,impl_path",
         [
-            ("praisonai.cli.commands.gateway", "Manage the PraisonAI Gateway"),
-            ("praisonai.cli.commands.bot", "messaging bots"),
-            ("praisonai.cli.features.gateway", "gateway"),
-            ("praisonai.cli.features.bots_cli", "BotHandler"),
+            ("praisonai.cli.commands.bot", "praisonai_bot.cli.commands.bot"),
+            ("praisonai.cli.commands.gateway", "praisonai_bot.cli.commands.gateway"),
+            ("praisonai.bots.bot", "praisonai_bot.bots.bot"),
+            ("praisonai.gateway.server", "praisonai_bot.gateway.server"),
         ],
     )
-    def test_bot_modules_are_wrapper_local(self, module_path: str, marker: str):
-        mod = importlib.import_module(module_path)
-        source = inspect.getsourcefile(mod) or ""
-        assert "/praisonai/praisonai/" in source.replace("\\", "/")
-        assert "praisonai-code" not in source.replace("\\", "/")
-        assert marker.lower() in inspect.getsource(mod).lower() or hasattr(mod, marker)
+    def test_bot_shim_module_identity(self, shim_path: str, impl_path: str):
+        shim_mod = importlib.import_module(shim_path)
+        impl_mod = importlib.import_module(impl_path)
+        assert shim_mod is impl_mod
 
     def test_no_nested_praisonai_code_package(self):
         nested = REPO_ROOT / "src" / "praisonai" / "praisonai_code"

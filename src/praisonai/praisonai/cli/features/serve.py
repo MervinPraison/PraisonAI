@@ -488,18 +488,13 @@ Launch PraisonAI servers with unified discovery support.
             
         try:
             self._print_success(f"Starting recipe gateway on {parsed['host']}:{parsed['port']}")
-            import asyncio
-            from praisonai.gateway import WebSocketGateway
-            from praisonaiagents.gateway.adapters.recipe_adapter import RecipeBotAdapter
-            
-            async def _run():
-                gateway = WebSocketGateway(host=parsed['host'], port=parsed['port'])
-                agent = RecipeBotAdapter(recipe_name=recipe_name)
-                gateway.register_agent(agent)
-                await gateway.start()
-                
-            asyncio.run(_run())
-            
+            from praisonai_bot.cli.features.recipe_gateway import run_recipe_gateway
+
+            return run_recipe_gateway(
+                host=parsed["host"],
+                port=parsed["port"],
+                recipe_name=recipe_name,
+            )
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
             print("Install with: pip install praisonai[serve]")
@@ -507,8 +502,6 @@ Launch PraisonAI servers with unified discovery support.
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
-        
-        return self.EXIT_SUCCESS
     
     def cmd_mcp(self, args: List[str]) -> int:
         """Launch MCP server (DEPRECATED - use 'praisonai mcp serve' instead)."""

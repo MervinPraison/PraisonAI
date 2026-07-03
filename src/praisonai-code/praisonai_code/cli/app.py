@@ -208,6 +208,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "identity": (".commands.identity", "app", "Manage cross-platform user identity links"),
     "kanban": (".commands.kanban", "app", "Kanban task management"),
     "claw": (".commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
+    "mint_link": (".commands.mint_link", "app", "Generate gateway magic links"),
     "dashboard": (".commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
 
     "browser": (".commands.browser", "app", "Browser control for agent automation"),
@@ -228,19 +229,24 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
 # relative ``.commands.*`` path would resolve to ``praisonai_code`` where the
 # modules do not live. The import happens lazily at invocation time only, so
 # ``praisonai_code`` keeps no static dependency on ``praisonai``.
-# C8: Typer modules whose implementation lives in ``praisonai.cli.commands.*`` only
-# (no ``praisonai_code.cli.commands.*`` copy). ``get_command()`` loads these via
-# absolute import when the wrapper is installed; standalone installs hide them from
-# ``--help``. Add names here as commands are repatriated from praisonai-code.
-_WRAPPER_RESIDENT_COMMANDS = frozenset({
+# C9: Bot/channel commands implemented in ``praisonai_bot.cli.commands.*``.
+_BOT_RESIDENT_COMMANDS = frozenset({
     "bot",
     "gateway",
     "pairing",
     "identity",
     "onboard",
     "kanban",
-    "dashboard",
     "claw",
+    "mint_link",
+})
+
+# C8: Typer modules whose implementation lives in ``praisonai.cli.commands.*`` only
+# (no ``praisonai_code.cli.commands.*`` copy). ``get_command()`` loads these via
+# absolute import when the wrapper is installed; standalone installs hide them from
+# ``--help``. Add names here as commands are repatriated from praisonai-code.
+_WRAPPER_RESIDENT_COMMANDS = frozenset({
+    "dashboard",
     # C8.2 Batch A — observability / integrations
     "langfuse",
     "langextract",
@@ -281,6 +287,7 @@ _SPECIAL_COMMANDS = {
 
 
 from praisonai_code._wrapper_bridge import wrapper_available
+from praisonai_code._bot_bridge import bot_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -295,9 +302,11 @@ class LazyCommandGroup(TyperGroup):
         # the ``praisonai`` wrapper is installed, so a standalone ``praisonai-code``
         # install does not surface commands it cannot resolve.
         wrapper_ok = wrapper_available()
+        bot_ok = bot_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
-            if wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS
+            if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
+            and (bot_ok or name not in _BOT_RESIDENT_COMMANDS)
         )
         commands.update(_SPECIAL_COMMANDS.keys())
         
@@ -327,7 +336,11 @@ class LazyCommandGroup(TyperGroup):
         if name in _LAZY_COMMANDS:
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
-                if name in _WRAPPER_RESIDENT_COMMANDS:
+                if name in _BOT_RESIDENT_COMMANDS:
+                    if not bot_package_available():
+                        return None
+                    module = importlib.import_module(f"praisonai_bot.cli.commands.{name}")
+                elif name in _WRAPPER_RESIDENT_COMMANDS:
                     if not wrapper_available():
                         return None
                     module = importlib.import_module(f"praisonai.cli.commands.{name}")

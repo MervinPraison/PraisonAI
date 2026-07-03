@@ -16,13 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create praison config directory
 RUN mkdir -p /root/.praison
 
-# Install praisonai with bot dependencies
+# Install praisonai-bot with channel dependencies (slim bot image)
 RUN pip install --no-cache-dir \
-    praisonai \
+    "praisonai-bot[bot]" \
     slack-bolt \
-    slack-sdk \
-    "discord.py>=2.0.0" \
-    "python-telegram-bot>=20.0"
+    slack-sdk
 
 # Set environment variables for directory management
 ENV PRAISON_CONFIG_DIR=/root/.praison
@@ -39,4 +37,4 @@ ENV DOCKER_CONTAINER=true
 # For webhook mode, expose port 3000
 
 # Default command - tokens from environment
-CMD ["praisonai", "bot", "slack"]
+CMD ["praisonai-bot", "bot", "slack"]

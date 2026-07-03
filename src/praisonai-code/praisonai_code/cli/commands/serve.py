@@ -210,18 +210,19 @@ def serve_gateway(
     output = get_output_controller()
     
     try:
-        from praisonai_code._wrapper_bridge import import_wrapper_module
-        _mod = import_wrapper_module('praisonai.cli.features.gateway')
-        GatewayHandler = getattr(_mod, 'GatewayHandler')
+        from praisonai_code._bot_bridge import import_bot_module
+
+        _mod = import_bot_module("praisonai_bot.cli.features.gateway")
+        GatewayHandler = getattr(_mod, "GatewayHandler")
         handler = GatewayHandler()
         # ``start`` returns a sysexits-based exit code (0 OK, 75 restart,
         # 78 fatal config) so supervisors react correctly; propagate it
         # instead of swallowing fatal/transient failures as success (#2437).
         exit_code = handler.start(host=host, port=port, agent_file=agents_file)
         raise typer.Exit(exit_code or 0)
-    except (ImportError, AttributeError) as e:
+    except ImportError as e:
         output.print_error(f"Gateway module not available: {e}")
-        output.print("Install with: pip install praisonai[api]")
+        output.print("Install with: pip install praisonai-bot[gateway]")
         raise typer.Exit(4)
 
 
@@ -406,18 +407,19 @@ def serve_ui_gateway(
     output = get_output_controller()
     
     try:
-        from praisonai_code._wrapper_bridge import import_wrapper_module
-        _mod = import_wrapper_module('praisonai.integration.gateway_host')
-        run_integrated_gateway = getattr(_mod, 'run_integrated_gateway')
+        from praisonai_code._bot_bridge import import_bot_module
+
+        _mod = import_bot_module("praisonai_bot.integration.gateway_host")
+        run_integrated_gateway = getattr(_mod, "run_integrated_gateway")
         run_integrated_gateway(
             host=host,
             port=port,
             title=title,
             style=style
         )
-    except (ImportError, AttributeError) as e:
+    except ImportError as e:
         output.print_error(f"UI-Gateway module not available: {e}")
-        output.print("Install with: pip install praisonai[ui]")
+        output.print("Install with: pip install praisonai-bot[gateway]")
         raise typer.Exit(4)
     except Exception as e:
         output.print_error(f"Failed to start UI-Gateway: {e}")
@@ -543,21 +545,34 @@ def serve_recipe(
         praisonai serve recipe
         praisonai serve recipe --port 8765 --reload
     """
+    output = get_output_controller()
     try:
-        from praisonai_code._wrapper_bridge import import_wrapper_module
-        _mod = import_wrapper_module('praisonai.cli.features.serve')
-        handle_serve_command = getattr(_mod, 'handle_serve_command')
-        args = ["recipe", "--host", host, "--port", str(port)]
-        if recipe:
-            args.extend(["--recipe", recipe])
-        if config:
-            args.extend(["--config", config])
-        if reload:
-            args.append("--reload")
-        exit_code = handle_serve_command(args)
+        if config or reload:
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+
+            _mod = import_wrapper_module("praisonai.cli.features.serve")
+            handle_serve_command = getattr(_mod, "handle_serve_command")
+            args = ["recipe", "--host", host, "--port", str(port)]
+            if recipe:
+                args.extend(["--recipe", recipe])
+            if config:
+                args.extend(["--config", config])
+            if reload:
+                args.append("--reload")
+            raise typer.Exit(handle_serve_command(args) or 0)
+        if not recipe:
+            output.print_error("A recipe name is required (e.g. --recipe my-recipe)")
+            raise typer.Exit(2)
+        from praisonai_code._bot_bridge import import_bot_module
+
+        recipe_mod = import_bot_module("praisonai_bot.cli.features.recipe_gateway")
+        exit_code = recipe_mod.run_recipe_gateway(
+            host=host, port=port, recipe_name=recipe
+        )
         raise typer.Exit(exit_code)
-    except (ImportError, AttributeError) as e:
-        output = get_output_controller()
+    except typer.Exit:
+        raise
+    except ImportError as e:
         output.print_error(f"Recipe serve module not available: {e}")
         raise typer.Exit(4)
 

@@ -176,6 +176,7 @@ jobs:
         echo "Testing both entry point methods..."
         python -m praisonai --version
         praisonai --version
+        praisonai-bot gateway --help
 
     - name: Test doctor packaging command
       run: |

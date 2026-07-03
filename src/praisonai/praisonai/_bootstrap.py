@@ -27,3 +27,19 @@ def ensure_praisonai_code() -> None:
         root = str(code_src)
         if root not in sys.path:
             sys.path.insert(0, root)
+
+
+def ensure_praisonai_bot() -> None:
+    """Ensure ``praisonai_bot`` can be imported in monorepo dev layouts."""
+    try:
+        import praisonai_bot  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    wrapper_src = Path(__file__).resolve().parents[1]  # .../src/praisonai
+    bot_src = wrapper_src.parent / "praisonai-bot"
+    if (bot_src / "praisonai_bot").is_dir():
+        root = str(bot_src)
+        if root not in sys.path:
+            sys.path.insert(0, root)

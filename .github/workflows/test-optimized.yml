@@ -136,6 +136,20 @@ jobs:
           exit 1
         fi
         echo "standalone run import gate ok (exit $RUN_CODE)"
+
+    - name: Standalone praisonai-bot smoke (C9)
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-bot-standalone
+        /tmp/praisonai-bot-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-bot
+        /tmp/praisonai-bot-standalone/bin/python -c "
+        import praisonai_bot
+        from praisonai_bot.bots import Bot
+        from praisonai_bot.gateway import WebSocketGateway
+        print('bot standalone ok', Bot, WebSocketGateway)
+        "
+        /tmp/praisonai-bot-standalone/bin/praisonai-bot --help
+        bash "$GITHUB_WORKSPACE/scripts/check_c9_bot_imports.sh"
     
     - name: Smoke Test Summary
       if: always()
