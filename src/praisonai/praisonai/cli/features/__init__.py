@@ -30,8 +30,7 @@ try:  # pragma: no cover - defensive
     for _code_dir in getattr(_code_features, "__path__", []):
         if _code_dir not in __path__:
             __path__.append(_code_dir)
-    del _code_dir
-except Exception:  # pragma: no cover - code package optional at import time
+except ImportError:  # pragma: no cover - code package optional at import time
     _code_features = None
 
 
@@ -91,8 +90,20 @@ __all__ = [
 ]
 
 
+_WRAPPER_LOCAL_HANDLERS = {
+    "ToolsHandler": "tools",
+    "WorkflowHandler": "workflow",
+}
+
+
 def __getattr__(name):
-    """Delegate handler/attribute access to ``praisonai_code.cli.features``."""
+    """Resolve repatriated handlers locally, then delegate to code features."""
+    submodule = _WRAPPER_LOCAL_HANDLERS.get(name)
+    if submodule is not None:
+        import importlib
+
+        mod = importlib.import_module(f"{__name__}.{submodule}")
+        return getattr(mod, name)
     if _code_features is not None:
         try:
             return getattr(_code_features, name)
