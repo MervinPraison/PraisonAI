@@ -24,9 +24,20 @@ This script:
 9. Creates GitHub release (latest)
 
 Three-package publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai
+
+One-command full release (patch by default):
+    python scripts/publish_all.py
+    python scripts/publish_all.py --dry-run
+
+Wrapper-only bump (after deps already on PyPI):
+    python scripts/bump_and_release.py 4.6.119 --agents 1.6.119 --code-pin 0.0.18 --bot-pin 0.0.3 \\
+        --wait --wait-code --wait-bot --no-add-all
+    cd src/praisonai && uv publish
+
 Use --code to bump code package; --code-pin to pin wrapper after code publish.
 Use --bot to bump bot package; --bot-pin to pin wrapper after bot publish.
 Use --wait for agents PyPI propagation; --wait-code for praisonai-code; --wait-bot for praisonai-bot.
+Use --wait-all to wait for agents, code, and bot (when pins are set).
 """
 
 import re
@@ -36,6 +47,7 @@ import json
 import argparse
 import subprocess
 import shutil
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Optional
@@ -89,23 +101,54 @@ def get_pypi_version(package: str) -> Optional[str]:
         return None
 
 
+def pypi_has_version(package: str, version: str) -> bool:
+    """Return True if an exact version exists on PyPI (not just latest)."""
+    url = f"https://pypi.org/pypi/{package}/{version}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            json.loads(response.read().decode())
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    except Exception:
+        return False
+
+
 def wait_for_pypi_version(package: str, version: str, max_wait: int = 300, interval: int = 30) -> bool:
-    """Wait for a specific version to be available on PyPI."""
+    """Wait until a specific version is available on PyPI."""
     print(f"\n⏳ Waiting for {package}=={version} to be available on PyPI...")
+    if pypi_has_version(package, version):
+        print(f"  ✅ {package}=={version} is already on PyPI")
+        return True
+
     start = time.time()
-    
     while time.time() - start < max_wait:
-        current = get_pypi_version(package)
-        if current == version:
+        if pypi_has_version(package, version):
             print(f"  ✅ {package}=={version} is now available on PyPI")
             return True
-        
+
         elapsed = int(time.time() - start)
         remaining = max_wait - elapsed
-        print(f"  ⏳ Current: {current}, waiting for: {version} ({remaining}s remaining...)")
+        latest = get_pypi_version(package)
+        print(
+            f"  ⏳ Latest on PyPI: {latest}, waiting for exact {version} "
+            f"({remaining}s remaining...)"
+        )
         time.sleep(interval)
-    
+
+    if pypi_has_version(package, version):
+        print(f"  ✅ {package}=={version} is now available on PyPI")
+        return True
+
     print(f"  ❌ Timeout waiting for {package}=={version} on PyPI")
+    latest = get_pypi_version(package)
+    if latest and latest != version:
+        print(
+            f"  💡 PyPI latest is {latest}. If {version} was never published, "
+            f"drop --wait or use --agents {latest}."
+        )
     return False
 
 
@@ -421,6 +464,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # One-command patch release (all 4 packages):
+  python scripts/publish_all.py
+
+  # Wrapper only (deps already published):
+  python scripts/bump_and_release.py --agents 1.6.119 --code-pin 0.0.18 --bot-pin 0.0.3 \\
+      --wait-all --no-add-all 4.6.119
+
   # Bump to 3.8.2 with agents 0.11.8
   python scripts/bump_and_release.py --agents 0.11.8 3.8.2
   
@@ -458,8 +508,8 @@ Examples:
     parser.add_argument(
         "--max-wait",
         type=int,
-        default=300,
-        help="Maximum seconds to wait for PyPI propagation (default: 300)"
+        default=600,
+        help="Maximum seconds to wait for PyPI propagation (default: 600)"
     )
     parser.add_argument(
         "--retries", "-r",
@@ -491,6 +541,11 @@ Examples:
         "--wait-bot",
         action="store_true",
         help="Wait for the specified praisonai-bot version to be available on PyPI"
+    )
+    parser.add_argument(
+        "--wait-all",
+        action="store_true",
+        help="Wait for agents, code, and bot versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -562,18 +617,22 @@ Examples:
         print("  ✅ Git working directory is clean")
     
     # Wait for PyPI propagation if requested
-    if args.wait and args.agents:
+    wait_agents = args.wait or args.wait_all
+    wait_code = args.wait_code or args.wait_all
+    wait_bot = args.wait_bot or args.wait_all
+
+    if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
             print("\n💡 Tip: Check if the package was published successfully")
             print("💡 Tip: You can retry without --wait if the package is confirmed published")
             sys.exit(1)
 
-    if args.wait_code and code_version:
+    if wait_code and code_version:
         if not wait_for_pypi_version("praisonai-code", code_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-code was published successfully")
             sys.exit(1)
 
-    if args.wait_bot and bot_version:
+    if wait_bot and bot_version:
         if not wait_for_pypi_version("praisonai-bot", bot_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-bot was published successfully")
             sys.exit(1)
