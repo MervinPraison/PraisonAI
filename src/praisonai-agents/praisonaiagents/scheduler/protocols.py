@@ -91,6 +91,55 @@ class ScheduleStoreProtocol(Protocol):
         """Remove a job by name. Returns True if found and removed."""
         ...
 
+    # ── Atomic claim / lease (optional) ──────────────────────────────
+
+    def claim_due(
+        self,
+        now: float,
+        owner_id: str,
+        lease_seconds: float = 300.0,
+    ) -> List[Any]:
+        """Atomically claim all due jobs, returning only those *this* caller won.
+
+        This is the at-most-once primitive: a due job must fire on exactly one
+        ticker even when several processes/hosts poll the same store. An
+        implementation MUST perform the "is due? -> reserve" step atomically
+        under a cross-process lock (e.g. an OS advisory file lock or a DB
+        compare-and-set), pre-advancing the job's schedule and/or taking a
+        short lease keyed by ``job_id + scheduled_fire_time`` before returning
+        it. A competing caller that loses the race receives an empty list for
+        that job and skips silently.
+
+        Args:
+            now: Epoch seconds treated as the current time.
+            owner_id: Stable identifier for the claiming ticker (process/host).
+            lease_seconds: How long the claim is held before it may be
+                reclaimed. A claim not marked complete (crash) expires after
+                this window so the run is not lost forever.
+
+        Returns:
+            The list of jobs successfully claimed by ``owner_id``. Jobs claimed
+            by another ticker are omitted.
+
+        Note:
+            This method is OPTIONAL. Stores that cannot provide cross-process
+            atomicity may omit it; callers should use ``hasattr()`` to detect
+            support and fall back to a non-atomic "list due -> run" path.
+        """
+        ...
+
+    def complete(self, job_id: str, owner_id: str) -> None:
+        """Release the lease for ``job_id`` held by ``owner_id`` after a run.
+
+        Called once the side effect for a claimed job has finished (success or
+        failure) so the lease does not linger until it expires. Idempotent and
+        a no-op if the lease is not held by ``owner_id``.
+
+        Note:
+            This method is OPTIONAL and pairs with :meth:`claim_due`.
+        """
+        ...
+
     # ── Execution History (optional) ─────────────────────────────────
 
     def log_run(
