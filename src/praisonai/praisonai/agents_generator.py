@@ -511,7 +511,35 @@ class AgentsGenerator:
                     tools_dict[tool_class.__name__] = tool_class()
                 except (TypeError, ValueError, RuntimeError) as e:
                     self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+
+        # Enforce tool_timeout from CLI/YAML at the wrapper layer so the field is
+        # not silently dropped. The timeout stack (_wrap_tool_with_timeout) is
+        # framework-agnostic and works for both the native and external adapters.
+        effective = self._resolve_effective_tool_timeout(config)
+        if effective and effective > 0:
+            tools_dict = {
+                name: self._wrap_tool_with_timeout(tool, effective)
+                for name, tool in tools_dict.items()
+            }
         return tools_dict
+
+    def _resolve_effective_tool_timeout(self, config):
+        """Resolve the effective per-tool timeout in seconds.
+
+        Precedence: an explicit CLI ``tool_timeout`` wins; otherwise use the
+        largest ``tool_timeout`` declared on any role/agent (safest default for
+        a shared tool dict). Returns ``None`` when nothing declares a timeout.
+        """
+        cli_timeout = (self.cli_config or {}).get("tool_timeout")
+        if isinstance(cli_timeout, (int, float)):
+            return float(cli_timeout)
+
+        entities = {**config.get("roles", {}), **config.get("agents", {})}
+        timeouts = [
+            e.get("tool_timeout") for e in entities.values()
+            if isinstance(e, dict) and isinstance(e.get("tool_timeout"), (int, float))
+        ]
+        return float(max(timeouts)) if timeouts else None
     
     def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
         """Select and resolve the appropriate framework adapter.
