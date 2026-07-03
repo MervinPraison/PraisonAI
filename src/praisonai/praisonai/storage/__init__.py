@@ -8,10 +8,25 @@ Heavy implementations that follow StorageBackendProtocol for:
 - DynamoDB (praisonai[dynamodb])
 - Valkey (praisonai[valkey])
 
-NOTE: ``praisonai.storage`` is a legacy parallel stack. The active persistence
-layer is ``praisonai.persistence``. New code should use ``create_state_store``,
-``create_conversation_store``, or ``create_knowledge_store`` from
-``praisonai.persistence.factory``.
+NOTE: ``praisonai.storage`` holds the canonical, low-level storage adapters.
+It is NOT dead code — ``praisonai.persistence`` builds on top of it. For
+example ``praisonai.persistence.state.redis.RedisStateStore`` is a thin wrapper
+around ``RedisStorageAdapter`` defined here, so this module is load-bearing and
+canonical for the backends that ``persistence`` wraps.
+
+Note on remaining duplication: ``persistence.state.mongodb`` / ``dynamodb`` /
+``valkey`` currently keep their own driver logic instead of wrapping the
+adapters here. This is because ``StateStore`` and these adapters implement
+different contracts — ``StateStore`` adds per-key TTL, hash operations
+(``hget``/``hset``) and counters (``incr``/``decr``), and the DynamoDB store
+uses a different partition-key schema (``pk``) than the adapter (``key``).
+Collapsing them therefore requires care to avoid changing stored-data layout;
+until that is done, treat these adapters as the canonical KV/blob layer and the
+``persistence.state`` stores as the richer, TTL/hash-aware state layer.
+
+Application code that just needs a persistence layer should use
+``create_state_store``, ``create_conversation_store``, or
+``create_knowledge_store`` from ``praisonai.persistence.factory``.
 """
 
 # Lazy imports - only import when needed
