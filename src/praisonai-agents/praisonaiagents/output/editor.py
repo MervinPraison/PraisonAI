@@ -142,9 +142,9 @@ class EditorOutput:
             # Rich's legacy Windows renderer encodes with the terminal encoding
             # (cp1252 by default) using strict error handling, so the ▸ glyph
             # (U+25B8) crashes on legacy consoles. Sanitize to an ASCII-safe
-            # fallback when the target stream cannot encode it.
-            stream = getattr(self._console, "file", None)
-            indicator = safe_text(f"▸ {phase.capitalize()}...", stream)
+            # fallback when the target stream cannot encode it, and escape
+            # markup metacharacters so a bracketed phase cannot raise MarkupError.
+            indicator = self._safe_markup(f"▸ {phase.capitalize()}...")
             self._console.print(f"[dim]{indicator}[/dim]")
         else:
             print(safe_text(f"▸ {phase.capitalize()}..."))
@@ -193,6 +193,18 @@ class EditorOutput:
             return f"[{name}] "
         return ""
 
+    def _safe_markup(self, text: Any) -> str:
+        """Sanitize dynamic text for safe rendering inside Rich markup.
+
+        Applies encoding-safe glyph fallback (legacy cp1252 consoles) and
+        escapes Rich markup metacharacters so bracketed content (e.g.
+        ``[/close]``) is never parsed as markup and cannot raise MarkupError.
+        """
+        from .encoding import safe_text
+        from rich.markup import escape as _escape
+        stream = getattr(self._console, "file", None)
+        return _escape(safe_text(str(text), stream))
+
     # ─────────────────────────────────────────────────────────────────────
     # Additional display methods (merged from CLI EditorDisplay)
     # ─────────────────────────────────────────────────────────────────────
@@ -210,7 +222,7 @@ class EditorOutput:
         self._add_block(BlockType.NARRATIVE, text)
         prefix = self._get_prefix(agent_name)
         if self._use_rich:
-            self._console.print(f"{prefix}{text}")
+            self._console.print(f"{self._safe_markup(prefix)}{self._safe_markup(text)}")
         else:
             print(f"{prefix}{text}")
 
@@ -245,10 +257,10 @@ class EditorOutput:
         """
         self._add_block(BlockType.ACTION, "", title=title, items=details or [])
         if self._use_rich:
-            self._console.print(f"[bold green]✓ {title}[/bold green]")
+            self._console.print(f"[bold green]✓ {self._safe_markup(title)}[/bold green]")
             if details:
                 for item in details:
-                    self._console.print(f"  - {item}")
+                    self._console.print(f"  - {self._safe_markup(item)}")
         else:
             print(f"✓ {title}")
             if details:
@@ -266,9 +278,9 @@ class EditorOutput:
         self._add_block(BlockType.LIST, "", title=title, items=items)
         if self._use_rich:
             if title:
-                self._console.print(f"[bold]{title}[/bold]")
+                self._console.print(f"[bold]{self._safe_markup(title)}[/bold]")
             for item in items:
-                self._console.print(f"  • {item}")
+                self._console.print(f"  • {self._safe_markup(item)}")
         else:
             if title:
                 print(title)
@@ -285,7 +297,9 @@ class EditorOutput:
         """
         prefix = self._get_prefix(agent_name)
         if self._use_rich:
-            self._console.print(f"[red]{prefix}✗ Error: {message}[/red]")
+            safe_prefix = self._safe_markup(prefix)
+            safe_msg = self._safe_markup(message)
+            self._console.print(f"[red]{safe_prefix}✗ Error: {safe_msg}[/red]")
         else:
             print(f"{prefix}✗ Error: {message}")
 
@@ -416,9 +430,9 @@ class EditorOutput:
 
     def _render_command(self, cmd: str, output: Optional[str] = None):
         if self._use_rich:
-            self._console.print(f"[dim]{cmd}[/dim]")
+            self._console.print(f"[dim]{self._safe_markup(cmd)}[/dim]")
             if output:
-                self._console.print(output)
+                self._console.print(self._safe_markup(output))
         else:
             print(cmd)
             if output:
@@ -427,10 +441,10 @@ class EditorOutput:
     def _render_summary(self, title: str, items: Optional[List[str]] = None):
         if self._use_rich:
             self._console.print()
-            self._console.print(f"[bold]{title}[/bold]")
+            self._console.print(f"[bold]{self._safe_markup(title)}[/bold]")
             if items:
                 for item in items:
-                    self._console.print(f"- {item}")
+                    self._console.print(f"- {self._safe_markup(item)}")
         else:
             print()
             print(title)
@@ -505,10 +519,8 @@ def enable_editor_output(
     def on_error(message: str = None, **kwargs):
         if not _editor_output_enabled or _editor_output is None:
             return
-        if message and _editor_output._use_rich:
-            _editor_output._console.print(f"[red]✗ Error: {message}[/red]")
-        elif message:
-            print(f"✗ Error: {message}")
+        if message:
+            _editor_output.error(message)
 
     def on_llm_start(model: str = None, agent_name: str = None, **kwargs):
         if not _editor_output_enabled or _editor_output is None:
