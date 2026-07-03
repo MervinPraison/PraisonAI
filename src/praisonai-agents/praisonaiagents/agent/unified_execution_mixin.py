@@ -1,6 +1,16 @@
 """
 Unified Execution Mixin - implements Gap 1 from Issue #1392.
 
+.. deprecated::
+    UnifiedExecutionMixin is unused and scheduled for removal (Issue #2644).
+    None of its methods are invoked by production code: the live execution paths
+    use ``_chat_impl`` / ``_execute_unified_chat_completion`` (in ``chat_mixin.py``)
+    and ``execute_tool`` (in ``tool_execution.py``), which are distinct from this
+    mixin's methods despite the similar names. This module remains importable and
+    emits a ``DeprecationWarning`` from its public methods during the deprecation
+    window; it will be removed from the ``Agent`` MRO after the cycle completes.
+    Use ``Agent.chat()`` / ``Agent.achat()`` / ``Agent.execute_tool()`` instead.
+
 This module consolidates sync/async execution paths into a single async-first 
 implementation with a thin sync bridge, eliminating code duplication between
 chat()/achat() and execute_tool()/execute_tool_async().
@@ -21,16 +31,33 @@ Design principles:
 import asyncio
 import logging
 import threading
+import warnings
 from typing import List, Optional, Any, Dict, Union
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+_DEPRECATION_MESSAGE = (
+    "UnifiedExecutionMixin is unused and scheduled for removal (Issue #2644); "
+    "no production path calls its methods. Use Agent.chat() / Agent.achat() / "
+    "Agent.execute_tool() instead."
+)
+
+
+def _warn_deprecated() -> None:
+    """Emit a DeprecationWarning for the unused UnifiedExecutionMixin public API."""
+    warnings.warn(_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=3)
+
 
 class UnifiedExecutionMixin:
     """
     Mixin providing unified sync/async execution for Agent class.
-    
+
+    .. deprecated::
+        Unused and scheduled for removal (Issue #2644). Its public methods emit a
+        ``DeprecationWarning``. Use ``Agent.chat()`` / ``Agent.achat()`` /
+        ``Agent.execute_tool()`` instead.
+
     This replaces the duplicated logic between chat/achat and execute_tool/execute_tool_async
     with a single async-first implementation plus sync bridge.
     """
@@ -362,7 +389,11 @@ class UnifiedExecutionMixin:
         
         This replaces the duplicated _chat_impl logic by using the unified
         async core with proper event loop bridging.
+
+        .. deprecated::
+            Unused and scheduled for removal (Issue #2644). Use ``Agent.chat()``.
         """
+        _warn_deprecated()
         return self._run_async_in_sync_context(
             self._unified_chat_impl(*args, **kwargs)
         )
@@ -373,7 +404,11 @@ class UnifiedExecutionMixin:
         
         This replaces the duplicated _achat_impl logic by using the unified
         async core directly.
+
+        .. deprecated::
+            Unused and scheduled for removal (Issue #2644). Use ``Agent.achat()``.
         """
+        _warn_deprecated()
         return await self._unified_chat_impl(*args, **kwargs)
 
     async def _unified_tool_execution(
@@ -399,7 +434,11 @@ class UnifiedExecutionMixin:
     def unified_execute_tool(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
         """
         Sync entry point for unified tool execution.
+
+        .. deprecated::
+            Unused and scheduled for removal (Issue #2644). Use ``Agent.execute_tool()``.
         """
+        _warn_deprecated()
         return self._run_async_in_sync_context(
             self._unified_tool_execution(function_name, arguments, tool_call_id)
         )
@@ -407,5 +446,9 @@ class UnifiedExecutionMixin:
     async def unified_execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
         """
         Async entry point for unified tool execution.
+
+        .. deprecated::
+            Unused and scheduled for removal (Issue #2644). Use ``Agent.execute_tool()``.
         """
+        _warn_deprecated()
         return await self._unified_tool_execution(function_name, arguments, tool_call_id)
