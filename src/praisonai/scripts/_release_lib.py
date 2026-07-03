@@ -150,7 +150,7 @@ def publish_package(package_dir: Path) -> None:
     if dist.exists():
         import shutil
         shutil.rmtree(dist)
-    run(["uv", "lock"], cwd=package_dir)
+    run(["uv", "lock", "--frozen"], cwd=package_dir, check=False)
     run(["uv", "build"], cwd=package_dir)
     run(["uv", "publish"], cwd=package_dir)
 
