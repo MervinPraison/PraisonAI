@@ -28,11 +28,8 @@ def _fallback_model() -> str:
     Kept out of this module so no CLI entry point ever re-declares the literal;
     they route through :func:`resolve_default_model` instead.
     """
-    try:
-        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
-        return DEFAULT_FALLBACK_MODEL
-    except Exception:
-        return "gpt-4o-mini"
+    from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+    return DEFAULT_FALLBACK_MODEL
 
 
 def _state_dir() -> Path:
@@ -114,12 +111,13 @@ def resolve_default_model(
     """Resolve the default model for a zero-config run.
 
     Precedence: ``explicit`` > recent (persisted) > ``MODEL_NAME`` /
-    ``OPENAI_MODEL_NAME`` > provider-aware best > ``gpt-4o-mini``.
+    ``OPENAI_MODEL_NAME`` > provider-aware best > the terminal fallback
+    (:data:`praisonai_code.llm.env.DEFAULT_FALLBACK_MODEL`).
 
     Only *user-chosen* models (``explicit`` and the env overrides) are
     persisted as the recent model. Provider-*inferred* defaults and the
-    ``gpt-4o-mini`` fallback are intentionally **not** persisted: persisting
-    them would let a stale inferred default short-circuit credential-based
+    terminal fallback are intentionally **not** persisted: persisting them
+    would let a stale inferred default short-circuit credential-based
     inference on a later run after the user's available providers have changed.
 
     Args:
@@ -166,7 +164,7 @@ def resolve_default_model(
             except Exception:
                 pass
 
-    # NOTE: provider-inferred defaults and the gpt-4o-mini fallback are
+    # NOTE: provider-inferred defaults and the terminal fallback are
     # deliberately NOT persisted. Persisting them would let a stale inferred
     # default win over fresh credential-based inference on a later run when the
     # user's available providers have changed, re-introducing the very

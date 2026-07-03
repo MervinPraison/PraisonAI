@@ -67,7 +67,7 @@ def test_resolver_prefers_explicit_model():
     assert resolve_default_model("my/model", persist=False) == "my/model"
 
 
-def test_resolver_honours_provider_credentials(monkeypatch, tmp_path):
+def test_resolver_honours_provider_credentials(monkeypatch):
     """With only ANTHROPIC_API_KEY set, the default is an Anthropic model."""
     # Isolate state so no persisted recency short-circuits inference.
     monkeypatch.setattr(
