@@ -266,8 +266,19 @@ class ToolsetRegistry:
             includes=["code", "files", "system"],
             description="Complete development workflow with code execution, files, and system access"
         )
-        
-        logger.debug("Loaded prebuilt toolsets: web, files, code, system, scraping, research, safe, development")
+
+        # Coding workflow (prefers diff-based edit_file/apply_patch over blunt write_file)
+        self.register_toolset(
+            "coding",
+            tools=[
+                "read_file", "edit_file", "apply_patch",
+                "grep", "glob", "execute_command",
+                "todo_add", "todo_list", "todo_update",
+            ],
+            description="Coding workflow with diff-based edits (edit_file for existing files, apply_patch to create new files), code search, and shell execution"
+        )
+
+        logger.debug("Loaded prebuilt toolsets: web, files, code, system, scraping, research, safe, development, coding")
     
     def clear(self) -> None:
         """Clear all registered toolsets."""
