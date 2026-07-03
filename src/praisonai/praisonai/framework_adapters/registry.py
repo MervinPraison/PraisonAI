@@ -66,7 +66,10 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     # ``praisonai.framework_adapters`` group are consulted after this list,
     # so a third-party adapter can become the default once the built-ins are
     # unavailable.
-    DEFAULT_PRIORITY: tuple[str, ...] = ("crewai", "praisonai", "autogen", "ag2")
+    # ``ag2`` is intentionally omitted: its adapter is an unimplemented stub and
+    # is not registered in ``_BUILTIN_ADAPTERS``, so advertising it as a default
+    # dispatch target would let ``pick_default`` route to a NotImplementedError.
+    DEFAULT_PRIORITY: tuple[str, ...] = ("crewai", "praisonai", "autogen")
 
     def __init__(self, *, discover_entry_points: bool = True) -> None:
         """Initialize the registry with built-in adapters."""
