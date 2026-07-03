@@ -507,26 +507,27 @@ class ToolExecutionMixin:
                 except Exception as e:
                     logger.warning(f"Steering check failed, continuing with tool execution: {e}")
             
-            # Trigger BEFORE_TOOL hook
+            # Trigger BEFORE_TOOL hook (only build the input if a hook is actually registered)
             from ..hooks import HookEvent, BeforeToolInput
-            before_tool_input = BeforeToolInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.BEFORE_TOOL,
-                timestamp=str(_time.time()),
-                agent_name=self.name,
-                tool_name=function_name,
-                tool_input=arguments
-            )
-            tool_hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL, before_tool_input, target=function_name)
-            if self._hook_runner.is_blocked(tool_hook_results):
-                logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
-                return f"Execution of {function_name} was blocked by security policy."
-            
-            # Update arguments if modified by hooks
-            for res in tool_hook_results:
-                if res.output and res.output.modified_data:
-                    arguments.update(res.output.modified_data)
+            if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_TOOL):
+                before_tool_input = BeforeToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.BEFORE_TOOL,
+                    timestamp=str(_time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments
+                )
+                tool_hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL, before_tool_input, target=function_name)
+                if self._hook_runner.is_blocked(tool_hook_results):
+                    logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                    return f"Execution of {function_name} was blocked by security policy."
+                
+                # Update arguments if modified by hooks
+                for res in tool_hook_results:
+                    if res.output and res.output.modified_data:
+                        arguments.update(res.output.modified_data)
 
             # Loop guard check - prevent tool execution loops with graduated response
             if hasattr(self, '_ensure_loop_guard'):
@@ -900,19 +901,21 @@ class ToolExecutionMixin:
                 # Clean up temporary attribute
                 delattr(self, '_last_normalized_result')
             
-            after_tool_input = AfterToolInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.AFTER_TOOL,
-                timestamp=str(_time.time()),
-                agent_name=self.name,
-                tool_name=function_name,
-                tool_input=arguments,
-                tool_output=result,
-                tool_error=tool_error,
-                execution_time_ms=(_time.time() - _tool_start_time) * 1000
-            )
-            self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
+            # Only build the input if an AFTER_TOOL hook is actually registered
+            if self._hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
+                after_tool_input = AfterToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_TOOL,
+                    timestamp=str(_time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments,
+                    tool_output=result,
+                    tool_error=tool_error,
+                    execution_time_ms=(_time.time() - _tool_start_time) * 1000
+                )
+                self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
             
             # G10 fix: Mark progress after successful tool execution
             # This prevents false doom loop detection when tools succeed
