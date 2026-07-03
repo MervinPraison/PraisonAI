@@ -6,7 +6,7 @@ that channel adapters render as native widgets. Enables structured
 interactive UI across Telegram, Slack, Discord, and other platforms.
 
 This is a core protocol with no heavy implementations - channel-specific
-rendering belongs in the wrapper (praisonai).
+rendering belongs in ``praisonai-bot`` (``praisonai_bot.bots``).
 """
 
 from __future__ import annotations

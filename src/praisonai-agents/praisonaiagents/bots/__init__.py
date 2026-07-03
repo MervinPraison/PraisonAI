@@ -2,7 +2,8 @@
 Bot Protocols and Configuration for PraisonAI Agents.
 
 Defines the interfaces and configuration for messaging bot implementations.
-All implementations live in the praisonai wrapper package.
+All implementations live in the ``praisonai-bot`` package (``praisonai_bot.bots``).
+Backward-compatible imports: ``from praisonai.bots import Bot`` via wrapper shims.
 """
 
 from typing import TYPE_CHECKING

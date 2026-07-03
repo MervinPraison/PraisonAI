@@ -54,3 +54,12 @@ def test_sdk_gateway_lazy_resolves_bot_first():
 def test_no_nested_praisonai_bot_under_wrapper():
     wrapper_pkg = REPO_ROOT / "src" / "praisonai" / "praisonai"
     assert not (wrapper_pkg / "praisonai_bot").exists()
+
+
+def test_bot_registry_resolves_without_wrapper():
+    """Built-in platform loaders must not require the praisonai wrapper."""
+    from praisonai_bot.bots._registry import resolve_adapter
+
+    telegram = resolve_adapter("telegram")
+    assert telegram.__name__ == "TelegramBot"
+    assert telegram.__module__.startswith("praisonai_bot.bots.")

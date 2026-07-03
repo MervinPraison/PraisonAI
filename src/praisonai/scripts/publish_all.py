@@ -105,10 +105,11 @@ def main() -> None:
         print("Dry run — no changes made.")
         return
 
-    token = os.environ.get("UV_PUBLISH_TOKEN") or os.environ.get("PYPI_TOKEN") or os.environ.get("PYPI_API_TOKEN")
+    token = lib.resolve_pypi_token()
     if not token:
         print("❌ Set UV_PUBLISH_TOKEN or PYPI_TOKEN before publishing.")
         sys.exit(1)
+    lib.ensure_uv_publish_token()
 
     if bump.check_git_status() and not args.force:
         print("❌ Working tree has uncommitted changes. Commit/stash or use --force.")

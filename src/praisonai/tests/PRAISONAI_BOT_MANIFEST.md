@@ -1,60 +1,85 @@
-# praisonai-bot Boundary Manifest (C8.4 Phase 9)
+# praisonai-bot Boundary Manifest (C9 — implemented)
 
-> Future PyPI package split — **not implemented in C8.4**. This document defines ownership for extraction.
+> **Status:** Implemented in C9. PyPI package `praisonai-bot` (currently 0.0.4+). Wrapper shims preserve `praisonai.bots.*` / `praisonai.gateway.*` imports.
+
+## Four-tier stack
+
+```
+praisonaiagents → praisonai-code + praisonai-bot → praisonai (wrapper)
+```
 
 ## Two daemon concepts (do not merge)
 
 | Name | Location | Purpose |
 |------|----------|---------|
 | `praisonai daemon` | `praisonai_code/cli/commands/daemon.py` | Warm runtime (code tier) |
-| `praisonai.daemon` | `praisonai/daemon/{systemd,launchd,windows}.py` | OS bot service install (`praisonai-bot` unit) |
+| `praisonai-bot` OS service | `praisonai_bot/daemon/{systemd,launchd,windows}.py` | Bot/gateway systemd unit |
 
-## Modules to move to `praisonai-bot`
+## Owned by `praisonai-bot` (`praisonai_bot/`)
 
 ### Runtime
 
 | Path | Notes |
 |------|-------|
-| `praisonai/gateway/*` | WebSocket gateway server, pairing, push |
-| `praisonai/bots/*` | Platform adapters, BotOS, registry |
-| `praisonai/daemon/*` | systemd/launchd/Windows service generators |
-| `praisonai/integration/{gateway_host,host_app,bridges/}` | UI gateway, dashboard bridges |
+| `praisonai_bot/bots/*` | Platform adapters, BotOS, registry |
+| `praisonai_bot/gateway/*` | WebSocket gateway, pairing, push |
+| `praisonai_bot/daemon/*` | OS service generators |
+| `praisonai_bot/integration/*` | gateway_host, host_app, kanban_bridge |
+| `praisonai_bot/kanban/*` | SQLite store for kanban dispatcher |
+| `praisonai_bot/claw/*` | Claw default app |
+| `praisonai_bot/tools/audio.py` | Telegram STT/TTS |
 
 ### CLI
 
 | Path | Notes |
 |------|-------|
-| `praisonai/cli/features/{gateway,bots_cli,onboard,approval,serve}.py` | Feature handlers |
-| `praisonai/cli/commands/{bot,gateway,pairing,identity,onboard,kanban,claw,dashboard,mint_link}` | Typer commands |
+| `praisonai_bot/cli/commands/*` | bot, gateway, pairing, identity, onboard, kanban, claw, mint_link |
+| `praisonai_bot/cli/features/*` | gateway, bots_cli, onboard, approval, recipe_gateway |
 
-### SDK protocols (stay in `praisonaiagents`)
+Console script: `praisonai-bot`
 
-| Protocol | Location |
-|----------|----------|
-| `GatewayProtocol` | `praisonaiagents/gateway/protocols.py` |
-| `BotOSProtocol` | `praisonaiagents/bots/protocols.py` |
+## Wrapper shims (backward compat)
+
+| Shim | Target |
+|------|--------|
+| `praisonai.bots` | `alias_package` → `praisonai_bot.bots` |
+| `praisonai.gateway` | `alias_package` → `praisonai_bot.gateway` |
+| `praisonai.daemon` | `alias_package` → `praisonai_bot.daemon` |
+| `praisonai.cli.commands.{bot,gateway,...}` | `sys.modules` → `praisonai_bot.cli.commands.*` |
+
+## Stays in `praisonaiagents` (protocols only)
+
+| Module | Location |
+|--------|----------|
+| `BotOSProtocol`, `BotProtocol` | `praisonaiagents/bots/protocols.py` |
+| `GatewayProtocol`, `GatewayConfig` | `praisonaiagents/gateway/` |
 | `BotGatewayFacadeProtocol` | `praisonaiagents/cli/protocols.py` |
 
 ## Stays in `praisonai-code`
 
 - `cli/commands/daemon.py` (warm runtime)
-- Doctor bridge checks (`gateway_checks`, `bot_checks`)
-- `_paths.resolve_bot_config_path`
-- `_WRAPPER_RESIDENT_COMMANDS` routing (until entry-point generalisation)
+- Doctor checks via `_bot_bridge`
+- `_BOT_RESIDENT_COMMANDS` routing to `praisonai_bot.cli.commands.*`
+- `serve gateway` / `serve ui-gateway` / `serve recipe` bridges to bot package
 
-## Stays in `praisonai` wrapper (until split)
+## Stays in `praisonai` wrapper
 
-- All modules listed above remain wrapper-resident in C8.4
-- Wrapper `pyproject.toml` extras: `[gateway]`, `[bot]`, `[claw]`
+- `cli/commands/dashboard.py` (unified flow+claw+ui launcher)
+- `cli/features/serve.py` (HTTP agents/mcp/a2a serve — not gateway recipe)
+- `scheduler/*` (gateway polls via `_wrapper_bridge` when co-installed)
+- Framework adapters, train, deploy
 
-## Post-split changes required
+## Install matrix
 
-1. Retarget `praisonaiagents.gateway` lazy re-exports to `praisonai_bot.gateway`
-2. Update `systemd.py` ExecStart from `python -m praisonai gateway` to `praisonai-bot`
-3. Generalise `LazyCommandGroup.get_command()` beyond hardcoded `praisonai.cli.commands.*`
-4. Add `[project.entry-points."praisonai.channels"]` in bot pyproject
-5. Bridge doctor/approval checks to new package namespace
+| Install | Bots/Gateway |
+|---------|--------------|
+| `pip install praisonaiagents` | Protocols only |
+| `pip install praisonai-bot[gateway,bot]` | Standalone (`praisonai-bot gateway start`) |
+| `pip install praisonai` | Full stack via dep + shims |
+| `pip install praisonai[bot]` | Alias → `praisonai-bot[bot]` |
 
-## C8.4 routing (interim)
+## Publish order
 
-Legacy `parse_args` gateway/bot branches use `legacy_dispatch.py` bridge to wrapper features — no direct `.features.gateway` import from code namespace.
+`praisonaiagents` → `praisonai-code` + `praisonai-bot` → `praisonai`
+
+See `src/praisonai/scripts/publish_all.py` and `.github/workflows/pypi-release.yml`.

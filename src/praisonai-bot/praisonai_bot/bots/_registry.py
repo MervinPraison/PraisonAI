@@ -14,40 +14,39 @@ from .._registry import PluginRegistry
 from praisonaiagents.bots.protocols import PlatformCapabilities
 
 
-def _telegram_loader():
+def _load_bot_class(module: str, class_name: str):
     import importlib
-    mod = importlib.import_module("praisonai.bots.telegram")
-    return getattr(mod, "TelegramBot")
+
+    mod = importlib.import_module(f"praisonai_bot.bots.{module}")
+    return getattr(mod, class_name)
+
+
+def _telegram_loader():
+    return _load_bot_class("telegram", "TelegramBot")
+
 
 def _discord_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.discord")
-    return getattr(mod, "DiscordBot")
+    return _load_bot_class("discord", "DiscordBot")
+
 
 def _slack_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.slack")
-    return getattr(mod, "SlackBot")
+    return _load_bot_class("slack", "SlackBot")
+
 
 def _whatsapp_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.whatsapp")
-    return getattr(mod, "WhatsAppBot")
+    return _load_bot_class("whatsapp", "WhatsAppBot")
+
 
 def _linear_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.linear")
-    return getattr(mod, "LinearBot")
+    return _load_bot_class("linear", "LinearBot")
+
 
 def _email_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.email")
-    return getattr(mod, "EmailBot")
+    return _load_bot_class("email", "EmailBot")
+
 
 def _agentmail_loader():
-    import importlib
-    mod = importlib.import_module("praisonai.bots.agentmail")
-    return getattr(mod, "AgentMailBot")
+    return _load_bot_class("agentmail", "AgentMailBot")
 
 # Built-in bot platforms with lazy loading
 _BUILTIN_PLATFORMS = {
@@ -66,30 +65,42 @@ class BotPlatformRegistry(PluginRegistry):
     
     def __init__(self):
         super().__init__(
-            entry_point_group="praisonai.bots",
-            builtins=_BUILTIN_PLATFORMS
+            entry_point_group="praisonai.channels",
+            builtins=_BUILTIN_PLATFORMS,
+            discover_entry_points=False,
         )
-        # Also discover the idiomatic ``praisonai.channels`` entry-point group
-        # so a ``pip install``ed channel connector registers itself with no code.
-        self._discover_channel_entry_points()
-        # Store capabilities for each platform
+        # Store capabilities for each platform (initialised before entry-point
+        # discovery so any future capability-aware discovery is safe).
         self._capabilities: Dict[str, PlatformCapabilities] = {}
         self._capabilities_lock = threading.Lock()
+        # Discover third-party channel connectors without shadowing builtins.
+        self._discover_channel_entry_points()
 
     def _discover_channel_entry_points(self) -> None:
         """Discover channel connectors from the ``praisonai.channels`` group."""
         import logging
         from importlib.metadata import entry_points
         logger = logging.getLogger(__name__)
+        # Names this package ships as builtins are also declared as entry points
+        # (for external discoverability), so a duplicate here is expected and not
+        # a conflict — log those at DEBUG and only warn for genuine third-party
+        # shadowing attempts.
+        builtin_names = set(_BUILTIN_PLATFORMS)
         try:
             for ep in entry_points(group="praisonai.channels"):
                 # Do not let a third-party entry point silently shadow a
                 # built-in (or already-registered) channel loader.
                 if ep.name.lower() in self._loaders:
-                    logger.warning(
-                        "Skipping duplicate channel entry point %r; a loader "
-                        "with that name is already registered.", ep.name
-                    )
+                    if ep.name.lower() in builtin_names:
+                        logger.debug(
+                            "Channel entry point %r matches a built-in loader; "
+                            "keeping the built-in.", ep.name
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping duplicate channel entry point %r; a loader "
+                            "with that name is already registered.", ep.name
+                        )
                     continue
                 self._add_loader(ep.name, ep.load)
         except Exception:

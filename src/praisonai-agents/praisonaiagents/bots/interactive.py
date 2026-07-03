@@ -6,7 +6,7 @@ interactive UI elements (buttons, select menus) across all messaging platforms.
 This complements the presentation.py render side with symmetric inbound handling.
 
 This is a core protocol with no heavy implementations - channel-specific
-callback decoding belongs in the wrapper (praisonai).
+callback decoding belongs in ``praisonai-bot`` (``praisonai_bot.bots``).
 """
 
 from __future__ import annotations

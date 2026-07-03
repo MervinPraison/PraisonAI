@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import urllib.error
@@ -145,14 +146,36 @@ def bump_bot_files(new_version: str) -> None:
     )
 
 
+def resolve_pypi_token() -> str | None:
+    """Return PyPI token from env (UV_PUBLISH_TOKEN, PYPI_TOKEN, or PYPI_API_TOKEN)."""
+    return (
+        os.environ.get("UV_PUBLISH_TOKEN")
+        or os.environ.get("PYPI_TOKEN")
+        or os.environ.get("PYPI_API_TOKEN")
+    )
+
+
+def ensure_uv_publish_token() -> None:
+    """Map PYPI_TOKEN / PYPI_API_TOKEN into UV_PUBLISH_TOKEN for uv publish."""
+    if os.environ.get("UV_PUBLISH_TOKEN"):
+        return
+    token = os.environ.get("PYPI_TOKEN") or os.environ.get("PYPI_API_TOKEN")
+    if token:
+        os.environ["UV_PUBLISH_TOKEN"] = token
+
+
 def publish_package(package_dir: Path) -> None:
+    token = resolve_pypi_token()
+    if not token:
+        raise RuntimeError("Missing PyPI credentials. Set UV_PUBLISH_TOKEN or PYPI_TOKEN.")
+    ensure_uv_publish_token()
     dist = package_dir / "dist"
     if dist.exists():
         import shutil
         shutil.rmtree(dist)
-    run(["uv", "lock", "--frozen"], cwd=package_dir, check=False)
+    run(["uv", "lock", "--frozen"], cwd=package_dir)
     run(["uv", "build"], cwd=package_dir)
-    run(["uv", "publish"], cwd=package_dir)
+    run(["uv", "publish", "--trusted-publishing", "never"], cwd=package_dir)
 
 
 def git_commit_files(message: str, rel_paths: list[str], root: Optional[Path] = None) -> bool:
