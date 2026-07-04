@@ -2297,10 +2297,21 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     """
     global _global_client, _global_client_params
     
-    # Normalize parameters for comparison
-    normalized_api_key = api_key or os.getenv("OPENAI_API_KEY")
-    normalized_base_url = base_url
-    current_params = (normalized_api_key, normalized_base_url, max_retries)
+    # Normalize parameters for comparison, mirroring OpenAIClient.__init__ so that
+    # an explicit argument matching the env-var fallback reuses the cached client.
+    normalized_api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    normalized_base_url = (
+        base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+    )
+    normalized_max_retries = max_retries
+    if normalized_max_retries is None:
+        _env_retries = os.environ.get("OPENAI_MAX_RETRIES")
+        if _env_retries is not None:
+            try:
+                normalized_max_retries = int(_env_retries)
+            except (TypeError, ValueError):
+                normalized_max_retries = None
+    current_params = (normalized_api_key, normalized_base_url, normalized_max_retries)
     
     # Thread-safe client creation
     with _global_client_lock:
