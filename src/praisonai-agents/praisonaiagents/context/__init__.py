@@ -191,6 +191,9 @@ __all__ = [
     "CONSERVATIVE_POLICY",
     "BALANCED_POLICY",
     "AGGRESSIVE_POLICY",
+    # On-demand instruction-file attachment (monorepo subtree rules)
+    "InstructionFileAttacher",
+    "discover_instruction_files",
 ]
 
 
@@ -323,5 +326,10 @@ def __getattr__(name: str):
                 "get_conversation_analyzer", "get_conversation_compactor"):
         from . import conversation
         return getattr(conversation, name)
+    
+    # On-demand instruction-file attachment (monorepo subtree rules)
+    if name in ("InstructionFileAttacher", "discover_instruction_files"):
+        from . import instruction_files
+        return getattr(instruction_files, name)
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
