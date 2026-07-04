@@ -1161,6 +1161,16 @@ def _run_prompt(
         args.thinking_budget = thinking_budget
         
         praison.args = args
+
+        from praisonai_code._wrapper_bridge import wrapper_available
+
+        if not wrapper_available():
+            output.print_error(
+                "Default run mode requires the praisonai wrapper. "
+                "Install with: pip install praisonai\n"
+                "Standalone alternative: praisonai run --output actions \"your prompt\""
+            )
+            raise typer.Exit(1)
         
         result = praison.handle_direct_prompt(prompt)
         

@@ -5,7 +5,8 @@ Defines the interfaces for gateway/control plane implementations.
 These protocols enable multi-agent coordination, session management,
 and real-time communication.
 
-All implementations should live in the praisonai wrapper package.
+All implementations live in the ``praisonai-bot`` package (``praisonai_bot.gateway``).
+The ``praisonai`` wrapper provides backward-compatible shims.
 """
 
 from __future__ import annotations
@@ -507,7 +508,7 @@ class GatewayProtocol(Protocol):
     The gateway coordinates communication between clients and agents,
     manages sessions, and provides health/presence tracking.
     
-    Example usage (implementation in praisonai wrapper):
+    Example usage (implementation in praisonai_bot.gateway):
         from praisonai.gateway import WebSocketGateway
         
         gateway = WebSocketGateway(port=8765)
@@ -917,7 +918,7 @@ class OutboundDeliveryProtocol(Protocol):
     are persisted before sending and can be retried on failure. This provides
     crash-safe at-least-once delivery for channel replies.
     
-    Example usage (implementation in praisonai wrapper):
+    Example usage (implementation in praisonai_bot.gateway):
         from praisonai.bots import OutboundQueue
         
         outbox = OutboundQueue(path="~/.praisonai/state/outbox.sqlite")
@@ -1737,7 +1738,7 @@ class OutboundMessengerProtocol(Protocol):
     built-in ``send_message`` tool can resolve it. It bridges to the existing
     delivery stack (DeliveryRouter, HomeChannelRegistry, outbox, mirroring).
 
-    Example usage (implementation in praisonai wrapper)::
+    Example usage (implementation in praisonai_bot.gateway)::
 
         messenger = BotOutboundMessenger(bot, resolver, router)
         token = register_outbound_messenger(messenger)

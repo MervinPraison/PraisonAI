@@ -1037,7 +1037,9 @@ class BotHandler:
     
     def _resolve_tool_by_name(self, name: str):
         """Resolve a tool by name using the canonical ToolResolver."""
-        from praisonai_code.tool_resolver import ToolResolver
+        from praisonai_bot._code_bridge import import_code_module
+
+        ToolResolver = import_code_module("praisonai_code.tool_resolver").ToolResolver
         resolver = ToolResolver()
         tool = resolver.resolve(name, instantiate=True)
         if tool is None:

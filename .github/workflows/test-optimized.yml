@@ -129,17 +129,35 @@ jobs:
         done
         echo "C7 hot-path import gate ok"
         bash "$GITHUB_WORKSPACE/scripts/check_c7_imports.sh"
-        # Standalone run must not fail on wrapper ImportError (API auth failure is OK)
+        # Standalone actions run (no wrapper); default run/chat require praisonai
         set +e
-        RUN_OUT=$(timeout 90 /tmp/praisonai-code-standalone/bin/praisonai-code run "Say hello in one word" 2>&1)
+        RUN_OUT=$(timeout 90 /tmp/praisonai-code-standalone/bin/praisonai-code run --output actions "Say hello in one word" 2>&1)
         RUN_CODE=$?
         set -e
         echo "$RUN_OUT" | tail -20
         if echo "$RUN_OUT" | grep -qE 'ImportError|ModuleNotFoundError: No module named .praisonai'; then
-          echo "FAIL: standalone run hit wrapper import error"
+          echo "FAIL: standalone actions run hit wrapper import error"
           exit 1
         fi
-        echo "standalone run import gate ok (exit $RUN_CODE)"
+        echo "standalone actions run import gate ok (exit $RUN_CODE)"
+        set +e
+        DEFAULT_RUN=$(timeout 15 /tmp/praisonai-code-standalone/bin/praisonai-code run "hi" 2>&1)
+        set -e
+        echo "$DEFAULT_RUN" | tail -10
+        if ! echo "$DEFAULT_RUN" | grep -qi 'pip install praisonai'; then
+          echo "FAIL: default run should prompt for praisonai wrapper install"
+          exit 1
+        fi
+        echo "default run wrapper gate ok"
+        set +e
+        CHAT_RUN=$(timeout 10 /tmp/praisonai-code-standalone/bin/praisonai-code chat 2>&1)
+        set -e
+        echo "$CHAT_RUN" | tail -10
+        if ! echo "$CHAT_RUN" | grep -qi 'pip install praisonai'; then
+          echo "FAIL: chat should prompt for praisonai wrapper install"
+          exit 1
+        fi
+        echo "chat wrapper gate ok"
 
     - name: Standalone praisonai-bot smoke (C9)
       run: |
@@ -162,6 +180,12 @@ jobs:
         "
         /tmp/praisonai-bot-standalone/bin/praisonai-bot --help
         bash "$GITHUB_WORKSPACE/scripts/check_c9_bot_imports.sh"
+        bash "$GITHUB_WORKSPACE/scripts/check_bot_code_imports.sh"
+        /tmp/praisonai-bot-standalone/bin/python -c "
+        import praisonai_bot.cli.commands.bot as bot_cmd
+        import praisonai_bot.cli.commands.gateway as gw_cmd
+        print('bot command modules import ok', bot_cmd.app, gw_cmd.app)
+        "
     
     - name: Smoke Test Summary
       if: always()

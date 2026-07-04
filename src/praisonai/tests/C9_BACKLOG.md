@@ -33,6 +33,13 @@ Epic branch: `feat/c9-praisonai-bot`
 - [x] `[claw]` extra composes `praisonai-bot[gateway,bot]`
 - [x] CI legacy paths + `test_c9_*` smoke; duplicate onboard tests removed
 
+## Four-tier validation fixes (2026-07-04)
+
+- [x] `host_app.setup_bridges()` → wrapper bridges via `_wrapper_bridge` (not missing bot copies)
+- [x] `kanban_bridge` jobs helpers → `praisonai.jobs.server`
+- [x] Bot production `praisonai_code` imports → `_code_bridge` (`check_bot_code_imports.sh`)
+- [x] C7 standalone truth: `chat`/`code`/default `run` require wrapper; daemon `--background` uses `praisonai_code.runtime`
+
 ## Deferred (optional follow-on)
 
 - [ ] `praisonai.jobs/*` move — stays wrapper-owned (lazy `praisonai` + recipe deps)
@@ -43,6 +50,7 @@ Epic branch: `feat/c9-praisonai-bot`
 ```bash
 bash scripts/check_c9_bot_imports.sh
 bash scripts/audit_bot_wrapper_imports.sh
+bash scripts/check_bot_code_imports.sh
 pytest src/praisonai/tests/unit/test_c9_backward_compat.py -q
 pytest src/praisonai/tests/unit/test_c9_1_boundaries.py -q
 ```

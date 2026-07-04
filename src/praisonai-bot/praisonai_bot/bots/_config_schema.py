@@ -457,7 +457,9 @@ def validate_gateway_config(raw: Dict[str, Any], apply_env_substitution: bool = 
     """
     # Apply environment variable substitution if requested
     if apply_env_substitution:
-        from praisonai_code.cli.utils.env_utils import substitute_env_vars
+        from praisonai_bot._code_bridge import import_code_module
+
+        substitute_env_vars = import_code_module("praisonai_code.cli.utils.env_utils").substitute_env_vars
         raw = substitute_env_vars(raw)
         
     try:
@@ -515,7 +517,9 @@ def load_and_validate_gateway_yaml(path: str, apply_env_substitution: bool = Tru
         )
     
     # Load env file if not already loaded
-    from praisonai_code.cli.utils.env_utils import load_env_file
+    from praisonai_bot._code_bridge import import_code_module
+
+    load_env_file = import_code_module("praisonai_code.cli.utils.env_utils").load_env_file
     load_env_file()
     
     with open(path) as f:

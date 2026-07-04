@@ -3740,7 +3740,9 @@ class WebSocketGateway:
         # Resolve tool names to callables (same pattern as agents_generator)
         tool_resolver = None
         try:
-            from praisonai_code.tool_resolver import ToolResolver
+            from praisonai_bot._code_bridge import import_code_module
+
+            ToolResolver = import_code_module("praisonai_code.tool_resolver").ToolResolver
             tool_resolver = ToolResolver()
         except ImportError:
             logger.debug("ToolResolver not available, agents will have no tools")

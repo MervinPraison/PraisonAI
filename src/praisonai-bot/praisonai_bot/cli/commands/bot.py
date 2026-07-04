@@ -106,8 +106,10 @@ def bot_start(
         praisonai bot start --config ~/.praisonai/bot.yaml
         praisonai bot start -c my-telegram-bot.yaml
     """
-    from praisonai_code.cli._paths import resolve_bot_config_path
+    from praisonai_bot._code_bridge import import_code_module
     from ..features.bots_cli import BotHandler
+
+    resolve_bot_config_path = import_code_module("praisonai_code.cli._paths").resolve_bot_config_path
 
     resolved = resolve_bot_config_path(config)
     handler = BotHandler()
@@ -613,8 +615,10 @@ def bot_install_daemon(
         praisonai bot install-daemon --config my-bot.yaml --no-start
     """
     from praisonai_bot.daemon import install_daemon
-    from praisonai_code.cli._paths import resolve_bot_config_path
+    from praisonai_bot._code_bridge import import_code_module
     from ..output.console import get_output_controller
+
+    resolve_bot_config_path = import_code_module("praisonai_code.cli._paths").resolve_bot_config_path
     
     output = get_output_controller()
     config = resolve_bot_config_path(config)

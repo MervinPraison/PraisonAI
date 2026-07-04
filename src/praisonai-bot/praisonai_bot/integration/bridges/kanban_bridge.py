@@ -25,7 +25,7 @@ def get_jobs_store():
     try:
         from praisonai_bot._wrapper_bridge import import_wrapper_module
 
-        jobs = import_wrapper_module("praisonai.jobs.store")
+        jobs = import_wrapper_module("praisonai.jobs.server")
         return jobs.get_store
     except ImportError:
         return None
@@ -36,7 +36,7 @@ def get_jobs_executor():
     try:
         from praisonai_bot._wrapper_bridge import import_wrapper_module
 
-        jobs = import_wrapper_module("praisonai.jobs.executor")
+        jobs = import_wrapper_module("praisonai.jobs.server")
         return jobs.get_executor
     except ImportError:
         return None
