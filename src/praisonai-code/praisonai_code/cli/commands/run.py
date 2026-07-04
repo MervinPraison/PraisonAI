@@ -18,6 +18,21 @@ app = typer.Typer(help="Run agents")
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
 
+def _is_yaml_file(target: Optional[str]) -> bool:
+    """Return True when ``target`` is an existing YAML file path.
+
+    Case-insensitive on the extension so uppercase paths (e.g. ``AGENTS.YAML``)
+    are recognised as file targets. Shared by the stdin-ingestion gate and the
+    downstream file/prompt routing so both decisions stay in lockstep.
+    """
+    import os
+    return bool(
+        target
+        and os.path.exists(target)
+        and target.lower().endswith((".yaml", ".yml"))
+    )
+
+
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
     """Parse permission flags into a config dict.
     
@@ -502,26 +517,22 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
+    # Rewind: restore the workspace to a prior checkpoint and exit. Handled
+    # before any execution (and before stdin ingestion) so `praisonai run
+    # --restore last` is a pure undo that never drains a pipe it won't use.
+    if restore:
+        _restore_checkpoint(restore)
+        return
+
     # Ingest piped stdin so `run` composes in Unix pipelines and CI, e.g.
     #   cat error.log | praisonai run "Diagnose the root cause"
     # The prompt argument comes first, then the piped body. Non-blocking/EOF-safe
     # so an interactive TTY is never stalled; isatty()-based mode detection below
     # is preserved. Skipped for file/agent/command flows where merging a piped
     # body into a YAML path or named definition would be meaningless.
-    import os as _os
-    _target_is_file = bool(
-        target and _os.path.exists(target)
-        and (target.endswith(".yaml") or target.endswith(".yml"))
-    )
-    if not (agent or command) and not _target_is_file:
+    if not (agent or command) and not _is_yaml_file(target):
         from ..utils.stdin import resolve_cli_input
         target = resolve_cli_input(target)
-
-    # Rewind: restore the workspace to a prior checkpoint and exit. Handled
-    # before any execution so `praisonai run --restore last` is a pure undo.
-    if restore:
-        _restore_checkpoint(restore)
-        return
 
     # Validate --thinking and resolve it to the core thinking_budget up front so
     # an unknown value fails closed before any execution (consistent with the
@@ -734,9 +745,9 @@ def run_main(
         }
     )
     
-    # Check if target is a file or prompt
-    import os
-    is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
+    # Check if target is a file or prompt (case-insensitive extension, shared
+    # with the stdin-ingestion gate above so both decisions stay consistent).
+    is_file = _is_yaml_file(target)
 
     # Only the direct-prompt path forwards to the warm runtime, so reject
     # --attach on file execution rather than letting it run with no observable
@@ -753,6 +764,7 @@ def run_main(
     # noise). Best-effort and gated by config (`checkpoints.auto`, default on)
     # and `--no-checkpoint`.
     if is_file:
+        import os
         from ..state.identifiers import get_current_context as _get_ctx
         _run_id = getattr(_get_ctx(), "run_id", None)
         _auto_checkpoint(

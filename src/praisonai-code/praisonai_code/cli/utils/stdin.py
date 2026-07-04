@@ -14,8 +14,15 @@ EOF, common in CI/CD, subprocesses, IDE terminals, and Docker) is never stalled.
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Safety cap so an accidentally huge pipe (e.g. `cat huge.bin | praisonai run`)
+# can't buffer unbounded memory before the agent even starts.
+_MAX_STDIN_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def read_stdin_if_available() -> Optional[str]:
@@ -24,10 +31,20 @@ def read_stdin_if_available() -> Optional[str]:
     Returns the stripped stdin content, or ``None`` when stdin is a TTY, has no
     data available, or reading fails. Non-blocking: uses ``select.select`` so an
     open pipe with no EOF never blocks the caller.
+
+    Reads at most ``_MAX_STDIN_BYTES`` to bound memory. On platforms where
+    ``select.select`` does not support pipes (notably Windows), the read is
+    skipped rather than risking a block.
     """
     try:
         # A TTY means interactive input, not piped data.
         if sys.stdin.isatty():
+            return None
+
+        # select.select() only supports pipes/stdin on Unix-like platforms; on
+        # Windows it is socket-only, so skip the piped-read path there rather
+        # than blocking on sys.stdin.read().
+        if sys.platform.startswith("win"):
             return None
 
         import select
@@ -37,11 +54,12 @@ def read_stdin_if_available() -> Optional[str]:
         # (subprocesses, CI/CD, IDE terminals, Docker) where stdin is a pipe
         # with no EOF.
         if select.select([sys.stdin], [], [], 0.0)[0]:
-            stdin_content = sys.stdin.read().strip()
+            stdin_content = sys.stdin.read(_MAX_STDIN_BYTES).strip()
             return stdin_content if stdin_content else None
     except Exception:
-        # If there's any error reading stdin, ignore it and fall through.
-        pass
+        # If there's any error reading stdin, don't crash the CLI — fall through
+        # to None, but log at debug level so piping issues remain diagnosable.
+        logger.debug("Failed to read piped stdin", exc_info=True)
     return None
 
 

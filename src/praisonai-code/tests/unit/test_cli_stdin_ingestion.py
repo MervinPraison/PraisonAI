@@ -56,6 +56,22 @@ def test_read_stdin_returns_none_when_no_data_available(monkeypatch):
     assert stdin_util.read_stdin_if_available() is None
 
 
+def test_read_stdin_skipped_on_windows(monkeypatch):
+    # select.select() is socket-only on Windows, so piped reads are skipped to
+    # avoid blocking on sys.stdin.read().
+    _patch_stdin(monkeypatch, "piped data")
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    assert stdin_util.read_stdin_if_available() is None
+
+
+def test_read_stdin_respects_size_cap(monkeypatch):
+    # Read is bounded by _MAX_STDIN_BYTES so a huge pipe can't buffer unbounded.
+    fake = _patch_stdin(monkeypatch, "x" * (stdin_util._MAX_STDIN_BYTES + 100))
+    result = stdin_util.read_stdin_if_available()
+    assert result is not None
+    assert len(result) <= stdin_util._MAX_STDIN_BYTES
+
+
 def test_resolve_cli_input_merges_prompt_first(monkeypatch):
     _patch_stdin(monkeypatch, "error log body")
     result = stdin_util.resolve_cli_input("Diagnose this")
