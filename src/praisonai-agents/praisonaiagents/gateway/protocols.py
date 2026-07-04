@@ -67,9 +67,19 @@ class GatewayCloseCode(str, Enum):
             advertised ``max_buffered_bytes`` policy (a genuinely slow/stalled
             consumer). The server evicts it so its backlog cannot grow without
             bound or stall delivery to healthy clients.
+        CREDENTIALS_ROTATED: The shared gateway secret this session
+            authenticated under is no longer the active secret (an operator
+            rotated ``auth_token`` and hot-reloaded, or otherwise revoked it).
+            The server force-closes every session stamped with a stale secret
+            so a leaked/revoked credential stops working within one reload
+            cycle, without a full process restart. Clients should
+            re-authenticate (see :attr:`ConnectRecoveryStep.REAUTHENTICATE`)
+            and reconnect with fresh credentials rather than backing off as if
+            the server were down.
     """
 
     SLOW_CONSUMER = "slow_consumer"
+    CREDENTIALS_ROTATED = "credentials_rotated"
 
 
 class ConnectRecoveryStep(str, Enum):

@@ -8,6 +8,7 @@ session management, and real-time communication.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -55,6 +56,13 @@ from .supervisor import ChannelSupervisor
 # keep up with; the structured GatewayCloseCode.SLOW_CONSUMER reason travels in
 # the close ``reason`` so clients can branch deterministically.
 SLOW_CONSUMER_CLOSE_CODE = 1013
+
+# WebSocket close code used when a session is force-closed because the shared
+# gateway secret it authenticated under was rotated/revoked. 4001 is in the
+# private-use (4000–4999) range reserved for application-defined codes; the
+# structured GatewayCloseCode.CREDENTIALS_ROTATED reason travels in the close
+# ``reason`` so clients can branch deterministically and re-authenticate.
+CREDENTIALS_ROTATED_CLOSE_CODE = 4001
 
 
 class _ChannelBotOS:
@@ -747,6 +755,11 @@ class WebSocketGateway:
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
+        # Issue #2661: fingerprint of the shared secret each authenticated
+        # client connected under, so rotating ``auth_token`` can force-close
+        # every session stamped with a stale secret (instant credential
+        # revocation) instead of leaving it trusted for its whole lifetime.
+        self._client_auth_generation: Dict[str, str] = {}  # client_id -> auth generation
         
         # Initialize session store based on configuration
         if session_store:
@@ -1262,6 +1275,9 @@ class WebSocketGateway:
             self._register_client_conn(client_id, websocket)
             # Resolve operator scopes for this connection (all scopes if no policy).
             self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
+            # Issue #2661: stamp the session with the active secret's generation
+            # so a later rotation can force-close it (instant revocation).
+            self._client_auth_generation[client_id] = self._auth_generation()
             # Per-connection unauthorized-frame flood guard (Issue #2620).
             from .rate_limiter import UnauthorizedFloodGuard
             _flood_guard = UnauthorizedFloodGuard(
@@ -1309,6 +1325,7 @@ class WebSocketGateway:
                 self._clients.pop(client_id, None)
                 await self._teardown_client_conn(client_id)
                 self._client_scopes.pop(client_id, None)
+                self._client_auth_generation.pop(client_id, None)
                 session_id = self._client_sessions.pop(client_id, None)
                 if session_id:
                     self.close_session(session_id)
@@ -1869,6 +1886,7 @@ class WebSocketGateway:
         self._client_conns.clear()
         self._client_sessions.clear()
         self._client_scopes.clear()
+        self._client_auth_generation.clear()
         
         for session_id in list(self._sessions.keys()):
             self.close_session(session_id)
@@ -2444,6 +2462,7 @@ class WebSocketGateway:
         # Mirror the normal disconnect cleanup so evicted clients do not leave
         # stale scope/session entries that accumulate until shutdown.
         self._client_scopes.pop(client_id, None)
+        self._client_auth_generation.pop(client_id, None)
         session_id = self._client_sessions.pop(client_id, None)
         if session_id:
             self.close_session(session_id)
@@ -2456,6 +2475,80 @@ class WebSocketGateway:
             except Exception as exc:
                 logger.debug(
                     "Could not close slow consumer %s: %s", client_id, exc
+                )
+
+    def _auth_generation(self) -> str:
+        """Return a stable fingerprint of the *active* shared secret.
+
+        Issue #2661: each authenticated client is stamped with this value at
+        connect time; when ``auth_token`` is rotated the fingerprint changes
+        and :meth:`_revoke_rotated_sessions` can force-close every session that
+        still carries the old stamp. The raw secret is never logged or stored —
+        only a truncated SHA-256 digest — so the stamp is safe to keep in
+        memory and compare. An empty/absent secret (local loopback mode) maps
+        to a stable sentinel so those sessions are handled consistently.
+        """
+        token = getattr(self.config, "auth_token", None) or ""
+        if not token:
+            return "no-auth"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+    async def _revoke_rotated_sessions(self) -> int:
+        """Force-close every session that authenticated under a stale secret.
+
+        Issue #2661: after the shared ``auth_token`` is rotated (via config
+        hot-reload or an explicit operator action) this evicts every live
+        WebSocket session whose stamped auth generation no longer matches the
+        active one, using the existing force-close path. Evicted clients are
+        told to re-authenticate (structured ``CREDENTIALS_ROTATED`` close code +
+        ``REAUTHENTICATE`` recovery step) rather than back off, and sessions
+        already on the current secret are left untouched.
+
+        Returns:
+            The number of sessions revoked.
+        """
+        current = self._auth_generation()
+        stale = [
+            client_id
+            for client_id, generation in list(self._client_auth_generation.items())
+            if generation != current
+        ]
+        if not stale:
+            return 0
+        logger.warning(
+            "Revoking %d gateway session(s) after auth secret rotation",
+            len(stale),
+        )
+        for client_id in stale:
+            await self._force_close_credentials_rotated(client_id)
+        return len(stale)
+
+    async def _force_close_credentials_rotated(self, client_id: str) -> None:
+        """Force-close one session whose credential was rotated/revoked.
+
+        Reuses the same server-initiated close mechanism as slow-consumer
+        eviction, swapping in the structured ``CREDENTIALS_ROTATED`` reason so
+        clients branch deterministically on ``(code, next_step)`` and
+        re-authenticate.
+        """
+        ws = self._clients.pop(client_id, None)
+        await self._teardown_client_conn(client_id)
+        self._client_scopes.pop(client_id, None)
+        self._client_auth_generation.pop(client_id, None)
+        session_id = self._client_sessions.pop(client_id, None)
+        if session_id:
+            self.close_session(session_id)
+        if ws is not None:
+            try:
+                await ws.close(
+                    code=CREDENTIALS_ROTATED_CLOSE_CODE,
+                    reason=GatewayCloseCode.CREDENTIALS_ROTATED.value,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Could not close rotated-credential session %s: %s",
+                    client_id,
+                    exc,
                 )
 
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
@@ -4997,9 +5090,65 @@ class WebSocketGateway:
         # rotated hook secrets take effect without a full process restart.
         self._apply_hooks_from_config(new_cfg)
 
+        # Issue #2661: pick up a rotated shared gateway secret and force-close
+        # every live session that authenticated under the previous secret, so a
+        # leaked/revoked credential stops working within one reload cycle
+        # without a full process restart.
+        await self._apply_auth_secret_rotation(new_cfg)
+
         # Update stored config
         self._loaded_config = new_cfg
         logger.info("Hot-reload complete")
+
+    async def _apply_auth_secret_rotation(self, new_cfg: Dict[str, Any]) -> int:
+        """Adopt a rotated shared secret and revoke stale live sessions.
+
+        Issue #2661: the reload loop refreshes hook secrets but historically
+        left the *gateway* shared secret and every already-authenticated
+        WebSocket session untouched. This reads the new ``gateway.auth_token``
+        (with env substitution, matching :meth:`load_gateway_config`), and when
+        it differs from the running secret updates ``self.config.auth_token``,
+        keeps ``GATEWAY_AUTH_TOKEN`` in sync, and force-closes every session
+        stamped with the old secret via :meth:`_revoke_rotated_sessions`.
+
+        The behaviour defaults on; set ``gateway.revoke_on_secret_rotation:
+        false`` in the config to opt out (the secret is still adopted for new
+        connections, but live sessions are left connected).
+
+        Returns:
+            The number of sessions revoked (0 when nothing changed or the
+            feature is disabled).
+        """
+        gateway_cfg = new_cfg.get("gateway", {}) if isinstance(new_cfg, dict) else {}
+        if not isinstance(gateway_cfg, dict):
+            return 0
+        if "auth_token" not in gateway_cfg:
+            # No secret declared in the new config: leave the running secret
+            # (and every live session) untouched.
+            return 0
+
+        raw_token = gateway_cfg.get("auth_token")
+        new_token = (
+            self._substitute_env_vars(raw_token)
+            if isinstance(raw_token, str)
+            else raw_token
+        )
+        current_token = getattr(self.config, "auth_token", None)
+        if not new_token or new_token == current_token:
+            return 0
+
+        # Adopt the new secret so subsequent handshakes authenticate against it.
+        self.config.auth_token = new_token
+        os.environ["GATEWAY_AUTH_TOKEN"] = new_token
+        logger.info("Gateway auth secret rotated via config reload")
+
+        if not gateway_cfg.get("revoke_on_secret_rotation", True):
+            logger.info(
+                "revoke_on_secret_rotation disabled; leaving live sessions "
+                "connected under the previous secret"
+            )
+            return 0
+        return await self._revoke_rotated_sessions()
 
     async def _watch_config(self, config_path: str, poll_interval: float = 5.0, debounce: float = 1.0) -> None:
         """Watch the config file for changes and trigger hot-reload.
