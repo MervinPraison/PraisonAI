@@ -287,23 +287,12 @@ class PraisonAI:
         """
         Read from stdin if it's available (when data is piped in).
         Returns the stdin content or None if no piped input is available.
+
+        Delegates to the shared CLI helper so the legacy path and the modern
+        `run`/`code`/`chat` commands use one EOF-safe implementation.
         """
-        try:
-            # Check if stdin is not a terminal (i.e., has piped input)
-            if not sys.stdin.isatty():
-                import select
-                # Non-blocking check: only read if data is actually available.
-                # Without this, sys.stdin.read() blocks forever in non-TTY
-                # environments (subprocesses, CI/CD, IDE terminals, Docker)
-                # where stdin is a pipe with no EOF.
-                if select.select([sys.stdin], [], [], 0.0)[0]:
-                    stdin_content = sys.stdin.read().strip()
-                    return stdin_content if stdin_content else None
-                return None
-        except Exception:
-            # If there's any error reading stdin, ignore it
-            pass
-        return None
+        from praisonai_code.cli.utils.stdin import read_stdin_if_available
+        return read_stdin_if_available()
 
     def read_file_if_provided(self, file_path):
         """
