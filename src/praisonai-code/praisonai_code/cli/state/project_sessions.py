@@ -123,7 +123,10 @@ def _is_root_session(session: Dict[str, Any]) -> bool:
     return True
 
 
-def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
+def find_last_session(
+    project_path: Optional[str] = None,
+    limit: int = 50,
+) -> Optional[str]:
     """
     Find the last session ID for the current project.
 
@@ -135,26 +138,15 @@ def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
 
     Args:
         project_path: Project root path (defaults to cwd)
+        limit: Per-store window size when scanning each store's sessions.
 
     Returns:
         Session ID or None if no sessions exist
     """
-    candidates: List[Dict[str, Any]] = []
-
-    for resolve in (
-        lambda: get_project_session_store(project_path),
-        _get_default_store,
-    ):
-        try:
-            store = resolve()
-        except Exception:
-            continue
-        if store is None:
-            continue
-        try:
-            candidates.extend(store.list_sessions(limit=50) or [])
-        except Exception:
-            continue
+    # Reuse the merged+de-duplicated view so list ⇔ continue stay consistent:
+    # a session id living in both stores appears once, and the freshest record
+    # wins (mirrors ``list_project_sessions``; Issue #2655).
+    candidates = list_project_sessions(project_path, limit=limit)
 
     if not candidates:
         return None
@@ -164,8 +156,7 @@ def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
     roots = [s for s in candidates if _is_root_session(s)]
     pool = roots or candidates
 
-    # Most-recent wins; de-duplicate a session id that lives in both stores.
-    pool.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+    # ``list_project_sessions`` already returns most-recent first.
     top = pool[0]
     return top.get("session_id") or top.get("id")
 

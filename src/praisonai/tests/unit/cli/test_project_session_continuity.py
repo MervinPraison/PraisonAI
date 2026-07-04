@@ -60,39 +60,53 @@ def test_injected_session_store_not_overwritten():
     store.clear_session(session_id)
 
 
-def test_find_last_session_sees_global_agent_session():
+def test_find_last_session_sees_global_agent_session(monkeypatch, tmp_path):
     """A session created via the core global store (e.g. Agent(session_id=...))
     must be visible to `--continue`/find_last_session and to the merged
-    listing, not only project-scoped run sessions (Issue #2655)."""
-    global_store = get_default_session_store()
+    listing, not only project-scoped run sessions (Issue #2655).
+
+    Both stores are redirected to isolated temp dirs so the assertion that the
+    freshly-created session is *the* most-recent one is deterministic and never
+    contends with pre-existing sessions on the machine or parallel test runs.
+    """
+    from praisonaiagents.session.store import DefaultSessionStore
+    import praisonai.cli.state.project_sessions as ps
+
+    project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
+    global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
+    monkeypatch.setattr(ps, "get_project_session_store", lambda *a, **k: project_store)
+    monkeypatch.setattr(ps, "_get_default_store", lambda: global_store)
+
     session_id = "issue-2655-global-session"
-    global_store.delete_session(session_id)
     global_store.add_user_message(session_id, "created by core Agent")
 
-    try:
-        assert find_last_session() == session_id
+    assert find_last_session() == session_id
 
-        listed = {s.get("session_id") for s in list_project_sessions()}
-        assert session_id in listed
-    finally:
-        global_store.delete_session(session_id)
+    listed = {s.get("session_id") for s in list_project_sessions()}
+    assert session_id in listed
 
 
-def test_find_last_session_skips_sub_agent_child():
+def test_find_last_session_skips_sub_agent_child(monkeypatch, tmp_path):
     """`--continue` resolves to the last root session, never a sub-agent child
-    marked with a parent_id in metadata (Issue #2655)."""
-    store = get_project_session_store()
+    marked with a parent_id in metadata (Issue #2655).
+
+    Stores are redirected to isolated temp dirs so the child (written last, and
+    thus most-recent) never wins over the root purely because of a pre-existing
+    session elsewhere on the machine.
+    """
+    from praisonaiagents.session.store import DefaultSessionStore
+    import praisonai.cli.state.project_sessions as ps
+
+    store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
+    empty_global = DefaultSessionStore(session_dir=str(tmp_path / "global"))
+    monkeypatch.setattr(ps, "get_project_session_store", lambda *a, **k: store)
+    monkeypatch.setattr(ps, "_get_default_store", lambda: empty_global)
+
     root_id = "issue-2655-root"
     child_id = "issue-2655-child"
-    store.delete_session(root_id)
-    store.delete_session(child_id)
 
     store.add_user_message(root_id, "root conversation")
     store.add_user_message(child_id, "sub-agent work")
     store.update_session_metadata(child_id, parent_id=root_id)
 
-    try:
-        assert find_last_session() == root_id
-    finally:
-        store.delete_session(root_id)
-        store.delete_session(child_id)
+    assert find_last_session() == root_id
