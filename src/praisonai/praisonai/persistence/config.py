@@ -114,10 +114,17 @@ ENV_VARS = {
     "xata_database_url": "XATA_DATABASE_URL",
 }
 
-# Supported backends
-CONVERSATION_BACKENDS = ["postgres", "mysql", "sqlite", "singlestore", "supabase", "surrealdb", "turso", "neon", "cockroachdb", "xata"]
-KNOWLEDGE_BACKENDS = ["qdrant", "pinecone", "chroma", "weaviate", "lancedb", "milvus", "pgvector", "redis", "cassandra", "clickhouse"]
-STATE_BACKENDS = ["redis", "dynamodb", "firestore", "mongodb", "upstash", "memory"]
+def _supported_backends(kind: str) -> list:
+    """Return the registry-registered backend names for a store kind.
+
+    The registry (``persistence/registry.py``) is the single source of truth for
+    supported backends, so validation can never drift from what actually
+    resolves and runs. ``list_all_names()`` is used so registered aliases (e.g.
+    ``neon``, ``xata``, ``cockroachdb``, ``libsql``, ``motor``) — which the
+    registry resolves — are accepted by validation too.
+    """
+    from .registry import get_default_registry
+    return sorted(get_default_registry(kind).list_all_names())
 
 
 @dataclass
@@ -214,20 +221,26 @@ class PersistenceConfig:
         """Validate configuration."""
         valid = True
         
-        if self.conversation_store and self.conversation_store not in CONVERSATION_BACKENDS:
-            logger.error(f"Invalid conversation_store: {self.conversation_store}. "
-                        f"Supported: {CONVERSATION_BACKENDS}")
-            valid = False
+        if self.conversation_store:
+            supported = _supported_backends("conversation")
+            if self.conversation_store not in supported:
+                logger.error(f"Invalid conversation_store: {self.conversation_store}. "
+                            f"Supported: {supported}")
+                valid = False
         
-        if self.knowledge_store and self.knowledge_store not in KNOWLEDGE_BACKENDS:
-            logger.error(f"Invalid knowledge_store: {self.knowledge_store}. "
-                        f"Supported: {KNOWLEDGE_BACKENDS}")
-            valid = False
+        if self.knowledge_store:
+            supported = _supported_backends("knowledge")
+            if self.knowledge_store not in supported:
+                logger.error(f"Invalid knowledge_store: {self.knowledge_store}. "
+                            f"Supported: {supported}")
+                valid = False
         
-        if self.state_store and self.state_store not in STATE_BACKENDS:
-            logger.error(f"Invalid state_store: {self.state_store}. "
-                        f"Supported: {STATE_BACKENDS}")
-            valid = False
+        if self.state_store:
+            supported = _supported_backends("state")
+            if self.state_store not in supported:
+                logger.error(f"Invalid state_store: {self.state_store}. "
+                            f"Supported: {supported}")
+                valid = False
         
         return valid
 
@@ -239,9 +252,13 @@ def get_env_var(key: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def list_available_backends() -> Dict[str, list]:
-    """List all available backends by store type."""
+    """List all available backends by store type.
+
+    Derived from the persistence registry (the single source of truth) so the
+    list never drifts from the backends that actually resolve.
+    """
     return {
-        "conversation": CONVERSATION_BACKENDS,
-        "knowledge": KNOWLEDGE_BACKENDS,
-        "state": STATE_BACKENDS,
+        "conversation": _supported_backends("conversation"),
+        "knowledge": _supported_backends("knowledge"),
+        "state": _supported_backends("state"),
     }
