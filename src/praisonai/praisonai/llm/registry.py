@@ -20,6 +20,7 @@ Example:
     provider = create_llm_provider("cloudflare/workers-ai")
 """
 
+import threading
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from .._registry import PluginRegistry
 
@@ -178,6 +179,7 @@ class LLMProviderRegistry(PluginRegistry[ProviderType]):
 
 # Guard so gateway providers are registered exactly once, on first registry use.
 _gateways_registered = False
+_gateways_lock = threading.Lock()
 
 
 def _ensure_gateways_registered() -> None:
@@ -186,17 +188,28 @@ def _ensure_gateways_registered() -> None:
     Deferred from package-import time so that importing config-only helpers
     (e.g. build_config_list) does not pay the gateway + importlib.metadata cost.
     Idempotent and cheap after the first call.
+
+    Thread-safe: the run-once flag is guarded by a module-level lock so
+    concurrent first-callers register the gateway providers exactly once.
     """
     global _gateways_registered
+    # Fast path: avoid taking the lock once registration has completed.
     if _gateways_registered:
         return
-    _gateways_registered = True
-    try:
-        from .gateways import register_gateway_providers
-        register_gateway_providers()
-    except ImportError:
-        # Gateways module not available, skip registration
-        pass
+    with _gateways_lock:
+        # Re-check under the lock in case another thread already registered.
+        if _gateways_registered:
+            return
+        # Set the flag before registering. register_gateway_providers() calls
+        # back into get_default_llm_registry() -> _ensure_gateways_registered();
+        # setting the flag first makes that re-entrant call a cheap no-op.
+        _gateways_registered = True
+        try:
+            from .gateways import register_gateway_providers
+            register_gateway_providers()
+        except ImportError:
+            # Gateways module not available, skip registration
+            pass
 
 
 # Default registry access - replaced by LLMProviderRegistry.default()

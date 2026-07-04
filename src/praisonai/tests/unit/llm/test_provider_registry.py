@@ -502,7 +502,9 @@ class TestLiteLLMIsolation:
                 if node.module:
                     imports.append(node.module)
         
-        # Only stdlib modules should be imported at the top level (no heavy deps like litellm)
-        allowed_stdlib_imports = {'typing', '.._registry', '_registry'}
+        # Only stdlib modules should be imported at the top level (no heavy deps like litellm).
+        # threading is stdlib and already loaded by the interpreter at startup, so it
+        # carries no measurable import cost.
+        allowed_stdlib_imports = {'typing', 'threading', '.._registry', '_registry'}
         unexpected = set(imports) - allowed_stdlib_imports
         assert not unexpected, f"Unexpected top-level imports: {unexpected}"
