@@ -5128,13 +5128,27 @@ class WebSocketGateway:
             return 0
 
         raw_token = gateway_cfg.get("auth_token")
-        new_token = (
-            self._substitute_env_vars(raw_token)
-            if isinstance(raw_token, str)
-            else raw_token
-        )
+        # YAML without quotes (e.g. ``auth_token: 12345``) parses as int/other;
+        # coerce to str so env substitution and ``os.environ`` assignment below
+        # never raise ``TypeError`` and leave the reload partially applied.
+        if isinstance(raw_token, str):
+            new_token = self._substitute_env_vars(raw_token)
+        elif raw_token is None:
+            new_token = raw_token
+        else:
+            new_token = str(raw_token)
         current_token = getattr(self.config, "auth_token", None)
-        if not new_token or new_token == current_token:
+        if not new_token:
+            # ``auth_token`` was declared but resolves to empty (e.g. unquoted
+            # empty string, or an unset ``${VAR}``). Surface it so an operator
+            # clearing the secret isn't left guessing why nothing changed.
+            if current_token:
+                logger.warning(
+                    "Gateway auth_token present in reloaded config but resolved "
+                    "to empty; keeping the previous secret and live sessions"
+                )
+            return 0
+        if new_token == current_token:
             return 0
 
         # Adopt the new secret so subsequent handshakes authenticate against it.
@@ -5142,7 +5156,14 @@ class WebSocketGateway:
         os.environ["GATEWAY_AUTH_TOKEN"] = new_token
         logger.info("Gateway auth secret rotated via config reload")
 
-        if not gateway_cfg.get("revoke_on_secret_rotation", True):
+        # Normalise the toggle: env-substituted YAML arrives as a string, so a
+        # raw truthiness check would treat "false"/"0" as enabled. Default on.
+        revoke_raw = gateway_cfg.get("revoke_on_secret_rotation", True)
+        if isinstance(revoke_raw, str):
+            revoke_enabled = revoke_raw.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            revoke_enabled = bool(revoke_raw)
+        if not revoke_enabled:
             logger.info(
                 "revoke_on_secret_rotation disabled; leaving live sessions "
                 "connected under the previous secret"

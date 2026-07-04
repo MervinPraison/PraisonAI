@@ -12,6 +12,7 @@ Verifies that:
 """
 
 import asyncio
+import os
 
 import pytest
 
@@ -159,6 +160,59 @@ async def test_apply_rotation_opt_out_keeps_sessions():
     # Secret adopted for new connections, but the live session is left alone.
     assert revoked == 0
     assert gateway.config.auth_token == "new-secret"
+    assert ws.closed is False
+
+
+@pytest.mark.asyncio
+async def test_apply_rotation_opt_out_string_false_keeps_sessions():
+    # Env-substituted YAML arrives as a string; "false" must disable revocation.
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="old-secret"))
+    ws = _RecordingWS()
+    _connect(gateway, "c1", ws, gateway._auth_generation())
+
+    revoked = await gateway._apply_auth_secret_rotation(
+        {
+            "gateway": {
+                "auth_token": "new-secret",
+                "revoke_on_secret_rotation": "false",
+            }
+        }
+    )
+
+    assert revoked == 0
+    assert gateway.config.auth_token == "new-secret"
+    assert ws.closed is False
+
+
+@pytest.mark.asyncio
+async def test_apply_rotation_non_string_token_is_coerced():
+    # Unquoted YAML (auth_token: 12345) parses as int; must not raise.
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="old-secret"))
+    ws = _RecordingWS()
+    _connect(gateway, "c1", ws, gateway._auth_generation())
+
+    revoked = await gateway._apply_auth_secret_rotation(
+        {"gateway": {"auth_token": 12345}}
+    )
+
+    assert revoked == 1
+    assert gateway.config.auth_token == "12345"
+    assert os.environ["GATEWAY_AUTH_TOKEN"] == "12345"
+    assert ws.closed is True
+
+
+@pytest.mark.asyncio
+async def test_apply_rotation_empty_token_keeps_previous_secret():
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="old-secret"))
+    ws = _RecordingWS()
+    _connect(gateway, "c1", ws, gateway._auth_generation())
+
+    revoked = await gateway._apply_auth_secret_rotation(
+        {"gateway": {"auth_token": ""}}
+    )
+
+    assert revoked == 0
+    assert gateway.config.auth_token == "old-secret"
     assert ws.closed is False
 
 
