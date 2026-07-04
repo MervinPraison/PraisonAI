@@ -72,13 +72,21 @@ def session_list(
     # Handle project-scoped session listing
     if not all_projects and not storage_backend:
         # Use project-scoped session store by default
-        from ..state.project_sessions import get_project_session_store
+        from ..state.project_sessions import (
+            get_project_session_store,
+            list_project_sessions,
+        )
         from ..utils.project import get_project_id, get_project_name
-        
-        # List sessions for specific or current project
-        project_store = get_project_session_store(project_id=project_id)
-            
-        sessions_data = project_store.list_sessions(limit=limit)
+
+        # List sessions for specific or current project. For the current
+        # project, merge the project-scoped and global default stores so the
+        # listing matches what `--continue`/`resume` can actually see
+        # (Issue #2655). A specific `--project` id stays project-scoped.
+        if project_id:
+            project_store = get_project_session_store(project_id=project_id)
+            sessions_data = project_store.list_sessions(limit=limit)
+        else:
+            sessions_data = list_project_sessions(limit=limit)
         
         # Convert to expected format
         class SessionInfo:

@@ -109,18 +109,97 @@ def session_exists_anywhere(session_id: str, project_path: Optional[str] = None)
         return False
 
 
-def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
+def _is_root_session(session: Dict[str, Any]) -> bool:
+    """Return True when ``session`` is a root (not a sub-agent child) session.
+
+    ``--continue`` must resolve to the last *root* conversation the user was in,
+    never a sub-agent/forked child. Children are marked in metadata with a
+    ``parent_id``/``parent_session_id`` (hierarchy/fork) so we skip those.
+    """
+    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+    for key in ("parent_id", "parent_session_id"):
+        if session.get(key) or (metadata or {}).get(key):
+            return False
+    return True
+
+
+def find_last_session(
+    project_path: Optional[str] = None,
+    limit: int = 50,
+) -> Optional[str]:
     """
     Find the last session ID for the current project.
-    
+
+    Searches the project-scoped store **and** the global default store so
+    ``--continue`` resolves to the genuinely most-recent session regardless of
+    how it was created (``run``, ``chat``, interactive, gateway, API, or a bare
+    core ``Agent(session_id=...)``). Resolves to the most recent **root**
+    session, never a sub-agent/forked child (Issue #2655).
+
     Args:
         project_path: Project root path (defaults to cwd)
-        
+        limit: Per-store window size when scanning each store's sessions.
+
     Returns:
         Session ID or None if no sessions exist
     """
-    store = get_project_session_store(project_path)
-    return store.get_last_session_id()
+    # Reuse the merged+de-duplicated view so list ⇔ continue stay consistent:
+    # a session id living in both stores appears once, and the freshest record
+    # wins (mirrors ``list_project_sessions``; Issue #2655).
+    candidates = list_project_sessions(project_path, limit=limit)
+
+    if not candidates:
+        return None
+
+    # Prefer root sessions; only fall back to children if nothing else exists so
+    # a project with only forked/sub-agent sessions still resumes something.
+    roots = [s for s in candidates if _is_root_session(s)]
+    pool = roots or candidates
+
+    # ``list_project_sessions`` already returns most-recent first.
+    top = pool[0]
+    return top.get("session_id") or top.get("id")
+
+
+def list_project_sessions(
+    project_path: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """List sessions visible to ``--continue`` for the current project.
+
+    Merges the project-scoped store and the global default store (the same
+    stores ``find_last_session``/``rehydrate_session`` search), de-duplicates by
+    session id, and returns the most-recently-updated first so that anything
+    resumable is also listable (Issue #2655).
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+
+    for resolve in (
+        lambda: get_project_session_store(project_path),
+        _get_default_store,
+    ):
+        try:
+            store = resolve()
+        except Exception:
+            continue
+        if store is None:
+            continue
+        try:
+            rows = store.list_sessions(limit=limit) or []
+        except Exception:
+            continue
+        for row in rows:
+            sid = row.get("session_id") or row.get("id")
+            if not sid:
+                continue
+            existing = merged.get(sid)
+            # Keep the freshest record when the same id lives in both stores.
+            if existing is None or (row.get("updated_at") or "") > (existing.get("updated_at") or ""):
+                merged[sid] = row
+
+    sessions = list(merged.values())
+    sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+    return sessions[:limit]
 
 
 def build_cli_memory_config(
