@@ -393,10 +393,15 @@ class AgentsGenerator:
                 self._tool_timeout_executor = None
                 self._leaked_workers = 0
             if self._tool_timeout_executor is None:
+                # Resolve once so the pool size and the leak threshold that
+                # governs its recycling always agree, even if the env var was
+                # changed between construction and (re)creation.
+                workers = _resolve_tool_timeout_workers()
                 self._tool_timeout_executor = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=_resolve_tool_timeout_workers(),
+                    max_workers=workers,
                     thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
                 )
+                self._max_leaked_workers = max(1, workers // 2)
                 self._owns_tool_timeout_executor = True
             # Capture the reference inside the lock so a concurrent close() can
             # never null the attribute out between the check and the return.

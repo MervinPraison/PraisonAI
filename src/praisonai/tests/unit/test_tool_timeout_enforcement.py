@@ -124,3 +124,38 @@ def test_ag2_not_in_default_priority():
     from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
 
     assert "ag2" not in FrameworkAdapterRegistry.DEFAULT_PRIORITY
+
+
+def test_autogen_adapter_translates_tool_timeout_to_string():
+    # AutoGen v0.2 runs tools inside its own chat loop and expects a value to
+    # hand back to the LLM; a ToolTimeoutError must be translated at the adapter
+    # boundary instead of aborting the whole conversation.
+    try:
+        from praisonai.framework_adapters.autogen_adapter import AutoGenAdapter
+        from praisonai.agents_generator import ToolTimeoutError
+    except ImportError:
+        pytest.skip("AutoGen adapter / timeout stack not available")
+
+    def _times_out():
+        raise ToolTimeoutError(
+            tool_name="_times_out", timeout_seconds=0.1,
+            background_work_may_continue=True,
+        )
+
+    guarded = AutoGenAdapter._wrap_tool_for_execution(_times_out, "_times_out")
+    result = guarded()
+    assert isinstance(result, str)
+    assert "timed out" in result
+
+
+def test_autogen_adapter_passes_through_normal_result():
+    try:
+        from praisonai.framework_adapters.autogen_adapter import AutoGenAdapter
+    except ImportError:
+        pytest.skip("AutoGen adapter not available")
+
+    def _ok(x):
+        return x + 1
+
+    guarded = AutoGenAdapter._wrap_tool_for_execution(_ok, "_ok")
+    assert guarded(41) == 42
