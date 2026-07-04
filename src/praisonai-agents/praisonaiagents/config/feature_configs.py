@@ -38,6 +38,11 @@ from enum import Enum
 # Import AutonomyConfig from canonical location (no circular dep)
 from ..agent.autonomy import AutonomyConfig
 
+# Default tool output limit (16000 chars ≈ 4000 tokens)
+# Single source of truth shared by OutputConfig.tool_output_limit and
+# ToolConfig.output_limit (and re-exported for agent.py) to prevent drift.
+DEFAULT_TOOL_OUTPUT_LIMIT = 16000
+
 # TYPE_CHECKING import to avoid circular dependency
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -651,7 +656,9 @@ class OutputConfig:
     
     # Tool output limit - maximum characters for tool output
     # Default: 16000 chars (≈ 4000 tokens) to prevent runaway tool outputs
-    tool_output_limit: int = 16000
+    # Alias reconciled with ToolConfig.output_limit (ToolConfig wins when supplied);
+    # default sourced from DEFAULT_TOOL_OUTPUT_LIMIT to avoid drift.
+    tool_output_limit: int = DEFAULT_TOOL_OUTPUT_LIMIT
 
     def __post_init__(self) -> None:
         if not isinstance(self.tool_output_limit, int) or self.tool_output_limit <= 0:
@@ -987,7 +994,7 @@ class ToolConfig:
     parallel: bool = False
     
     # Tool output handling and artifact storage
-    output_limit: int = 16000  # Maximum bytes before spilling to artifact store
+    output_limit: int = DEFAULT_TOOL_OUTPUT_LIMIT  # Maximum bytes before spilling to artifact store
     output_max_lines: Optional[int] = None  # Maximum lines before spilling
     output_direction: str = "both"  # Truncation direction: "head", "tail", or "both"
     enable_artifacts: bool = False  # Whether to enable artifact storage (default False for backward compat)
@@ -1041,7 +1048,7 @@ class ToolConfig:
             timeout=data.get("timeout"),
             retry_policy=retry_policy,
             parallel=data.get("parallel", False),
-            output_limit=data.get("output_limit", 16000),
+            output_limit=data.get("output_limit", DEFAULT_TOOL_OUTPUT_LIMIT),
             output_max_lines=data.get("output_max_lines"),
             output_direction=data.get("output_direction", "both"),
             enable_artifacts=data.get("enable_artifacts", False),
