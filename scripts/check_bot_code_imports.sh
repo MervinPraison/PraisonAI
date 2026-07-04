@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="src/praisonai-bot/praisonai_bot"
 ALLOWLIST="scripts/c9_code_import_allowlist.txt"
-RE='(^from praisonai_code|^import praisonai_code)'
+RE='(from praisonai_code|import praisonai_code)'
 FAIL=0
 
 allowed_line() {
