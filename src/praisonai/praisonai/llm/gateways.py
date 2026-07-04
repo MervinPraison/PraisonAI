@@ -207,5 +207,8 @@ def register_gateway_providers():
     )
 
 
-# Auto-register on import
-register_gateway_providers()
+# NOTE: Gateway providers are NOT auto-registered on import. Registration is
+# driven lazily on first default-registry access via
+# registry._ensure_gateways_registered(), which calls register_gateway_providers()
+# exactly once. Re-adding a module-level call here would (a) double-register on
+# every cold start and (b) reintroduce the eager import cost this deferral removes.
