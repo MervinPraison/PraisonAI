@@ -5,10 +5,11 @@ Provides protocols and base classes for building gateway/control plane
 implementations that coordinate multi-agent deployments.
 
 This module contains only protocols and lightweight utilities.
-Heavy implementations live in the praisonai wrapper package.
+Heavy implementations live in the ``praisonai-bot`` package (C9); the
+``praisonai`` wrapper re-exports them for full-stack installs.
 
 Gap S2: WebSocketGateway is re-exported here for convenience but requires
-the praisonai wrapper package to be installed.
+``praisonai-bot`` (or ``pip install praisonai``) to be installed.
 """
 
 from .protocols import (
@@ -119,11 +120,10 @@ _lazy_cache = {}
 
 
 def __getattr__(name: str):
-    """Lazy load heavy gateway implementations from praisonai wrapper.
-    
-    Gap S2: Re-export WebSocketGateway from praisonai wrapper for convenience.
-    This allows downstream packages to import from praisonaiagents.gateway
-    without needing to know about the praisonai wrapper.
+    """Lazy load heavy gateway implementations from praisonai-bot (C9).
+
+    Gap S2: Re-export WebSocketGateway for convenience. Prefer
+    ``praisonai_bot.gateway`` or ``pip install praisonai`` for full stack.
     """
     if name in _lazy_cache:
         return _lazy_cache[name]

@@ -1293,7 +1293,9 @@ class BotOS:
                     try:
                         # Go through the praisonai.tool_resolver shim so the
                         # praisonai_code bootstrap runs in lean installs.
-                        from praisonai_code.tool_resolver import ToolResolver
+                        from praisonai_bot._code_bridge import import_code_module
+
+                        ToolResolver = import_code_module("praisonai_code.tool_resolver").ToolResolver
 
                         # Point the resolver at the config directory's tools.py so
                         # config-local tools are found regardless of process cwd

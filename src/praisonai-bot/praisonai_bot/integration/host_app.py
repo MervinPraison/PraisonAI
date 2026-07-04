@@ -202,22 +202,23 @@ def setup_bridges() -> None:
     """Register optional L1→L2 bridge hooks (usage sink, schedules, aiui backends)."""
     import logging
 
+    from praisonai_bot._wrapper_bridge import import_wrapper_module
+
     log = logging.getLogger(__name__)
     sink = None
+    usage_bridge = None
 
     try:
-        from praisonai_bot.integration.bridges.usage_bridge import register_usage_sink
-
-        sink = register_usage_sink()
+        usage_bridge = import_wrapper_module("praisonai.integration.bridges.usage_bridge")
+        sink = usage_bridge.register_usage_sink()
     except ImportError as exc:
         log.debug("usage bridge unavailable: %s", exc)
     except Exception as exc:
         log.warning("usage bridge unavailable: %s", exc)
 
     try:
-        from praisonai_bot.integration.bridges.schedules_runner import ensure_schedule_runner
-
-        ensure_schedule_runner()
+        schedules_runner = import_wrapper_module("praisonai.integration.bridges.schedules_runner")
+        schedules_runner.ensure_schedule_runner()
     except ImportError as exc:
         log.debug("schedule runner unavailable: %s", exc)
     except Exception as exc:
@@ -225,34 +226,32 @@ def setup_bridges() -> None:
 
     try:
         import praisonaiui.backends as backends
-        from praisonai_bot.integration.bridges.hooks_query import list_hooks_for_api
-        from praisonai_bot.integration.bridges.workflows_service import run_workflow as svc_run
+
+        hooks_query = import_wrapper_module("praisonai.integration.bridges.hooks_query")
+        workflows_service = import_wrapper_module("praisonai.integration.bridges.workflows_service")
+        approvals_bridge = import_wrapper_module("praisonai.integration.bridges.approvals_bridge")
 
         def _workflow_backend(wf_id, *, workflow, input_data):
             text = (input_data or {}).get("text") or (input_data or {}).get("message") or ""
-            return svc_run(wf_id, input_text=text, workflow_config=workflow)
+            return workflows_service.run_workflow(
+                wf_id, input_text=text, workflow_config=workflow
+            )
 
-        backends.set_backend("hooks", list_hooks_for_api)
+        backends.set_backend("hooks", hooks_query.list_hooks_for_api)
         backends.set_backend("workflows", _workflow_backend)
         if sink is not None:
             backends.set_backend("usage_sink", sink)
-        from praisonai_bot.integration.bridges.usage_bridge import get_usage_query
+        if usage_bridge is not None:
+            query = usage_bridge.get_usage_query()
+            if query is not None:
+                backends.set_backend("usage_query", query)
+        backends.set_backend("approvals_pending", approvals_bridge.list_pending_approvals)
+        backends.set_backend("approvals_policies", approvals_bridge.get_approval_policies)
 
-        query = get_usage_query()
-        if query is not None:
-            backends.set_backend("usage_query", query)
-        from praisonai_bot.integration.bridges.approvals_bridge import (
-            get_approval_policies,
-            list_pending_approvals,
-        )
-
-        backends.set_backend("approvals_pending", list_pending_approvals)
-        backends.set_backend("approvals_policies", get_approval_policies)
-        
-        # Kanban and jobs backends
         from praisonai_bot.integration.bridges.kanban_bridge import register_kanban_backends
+
         register_kanban_backends()
-        
+
     except Exception as exc:
         log.warning("aiui backend injection failed: %s", exc)
 

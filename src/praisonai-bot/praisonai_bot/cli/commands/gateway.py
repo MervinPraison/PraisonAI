@@ -541,8 +541,10 @@ def gateway_install(
         praisonai gateway install --config my-bot.yaml --no-start
     """
     from praisonai_bot.daemon import install_daemon
-    from praisonai_code.cli._paths import resolve_bot_config_path
+    from praisonai_bot._code_bridge import import_code_module
     from ..output.console import get_output_controller
+
+    resolve_bot_config_path = import_code_module("praisonai_code.cli._paths").resolve_bot_config_path
     
     output = get_output_controller()
     config = resolve_bot_config_path(config)

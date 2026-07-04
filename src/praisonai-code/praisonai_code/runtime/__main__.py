@@ -1,7 +1,8 @@
 """
-Entrypoint so ``python -m praisonai.runtime`` boots a warm runtime.
+Entrypoint so ``python -m praisonai_code.runtime`` boots a warm runtime.
 
 Used by ``praisonai daemon start --background`` to spawn a detached process.
+The wrapper shim ``python -m praisonai.runtime`` remains for full-stack installs.
 """
 
 from __future__ import annotations

@@ -139,7 +139,9 @@ async def classify_with_llm(
     )
 
     try:
-        from praisonai_code.llm.env import resolve_llm_endpoint
+        from praisonai_bot._code_bridge import import_code_module
+
+        resolve_llm_endpoint = import_code_module("praisonai_code.llm.env").resolve_llm_endpoint
         ep = resolve_llm_endpoint()
         
         client = OpenAI(

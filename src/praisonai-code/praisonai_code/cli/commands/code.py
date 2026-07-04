@@ -162,6 +162,16 @@ def code_main(
             args.llm = agent_profile["llm"]
     
     # Import and run the terminal-native interactive mode
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if not wrapper_available():
+        typer.echo(
+            "Error: code requires the praisonai wrapper. "
+            "Install the full wrapper: pip install praisonai",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     from praisonai_code.cli.main import PraisonAI
     
     praison = PraisonAI()

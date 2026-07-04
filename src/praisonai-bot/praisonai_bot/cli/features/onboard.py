@@ -522,7 +522,9 @@ class OnboardWizard:
             agent_instructions=self.agent_instructions,
         )
 
-        from praisonai_code.cli._paths import default_bot_config_path
+        from praisonai_bot._code_bridge import import_code_module
+
+        default_bot_config_path = import_code_module("praisonai_code.cli._paths").default_bot_config_path
         self.config_path = str(default_bot_config_path())
         os.makedirs(os.path.dirname(os.path.abspath(self.config_path)) or ".", exist_ok=True)
 
@@ -912,7 +914,9 @@ class OnboardWizard:
 
         env_file = _save_env_vars(env_to_save)
         yaml_content = _generate_bot_yaml(self.selected_platforms)
-        from praisonai_code.cli._paths import default_bot_config_path
+        from praisonai_bot._code_bridge import import_code_module
+
+        default_bot_config_path = import_code_module("praisonai_code.cli._paths").default_bot_config_path
         cfg_path = default_bot_config_path()
         os.makedirs(cfg_path.parent, exist_ok=True)
         with open(cfg_path, "w") as f:

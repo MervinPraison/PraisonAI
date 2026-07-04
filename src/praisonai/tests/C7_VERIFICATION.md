@@ -50,8 +50,22 @@ echo "hot-path gate ok"
 ## Real agentic (optional, requires API key)
 
 ```bash
-OPENAI_API_KEY=... praisonai-code run "Say hello in one word"
+# Standalone (actions mode — no wrapper required)
+OPENAI_API_KEY=... praisonai-code run --output actions "Say hello in one word"
+
+# Full stack (default run mode, chat, code)
+OPENAI_API_KEY=... pip install praisonai
+OPENAI_API_KEY=... praisonai run "Say hello in one word"
 ```
+
+## Standalone command matrix
+
+| Command | Standalone? |
+|---------|-------------|
+| `run --output actions` | Yes |
+| `run` (default) | No — needs wrapper |
+| `chat`, `code` | No — needs wrapper |
+| `daemon start --background` | Yes (`praisonai_code.runtime`) |
 
 ## Moved modules (C7)
 

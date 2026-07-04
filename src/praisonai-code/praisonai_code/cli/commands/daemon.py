@@ -68,7 +68,7 @@ def daemon_start(
         import sys
 
         cmd = [
-            sys.executable, "-m", "praisonai.runtime",
+            sys.executable, "-m", "praisonai_code.runtime",
             "--host", host,
             "--port", str(port),
             "--idle-timeout", str(idle_timeout),
