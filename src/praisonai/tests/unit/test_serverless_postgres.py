@@ -227,8 +227,8 @@ class TestConfigEnvVars(unittest.TestCase):
         self.assertIn("xata_database_url", ENV_VARS)
 
     def test_turso_in_conversation_backends(self):
-        from praisonai.persistence.config import CONVERSATION_BACKENDS
-        self.assertIn("turso", CONVERSATION_BACKENDS)
+        from praisonai.persistence.config import list_available_backends
+        self.assertIn("turso", list_available_backends()["conversation"])
 
 
 class TestFactoryRegistration(unittest.TestCase):
