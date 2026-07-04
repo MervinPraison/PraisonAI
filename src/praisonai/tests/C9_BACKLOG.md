@@ -39,6 +39,7 @@ Epic branch: `feat/c9-praisonai-bot`
 - [x] `kanban_bridge` jobs helpers → `praisonai.jobs.server`
 - [x] Bot production `praisonai_code` imports → `_code_bridge` (`check_bot_code_imports.sh`)
 - [x] C7 standalone truth: `chat`/`code`/default `run` require wrapper; daemon `--background` uses `praisonai_code.runtime`
+- [x] `scripts/audit_hybrid_modules.py` in CI smoke (C8 hybrid path gate)
 
 ## Deferred (optional follow-on)
 
