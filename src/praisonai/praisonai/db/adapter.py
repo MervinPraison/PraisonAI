@@ -398,10 +398,6 @@ class PraisonAIDB:
                 "status": "running",
                 "metadata": metadata or {}
             })
-        
-        # Early return only applies to conversation store operations
-        if not self._conversation_store:
-            return
     
     def on_run_end(
         self,
@@ -782,17 +778,47 @@ class PraisonAIDB:
                 )
 
     async def aclose(self) -> None:
-        """Async version of close."""
-        stores = [self._conversation_store, self._state_store, self._knowledge_store]
-        
+        """Async version of close; idempotent and lock-safe.
+
+        Serialises against concurrent async init callers via ``_ainit_lock`` and
+        resets lifecycle state under the shared sync ``_init_lock`` (off the event
+        loop) so init/close can never race and leave a half-closed adapter that
+        reports ``_initialized`` while its stores are shut.
+        """
+        if self._ainit_lock is None:
+            self._ainit_lock = asyncio.Lock()
+
+        async with self._ainit_lock:
+            def _snapshot_and_reset():
+                with self._init_lock:
+                    snapshot = (
+                        self._conversation_store,
+                        self._state_store,
+                        self._knowledge_store,
+                    )
+                    self._conversation_store = None
+                    self._state_store = None
+                    self._knowledge_store = None
+                    self._initialized = False
+                    self._init_failed = None
+                    self._init_failed_at = 0.0
+                    return snapshot
+
+            stores = await asyncio.to_thread(_snapshot_and_reset)
+
         for store in stores:
             if store is None:
                 continue
             if hasattr(store, "async_close"):
-                await store.async_close()
+                try:
+                    await store.async_close()
+                except Exception:
+                    logger.exception("Error async-closing store %r", store)
             else:
-                import asyncio
-                await asyncio.to_thread(store.close)
+                try:
+                    await asyncio.to_thread(store.close)
+                except Exception:
+                    logger.exception("Error closing store %r", store)
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -813,13 +839,31 @@ class PraisonAIDB:
         self.close()
     
     def close(self) -> None:
-        """Close all database connections."""
-        if self._conversation_store:
-            self._conversation_store.close()
-        if self._state_store:
-            self._state_store.close()
-        if self._knowledge_store:
-            self._knowledge_store.close()
+        """Close all database connections; idempotent and lock-safe.
+
+        Resets lifecycle state under ``_init_lock`` so a subsequent hook (or a
+        reused ``with db: ...`` block) triggers a clean re-initialisation via
+        ``_init_stores()`` instead of dispatching to a closed store.
+        """
+        with self._init_lock:
+            stores = (
+                self._conversation_store,
+                self._state_store,
+                self._knowledge_store,
+            )
+            self._conversation_store = None
+            self._state_store = None
+            self._knowledge_store = None
+            self._initialized = False
+            self._init_failed = None
+            self._init_failed_at = 0.0
+        for store in stores:
+            if store is None:
+                continue
+            try:
+                store.close()
+            except Exception:
+                logger.exception("Error closing store %r", store)
 
 
 class PostgresDB(PraisonAIDB):

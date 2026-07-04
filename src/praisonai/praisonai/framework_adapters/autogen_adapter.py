@@ -66,7 +66,40 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             f"AutoGen is not available. Version requested: {version}. "
             f"Install with 'pip install praisonai-frameworks[autogen]' for v0.2 or 'pip install praisonai-frameworks[autogen-v4]' for v0.4"
         )
-    
+
+    @staticmethod
+    def _wrap_tool_for_execution(tool: Callable, tool_name: str) -> Callable:
+        """Translate a per-call tool timeout into an LLM-readable string.
+
+        The timeout wrapper raises :class:`ToolTimeoutError` to preserve each
+        tool's declared return-type contract. AutoGen v0.2 runs tools inside its
+        own chat loop and expects a value to hand back to the model, so an
+        uncaught exception would abort the whole conversation. Here (the adapter
+        boundary) we catch it and return a concise message the LLM can reason
+        about, exactly as the PR intended ("adapters can catch it and translate
+        per-framework").
+        """
+        import functools
+
+        try:
+            from ..agents_generator import ToolTimeoutError
+        except Exception:  # pragma: no cover - defensive; timeout stack absent
+            return tool
+
+        @functools.wraps(tool)
+        def _guarded(*args, **kwargs):
+            try:
+                return tool(*args, **kwargs)
+            except ToolTimeoutError as exc:
+                logger.warning(
+                    "AutoGen v0.2: tool %r timed out; returning a timeout "
+                    "message to the LLM instead of aborting the chat.",
+                    tool_name,
+                )
+                return f"Error: tool {tool_name!r} timed out ({exc})."
+
+        return _guarded
+
     def run(
         self,
         config: Dict[str, Any],
@@ -117,6 +150,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
 
         agents = {}
         tasks = []
+        # Track names already wired for execution on the shared user_proxy so a
+        # second agent declaring a same-named tool cannot silently overwrite the
+        # first callable in AutoGen's _function_map (last-write-wins).
+        registered_for_execution = set()
 
         # Single canonical YAML -> spec conversion (shared across adapters)
         specs = build_agent_specs(config, topic, tools_dict, self._format_template)
@@ -131,10 +168,48 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
             
-            # NOTE: AutoGen v0.2 tool/function registration (register_for_llm /
-            # register_for_execution) is intentionally not wired here yet — the
-            # resolved callables live on ``spec.tools``. Tracked separately so we
-            # don't ship a half-registration that silently no-ops.
+            # Register YAML-declared tools with AutoGen v0.2's two-agent split:
+            #   - the assistant advertises the schema to the LLM (register_for_llm)
+            #   - the user_proxy executes the call (register_for_execution)
+            # Anything that is not a plain callable is logged and skipped rather
+            # than silently dropped, so YAML+framework:autogen never no-ops.
+            for tool in spec.tools or []:
+                if not callable(tool):
+                    logger.warning(
+                        "AutoGen v0.2: skipping non-callable tool %r for agent %r; "
+                        "only plain callables can be registered.",
+                        tool, spec.role,
+                    )
+                    continue
+                tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+                if not tool_name:
+                    logger.warning(
+                        "AutoGen v0.2: skipping tool %r for agent %r; no resolvable name.",
+                        tool, spec.role,
+                    )
+                    continue
+                doc = getattr(tool, "__doc__", None) or f"Tool {tool_name}"
+                description = doc.strip().splitlines()[0] if doc.strip() else f"Tool {tool_name}"
+                # A per-call tool timeout raises ToolTimeoutError (see the
+                # timeout wrapper in agents_generator); AutoGen executes tools
+                # synchronously and expects a string result to feed back to the
+                # LLM, so translate the timeout here instead of letting it crash
+                # the whole chat.
+                exec_tool = self._wrap_tool_for_execution(tool, tool_name)
+                agents[spec.key].register_for_llm(
+                    name=tool_name, description=description
+                )(exec_tool)
+                if tool_name in registered_for_execution:
+                    logger.warning(
+                        "AutoGen v0.2: tool name %r already registered for "
+                        "execution on the shared user_proxy by an earlier agent; "
+                        "keeping the first callable and skipping the duplicate "
+                        "for agent %r.",
+                        tool_name, spec.role,
+                    )
+                else:
+                    user_proxy.register_for_execution(name=tool_name)(exec_tool)
+                    registered_for_execution.add(tool_name)
             
             # Prepare tasks
             for task_spec in spec.tasks:
