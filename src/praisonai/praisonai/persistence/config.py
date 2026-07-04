@@ -119,10 +119,12 @@ def _supported_backends(kind: str) -> list:
 
     The registry (``persistence/registry.py``) is the single source of truth for
     supported backends, so validation can never drift from what actually
-    resolves and runs.
+    resolves and runs. ``list_all_names()`` is used so registered aliases (e.g.
+    ``neon``, ``xata``, ``cockroachdb``, ``libsql``, ``motor``) — which the
+    registry resolves — are accepted by validation too.
     """
     from .registry import get_default_registry
-    return sorted(get_default_registry(kind).list_registered())
+    return sorted(get_default_registry(kind).list_all_names())
 
 
 @dataclass
