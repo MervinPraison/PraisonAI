@@ -186,6 +186,12 @@ jobs:
         import praisonai_bot.cli.commands.gateway as gw_cmd
         print('bot command modules import ok', bot_cmd.app, gw_cmd.app)
         "
+
+    - name: Audit hybrid module imports (C8 full stack)
+      run: |
+        set -euo pipefail
+        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai
+        python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary
       if: always()
