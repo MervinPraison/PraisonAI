@@ -77,6 +77,26 @@ def test_dedup_against_already_loaded(monorepo: Path):
     assert "ROOT conventions" not in text
 
 
+def test_dedup_does_not_drop_on_substring_overlap(monorepo: Path):
+    """A distinct subtree file is not dropped just because its normalized text
+    is a substring of the larger already-loaded blob."""
+    (monorepo / "packages" / "foo" / "AGENTS.md").write_text(
+        "conventions", encoding="utf-8"
+    )
+    attacher = InstructionFileAttacher(
+        project_root=monorepo,
+        already_loaded="ROOT conventions\n\nother stuff here",
+    )
+    text = attacher.attach_for_path(
+        str(monorepo / "packages" / "foo" / "src" / "module.py")
+    )
+    # "conventions" is a substring of the preloaded blob but is a distinct file,
+    # so it must still be attached.
+    assert "conventions" in text
+    # The exact preloaded block is still skipped.
+    assert "ROOT conventions" not in text
+
+
 def test_sibling_subtree_without_instructions(monorepo: Path):
     """A sibling subtree with no local file still surfaces root conventions once."""
     attacher = InstructionFileAttacher(project_root=monorepo)

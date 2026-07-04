@@ -94,13 +94,20 @@ class InstructionFileAttacher:
     _visited_dirs: Set[Path] = field(default_factory=set, init=False, repr=False)
     _seen_file_keys: Set[tuple] = field(default_factory=set, init=False, repr=False)
     _used_chars: int = field(default=0, init=False, repr=False)
+    _preloaded_norms: Set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.project_root is not None:
             self.project_root = Path(self.project_root).resolve()
-        # Pre-seed dedup with a normalized snapshot of already-loaded text so we
-        # never re-attach content the up-front loader already supplied.
-        self._preloaded_norm = _normalize(self.already_loaded)
+        # Pre-seed dedup with normalized snapshots of already-loaded blocks so we
+        # never re-attach content the up-front loader already supplied. We match
+        # whole normalized blocks (exact), not substrings, so a subtree file is
+        # never dropped merely because its text appears inside a larger blob.
+        self._preloaded_norms = {
+            _normalize(block)
+            for block in _split_blocks(self.already_loaded)
+            if _normalize(block)
+        }
 
     def _search_dirs(self, directory: Path) -> List[Path]:
         """Directories to search for ``directory``, ordered root -> nearest.
@@ -158,8 +165,9 @@ class InstructionFileAttacher:
         self._seen_file_keys.add(key)
         if not text.strip():
             return None
-        # Skip content already present in the up-front layer.
-        if self._preloaded_norm and _normalize(text) in self._preloaded_norm:
+        # Skip content already present in the up-front layer. Exact whole-block
+        # match (not substring) so a distinct file is never wrongly dropped.
+        if _normalize(text) in self._preloaded_norms:
             return None
         return text
 
@@ -199,9 +207,11 @@ class InstructionFileAttacher:
                 if remaining <= 0:
                     break
                 if len(text) > remaining:
-                    text = text[:remaining].rstrip() + "\n\n... (truncated)"
-                    # Credit only the budgeted content, not the truncation
-                    # notice, so later subtrees are not under-served.
+                    # Reserve room for the notice so the emitted chunk never
+                    # exceeds the remaining budget.
+                    suffix = "\n\n... (truncated)"
+                    body = text[: max(remaining - len(suffix), 0)].rstrip()
+                    text = body + suffix
                     self._used_chars += remaining
                 else:
                     self._used_chars += len(text)
@@ -213,10 +223,24 @@ class InstructionFileAttacher:
 
 
 def _normalize(text: str) -> str:
-    """Collapse whitespace for robust substring de-duplication."""
+    """Collapse whitespace for robust whole-block de-duplication."""
     if not text:
         return ""
     return " ".join(text.split())
+
+
+def _split_blocks(text: str) -> List[str]:
+    """Split concatenated already-loaded text into candidate blocks.
+
+    Up-front loaders typically join instruction files with blank lines, so we
+    split on that separator to recover individual blocks for exact-match dedup.
+    The whole text is also treated as one block to cover single-file inputs.
+    """
+    if not text:
+        return []
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    blocks.append(text)
+    return blocks
 
 
 def discover_instruction_files(
