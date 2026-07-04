@@ -285,17 +285,32 @@ class OpenAIClient:
     interface for chat completions, streaming, and structured outputs.
     """
     
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, max_retries: Optional[int] = None):
         """
         Initialize the OpenAI client with proper API key handling.
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
             base_url: Custom base URL for API endpoints (defaults to OPENAI_API_BASE env var)
+            max_retries: Number of automatic retries for transient errors (rate limits,
+                network blips) performed by the underlying OpenAI SDK, which honours
+                ``Retry-After`` and applies exponential backoff. Defaults to the
+                ``OPENAI_MAX_RETRIES`` env var when set, otherwise the SDK default
+                (transparent, no behaviour change).
         """
         # Use provided values or fall back to environment variables
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+
+        # Resolve retry configuration: explicit arg wins, else OPENAI_MAX_RETRIES env var.
+        if max_retries is None:
+            _env_retries = os.environ.get("OPENAI_MAX_RETRIES")
+            if _env_retries is not None:
+                try:
+                    max_retries = int(_env_retries)
+                except (TypeError, ValueError):
+                    max_retries = None
+        self.max_retries = max_retries
         
         # For local servers like LM Studio, allow minimal API key
         if self.base_url and not self.api_key:
@@ -335,7 +350,10 @@ class OpenAIClient:
         """Get the synchronous OpenAI client (lazy initialization)."""
         if self._sync_client is None:
             OpenAI, _ = _get_openai_classes()
-            self._sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
+            if self.max_retries is not None:
+                client_kwargs["max_retries"] = self.max_retries
+            self._sync_client = OpenAI(**client_kwargs)
         return self._sync_client
     
     @property
@@ -343,7 +361,10 @@ class OpenAIClient:
         """Get the asynchronous OpenAI client (lazy initialization)."""
         if self._async_client is None:
             _, AsyncOpenAI = _get_openai_classes()
-            self._async_client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+            client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
+            if self.max_retries is not None:
+                client_kwargs["max_retries"] = self.max_retries
+            self._async_client = AsyncOpenAI(**client_kwargs)
         return self._async_client
     
     def build_messages(
@@ -2260,13 +2281,16 @@ _global_client = None
 _global_client_params = None
 _global_client_lock = threading.Lock()
 
-def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenAIClient:
+def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None, max_retries: Optional[int] = None) -> OpenAIClient:
     """
     Get or create a global OpenAI client instance.
     
     Args:
         api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
         base_url: Custom base URL for API endpoints
+        max_retries: Optional number of SDK-level automatic retries for transient
+            errors (honours ``Retry-After`` and applies backoff). Defaults to the
+            ``OPENAI_MAX_RETRIES`` env var when unset, otherwise the SDK default.
         
     Returns:
         OpenAIClient instance
@@ -2276,12 +2300,12 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     # Normalize parameters for comparison
     normalized_api_key = api_key or os.getenv("OPENAI_API_KEY")
     normalized_base_url = base_url
-    current_params = (normalized_api_key, normalized_base_url)
+    current_params = (normalized_api_key, normalized_base_url, max_retries)
     
     # Thread-safe client creation
     with _global_client_lock:
         # Only create new client if parameters changed or first time
         if _global_client is None or _global_client_params != current_params:
-            _global_client = OpenAIClient(api_key=api_key, base_url=base_url)
+            _global_client = OpenAIClient(api_key=api_key, base_url=base_url, max_retries=max_retries)
             _global_client_params = current_params
         return _global_client
