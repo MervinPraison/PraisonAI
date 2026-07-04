@@ -176,6 +176,29 @@ class LLMProviderRegistry(PluginRegistry[ProviderType]):
 # Default Registry Instance (No Singleton)
 # ============================================================================
 
+# Guard so gateway providers are registered exactly once, on first registry use.
+_gateways_registered = False
+
+
+def _ensure_gateways_registered() -> None:
+    """Register gateway providers on first default-registry access.
+
+    Deferred from package-import time so that importing config-only helpers
+    (e.g. build_config_list) does not pay the gateway + importlib.metadata cost.
+    Idempotent and cheap after the first call.
+    """
+    global _gateways_registered
+    if _gateways_registered:
+        return
+    _gateways_registered = True
+    try:
+        from .gateways import register_gateway_providers
+        register_gateway_providers()
+    except ImportError:
+        # Gateways module not available, skip registration
+        pass
+
+
 # Default registry access - replaced by LLMProviderRegistry.default()
 def get_default_llm_registry() -> LLMProviderRegistry:
     """
@@ -184,7 +207,9 @@ def get_default_llm_registry() -> LLMProviderRegistry:
     This is the registry used by create_llm_provider() when no custom registry
     is specified. Uses lazy initialization pattern.
     """
-    return LLMProviderRegistry.default()
+    registry = LLMProviderRegistry.default()
+    _ensure_gateways_registered()
+    return registry
 
 
 def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
@@ -412,3 +437,6 @@ def _reset_default_registry() -> None:
     # Clear the cached default instance (stored on the subclass __dict__ by default())
     if '_default_instance' in LLMProviderRegistry.__dict__:
         delattr(LLMProviderRegistry, '_default_instance')
+    # Reset the run-once guard so gateways re-register on next registry access.
+    global _gateways_registered
+    _gateways_registered = False
