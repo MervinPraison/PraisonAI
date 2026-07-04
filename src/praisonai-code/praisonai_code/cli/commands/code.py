@@ -52,7 +52,14 @@ def code_main(
     """
     import os
     import argparse
-    
+
+    # Ingest piped stdin so `code` composes in Unix pipelines and CI, e.g.
+    #   cat data.json | praisonai code "Write a parser for this shape"
+    # The prompt argument comes first, then the piped body. Non-blocking/EOF-safe
+    # so an interactive REPL is never stalled.
+    from praisonai_code.cli.utils.stdin import resolve_cli_input
+    prompt = resolve_cli_input(prompt)
+
     # Validate --thinking up front so an unknown value fails closed before any
     # work is done (consistent with MODE_RULES validation on custom agents).
     from praisonai_code.cli.features.thinking import thinking_to_budget

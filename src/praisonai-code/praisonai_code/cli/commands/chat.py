@@ -156,7 +156,14 @@ def chat_main(
         praisonai chat "What is 2+2?" --profile
     """
     import os
-    
+
+    # Ingest piped stdin so `chat` composes in Unix pipelines and CI, e.g.
+    #   echo "$STACKTRACE" | praisonai chat "Explain this"
+    # The prompt argument comes first, then the piped body. Non-blocking/EOF-safe
+    # so the interactive TUI is never stalled.
+    from praisonai_code.cli.utils.stdin import resolve_cli_input
+    prompt = resolve_cli_input(prompt)
+
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
