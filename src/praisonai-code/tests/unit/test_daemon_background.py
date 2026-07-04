@@ -28,6 +28,6 @@ def test_daemon_start_background_spawns_code_runtime_module():
                 background=True,
             )
         assert exc.value.exit_code == 0
-        cmd = popen.call_args[0][0]
+        cmd = popen.call_args.args[0]
         assert "-m" in cmd
         assert cmd[cmd.index("-m") + 1] == "praisonai_code.runtime"
