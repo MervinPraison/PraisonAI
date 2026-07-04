@@ -1,0 +1,21 @@
+# -*- coding: utf-8 -*-
+
+import json
+import os
+from typing import Dict
+
+from pylsp.config import Config
+
+class LSPConfig:
+    def __init__(self, root_dir: str):
+        self.root_dir = root_dir
+        self.config = self._load_config()
+
+    def _load_config(self):
+        config_file = os.path.join(self.root_dir, ".lspconfig.json")
+        with open(config_file, "r") as f:
+            config = json.load(f)
+        return config
+
+    def get_config(self):
+        return self.config
