@@ -2515,7 +2515,7 @@ Now provide your final answer using this result. Summarize the information natur
                     # ── Chat Completions path (unchanged) ───────────────────
                     # If reasoning_steps is True, do a single non-streaming call
                     if reasoning_steps:
-                        resp = litellm.completion(
+                        resp = self._completion_with_retry(
                             **self._build_completion_params(
                                 messages=messages,
                                 temperature=temperature,
@@ -2667,7 +2667,7 @@ Now provide your final answer using this result. Summarize the information natur
                                 if verbose:
                                     # Verbose streaming: show display_generating during streaming
                                     with _get_live()(_get_display_functions()['display_generating']("", current_time), console=self.console, refresh_per_second=4) as live:
-                                        for chunk in litellm.completion(
+                                        for chunk in self._completion_with_retry(
                                             **self._build_completion_params(
                                                 messages=messages,
                                                 tools=formatted_tools,
@@ -2686,7 +2686,7 @@ Now provide your final answer using this result. Summarize the information natur
                                                 live.update(_get_display_functions()['display_generating'](response_text, current_time))
                                 else:
                                     # Non-verbose streaming: no display_generating during streaming
-                                    for chunk in litellm.completion(
+                                    for chunk in self._completion_with_retry(
                                         **self._build_completion_params(
                                             messages=messages,
                                             tools=formatted_tools,
@@ -2717,7 +2717,7 @@ Now provide your final answer using this result. Summarize the information natur
                                                 response_text = ""
                                                 tool_calls = []
                                                 # Use streaming when verbose for progressive display
-                                                for chunk in litellm.completion(
+                                                for chunk in self._completion_with_retry(
                                                     **self._build_completion_params(
                                                         messages=messages,
                                                         tools=formatted_tools,
@@ -2749,7 +2749,7 @@ Now provide your final answer using this result. Summarize the information natur
                                             }
                                         else:
                                             # For non-streaming + non-verbose: no display_generating (per user requirements)
-                                            final_response = litellm.completion(
+                                            final_response = self._completion_with_retry(
                                                 **self._build_completion_params(
                                                     messages=messages,
                                                     tools=formatted_tools,
@@ -2868,7 +2868,7 @@ Now provide your final answer using this result. Summarize the information natur
                                     response_text = ""
                                     tool_calls = []
                                     # Use streaming when verbose for progressive display
-                                    for chunk in litellm.completion(
+                                    for chunk in self._completion_with_retry(
                                         **self._build_completion_params(
                                             messages=messages,
                                             tools=formatted_tools,
@@ -2915,7 +2915,7 @@ Now provide your final answer using this result. Summarize the information natur
                                     # Silent streaming: no display, just accumulate
                                     response_text = ""
                                     tool_calls = []
-                                    for chunk in litellm.completion(
+                                    for chunk in self._completion_with_retry(
                                         **self._build_completion_params(
                                             messages=messages,
                                             tools=formatted_tools,
@@ -2941,7 +2941,7 @@ Now provide your final answer using this result. Summarize the information natur
                                     }
                                 else:
                                     # Standard non-streaming path
-                                    final_response = litellm.completion(
+                                    final_response = self._completion_with_retry(
                                         **self._build_completion_params(
                                             messages=messages,
                                             tools=formatted_tools,
@@ -3533,7 +3533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 # If reasoning_steps is True, do a single non-streaming call to capture reasoning
                 if reasoning_steps:
-                    reflection_resp = litellm.completion(
+                    reflection_resp = self._completion_with_retry(
                         **self._build_completion_params(
                             messages=reflection_messages,
                             temperature=temperature,
@@ -3582,7 +3582,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if verbose:
                         with _get_live()(_get_display_functions()['display_generating']("", start_time), console=self.console, refresh_per_second=4) as live:
                             reflection_text = ""
-                            for chunk in litellm.completion(
+                            for chunk in self._completion_with_retry(
                                 **self._build_completion_params(
                                     messages=reflection_messages,
                                     temperature=temperature,
@@ -3599,7 +3599,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     live.update(_get_display_functions()['display_generating'](reflection_text, start_time))
                     else:
                         reflection_text = ""
-                        for chunk in litellm.completion(
+                        for chunk in self._completion_with_retry(
                             **self._build_completion_params(
                                 messages=reflection_messages,
                                 temperature=temperature,
@@ -3653,7 +3653,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if verbose:
                         with _get_live()(_get_display_functions()['display_generating']("", time.time()), console=self.console, refresh_per_second=4) as live:
                             response_text = ""
-                            for chunk in litellm.completion(
+                            for chunk in self._completion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -3670,7 +3670,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     live.update(_get_display_functions()['display_generating'](response_text, time.time()))
                     else:
                         response_text = ""
-                        for chunk in litellm.completion(
+                        for chunk in self._completion_with_retry(
                             **self._build_completion_params(
                                 messages=messages,
                                 temperature=temperature,
@@ -3801,7 +3801,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
                     
-                    stream_iterator = litellm.completion(
+                    stream_iterator = self._completion_with_retry(
                         **self._build_completion_params(
                             messages=messages,
                             tools=formatted_tools,
@@ -4275,7 +4275,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # ── Chat Completions path (unchanged) ───────────────
                 if reasoning_steps and iteration_count == 0:
                     # Non-streaming call to capture reasoning
-                    resp = await litellm.acompletion(
+                    resp = await self._acompletion_with_retry(
                         **self._build_completion_params(
                             messages=messages,
                             temperature=temperature,
@@ -4334,7 +4334,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_calls = []
                         
                         if verbose:
-                            async for chunk in await litellm.acompletion(
+                            async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -4356,7 +4356,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         else:
                             # Non-verbose streaming
-                            async for chunk in await litellm.acompletion(
+                            async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -4382,7 +4382,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # No need for a second API call!
                     else:
                         # Non-streaming approach (when tools require it or streaming is disabled)
-                        tool_response = await litellm.acompletion(
+                        tool_response = await self._acompletion_with_retry(
                             **self._build_completion_params(
                                 messages=messages,
                                 temperature=temperature,
@@ -4533,7 +4533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # If no special handling was needed
                     if reasoning_steps:
                         # Non-streaming call to capture reasoning
-                        resp = await litellm.acompletion(
+                        resp = await self._acompletion_with_retry(
                             **self._build_completion_params(
                                 messages=messages,
                                 temperature=temperature,
@@ -4584,7 +4584,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if not self._provider_adapter.supports_streaming():
                                 _use_stream = False
                         if not _use_stream:
-                            resp = await litellm.acompletion(
+                            resp = await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -4602,7 +4602,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if _next_tool_calls:
                                 tool_calls = _next_tool_calls
                         elif verbose:
-                            async for chunk in await litellm.acompletion(
+                            async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -4620,7 +4620,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
                         else:
                             response_text = ""
-                            async for chunk in await litellm.acompletion(
+                            async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -4760,7 +4760,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # If reasoning_steps is True, do a single non-streaming call to capture reasoning
             if reasoning_steps:
-                reflection_resp = await litellm.acompletion(
+                reflection_resp = await self._acompletion_with_retry(
                     **self._build_completion_params(
                         messages=reflection_messages,
                         temperature=temperature,
@@ -4809,7 +4809,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if verbose:
                     with _get_live()(_get_display_functions()['display_generating']("", start_time), console=self.console, refresh_per_second=4) as live:
                         reflection_text = ""
-                        async for chunk in await litellm.acompletion(
+                        async for chunk in await self._acompletion_with_retry(
                             **self._build_completion_params(
                                 messages=reflection_messages,
                                 temperature=temperature,
@@ -4826,7 +4826,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 live.update(_get_display_functions()['display_generating'](reflection_text, start_time))
                 else:
                     reflection_text = ""
-                    async for chunk in await litellm.acompletion(
+                    async for chunk in await self._acompletion_with_retry(
                         **self._build_completion_params(
                             messages=reflection_messages,
                             temperature=temperature,
@@ -5884,7 +5884,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             if stream:
                 with _get_live()(_get_display_functions()['display_generating']("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                    for chunk in litellm.completion(**completion_params):
+                    for chunk in self._completion_with_retry(**completion_params):
                         content = self._process_streaming_chunk(chunk)
                         if content:
                             response_text += content
@@ -5979,7 +5979,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             if stream:
                 with _get_live()(_get_display_functions()['display_generating']("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                    async for chunk in await litellm.acompletion(**completion_params):
+                    async for chunk in await self._acompletion_with_retry(**completion_params):
                         content = self._process_streaming_chunk(chunk)
                         if content:
                             response_text += content
