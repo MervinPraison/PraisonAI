@@ -19,6 +19,7 @@ import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 from ..tools.trust import wrap_if_external
+from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -780,7 +781,7 @@ class ToolExecutionMixin:
                     result_str = str(result)
                     
                     # Get configured limit
-                    limit = getattr(self, 'tool_output_limit', 16000)
+                    limit = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT)
                     
                     # Check if we need to spill to artifact store
                     if len(result_str) > limit:
@@ -846,7 +847,7 @@ class ToolExecutionMixin:
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
                         # For dicts, truncate large string fields (e.g., raw_content from search)
                         if isinstance(result, dict):
-                            max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
+                            max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                             # Add artifact reference to dict result if available
                             if 'artifact_ref' in locals() and artifact_ref:

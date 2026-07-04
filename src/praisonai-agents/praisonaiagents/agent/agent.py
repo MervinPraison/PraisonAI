@@ -122,12 +122,13 @@ from ..config.feature_configs import (
     OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
     PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
+    DEFAULT_TOOL_OUTPUT_LIMIT,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
-# Increased to allow full page content from search tools while still preventing overflow
-# Applied even when context management is disabled to prevent runaway tool outputs
-DEFAULT_TOOL_OUTPUT_LIMIT = 16000
+# Single source of truth defined in config.feature_configs and imported here
+# (re-exported for backward compatibility) so OutputConfig.tool_output_limit,
+# ToolConfig.output_limit, and this constant cannot drift apart.
 
 class ServerRegistry:
     """Registry for API server state per-port."""
