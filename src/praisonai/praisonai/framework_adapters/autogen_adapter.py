@@ -131,10 +131,32 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
             
-            # NOTE: AutoGen v0.2 tool/function registration (register_for_llm /
-            # register_for_execution) is intentionally not wired here yet — the
-            # resolved callables live on ``spec.tools``. Tracked separately so we
-            # don't ship a half-registration that silently no-ops.
+            # Register YAML-declared tools with AutoGen v0.2's two-agent split:
+            #   - the assistant advertises the schema to the LLM (register_for_llm)
+            #   - the user_proxy executes the call (register_for_execution)
+            # Anything that is not a plain callable is logged and skipped rather
+            # than silently dropped, so YAML+framework:autogen never no-ops.
+            for tool in spec.tools or []:
+                if not callable(tool):
+                    logger.warning(
+                        "AutoGen v0.2: skipping non-callable tool %r for agent %r; "
+                        "only plain callables can be registered.",
+                        tool, spec.role,
+                    )
+                    continue
+                tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", None)
+                if not tool_name:
+                    logger.warning(
+                        "AutoGen v0.2: skipping tool %r for agent %r; no resolvable name.",
+                        tool, spec.role,
+                    )
+                    continue
+                doc = getattr(tool, "__doc__", None) or f"Tool {tool_name}"
+                description = doc.strip().splitlines()[0] if doc.strip() else f"Tool {tool_name}"
+                agents[spec.key].register_for_llm(
+                    name=tool_name, description=description
+                )(tool)
+                user_proxy.register_for_execution(name=tool_name)(tool)
             
             # Prepare tasks
             for task_spec in spec.tasks:

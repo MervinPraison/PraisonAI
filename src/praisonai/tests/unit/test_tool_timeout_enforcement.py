@@ -9,7 +9,6 @@ into every role, and then silently dropped it: ``_build_tools_dict`` returned
 naked callables and ``_wrap_tool_with_timeout`` had zero call sites.
 """
 
-import json
 import logging
 import threading
 
@@ -27,6 +26,8 @@ def _make_generator():
     gen._tool_timeout_executor = None
     gen._owns_tool_timeout_executor = True
     gen._tool_timeout_executor_lock = threading.Lock()
+    gen._leaked_workers = 0
+    gen._max_leaked_workers = 16
     gen.logger = logging.getLogger(__name__)
     return gen
 
@@ -88,10 +89,14 @@ def test_build_tools_dict_wraps_with_timeout():
     gen.tools = []
 
     try:
+        from praisonai.agents_generator import ToolTimeoutError
         tools_dict = gen._build_tools_dict({"roles": {"a": {"tool_timeout": 0.3}}})
-        result = tools_dict["blocking"]()
-        payload = json.loads(result)
-        assert payload["error"] == "tool_timeout"
+        # On timeout the wrapper raises ToolTimeoutError instead of returning a
+        # JSON string, preserving the tool's declared return-type contract.
+        with pytest.raises(ToolTimeoutError) as exc_info:
+            tools_dict["blocking"]()
+        assert exc_info.value.tool_name == "_blocking"
+        assert exc_info.value.timeout_seconds == 0.3
     finally:
         never.set()
         gen.close()

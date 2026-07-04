@@ -138,6 +138,24 @@ def __dir__():
 _DEFAULT_TOOL_TIMEOUT_WORKERS = 32
 
 
+class ToolTimeoutError(TimeoutError):
+    """Raised when a wrapped tool exceeds its per-call timeout.
+
+    Preserves the tool's declared return-type contract: instead of silently
+    downgrading a typed return value to a JSON string, the wrapper raises this
+    so the framework adapter (a per-adapter concern) can translate it into
+    whatever its framework expects.
+    """
+
+    def __init__(self, tool_name, timeout_seconds, background_work_may_continue):
+        super().__init__(
+            f"Tool {tool_name!r} exceeded {timeout_seconds}s"
+        )
+        self.tool_name = tool_name
+        self.timeout_seconds = timeout_seconds
+        self.background_work_may_continue = background_work_may_continue
+
+
 def _resolve_tool_timeout_workers():
     """Resolve the timeout worker count, tolerating a bad env value.
 
@@ -164,15 +182,20 @@ def _resolve_tool_timeout_workers():
     return workers
 
 
-def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory):
+def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
     For async tools the underlying task is cancelled on timeout. For sync tools
     the call runs in an instance-owned bounded thread pool obtained from
-    ``executor_factory``; on timeout we best-effort cancel the future and log a
-    warning. Note: a synchronous call that has already started cannot be forcibly
-    interrupted, so background work may continue executing — the returned payload
-    flags this with ``background_work_may_continue``.
+    ``executor_factory``; on timeout we best-effort cancel the future. Note: a
+    synchronous call that has already started cannot be forcibly interrupted, so
+    background work may continue executing. When the cancel fails (the worker is
+    leaked), ``on_leaked`` is invoked so the owning generator can recycle its
+    pool before every worker is permanently starved.
+
+    On timeout the wrapper raises :class:`ToolTimeoutError` rather than returning
+    a JSON string, so a tool's declared return-type contract is never silently
+    downgraded; the framework adapter decides how to surface the timeout.
     """
     if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
         return tool
@@ -181,7 +204,6 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory):
     import concurrent.futures
     import functools
     import inspect
-    import json
     
     if inspect.iscoroutinefunction(tool):
         @functools.wraps(tool)
@@ -189,11 +211,12 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory):
             try:
                 return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
             except asyncio.TimeoutError:
-                return json.dumps({
-                    "error": "tool_timeout",
-                    "tool": getattr(tool, "__name__", repr(tool)),
-                    "timeout_seconds": timeout_seconds,
-                })
+                # asyncio.wait_for cancels the underlying task, so no work leaks.
+                raise ToolTimeoutError(
+                    tool_name=getattr(tool, "__name__", repr(tool)),
+                    timeout_seconds=timeout_seconds,
+                    background_work_may_continue=False,
+                )
         return _async_wrapped
 
     @functools.wraps(tool)
@@ -207,18 +230,22 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory):
             # A started sync call cannot be interrupted, so warn operators that
             # the worker may keep running (and its side effects may still occur).
             cancelled = future.cancel()
+            if not cancelled and on_leaked is not None:
+                # The worker is stuck and OS-owned; let the generator recycle
+                # the pool so new submissions are not permanently queued behind
+                # leaked threads.
+                on_leaked()
             logger.warning(
                 "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
                 "executing in the background.",
                 getattr(tool, "__name__", repr(tool)),
                 timeout_seconds, cancelled,
             )
-            return json.dumps({
-                "error": "tool_timeout",
-                "tool": getattr(tool, "__name__", repr(tool)),
-                "timeout_seconds": timeout_seconds,
-                "background_work_may_continue": not cancelled,
-            })
+            raise ToolTimeoutError(
+                tool_name=getattr(tool, "__name__", repr(tool)),
+                timeout_seconds=timeout_seconds,
+                background_work_may_continue=not cancelled,
+            )
     return _sync_wrapped
 
 
@@ -334,6 +361,10 @@ class AgentsGenerator:
         self._tool_timeout_executor = tool_timeout_executor
         self._owns_tool_timeout_executor = tool_timeout_executor is None
         self._tool_timeout_executor_lock = threading.Lock()
+        # Track workers permanently held by stuck sync tools. Once half the pool
+        # is leaked we recycle it so new tool calls aren't starved forever.
+        self._leaked_workers = 0
+        self._max_leaked_workers = max(1, _resolve_tool_timeout_workers() // 2)
         
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
@@ -344,23 +375,46 @@ class AgentsGenerator:
 
         The pool is owned by the instance (not a module global), so concurrent
         sessions / tenants never share workers and a stuck tool in one session
-        cannot starve another.
+        cannot starve another. If enough workers have leaked to stuck tools, the
+        pool is recycled: leaked threads keep running until their syscall returns,
+        but new submissions get a fresh set of workers instead of queuing behind
+        the dead ones forever.
         """
         import concurrent.futures
 
         with self._tool_timeout_executor_lock:
+            recycle = (
+                self._owns_tool_timeout_executor
+                and self._tool_timeout_executor is not None
+                and self._leaked_workers >= self._max_leaked_workers
+            )
+            if recycle:
+                self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._tool_timeout_executor = None
+                self._leaked_workers = 0
             if self._tool_timeout_executor is None:
                 self._tool_timeout_executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=_resolve_tool_timeout_workers(),
                     thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
                 )
+                self._owns_tool_timeout_executor = True
             # Capture the reference inside the lock so a concurrent close() can
             # never null the attribute out between the check and the return.
             return self._tool_timeout_executor
 
+    def _note_leaked_worker(self):
+        """Record a worker permanently held by a stuck sync tool."""
+        with self._tool_timeout_executor_lock:
+            self._leaked_workers += 1
+
     def _wrap_tool_with_timeout(self, tool, timeout_seconds):
         """Wrap a tool with this generator's instance-owned timeout executor."""
-        return _wrap_with_timeout(tool, timeout_seconds, self._get_tool_timeout_executor)
+        return _wrap_with_timeout(
+            tool,
+            timeout_seconds,
+            self._get_tool_timeout_executor,
+            on_leaked=self._note_leaked_worker,
+        )
 
     def close(self):
         """Release the owned tool-timeout executor; safe to call repeatedly."""
