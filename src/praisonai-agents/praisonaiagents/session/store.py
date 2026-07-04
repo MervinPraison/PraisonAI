@@ -608,6 +608,10 @@ class DefaultSessionStore:
                             "agent_name": data.get("agent_name"),
                             "agent_id": data.get("agent_id") or (data.get("metadata") or {}).get("agent_id"),
                             "source": data.get("source") or (data.get("metadata") or {}).get("source"),
+                            # Surface parentage so callers can distinguish root
+                            # sessions from sub-agent/forked children (Issue #2655).
+                            "parent_id": data.get("parent_id") or (data.get("metadata") or {}).get("parent_id"),
+                            "parent_session_id": data.get("parent_session_id") or (data.get("metadata") or {}).get("parent_session_id"),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
                             "message_count": len(data.get("messages", [])),

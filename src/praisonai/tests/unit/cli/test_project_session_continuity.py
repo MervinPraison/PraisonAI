@@ -3,9 +3,12 @@
 from praisonai.cli.state.project_sessions import (
     apply_cli_session_continuity,
     build_cli_memory_config,
+    find_last_session,
     get_project_session_store,
+    list_project_sessions,
 )
 from praisonaiagents import Agent
+from praisonaiagents.session.store import get_default_session_store
 
 
 def test_build_cli_memory_config_enables_history():
@@ -55,3 +58,41 @@ def test_injected_session_store_not_overwritten():
     assert agent._session_store.session_dir == injected_dir
 
     store.clear_session(session_id)
+
+
+def test_find_last_session_sees_global_agent_session():
+    """A session created via the core global store (e.g. Agent(session_id=...))
+    must be visible to `--continue`/find_last_session and to the merged
+    listing, not only project-scoped run sessions (Issue #2655)."""
+    global_store = get_default_session_store()
+    session_id = "issue-2655-global-session"
+    global_store.delete_session(session_id)
+    global_store.add_user_message(session_id, "created by core Agent")
+
+    try:
+        assert find_last_session() == session_id
+
+        listed = {s.get("session_id") for s in list_project_sessions()}
+        assert session_id in listed
+    finally:
+        global_store.delete_session(session_id)
+
+
+def test_find_last_session_skips_sub_agent_child():
+    """`--continue` resolves to the last root session, never a sub-agent child
+    marked with a parent_id in metadata (Issue #2655)."""
+    store = get_project_session_store()
+    root_id = "issue-2655-root"
+    child_id = "issue-2655-child"
+    store.delete_session(root_id)
+    store.delete_session(child_id)
+
+    store.add_user_message(root_id, "root conversation")
+    store.add_user_message(child_id, "sub-agent work")
+    store.update_session_metadata(child_id, parent_id=root_id)
+
+    try:
+        assert find_last_session() == root_id
+    finally:
+        store.delete_session(root_id)
+        store.delete_session(child_id)
