@@ -117,3 +117,16 @@ def test_no_instruction_files_returns_empty(tmp_path: Path):
     (tmp_path / "file.py").write_text("x", encoding="utf-8")
     attacher = InstructionFileAttacher(project_root=tmp_path)
     assert attacher.attach_for_path(str(tmp_path / "file.py")) == ""
+
+
+def test_file_outside_project_root_does_not_escape(monorepo: Path, tmp_path_factory):
+    """A file outside project_root must never surface external AGENTS.md files."""
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "AGENTS.md").write_text("OUTSIDE conventions", encoding="utf-8")
+    (outside / "rogue.py").write_text("print('x')\n", encoding="utf-8")
+
+    attacher = InstructionFileAttacher(project_root=monorepo)
+    text = attacher.attach_for_path(str(outside / "rogue.py"))
+
+    assert "OUTSIDE conventions" not in text
+    assert text == ""

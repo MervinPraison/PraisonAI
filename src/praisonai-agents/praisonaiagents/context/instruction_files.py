@@ -54,6 +54,15 @@ def _find_project_root(start: Path) -> Optional[Path]:
         current = current.parent
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    """True if ``path`` is ``root`` or a descendant of it."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 @dataclass
 class InstructionFileAttacher:
     """Discover and attach nearest-governing instruction files on demand.
@@ -113,10 +122,20 @@ class InstructionFileAttacher:
                 break
             if current == current.parent:
                 break
-            if root is None and depth >= _MAX_WALK_UP_DEPTH:
+            # Always bound the walk. When ``root`` is set but ``directory`` is
+            # outside it, ``current == root`` is never reached; the depth cap
+            # then stops us from escaping to arbitrary system directories.
+            if depth >= _MAX_WALK_UP_DEPTH:
                 break
             current = current.parent
             depth += 1
+
+        # Hard boundary: when an explicit project_root is configured, never
+        # surface instruction files from outside it (e.g. the file lives in a
+        # sibling tree or a temp dir). Directories not contained in root are
+        # dropped, so we cannot read AGENTS.md from home/system directories.
+        if self.project_root is not None:
+            dirs = [d for d in dirs if _is_within(d, self.project_root)]
 
         dirs.reverse()
         return dirs
@@ -129,7 +148,7 @@ class InstructionFileAttacher:
             stat = path.stat()
             key = (stat.st_dev, stat.st_ino)
         except OSError:
-            key = (0, str(path.resolve()))
+            key = (0, str(path))
         if key in self._seen_file_keys:
             return None
         try:
@@ -169,7 +188,6 @@ class InstructionFileAttacher:
         # in the same subtree does not re-walk.
         for d in search_dirs:
             self._visited_dirs.add(d)
-        self._visited_dirs.add(directory)
 
         chunks: List[str] = []
         for search_dir in search_dirs:
@@ -182,8 +200,12 @@ class InstructionFileAttacher:
                     break
                 if len(text) > remaining:
                     text = text[:remaining].rstrip() + "\n\n... (truncated)"
+                    # Credit only the budgeted content, not the truncation
+                    # notice, so later subtrees are not under-served.
+                    self._used_chars += remaining
+                else:
+                    self._used_chars += len(text)
                 chunks.append(text)
-                self._used_chars += len(text)
             if self._used_chars >= self.max_chars:
                 break
 
