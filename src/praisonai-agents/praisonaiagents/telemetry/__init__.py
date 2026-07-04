@@ -113,16 +113,23 @@ def __getattr__(name):
     if module_name is not None:
         from importlib import import_module
         module = import_module(f".{module_name}", __name__)
-        return getattr(module, name)
+        value = getattr(module, name)
+        # Cache back into the module namespace (PEP 562) so subsequent
+        # attribute-style lookups skip __getattr__ and the import machinery.
+        globals()[name] = value
+        return value
     if name == 'PERFORMANCE_MONITORING_AVAILABLE':
         try:
             from importlib import import_module
             import_module('.performance_monitor', __name__)
             import_module('.performance_utils', __name__)
             import_module('.performance_cli', __name__)
-            return True
+            result = True
         except ImportError:
-            return False
+            result = False
+        # Cache the resolved flag so repeated reads don't re-run the imports.
+        globals()['PERFORMANCE_MONITORING_AVAILABLE'] = result
+        return result
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
