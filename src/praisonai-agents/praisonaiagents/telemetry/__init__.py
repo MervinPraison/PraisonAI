@@ -36,24 +36,33 @@ if TYPE_CHECKING:
 # Import the classes for real (not just type checking)
 from .telemetry import MinimalTelemetry, TelemetryCollector
 
-# Import performance monitoring tools
-try:
-    from .performance_monitor import (
-        PerformanceMonitor, performance_monitor,
-        monitor_function, track_api_call, get_performance_report,
-        get_function_stats, get_api_stats, get_slowest_functions, 
-        get_slowest_apis, clear_performance_data, export_external_apm_metrics
-    )
-    from .performance_utils import (
-        FunctionFlowAnalyzer, PerformanceAnalyzer,
-        flow_analyzer, performance_analyzer,
-        analyze_function_flow, visualize_execution_flow,
-        analyze_performance_trends, generate_comprehensive_report
-    )
-    from .performance_cli import PerformanceCLI
-    PERFORMANCE_MONITORING_AVAILABLE = True
-except ImportError:
-    PERFORMANCE_MONITORING_AVAILABLE = False
+# Performance monitoring tools are lazy-loaded via module-level __getattr__ to
+# avoid parsing ~68K of performance-monitoring code on the common get_telemetry()
+# path (e.g. AgentTeam.__init__). The public names stay importable from
+# praisonaiagents.telemetry exactly as before; the first access triggers the import.
+_PERFORMANCE_EXPORTS = {
+    # Symbol name -> submodule providing it
+    'PerformanceMonitor': 'performance_monitor',
+    'performance_monitor': 'performance_monitor',
+    'monitor_function': 'performance_monitor',
+    'track_api_call': 'performance_monitor',
+    'get_performance_report': 'performance_monitor',
+    'get_function_stats': 'performance_monitor',
+    'get_api_stats': 'performance_monitor',
+    'get_slowest_functions': 'performance_monitor',
+    'get_slowest_apis': 'performance_monitor',
+    'clear_performance_data': 'performance_monitor',
+    'export_external_apm_metrics': 'performance_monitor',
+    'FunctionFlowAnalyzer': 'performance_utils',
+    'PerformanceAnalyzer': 'performance_utils',
+    'flow_analyzer': 'performance_utils',
+    'performance_analyzer': 'performance_utils',
+    'analyze_function_flow': 'performance_utils',
+    'visualize_execution_flow': 'performance_utils',
+    'analyze_performance_trends': 'performance_utils',
+    'generate_comprehensive_report': 'performance_utils',
+    'PerformanceCLI': 'performance_cli',
+}
 
 __all__ = [
     # Core telemetry
@@ -67,37 +76,54 @@ __all__ = [
     'enable_performance_mode',
     'disable_performance_mode',
     'cleanup_telemetry_resources',
+    # Performance monitoring (lazy-loaded via __getattr__)
+    'PerformanceMonitor',
+    'FunctionFlowAnalyzer',
+    'PerformanceAnalyzer',
+    'PerformanceCLI',
+    'performance_monitor',
+    'flow_analyzer',
+    'performance_analyzer',
+    'monitor_function',
+    'track_api_call',
+    'get_performance_report',
+    'get_function_stats',
+    'get_api_stats',
+    'get_slowest_functions',
+    'get_slowest_apis',
+    'clear_performance_data',
+    'export_external_apm_metrics',
+    'analyze_function_flow',
+    'visualize_execution_flow',
+    'analyze_performance_trends',
+    'generate_comprehensive_report',
+    # Availability flag
+    'PERFORMANCE_MONITORING_AVAILABLE',
 ]
 
-# Add performance monitoring to __all__ if available
-if PERFORMANCE_MONITORING_AVAILABLE:
-    __all__.extend([
-        # Performance monitoring classes
-        'PerformanceMonitor',
-        'FunctionFlowAnalyzer', 
-        'PerformanceAnalyzer',
-        'PerformanceCLI',
-        # Global instances
-        'performance_monitor',
-        'flow_analyzer',
-        'performance_analyzer',
-        # Convenience functions
-        'monitor_function',
-        'track_api_call',
-        'get_performance_report',
-        'get_function_stats',
-        'get_api_stats',
-        'get_slowest_functions',
-        'get_slowest_apis',
-        'clear_performance_data',
-        'export_external_apm_metrics',
-        'analyze_function_flow',
-        'visualize_execution_flow',
-        'analyze_performance_trends',
-        'generate_comprehensive_report',
-        # Availability flag
-        'PERFORMANCE_MONITORING_AVAILABLE'
-    ])
+
+def __getattr__(name):
+    """Lazily import performance-monitoring symbols on first access.
+
+    This keeps the lightweight MinimalTelemetry / get_telemetry() path free of the
+    performance-monitoring import cost while preserving the exact public import
+    surface (all symbols remain importable from praisonaiagents.telemetry).
+    """
+    module_name = _PERFORMANCE_EXPORTS.get(name)
+    if module_name is not None:
+        from importlib import import_module
+        module = import_module(f".{module_name}", __name__)
+        return getattr(module, name)
+    if name == 'PERFORMANCE_MONITORING_AVAILABLE':
+        try:
+            from importlib import import_module
+            import_module('.performance_monitor', __name__)
+            import_module('.performance_utils', __name__)
+            import_module('.performance_cli', __name__)
+            return True
+        except ImportError:
+            return False
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_telemetry() -> 'MinimalTelemetry':
