@@ -116,7 +116,8 @@ def test_missing_dependencies_graceful_degradation():
 def test_jobs_store_bridge():
     """Test jobs store bridge resolves praisonai.jobs.server helpers."""
     from praisonai.integration.bridges.kanban_bridge import get_jobs_store, get_jobs_executor
-    from praisonai_bot._wrapper_bridge import wrapper_available
+
+    bridge = pytest.importorskip("praisonai_bot._wrapper_bridge")
 
     jobs_store = get_jobs_store()
     jobs_executor = get_jobs_executor()
@@ -124,7 +125,7 @@ def test_jobs_store_bridge():
     assert jobs_store is None or callable(jobs_store)
     assert jobs_executor is None or callable(jobs_executor)
 
-    if wrapper_available():
+    if bridge.wrapper_available():
         from praisonai.jobs import server as jobs_server
 
         assert jobs_store is jobs_server.get_store
