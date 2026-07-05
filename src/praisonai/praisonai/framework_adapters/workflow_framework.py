@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -12,15 +12,34 @@ def validate_workflow_framework(
     framework: Optional[str],
     *,
     source: str = "workflow YAML",
+    registry: Any = None,
 ) -> None:
     """
-    Warn then fail when a workflow file declares a non-native framework.
+    Warn then fail when a workflow file declares a framework whose adapter does
+    not advertise workflow support.
 
-    Multi-framework workflow dispatch is not implemented; only agents.yaml
-    via AgentsGenerator supports framework != praisonai today.
+    Instead of hardcoding ``framework == "praisonai"``, ask the adapter via its
+    ``SUPPORTS_WORKFLOW`` capability flag. Third-party adapters registered via
+    the ``praisonai.framework_adapters`` entry-point group can opt in by setting
+    ``SUPPORTS_WORKFLOW = True``. The native ``praisonai`` adapter sets it, so
+    behaviour is unchanged for existing configs.
     """
-    if not framework or str(framework).lower() == "praisonai":
+    if not framework:
         return
+
+    # Consult the adapter's capability flag. If resolution fails for any reason,
+    # fall back to the historical native-only behaviour.
+    try:
+        if registry is None:
+            from .registry import get_default_registry
+
+            registry = get_default_registry()
+        adapter = registry.create(framework)
+        if getattr(adapter, "SUPPORTS_WORKFLOW", False):
+            return
+    except Exception:
+        if str(framework).lower() == "praisonai":
+            return
 
     supported = ""
     try:

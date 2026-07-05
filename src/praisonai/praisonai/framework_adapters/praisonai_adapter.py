@@ -32,6 +32,13 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
     # Native async path: arun() awaits team.astart() directly (no thread offload).
     SUPPORTS_ASYNC = True
 
+    # Native PraisonAI is the only in-tree adapter that supports workflow YAML
+    # execution and runtime features (cli_backend / runtime / models.*.runtime /
+    # providers.*.runtime_default). Capability call sites read these flags
+    # instead of hardcoding ``framework == "praisonai"``.
+    SUPPORTS_WORKFLOW = True
+    SUPPORTS_RUNTIME_FEATURES = True
+
     @property
     def name(self) -> str:
         """Return adapter name."""

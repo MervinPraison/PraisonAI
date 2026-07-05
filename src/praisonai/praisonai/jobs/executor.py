@@ -235,8 +235,11 @@ class JobExecutor:
         await self._notify_progress(job)
         
         try:
-            # Try praisonaiagents first (preferred)
-            if framework == "praisonai":
+            # Prefer the native praisonaiagents path when the framework's adapter
+            # advertises workflow support (SUPPORTS_WORKFLOW) rather than
+            # hardcoding ``framework == "praisonai"``. Third-party adapters that
+            # opt in are routed natively; everything else uses the legacy path.
+            if self._framework_supports_native(framework):
                 result = await self._run_praisonai_agents(job, agent_file)
             else:
                 # Use legacy PraisonAI for crewai/autogen
@@ -252,6 +255,22 @@ class JobExecutor:
                 except Exception:
                     pass
     
+    @staticmethod
+    def _framework_supports_native(framework: str) -> bool:
+        """Return True if the framework's adapter advertises workflow support.
+
+        Reads the adapter's ``SUPPORTS_WORKFLOW`` capability flag instead of
+        hardcoding ``framework == "praisonai"``. Falls back to the historical
+        native-only behaviour if adapter resolution fails.
+        """
+        try:
+            from praisonai.framework_adapters.registry import get_default_registry
+
+            adapter = get_default_registry().create(framework)
+            return bool(getattr(adapter, "SUPPORTS_WORKFLOW", False))
+        except Exception:
+            return str(framework).lower() == "praisonai"
+
     async def _run_recipe(self, job: Job) -> Any:
         """Run a recipe-based job."""
         try:
