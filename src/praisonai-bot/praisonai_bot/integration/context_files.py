@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 DEFAULT_CANDIDATES = ["AGENTS.md", "agents.md", ".agents/AGENTS.md", "CLAUDE.md"]
 
@@ -128,3 +128,131 @@ def load_context_files(
             _add(search_dir / name)
 
     return "\n\n".join(chunks)
+
+
+def _identity_key(path: Path):
+    """Filesystem identity for dedup (device+inode), falling back to resolved path."""
+    try:
+        stat = path.stat()
+        return (stat.st_dev, stat.st_ino)
+    except OSError:
+        return path.resolve()
+
+
+class PathContextAttacher:
+    """Attach the nearest governing instruction files as files are touched.
+
+    Up-front ``load_context_files`` discovery walks ``cwd -> project root`` once
+    at session start. In a monorepo, an agent that later reads/edits a file in a
+    *sibling or deeper* subtree (e.g. ``packages/foo/AGENTS.md``) never sees that
+    subtree's conventions. This attacher augments the up-front load: on the first
+    touch of a directory it walks up to the project root collecting
+    ``DEFAULT_CANDIDATES``, deduplicates against files already loaded (both the
+    up-front rules and earlier touches), bounds the result by a character budget,
+    and caches per directory so repeated touches never re-walk disk.
+
+    Session-scoped: create one instance per session/agent run so cache and dedup
+    state stay isolated (multi-agent safe).
+    """
+
+    def __init__(
+        self,
+        already_loaded: Optional[str] = None,
+        *,
+        max_chars: int = 8000,
+    ) -> None:
+        """Initialise the attacher.
+
+        Args:
+            already_loaded: Text already injected up front (used only to seed
+                dedup so its files are not re-attached). Its identity is tracked
+                by content so duplicate physical files are skipped.
+            max_chars: Character budget for the total text this attacher emits
+                across the session. ``0`` disables the budget.
+        """
+        self._seen: Set = set()
+        self._dir_cache: Dict[Path, str] = {}
+        self._max_chars = max_chars
+        self._emitted_chars = 0
+        # Seed dedup with the identities of already-loaded files so the same
+        # physical instruction file discovered up front is not re-attached.
+        if already_loaded:
+            self._seed_from_text(already_loaded)
+
+    def _seed_from_text(self, text: str) -> None:
+        # We cannot recover file identities from text alone, so we record the
+        # text content to skip re-emitting identical bodies. Physical-identity
+        # dedup below still handles the same file reached via different paths.
+        self._seen_texts: Set[str] = getattr(self, "_seen_texts", set())
+        self._seen_texts.add(text)
+
+    def attach_for_path(self, file_path) -> str:
+        """Return nearest instruction text for ``file_path``'s directory.
+
+        Walks up from the file's directory to the project root collecting
+        instruction files (root first, nearest last), deduplicated against
+        everything already emitted/loaded and bounded by the char budget. The
+        first touch of a directory does the disk walk; later touches of the same
+        directory return the cached (already-deduped) result cheaply.
+
+        Returns an empty string when nothing new is found or the budget is
+        exhausted.
+        """
+        p = Path(file_path)
+        directory = (p if p.is_dir() else p.parent).resolve()
+
+        if directory in self._dir_cache:
+            return self._dir_cache[directory]
+
+        seen_texts: Set[str] = getattr(self, "_seen_texts", set())
+        chunks: List[str] = []
+        for search_dir in _discover_search_dirs(directory, walk_up=True):
+            for name in DEFAULT_CANDIDATES:
+                candidate = search_dir / name
+                if not candidate.is_file():
+                    continue
+                key = _identity_key(candidate)
+                if key in self._seen:
+                    continue
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                if text in seen_texts:
+                    self._seen.add(key)
+                    continue
+                self._seen.add(key)
+                seen_texts.add(text)
+                chunks.append(text)
+
+        result = "\n\n".join(chunks)
+
+        # Enforce the character budget across the whole session.
+        if self._max_chars and result:
+            remaining = self._max_chars - self._emitted_chars
+            if remaining <= 0:
+                result = ""
+            elif len(result) > remaining:
+                result = result[:remaining] + "\n... [subtree context truncated]"
+
+        self._emitted_chars += len(result)
+        self._seen_texts = seen_texts
+        self._dir_cache[directory] = result
+        return result
+
+
+def load_context_files_for_path(
+    file_path,
+    *,
+    already_loaded: Optional[str] = None,
+    max_chars: int = 8000,
+) -> str:
+    """Stateless one-shot discovery of nearest instruction files for a path.
+
+    Convenience wrapper around :class:`PathContextAttacher` for callers that do
+    not maintain session state. Prefer the class when touching many files so
+    dedup and per-directory caching persist across touches.
+    """
+    return PathContextAttacher(
+        already_loaded, max_chars=max_chars
+    ).attach_for_path(file_path)
