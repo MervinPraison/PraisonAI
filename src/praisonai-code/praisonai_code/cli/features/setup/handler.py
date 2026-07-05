@@ -301,17 +301,10 @@ class SetupHandler(CommandHandler):
         Returns ``(provider_id, env_key, default_model, provider_name)`` or
         ``None`` when no supported provider credential is present.
         """
-        try:
-            from praisonai_code.llm.env import (
-                default_model_for_available_provider,
-                DEFAULT_FALLBACK_MODEL,
-            )
-        except Exception:
-            return None
-
-        model = default_model_for_available_provider()
-
-        # Map the resolved model's env-var onto the setup provider table.
+        # Map each credential env-var to the setup provider it unlocks. The
+        # env-var actually present is returned (not the provider's canonical
+        # one) so callers can read it back from the environment safely — e.g.
+        # GOOGLE_API_KEY and GEMINI_API_KEY both map to "google".
         env_key_to_provider = {
             "OPENAI_API_KEY": "openai",
             "ANTHROPIC_API_KEY": "anthropic",
@@ -322,11 +315,12 @@ class SetupHandler(CommandHandler):
         for env_key, provider_id in env_key_to_provider.items():
             if not os.environ.get(env_key):
                 continue
-            name, canonical_env, default_model = defaults[provider_id]
-            # Prefer the inferred model when it is not the terminal fallback,
-            # otherwise fall back to the provider's setup default.
-            chosen = model if model != DEFAULT_FALLBACK_MODEL or provider_id == "openai" else default_model
-            return provider_id, canonical_env, chosen or default_model, name
+            name, _canonical_env, default_model = defaults[provider_id]
+            # Always present the refreshed setup default (clean, unprefixed)
+            # so the model shown to the user and fed to the smoke test matches
+            # _provider_defaults() rather than the older prefixed string from
+            # llm/env.py. Return the env-var that was actually found.
+            return provider_id, env_key, default_model, name
         return None
 
     def _prompt_and_validate_key(self, provider_id: str, provider_name: str, output) -> Optional[str]:
@@ -346,7 +340,8 @@ class SetupHandler(CommandHandler):
         except Exception:
             validate_api_key = None
 
-        while True:
+        max_attempts = 3
+        for attempt in range(max_attempts):
             api_key = getpass.getpass("Enter API key (hidden): ").strip()
             if not api_key:
                 return None
@@ -359,8 +354,15 @@ class SetupHandler(CommandHandler):
                 return api_key
 
             output.print_error(f"Invalid API key for {provider_name}: {message}")
+            last_attempt = attempt == max_attempts - 1
+            if last_attempt:
+                # Bounded: keep the key on the final attempt rather than looping
+                # forever (Confirm may be unavailable when rich is missing).
+                output.print_warning("Proceeding with the entered key; you can update it later.")
+                return api_key
             if Confirm is not None and not Confirm.ask("Try again?", default=True):
                 return api_key
+        return None
 
     def _run_smoke_test(self, model: Optional[str], env_vars: Dict[str, str], output) -> None:
         """Run a one-line smoke test to confirm the configured agent works.

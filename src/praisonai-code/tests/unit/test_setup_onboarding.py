@@ -59,6 +59,33 @@ def test_detect_openai_from_env(clean_env):
     assert env_key == "OPENAI_API_KEY"
 
 
+def test_detect_google_from_google_api_key_returns_present_env_var(clean_env):
+    """GOOGLE_API_KEY (without GEMINI_API_KEY) must return the env-var that is
+    actually present, so the interactive path can read it back without a
+    KeyError, and use the clean refreshed default model.
+    """
+    clean_env.setenv("GOOGLE_API_KEY", "x" * 32)
+    detected = SetupHandler()._detect_provider_from_env()
+    assert detected is not None
+    provider_id, env_key, model, name = detected
+    assert provider_id == "google"
+    assert env_key == "GOOGLE_API_KEY"
+    assert os.environ.get(env_key)  # readable without KeyError
+    # Clean refreshed default, not the older prefixed llm/env.py string.
+    assert "/" not in model
+    assert model == SetupHandler()._provider_defaults()["google"][2]
+
+
+def test_detect_uses_refreshed_default_model_not_prefixed(clean_env):
+    """Detected model must match _provider_defaults(), not the prefixed string
+    from llm/env.py's default_model_for_available_provider().
+    """
+    clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-" + "x" * 24)
+    _pid, _env_key, model, _name = SetupHandler()._detect_provider_from_env()
+    assert "/" not in model
+    assert model == SetupHandler()._provider_defaults()["anthropic"][2]
+
+
 def test_provider_menu_shape():
     menu = SetupHandler()._provider_menu()
     assert set(menu) == {"1", "2", "3", "4", "5"}
