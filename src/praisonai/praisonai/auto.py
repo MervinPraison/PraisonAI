@@ -1067,8 +1067,10 @@ class AutoGenerator(BaseAutoGenerator):
         user does not have. Falls back to keyword hints when the resolver cannot
         be constructed.
         """
+        return self._discover_tools_for_topic(self._available_tools())
+
+    def _discover_tools_for_topic(self, available: List[str]) -> List[str]:
         keyword_tools = get_tools_for_task(self.topic)
-        available = self._available_tools()
         if not available:
             # Resolver unavailable — preserve legacy keyword-only behaviour.
             return keyword_tools
@@ -1109,19 +1111,25 @@ class AutoGenerator(BaseAutoGenerator):
         
         workflow_guidance = pattern_guidance.get(self.pattern, pattern_guidance["sequential"])
         
+        # Resolve the installed tool registry once (single source of truth) and
+        # reuse it for both discovery and the prompt reference to avoid calling
+        # ToolResolver.list_available() twice per invocation.
+        available_tools = self._available_tools()
+
         # Get recommended tools based on task analysis
-        recommended_tools = self.discover_tools_for_topic()
+        recommended_tools = self._discover_tools_for_topic(available_tools)
         recommended_agent_count = recommend_agent_count(self.topic)
         complexity = self.analyze_complexity(self.topic)
-        
-        # Prefer the real, installed tool registry (single source of truth) so
-        # the LLM only plans with tools the user can actually run. Fall back to
-        # the static category reference when the resolver is unavailable.
-        available_tools = self._available_tools()
+
+        # Prefer the real, installed tool registry so the LLM only plans with
+        # tools the user can actually run. Fall back to the static category
+        # reference when the resolver is unavailable.
         if available_tools:
+            tools_header = "AVAILABLE TOOLS (installed)"
             tools_reference = "\n".join(f"  - {t}" for t in available_tools)
             legacy_tools = ", ".join(available_tools)
         else:
+            tools_header = "AVAILABLE TOOLS BY CATEGORY"
             all_tools_by_category = []
             for category, tools in TOOL_CATEGORIES.items():
                 all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
@@ -1160,7 +1168,7 @@ Each agent should have:
 - 1 focused task with clear description and expected output
 - Appropriate tools from the recommended list
 
-AVAILABLE TOOLS BY CATEGORY:
+{tools_header}:
 {tools_reference}
 
 LEGACY TOOLS (for backward compatibility):

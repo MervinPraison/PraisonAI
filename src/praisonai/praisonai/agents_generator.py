@@ -751,7 +751,9 @@ class AgentsGenerator:
                     f"sets SUPPORTS_RUNTIME_FEATURES = True (e.g. framework='praisonai')."
                 )
             raise ValueError(
-                f"Runtime features require framework='praisonai', but framework='{framework}' was specified"
+                f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
+                f"Use a framework whose adapter sets SUPPORTS_RUNTIME_FEATURES = True "
+                f"(e.g. framework='praisonai')."
             )
 
     def _validate_agents_config(self, config):

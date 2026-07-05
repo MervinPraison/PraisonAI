@@ -41,7 +41,11 @@ def validate_workflow_framework(
         if str(framework).lower() == "praisonai":
             return
 
+    # Discover the set of frameworks whose adapters advertise workflow support,
+    # so the guidance reflects capability flags rather than assuming praisonai
+    # is the only valid choice.
     supported = ""
+    workflow_frameworks: list[str] = []
     try:
         from .registry import list_framework_choices
     except ImportError:
@@ -51,13 +55,24 @@ def validate_workflow_framework(
         list_framework_choices = None  # type: ignore[assignment]
 
     if list_framework_choices is not None:
-        choices = [f for f in list_framework_choices(include_unavailable=True) if f != "praisonai"]
-        if choices:
-            supported = f" Available registered frameworks: {', '.join(sorted(choices))}."
+        for name in list_framework_choices(include_unavailable=True):
+            try:
+                candidate = registry.create(name) if registry is not None else None
+            except Exception:
+                candidate = None
+            if (candidate is not None and getattr(candidate, "SUPPORTS_WORKFLOW", False)) \
+                    or (candidate is None and str(name).lower() == "praisonai"):
+                workflow_frameworks.append(name)
+        if workflow_frameworks:
+            supported = (
+                f" Frameworks supporting workflow execution: "
+                f"{', '.join(sorted(set(workflow_frameworks)))}."
+            )
 
     message = (
         f"framework='{framework}' in {source} is not supported for workflow execution. "
-        "Native PraisonAI Workflow engine only supports framework='praisonai'. "
+        "The workflow engine requires an adapter whose SUPPORTS_WORKFLOW flag is set "
+        "(the native 'praisonai' adapter does). "
         "Use a non-workflow agents.yaml with a supported registered framework, "
         f"or set framework: praisonai.{supported}"
     )
