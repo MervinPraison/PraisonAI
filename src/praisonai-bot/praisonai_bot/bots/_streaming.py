@@ -71,6 +71,11 @@ class StreamingConfig:
     min_delta: int = 120           # Minimum characters before triggering edit
     placeholder_text: str = "🤔 Thinking..."
     progress_prefix: str = "🤔 "
+    # Progress rendering style: "line" (default, single overwritten tool line)
+    # or "feed" (bounded multi-line rolling status feed via the core compositor).
+    progress_style: str = "line"
+    progress_max_lines: int = 8    # Max trailing lines shown in feed style
+    progress_max_line_chars: int = 120  # Per-line char cap in feed style
     # Flood-control / resilience for progressive edits
     disable_progressive_edits_after: int = 3  # Consecutive edit failures before giving up
     flood_backoff_factor: float = 2.0         # Multiply interval on each flood/429
@@ -93,6 +98,9 @@ class StreamingConfig:
             min_delta=data.get("min_delta", 120),
             placeholder_text=data.get("placeholder_text", "🤔 Thinking..."),
             progress_prefix=data.get("progress_prefix", "🤔 "),
+            progress_style=data.get("progress_style", "line"),
+            progress_max_lines=data.get("progress_max_lines", 8),
+            progress_max_line_chars=data.get("progress_max_line_chars", 120),
             disable_progressive_edits_after=data.get("disable_progressive_edits_after", 3),
             flood_backoff_factor=data.get("flood_backoff_factor", 2.0),
             max_interval=data.get("max_interval", 30.0),
@@ -164,6 +172,9 @@ class DraftStreamer:
         self._last_edit_time = 0.0
         self._last_content_length = 0
         self._current_tool: Optional[str] = None
+        # Structured progress feed (feed style). Kept as a list of core
+        # ProgressLine objects folded from typed stream events.
+        self._progress_lines: list = []
         self._is_finalized = False
         self._update_task: Optional[asyncio.Task] = None
         self._pending_update = False
@@ -230,6 +241,23 @@ class DraftStreamer:
         logger.debug("DraftStreamer started, placeholder sent with message_id=%s", self._message_id)
         return self._message_id
     
+    @property
+    def _feed_style(self) -> bool:
+        """Whether the multi-line rolling progress feed is enabled."""
+        return (
+            self._config.mode == StreamingMode.PROGRESS
+            and self._config.progress_style == "feed"
+        )
+
+    def _fold_progress_event(self, event: "StreamEvent") -> None:
+        """Fold a stream event into the structured progress feed (feed style)."""
+        from praisonaiagents.streaming.progress import merge_progress_line
+
+        try:
+            self._progress_lines = merge_progress_line(self._progress_lines, event)
+        except Exception as e:  # never break streaming on a compositor error
+            logger.debug("Progress feed merge failed: %s", e)
+
     async def on_event(self, event: "StreamEvent") -> None:
         """Stream event callback to handle progressive updates."""
         if self._is_finalized or not self._message_id:
@@ -247,14 +275,29 @@ class DraftStreamer:
             if self._config.mode == StreamingMode.PROGRESS:
                 # Update current tool for progress display
                 self._current_tool = tool_name
+                if self._feed_style:
+                    self._fold_progress_event(event)
                 await self._schedule_update()
             
         elif event.type == StreamEventType.TOOL_CALL_START and event.tool_call:
             tool_name = event.tool_call.get('name', 'unknown_tool')
             if self._config.mode == StreamingMode.PROGRESS:
                 self._current_tool = tool_name
+                if self._feed_style:
+                    self._fold_progress_event(event)
                 await self._schedule_update()
-                
+
+        elif event.type in (
+            StreamEventType.TOOL_CALL_END,
+            StreamEventType.TOOL_CALL_RESULT,
+            StreamEventType.TOOL_PROGRESS,
+        ):
+            # Completion/output markers only matter for the structured feed;
+            # single-line style has no notion of per-step finishes.
+            if self._feed_style:
+                self._fold_progress_event(event)
+                await self._schedule_update()
+
         elif event.type == StreamEventType.STREAM_END:
             # Final update will be handled by finalize()
             pass
@@ -275,8 +318,9 @@ class DraftStreamer:
             elapsed >= self._current_min_interval and
             content_delta >= self._config.min_delta
         ) or (
-            # Always update for progress mode when tool changes
-            self._config.mode == StreamingMode.PROGRESS and self._current_tool
+            # Always update for progress mode when tool changes / feed advances
+            self._config.mode == StreamingMode.PROGRESS
+            and (self._current_tool or self._progress_lines)
         )
         
         if not should_update:
@@ -311,7 +355,17 @@ class DraftStreamer:
         if self._config.mode == StreamingMode.DRAFT:
             content = buffer or self._config.placeholder_text
         elif self._config.mode == StreamingMode.PROGRESS:
-            if self._current_tool:
+            if self._feed_style and self._progress_lines:
+                from praisonaiagents.streaming.progress import render_progress
+
+                content = render_progress(
+                    self._progress_lines,
+                    max_lines=self._config.progress_max_lines,
+                    max_line_chars=self._config.progress_max_line_chars,
+                )
+                if not content:
+                    content = self._config.placeholder_text
+            elif self._current_tool:
                 content = f"{self._config.progress_prefix}Running {self._current_tool}..."
             elif buffer:
                 content = buffer
