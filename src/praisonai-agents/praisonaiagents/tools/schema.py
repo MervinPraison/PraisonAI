@@ -365,7 +365,11 @@ def build_tool_definition(
     if fix_array_items:
         parameters = fix_array_schemas(parameters)
 
-    description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
+    # Use the first paragraph (everything before the first blank line) as the
+    # description. This preserves the richer llm.py behaviour and is a superset
+    # of the single-line extraction previously used by agent.py/openai_client.py
+    # (single-line docstrings yield an identical result on all paths).
+    description = docstring.split('\n\n')[0].strip() if docstring else f"Function {function_name}"
 
     return {
         "type": "function",
