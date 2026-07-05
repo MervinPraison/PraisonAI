@@ -92,6 +92,50 @@ def tools_list(
         console.print(f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | External: {len(external_tools)} | Registered: {len(registered_tools)}[/dim]")
 
 
+@app.command("search")
+def tools_search(
+    query: str = typer.Argument(..., help="Substring to search tool names for"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
+):
+    """Search available tools by name substring (case-insensitive).
+
+    Enumerates the same catalogue as 'tools list' (built-in, local, external,
+    registered/entry-point) and filters to names containing the query.
+    """
+    from praisonai_code.tool_resolver import ToolResolver
+
+    resolver = ToolResolver()
+    available = resolver.list_available()
+    sources = resolver.list_available_sources()
+
+    needle = query.strip().lower()
+    matches = {
+        name: desc for name, desc in available.items() if needle in name.lower()
+    }
+
+    if not matches:
+        console.print(f"[yellow]No tools matching '{query}'.[/yellow]")
+        console.print("[dim]Run 'praisonai tools list' to see all available tools.[/dim]")
+        return
+
+    table = Table(title=f"Tools matching '{query}'", show_header=True, header_style="bold cyan")
+    table.add_column("Tool Name", style="green")
+    table.add_column("Source", style="blue")
+    if verbose:
+        table.add_column("Description", style="dim")
+
+    for name in sorted(matches.keys()):
+        desc = matches[name]
+        src = sources.get(name, "builtin")
+        if verbose:
+            table.add_row(name, src, desc[:60] + "..." if len(desc) > 60 else desc)
+        else:
+            table.add_row(name, src)
+
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(matches)} match(es)[/dim]")
+
+
 @app.command("validate")
 def tools_validate(
     yaml_file: str = typer.Argument("agents.yaml", help="YAML file to validate"),

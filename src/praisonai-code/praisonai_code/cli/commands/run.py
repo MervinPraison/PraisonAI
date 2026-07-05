@@ -252,6 +252,56 @@ def _build_mcp_tools(
     return tools
 
 
+def _resolve_tools_arg(value: Optional[str], verbose: bool = False) -> list:
+    """Resolve a ``--tools`` value into a list of tool callables.
+
+    ``value`` may be a comma-separated list of tool *names* (resolved by name
+    through :class:`ToolResolver`, so CLI == YAML == Python), a path to a
+    ``tools.py`` file, or a mix of both. Items ending in ``.py`` or that exist
+    on disk are loaded as files; everything else is resolved by name.
+
+    Returns an empty list when ``value`` is falsy so callers can unconditionally
+    extend an agent's tool list.
+    """
+    import os as _os
+
+    if not value:
+        return []
+
+    from praisonai_code.tool_resolver import ToolResolver
+    resolver = ToolResolver()
+    resolved: list = []
+    for item in (v.strip() for v in value.split(",")):
+        if not item:
+            continue
+        if item.endswith(".py") or _os.path.exists(item):
+            module_fns = resolver.load_functions_from_module(item)
+            if module_fns:
+                resolved.extend(module_fns.values())
+            elif not _os.path.exists(item):
+                # A .py name that isn't on disk: fall through to name resolution
+                tool = resolver.resolve(item, instantiate=True)
+                if tool is not None:
+                    resolved.append(tool)
+            else:
+                # tools.py present but loading disabled (PRAISONAI_ALLOW_LOCAL_TOOLS)
+                if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+                    from ..output import get_output_controller
+                    get_output_controller().print_info(
+                        f"Skipped '{item}': set PRAISONAI_ALLOW_LOCAL_TOOLS=true to load local tools."
+                    )
+        else:
+            tool = resolver.resolve(item, instantiate=True)
+            if tool is not None:
+                resolved.append(tool)
+            else:
+                from ..output import get_output_controller
+                get_output_controller().print_info(
+                    f"Unknown tool '{item}'. Run 'praisonai tools list' to see available tools."
+                )
+    return resolved
+
+
 def _permissions_from_config(config) -> Optional[dict]:
     """Convert a resolved ``permissions`` config section to a pattern->action dict.
 
@@ -510,7 +560,7 @@ def run_main(
     stream: bool = typer.Option(False, "--stream/--no-stream", help="Stream output (default: off for production use)"),
     trace: bool = typer.Option(False, "--trace", help="Enable tracing"),
     memory: bool = typer.Option(False, "--memory", help="Enable memory"),
-    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
+    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names (e.g. web_search,github) or a tools.py file path"),
     toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
@@ -1142,6 +1192,17 @@ def _run_prompt(
                 mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
                 if mcp_tools:
                     agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
+
+            # Wire --tools (names or file) and --toolset so actions mode reaches
+            # parity with the default/YAML/Python surfaces (previously dropped).
+            selected_tools = _resolve_tools_arg(tools, verbose=verbose)
+            if toolset:
+                from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
+                toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
+                if toolset_names:
+                    selected_tools.extend(_resolve_toolsets(toolset_names))
+            if selected_tools:
+                agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
 
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
