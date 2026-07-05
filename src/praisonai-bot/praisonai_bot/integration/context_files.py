@@ -171,6 +171,7 @@ class PathContextAttacher:
                 across the session. ``0`` disables the budget.
         """
         self._seen: Set = set()
+        self._seen_texts: Set[str] = set()
         self._dir_cache: Dict[Path, str] = {}
         self._max_chars = max_chars
         self._emitted_chars = 0
@@ -183,8 +184,15 @@ class PathContextAttacher:
         # We cannot recover file identities from text alone, so we record the
         # text content to skip re-emitting identical bodies. Physical-identity
         # dedup below still handles the same file reached via different paths.
-        self._seen_texts: Set[str] = getattr(self, "_seen_texts", set())
+        #
+        # ``load_context_files`` joins multiple instruction files with "\n\n",
+        # so seed the whole blob *and* each chunk. This lets an individual file
+        # discovered later match even when it was originally injected inside a
+        # larger concatenated up-front load.
         self._seen_texts.add(text)
+        for chunk in text.split("\n\n"):
+            if chunk:
+                self._seen_texts.add(chunk)
 
     def attach_for_path(self, file_path) -> str:
         """Return nearest instruction text for ``file_path``'s directory.
@@ -204,8 +212,12 @@ class PathContextAttacher:
         if directory in self._dir_cache:
             return self._dir_cache[directory]
 
-        seen_texts: Set[str] = getattr(self, "_seen_texts", set())
+        # Collect newly-discovered files without mutating dedup state yet: if
+        # the char budget discards this result we must not permanently lock the
+        # files out of future touches (they were never actually emitted).
         chunks: List[str] = []
+        new_keys: List = []
+        local_seen_texts: Set[str] = set()
         for search_dir in _discover_search_dirs(directory, walk_up=True):
             for name in DEFAULT_CANDIDATES:
                 candidate = search_dir / name
@@ -218,25 +230,36 @@ class PathContextAttacher:
                     text = candidate.read_text(encoding="utf-8")
                 except OSError:
                     continue
-                if text in seen_texts:
+                if text in self._seen_texts or text in local_seen_texts:
                     self._seen.add(key)
                     continue
-                self._seen.add(key)
-                seen_texts.add(text)
+                local_seen_texts.add(text)
+                new_keys.append(key)
                 chunks.append(text)
 
         result = "\n\n".join(chunks)
 
-        # Enforce the character budget across the whole session.
+        # Enforce the character budget across the whole session, keeping the
+        # truncation marker inside the remaining budget so max_chars holds.
         if self._max_chars and result:
             remaining = self._max_chars - self._emitted_chars
             if remaining <= 0:
                 result = ""
             elif len(result) > remaining:
-                result = result[:remaining] + "\n... [subtree context truncated]"
+                suffix = "\n... [subtree context truncated]"
+                if remaining > len(suffix):
+                    result = result[: remaining - len(suffix)] + suffix
+                else:
+                    result = result[:remaining]
+
+        # Only commit dedup state when something was actually emitted, so a
+        # budget-suppressed discovery can still surface if budget frees up.
+        if result:
+            for key in new_keys:
+                self._seen.add(key)
+            self._seen_texts |= local_seen_texts
 
         self._emitted_chars += len(result)
-        self._seen_texts = seen_texts
         self._dir_cache[directory] = result
         return result
 

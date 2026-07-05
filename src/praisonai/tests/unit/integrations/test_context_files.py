@@ -144,7 +144,7 @@ def test_sibling_without_instructions_attaches_nothing_new(monorepo):
 
 
 def test_dedup_against_already_loaded_up_front(monorepo):
-    root, foo, _bar = monorepo
+    _root, foo, _bar = monorepo
     (foo / "AGENTS.md").write_text("FOO RULES")
 
     # Simulate the foo rules already being part of up-front context.
@@ -153,8 +153,21 @@ def test_dedup_against_already_loaded_up_front(monorepo):
     assert out == ""
 
 
+def test_dedup_against_concatenated_already_loaded(monorepo):
+    _root, foo, _bar = monorepo
+    (_root / "AGENTS.md").write_text("ROOT RULES")
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    # Up-front context is the concatenation produced by load_context_files().
+    combined = "ROOT RULES\n\nFOO RULES"
+    attacher = PathContextAttacher(already_loaded=combined)
+    out = attacher.attach_for_path(foo / "main.py")
+    # Both files were part of the concatenated up-front load -> nothing new.
+    assert out == ""
+
+
 def test_per_subtree_cache_avoids_rewalk(monorepo):
-    root, foo, _bar = monorepo
+    _root, foo, _bar = monorepo
     (foo / "AGENTS.md").write_text("FOO RULES")
 
     attacher = PathContextAttacher()
@@ -167,7 +180,7 @@ def test_per_subtree_cache_avoids_rewalk(monorepo):
 
 
 def test_already_emitted_file_not_reattached_across_dirs(monorepo):
-    root, foo, _bar = monorepo
+    _root, foo, _bar = monorepo
     sub = foo / "sub"
     sub.mkdir()
     (foo / "AGENTS.md").write_text("FOO RULES")
@@ -182,7 +195,7 @@ def test_already_emitted_file_not_reattached_across_dirs(monorepo):
 
 
 def test_char_budget_bounds_output(monorepo):
-    root, foo, _bar = monorepo
+    _root, foo, _bar = monorepo
     (foo / "AGENTS.md").write_text("X" * 500)
 
     attacher = PathContextAttacher(max_chars=100)
@@ -192,7 +205,7 @@ def test_char_budget_bounds_output(monorepo):
 
 
 def test_stateless_helper_discovers_nearest(monorepo):
-    root, foo, _bar = monorepo
+    _root, foo, _bar = monorepo
     (foo / "AGENTS.md").write_text("FOO RULES")
 
     out = load_context_files_for_path(foo / "main.py")
