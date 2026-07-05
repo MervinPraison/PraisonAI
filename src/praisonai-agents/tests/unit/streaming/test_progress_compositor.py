@@ -71,6 +71,26 @@ class TestMergeProgressLine:
         )
         assert lines[0].state == STATE_ERROR
 
+    def test_done_not_downgraded_by_late_running(self):
+        lines = merge_progress_line(
+            [],
+            StreamEvent(type=StreamEventType.TOOL_CALL_START,
+                        tool_call={"id": "d", "name": "write_file"}),
+        )
+        lines = merge_progress_line(
+            lines,
+            StreamEvent(type=StreamEventType.TOOL_CALL_RESULT,
+                        tool_call={"id": "d", "name": "write_file"}),
+        )
+        assert lines[0].state == STATE_DONE
+        # A late/overlapping running event must not reset a completed line
+        lines = merge_progress_line(
+            lines,
+            StreamEvent(type=StreamEventType.DELTA_TOOL_CALL,
+                        tool_call={"id": "d", "name": "write_file"}),
+        )
+        assert lines[0].state == STATE_DONE
+
     def test_non_progress_event_is_noop(self):
         lines = [ProgressLine("a", "tool", "web_search", STATE_DONE)]
         out = merge_progress_line(

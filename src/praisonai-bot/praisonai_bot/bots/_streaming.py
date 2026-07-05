@@ -173,8 +173,11 @@ class DraftStreamer:
         self._last_content_length = 0
         self._current_tool: Optional[str] = None
         # Structured progress feed (feed style). Kept as a list of core
-        # ProgressLine objects folded from typed stream events.
+        # ProgressLine objects folded from typed stream events. ``_progress_dirty``
+        # marks an unrendered advance so the rate-limit bypass fires only when the
+        # feed actually changed, not for every text token thereafter.
         self._progress_lines: list = []
+        self._progress_dirty = False
         self._is_finalized = False
         self._update_task: Optional[asyncio.Task] = None
         self._pending_update = False
@@ -254,7 +257,10 @@ class DraftStreamer:
         from praisonaiagents.streaming.progress import merge_progress_line
 
         try:
-            self._progress_lines = merge_progress_line(self._progress_lines, event)
+            before = self._progress_lines
+            self._progress_lines = merge_progress_line(before, event)
+            if self._progress_lines != before:
+                self._progress_dirty = True
         except Exception as e:  # never break streaming on a compositor error
             logger.debug("Progress feed merge failed: %s", e)
 
@@ -291,9 +297,11 @@ class DraftStreamer:
             StreamEventType.TOOL_CALL_END,
             StreamEventType.TOOL_CALL_RESULT,
             StreamEventType.TOOL_PROGRESS,
+            StreamEventType.ERROR,
         ):
-            # Completion/output markers only matter for the structured feed;
-            # single-line style has no notion of per-step finishes.
+            # Completion/output/error markers only matter for the structured
+            # feed; single-line style has no notion of per-step finishes. Folding
+            # ERROR here is what flips a running line to the ✗ error glyph.
             if self._feed_style:
                 self._fold_progress_event(event)
                 await self._schedule_update()
@@ -318,9 +326,15 @@ class DraftStreamer:
             elapsed >= self._current_min_interval and
             content_delta >= self._config.min_delta
         ) or (
-            # Always update for progress mode when tool changes / feed advances
+            # Bypass throttling for progress mode only when the display actually
+            # advanced: a new tool label (line style) or an unrendered feed change
+            # (feed style). Without the dirty gate, every later text token would
+            # re-trigger an identical edit once any tool had run.
             self._config.mode == StreamingMode.PROGRESS
-            and (self._current_tool or self._progress_lines)
+            and (
+                (self._current_tool and not self._feed_style)
+                or self._progress_dirty
+            )
         )
         
         if not should_update:
@@ -401,6 +415,7 @@ class DraftStreamer:
             self._fail_streak = 0
             self._last_edit_time = time.monotonic()
             self._last_content_length = len(self._content_buffer)
+            self._progress_dirty = False
             
             logger.debug(
                 "DraftStreamer updated message %s, content_length=%d", 

@@ -90,7 +90,7 @@ def _event_correlation_id(event: "StreamEvent") -> Optional[str]:
     return None
 
 
-def _tool_text(event: "StreamEvent", state: str) -> str:
+def _tool_text(event: "StreamEvent") -> str:
     """Compose a tool line's text from the event payload."""
     tool_call = getattr(event, "tool_call", None) or {}
     name = tool_call.get("name") or "tool"
@@ -147,7 +147,7 @@ def merge_progress_line(
         corr = f"{kind}:{len(lines)}"
 
     if kind == "tool":
-        text = _tool_text(event, state)
+        text = _tool_text(event)
     elif kind == "command-output":
         text = (getattr(event, "content", None) or "").strip() or "output"
     else:
@@ -156,11 +156,13 @@ def merge_progress_line(
     result = list(lines)
     for i, line in enumerate(result):
         if line.id == corr:
-            # Error takes precedence; a done event never downgrades a running
-            # line back, and a running update refreshes text.
+            # A terminal state (error/done) is never downgraded back to running
+            # by a late/overlapping event; error stays error even after a done.
             new_state = state
             if line.state == STATE_ERROR:
                 new_state = STATE_ERROR
+            elif line.state == STATE_DONE and state == STATE_RUNNING:
+                new_state = STATE_DONE
             result[i] = ProgressLine(id=corr, kind=line.kind, text=text, state=new_state)
             return result
 
