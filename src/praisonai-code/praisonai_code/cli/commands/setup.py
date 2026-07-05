@@ -52,6 +52,7 @@ def _run_setup(
     provider: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    verify: bool = True,
 ) -> int:
     """Run the setup wizard."""
     try:
@@ -61,7 +62,8 @@ def _run_setup(
             non_interactive=non_interactive,
             provider=provider,
             api_key=api_key,
-            model=model
+            model=model,
+            verify=verify,
         )
     except ImportError as e:
         output = get_output_controller()
@@ -80,6 +82,7 @@ def setup_callback(
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM provider (openai, anthropic, google, ollama, custom)"),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for the provider"),
     model: Optional[str] = typer.Option(None, "--model", help="Default model to use"),
+    no_verify: bool = typer.Option(False, "--no-verify", help="Skip the post-setup smoke test (offline/CI)"),
 ):
     """Run the onboarding wizard (idempotent — safe to re-run)."""
     if ctx.invoked_subcommand:
@@ -89,7 +92,8 @@ def setup_callback(
         non_interactive=non_interactive,
         provider=provider,
         api_key=api_key,
-        model=model
+        model=model,
+        verify=not no_verify,
     )
     raise typer.Exit(exit_code)
 
@@ -99,13 +103,15 @@ def setup_wizard(
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM provider"),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="API key"),
     model: Optional[str] = typer.Option(None, "--model", help="Default model"),
+    no_verify: bool = typer.Option(False, "--no-verify", help="Skip the post-setup smoke test (offline/CI)"),
 ):
     """Run the interactive setup wizard."""
     exit_code = _run_setup(
         non_interactive=False,
         provider=provider,
         api_key=api_key,
-        model=model
+        model=model,
+        verify=not no_verify,
     )
     raise typer.Exit(exit_code)
 
