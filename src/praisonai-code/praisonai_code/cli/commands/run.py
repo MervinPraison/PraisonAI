@@ -279,16 +279,28 @@ def _resolve_tools_arg(value: Optional[str], verbose: bool = False) -> list:
             if module_fns:
                 resolved.extend(module_fns.values())
             elif not _os.path.exists(item):
-                # A .py name that isn't on disk: fall through to name resolution
-                tool = resolver.resolve(item, instantiate=True)
+                # A .py name that isn't on disk: fall through to name resolution.
+                # Strip the .py suffix so "internet_search.py" resolves as the
+                # named tool "internet_search" instead of missing outright.
+                name_only = item[:-3] if item.endswith(".py") else item
+                tool = resolver.resolve(name_only, instantiate=True)
                 if tool is not None:
                     resolved.append(tool)
-            else:
-                # tools.py present but loading disabled (PRAISONAI_ALLOW_LOCAL_TOOLS)
-                if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+                else:
                     from ..output import get_output_controller
                     get_output_controller().print_info(
+                        f"Unknown tool '{item}'. Run 'praisonai tools list' to see available tools."
+                    )
+            else:
+                # tools.py present on disk but produced no callables.
+                from ..output import get_output_controller
+                if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+                    get_output_controller().print_info(
                         f"Skipped '{item}': set PRAISONAI_ALLOW_LOCAL_TOOLS=true to load local tools."
+                    )
+                else:
+                    get_output_controller().print_info(
+                        f"No callable tools found in '{item}'."
                     )
         else:
             tool = resolver.resolve(item, instantiate=True)

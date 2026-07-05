@@ -11,6 +11,7 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 app = typer.Typer(help="Tool management and discovery")
@@ -113,12 +114,13 @@ def tools_search(
         name: desc for name, desc in available.items() if needle in name.lower()
     }
 
+    safe_query = escape(query)
     if not matches:
-        console.print(f"[yellow]No tools matching '{query}'.[/yellow]")
+        console.print(f"[yellow]No tools matching '{safe_query}'.[/yellow]")
         console.print("[dim]Run 'praisonai tools list' to see all available tools.[/dim]")
         return
 
-    table = Table(title=f"Tools matching '{query}'", show_header=True, header_style="bold cyan")
+    table = Table(title=f"Tools matching '{safe_query}'", show_header=True, header_style="bold cyan")
     table.add_column("Tool Name", style="green")
     table.add_column("Source", style="blue")
     if verbose:
