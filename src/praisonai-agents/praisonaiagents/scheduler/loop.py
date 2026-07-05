@@ -5,6 +5,9 @@ Polls ScheduleRunner for due jobs and fires a callback.
 """
 
 import logging
+import os
+import socket
+import uuid
 from praisonaiagents._logging import get_logger
 import threading
 import time
@@ -59,10 +62,6 @@ class ScheduleLoop:
         # Stable per-process identity for atomic job claims (host:pid:uuid) so a
         # due job fires at most once across tickers/processes/hosts when the
         # backing store supports ``claim_due``.
-        import os
-        import socket
-        import uuid
-
         self._owner_id = (
             f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         )

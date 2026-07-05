@@ -642,6 +642,13 @@ class BotOS:
                         if atomic_claim:
                             try:
                                 runner.complete_run(job.id, owner_id)
+                                # complete_run clears the lease on disk; also
+                                # clear it in-memory so the mark_run ->
+                                # store.update(job) below does not re-write the
+                                # stale lease and block crash-recovery for
+                                # sub-lease-interval jobs.
+                                job._lease_until = 0.0
+                                job._lease_owner = None
                             except Exception as e:
                                 logger.warning(
                                     f"BotOS: failed to release lease for job "
