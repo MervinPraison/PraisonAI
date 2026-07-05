@@ -89,10 +89,11 @@ class BackgroundJobStore(Protocol):
     def list_unreconciled(self) -> List[JobInfo]:
         """Return jobs needing reconciliation after a restart.
 
-        Specifically: jobs left ``RUNNING`` at the last write (their process
-        died mid-run) and jobs ``COMPLETED`` with an ``origin`` that were never
-        marked ``delivered``. Returned in a stable order for deterministic
-        replay.
+        Specifically: jobs left ``PENDING`` or ``RUNNING`` at the last write
+        (their process died before or during the run — both are orphaned and
+        reconciled to ``LOST``) and jobs ``COMPLETED`` with an ``origin`` that
+        were never marked ``delivered``. Returned in a stable order for
+        deterministic replay.
         """
         ...
 
@@ -398,16 +399,29 @@ class BackgroundJobManager:
             return counts
 
         for job in unreconciled:
+            # A job left RUNNING (or still PENDING) when its process died was
+            # orphaned by the crash. Transition it to the terminal LOST state
+            # *before* it becomes visible in the in-memory map, so a concurrent
+            # get_status never observes the transient RUNNING/PENDING status the
+            # caller is specifically reconciling away. Stamp completed_at so the
+            # terminal record is age-evictable by cleanup_completed().
+            orphaned = job.status in (JobStatus.RUNNING, JobStatus.PENDING)
+            if orphaned:
+                prior_status = job.status.value
+                job.status = JobStatus.LOST
+                if job.completed_at is None:
+                    job.completed_at = time.time()
+
             with self._lock:
                 self._jobs[job.job_id] = job
             counts["rehydrated"] += 1
 
-            if job.status == JobStatus.RUNNING:
-                job.status = JobStatus.LOST
+            if orphaned:
                 self._persist(job)
                 counts["lost"] += 1
                 logger.info(
-                    "Reconciled orphaned RUNNING job %s as LOST", job.job_id,
+                    "Reconciled orphaned %s job %s as LOST",
+                    prior_status, job.job_id,
                 )
             elif (
                 job.status == JobStatus.COMPLETED
@@ -452,12 +466,23 @@ class BackgroundJobManager:
                 if info.status == status
             }
     
+    # Terminal states whose in-memory records are age-evictable. LOST is
+    # included so reconciled orphans (see reconcile_on_start) do not accumulate
+    # unbounded across restarts — without it every restart would leak a fresh
+    # batch of LOST entries for the process lifetime.
+    _EVICTABLE_STATES = (
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+        JobStatus.LOST,
+    )
+
     def cleanup_completed(self, max_age: float = 3600.0) -> int:
         """
-        Remove completed jobs older than max_age seconds.
+        Remove terminal jobs older than max_age seconds.
         
         Args:
-            max_age: Maximum age in seconds for completed jobs
+            max_age: Maximum age in seconds for terminal jobs
             
         Returns:
             Number of jobs removed
@@ -468,7 +493,7 @@ class BackgroundJobManager:
         with self._lock:
             to_remove = []
             for job_id, info in self._jobs.items():
-                if info.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+                if info.status in self._EVICTABLE_STATES:
                     if info.completed_at and (now - info.completed_at) > max_age:
                         to_remove.append(job_id)
             

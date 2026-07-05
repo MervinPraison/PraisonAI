@@ -273,7 +273,7 @@ class _MemJobStore:
         from praisonaiagents.background.job_manager import JobStatus
         out = []
         for job in self._data.values():
-            if job.status == JobStatus.RUNNING:
+            if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
                 out.append(job)
             elif (
                 job.status == JobStatus.COMPLETED
@@ -406,6 +406,40 @@ class TestBackgroundJobManagement:
 
         assert counts["redelivered"] == 0
         assert delivered == []
+
+    def test_reconcile_marks_orphaned_pending_as_lost(self):
+        """A PENDING job left by a crash (never started) is reconciled to LOST."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(job_id="pending_orphan", status=JobStatus.PENDING))
+
+        manager = BackgroundJobManager(store=store)
+        counts = manager.reconcile_on_start()
+
+        assert counts["lost"] == 1
+        assert store.get("pending_orphan").status == JobStatus.LOST
+        assert manager.get_status("pending_orphan") == JobStatus.LOST
+
+    def test_reconciled_lost_job_is_evictable(self):
+        """A reconciled LOST job is cleaned up by cleanup_completed (no leak)."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(job_id="orphan", status=JobStatus.RUNNING))
+
+        manager = BackgroundJobManager(store=store)
+        manager.reconcile_on_start()
+
+        assert manager.get_status("orphan") == JobStatus.LOST
+        removed = manager.cleanup_completed(max_age=-1)
+        assert removed == 1
+        with pytest.raises(KeyError):
+            manager.list_jobs()["orphan"]
 
 
 # ============================================================================
