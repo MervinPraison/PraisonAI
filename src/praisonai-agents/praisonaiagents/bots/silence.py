@@ -13,6 +13,7 @@ pair identities and drops the turn on a ``False`` verdict.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -92,6 +93,13 @@ class BotLoopPolicy:
     window_seconds: float = 60.0
     cooldown_seconds: float = 60.0
 
+    def __post_init__(self) -> None:
+        # A budget below 1 would suppress the very first exchange for every
+        # pair, permanently blocking all bot traffic. Clamp to a safe minimum
+        # so a config typo cannot silently deadlock the gateway.
+        if self.max_events_per_window < 1:
+            self.max_events_per_window = 1
+
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "BotLoopPolicy":
         """Build a policy from a config mapping (YAML/kwargs), tolerating None.
@@ -150,6 +158,9 @@ class BotLoopGuard:
         self._events: Dict[Tuple[str, str], Deque[float]] = {}
         # Per-pair cooldown expiry timestamps.
         self._cooldowns: Dict[Tuple[str, str], float] = {}
+        # Guards shared state against concurrent inbound turns (async/threaded
+        # gateways can observe the same pair from multiple workers).
+        self._lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -183,33 +194,41 @@ class BotLoopGuard:
 
         key = _pair_key(self_bot_id, sender_bot_id)
 
-        # Still cooling down? Suppress without recording, so a persistent
-        # flood cannot keep resetting/extending the window mid-cooldown.
-        cooldown_until = self._cooldowns.get(key)
-        if cooldown_until is not None:
-            if now < cooldown_until:
+        with self._lock:
+            # Still cooling down? Suppress without recording, so a persistent
+            # flood cannot keep resetting/extending the window mid-cooldown.
+            cooldown_until = self._cooldowns.get(key)
+            if cooldown_until is not None:
+                if now < cooldown_until:
+                    return False
+                # Cooldown elapsed: clear it and start a fresh window below.
+                del self._cooldowns[key]
+                self._events.pop(key, None)
+
+            window = self._events.setdefault(key, deque())
+            window.append(now)
+
+            # Evict events older than the sliding window.
+            cutoff = now - self._policy.window_seconds
+            while window and window[0] <= cutoff:
+                window.popleft()
+
+            if len(window) > self._policy.max_events_per_window:
+                # Budget exceeded: open a cooldown and suppress this reply.
+                self._cooldowns[key] = now + self._policy.cooldown_seconds
+                self._events.pop(key, None)
                 return False
-            # Cooldown elapsed: clear it and start a fresh window below.
-            del self._cooldowns[key]
-            self._events.pop(key, None)
 
-        window = self._events.setdefault(key, deque())
-        window.append(now)
+            # Reclaim the deque if the window emptied out (a long-idle pair),
+            # so a gateway seeing many unique identities does not accumulate
+            # empty deques indefinitely.
+            if not window:
+                self._events.pop(key, None)
 
-        # Evict events older than the sliding window.
-        cutoff = now - self._policy.window_seconds
-        while window and window[0] <= cutoff:
-            window.popleft()
-
-        if len(window) > self._policy.max_events_per_window:
-            # Budget exceeded: open a cooldown and suppress this reply.
-            self._cooldowns[key] = now + self._policy.cooldown_seconds
-            self._events.pop(key, None)
-            return False
-
-        return True
+            return True
 
     def reset(self) -> None:
         """Clear all tracked pairs and cooldowns (e.g. on gateway restart)."""
-        self._events.clear()
-        self._cooldowns.clear()
+        with self._lock:
+            self._events.clear()
+            self._cooldowns.clear()

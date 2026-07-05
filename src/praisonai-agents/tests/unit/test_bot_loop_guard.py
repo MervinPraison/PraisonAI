@@ -116,3 +116,19 @@ def test_default_now_uses_wall_clock():
     guard = BotLoopGuard(BotLoopPolicy(max_events_per_window=1, window_seconds=60))
     assert guard.observe(self_bot_id="A", sender_bot_id="B") is True
     assert guard.observe(self_bot_id="A", sender_bot_id="B") is False
+
+
+def test_zero_budget_is_clamped_to_one():
+    """max_events_per_window < 1 is clamped so the first exchange is not blocked."""
+    policy = BotLoopPolicy(max_events_per_window=0)
+    assert policy.max_events_per_window == 1
+    guard = BotLoopGuard(policy)
+    now = 1000.0
+    # First exchange must still be allowed (not permanently blocked).
+    assert guard.observe(self_bot_id="A", sender_bot_id="B", now=now) is True
+    assert guard.observe(self_bot_id="A", sender_bot_id="B", now=now + 1) is False
+
+
+def test_from_dict_clamps_zero_budget():
+    policy = BotLoopPolicy.from_dict({"max_events_per_window": 0})
+    assert policy.max_events_per_window == 1
