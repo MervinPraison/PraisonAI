@@ -463,90 +463,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             logging.debug(f"Function {function_name} not found or not callable")
             return None
 
-        import inspect
-        # Langchain tools
-        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
-            original_func = func
-            func = func.run
-            function_name = original_func.__name__
-        # CrewAI tools
-        elif inspect.isclass(func) and hasattr(func, '_run'):
-            original_func = func
-            func = func._run
-            function_name = original_func.__name__
-
-        sig = inspect.signature(func)
-        logging.debug(f"Function signature: {sig}")
-        
-        # Skip self, *args, **kwargs, so they don't get passed in arguments
-        parameters_list = []
-        for name, param in sig.parameters.items():
-            if name == "self":
-                continue
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            parameters_list.append((name, param))
-
-        parameters = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-        
-        # Parse docstring for parameter descriptions
-        docstring = inspect.getdoc(func)
-        logging.debug(f"Function docstring: {docstring}")
-        
-        param_descriptions = {}
-        if docstring:
-            import re
-            param_section = re.split(r'\s*Args:\s*', docstring)
-            logging.debug(f"Param section split: {param_section}")
-            if len(param_section) > 1:
-                param_lines = param_section[1].split('\n')
-                for line in param_lines:
-                    line = line.strip()
-                    if line and ':' in line:
-                        param_name, param_desc = line.split(':', 1)
-                        param_descriptions[param_name.strip()] = param_desc.strip()
-        
-        logging.debug(f"Parameter descriptions: {param_descriptions}")
-
-        for name, param in parameters_list:
-            param_type = "string"  # Default type
-            if param.annotation != inspect.Parameter.empty:
-                if param.annotation == int:
-                    param_type = "integer"
-                elif param.annotation == float:
-                    param_type = "number"
-                elif param.annotation == bool:
-                    param_type = "boolean"
-                elif param.annotation == list:
-                    param_type = "array"
-                elif param.annotation == dict:
-                    param_type = "object"
-            
-            param_info = {"type": param_type}
-            if name in param_descriptions:
-                param_info["description"] = param_descriptions[name]
-            
-            parameters["properties"][name] = param_info
-            if param.default == inspect.Parameter.empty:
-                parameters["required"].append(name)
-        
-        logging.debug(f"Generated parameters: {parameters}")
-
-        # Extract description from docstring
-        description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
-        
-        tool_def = {
-            "type": "function",
-            "function": {
-                "name": function_name,
-                "description": description,
-                "parameters": parameters
-            }
-        }
+        # Delegate signature introspection + schema generation to the shared
+        # core helper so all layers produce identical, provider-safe schemas
+        # (including array 'items' normalisation).
+        from ..tools.schema import build_tool_definition
+        tool_def = build_tool_definition(func, function_name)
         logging.debug(f"Generated tool definition: {tool_def}")
         return tool_def
 

@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
-from ..tools.schema import annotation_to_json_schema, get_parameter_requirements
+from ..tools.schema import build_tool_definition
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -6087,86 +6087,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     logging.debug(f"Function {function_name} not found or not callable")
                     return None
 
-        import inspect
-        from typing import get_type_hints
-        
-        # Handle Langchain and CrewAI tools
-        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
-            original_func = func
-            func = func.run
-            function_name = original_func.__name__
-        elif inspect.isclass(func) and hasattr(func, '_run'):
-            original_func = func
-            func = func._run
-            function_name = original_func.__name__
-
-        sig = inspect.signature(func)
-        logging.debug(f"Function signature: {sig}")
-        
-        # Skip self, *args, **kwargs
-        parameters_list = []
-        for name, param in sig.parameters.items():
-            if name == "self":
-                continue
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            parameters_list.append((name, param))
-
-        parameters = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-        
-        # Parse docstring for parameter descriptions
-        docstring = inspect.getdoc(func)
-        logging.debug(f"Function docstring: {docstring}")
-        
-        param_descriptions = {}
-        if docstring:
-            import re
-            param_section = re.split(r'\s*Args:\s*', docstring)
-            logging.debug(f"Param section split: {param_section}")
-            if len(param_section) > 1:
-                param_lines = param_section[1].split('\n')
-                for line in param_lines:
-                    line = line.strip()
-                    if line and ':' in line:
-                        param_name, param_desc = line.split(':', 1)
-                        param_descriptions[param_name.strip()] = param_desc.strip()
-        
-        logging.debug(f"Parameter descriptions: {param_descriptions}")
-
-        # Get type hints for proper schema generation
-        try:
-            hints = get_type_hints(func) if getattr(func, "__annotations__", None) else {}
-        except (NameError, TypeError, AttributeError):
-            hints = getattr(func, "__annotations__", {}) or {}
-
-        for name, param in parameters_list:
-            # Get type annotation
-            param_type = hints.get(name, param.annotation if param.annotation != inspect.Parameter.empty else str)
-            
-            # Use new schema utility for proper type handling
-            prop_schema = annotation_to_json_schema(param_type)
-            
-            # Add description from docstring
-            prop_schema["description"] = param_descriptions.get(name, "Parameter description not available")
-            
-            parameters["properties"][name] = prop_schema
-            
-            # Check if required using improved logic
-            if get_parameter_requirements(sig, name):
-                parameters["required"].append(name)
-        
-        logging.debug(f"Generated parameters: {parameters}")
-        tool_def = {
-            "type": "function",
-            "function": {
-                "name": function_name,
-                "description": docstring.split('\n\n')[0] if docstring else "No description available",
-                "parameters": self._fix_array_schemas(parameters)
-            }
-        }
+        # Delegate signature introspection + schema generation to the shared
+        # core helper so all layers produce identical, provider-safe schemas
+        # (including array 'items' normalisation via fix_array_schemas).
+        from ..tools.schema import build_tool_definition
+        tool_def = build_tool_definition(func, function_name)
         logging.debug(f"Generated tool definition: {tool_def}")
         return tool_def

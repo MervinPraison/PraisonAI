@@ -17,7 +17,7 @@ Usage:
 import enum
 import inspect
 import logging
-from typing import Any, Union, Literal, get_origin, get_args, Callable, Dict, Optional, Set
+from typing import Any, Union, Literal, get_origin, get_args, get_type_hints, Callable, Dict, Optional, Set
 
 
 def annotation_to_json_schema(annotation: Any) -> dict:
@@ -120,6 +120,52 @@ def annotation_to_json_schema(annotation: Any) -> dict:
     return {"type": type_map.get(annotation, "string")}
 
 
+def fix_array_schemas(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively fix array schemas by adding a missing 'items' attribute.
+
+    Ensures compatibility with strict OpenAI-style function-calling providers
+    which require array types to specify the type of items they contain. Also
+    normalises nested ``properties``, ``items``, ``additionalProperties`` and
+    ``anyOf``/``oneOf``/``allOf`` schema constructs. The original is not mutated.
+
+    Args:
+        schema: The schema dictionary to fix
+
+    Returns:
+        dict: The fixed schema
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    fixed_schema = schema.copy()
+
+    if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
+        fixed_schema["items"] = {"type": "string"}
+
+    if "properties" in fixed_schema and isinstance(fixed_schema["properties"], dict):
+        fixed_properties = {}
+        for prop_name, prop_schema in fixed_schema["properties"].items():
+            if isinstance(prop_schema, dict):
+                fixed_properties[prop_name] = fix_array_schemas(prop_schema)
+            else:
+                fixed_properties[prop_name] = prop_schema
+        fixed_schema["properties"] = fixed_properties
+
+    if "items" in fixed_schema and isinstance(fixed_schema["items"], dict):
+        fixed_schema["items"] = fix_array_schemas(fixed_schema["items"])
+
+    if isinstance(fixed_schema.get("additionalProperties"), dict):
+        fixed_schema["additionalProperties"] = fix_array_schemas(
+            fixed_schema["additionalProperties"]
+        )
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in fixed_schema and isinstance(fixed_schema[key], list):
+            fixed_schema[key] = [fix_array_schemas(s) for s in fixed_schema[key]]
+
+    return fixed_schema
+
+
 def get_parameter_requirements(sig: inspect.Signature, param_name: str) -> bool:
     """Determine if a parameter is required based on its signature.
     
@@ -216,3 +262,116 @@ def build_parameters_schema(
             schema["required"].append(param_name)
     
     return schema
+
+
+def _parse_docstring_args(docstring: Optional[str]) -> Dict[str, str]:
+    """Parse a docstring's ``Args:`` section into {param_name: description}."""
+    import re
+
+    param_descriptions: Dict[str, str] = {}
+    if not docstring:
+        return param_descriptions
+
+    param_section = re.split(r'\s*Args:\s*', docstring)
+    if len(param_section) > 1:
+        for line in param_section[1].split('\n'):
+            line = line.strip()
+            if line and ':' in line:
+                param_name, param_desc = line.split(':', 1)
+                param_descriptions[param_name.strip()] = param_desc.strip()
+    return param_descriptions
+
+
+def build_tool_definition(
+    func: Callable,
+    function_name: Optional[str] = None,
+    *,
+    fix_array_items: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Build an OpenAI-style tool definition from a callable.
+
+    Single source of truth for signature introspection, docstring ``Args:``
+    description parsing, the Python->JSON-schema type map and the recursive
+    array-``items`` normalisation. Consolidates the previously triplicated
+    ``_generate_tool_definition`` implementations in ``agent.py``, ``llm.py`` and
+    ``openai_client.py``.
+
+    Args:
+        func: The callable (or Langchain/CrewAI tool class) to introspect.
+        function_name: Optional explicit tool name; defaults to ``func.__name__``.
+        fix_array_items: When True, arrays missing ``items`` are normalised so
+            strict providers accept them (the canonical, complete behaviour).
+
+    Returns:
+        dict: The tool definition, or None if ``func`` is not callable.
+    """
+    # Unwrap Langchain and CrewAI tool classes
+    if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
+        original_func = func
+        func = func.run
+        function_name = function_name or original_func.__name__
+    elif inspect.isclass(func) and hasattr(func, '_run'):
+        original_func = func
+        func = func._run
+        function_name = function_name or original_func.__name__
+
+    if not callable(func):
+        return None
+
+    if function_name is None:
+        function_name = getattr(func, '__name__', 'unknown')
+
+    sig = inspect.signature(func)
+
+    docstring = inspect.getdoc(func)
+    param_descriptions = _parse_docstring_args(docstring)
+
+    # Resolve type hints once; fall back to raw annotations if resolution fails
+    try:
+        hints = get_type_hints(func) if getattr(func, "__annotations__", None) else {}
+    except (NameError, TypeError, AttributeError):
+        hints = getattr(func, "__annotations__", {}) or {}
+
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+
+    for name, param in sig.parameters.items():
+        if name == "self":
+            continue
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+
+        annotation = hints.get(
+            name,
+            param.annotation if param.annotation != inspect.Parameter.empty else str
+        )
+        try:
+            prop_schema = annotation_to_json_schema(annotation)
+        except Exception as e:
+            logging.debug(f"Could not generate schema for {function_name}.{name}: {e}")
+            prop_schema = {"type": "string"}
+
+        if name in param_descriptions:
+            prop_schema["description"] = param_descriptions[name]
+
+        parameters["properties"][name] = prop_schema
+
+        if get_parameter_requirements(sig, name):
+            parameters["required"].append(name)
+
+    if fix_array_items:
+        parameters = fix_array_schemas(parameters)
+
+    description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
+
+    return {
+        "type": "function",
+        "function": {
+            "name": function_name,
+            "description": description,
+            "parameters": parameters
+        }
+    }
