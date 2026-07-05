@@ -374,38 +374,6 @@ def __getattr__(name: str) -> Any:
     if class_name is None:
         # Direct function import
         module = import_module(module_path, __package__)
-        if name in [
-            'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
-            'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'execute_command', 'execute_code', 'execute_code_with_tools', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
-            'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
-            'tavily_search_async', 'tavily_extract_async',
-            'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
-            'exa', 'exa_search', 'exa_search_contents', 'exa_find_similar', 'exa_answer',
-            'exa_search_async', 'exa_search_contents_async', 'exa_answer_async',
-            'crawl4ai', 'crawl4ai_many', 'crawl4ai_extract', 'crawl4ai_llm_extract',
-            'crawl4ai_sync', 'crawl4ai_extract_sync',
-            'search_web', 'web_search', 'get_available_providers',
-            'web_crawl', 'crawl_web', 'get_available_crawl_providers',
-            'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
-            'github_create_branch', 'github_commit_and_push', 'github_create_pull_request',
-            'jira_watch_issue', 'jira_watch_project', 'jira_get_issue_info', 'jira_search_issues',
-            'schedule_add', 'schedule_list', 'schedule_remove',
-            'send_message',
-            'grep', 'glob',
-            'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
-            'edit_file', 'apply_patch', 'create_edit_tools',
-            'todo_add', 'todo_list', 'todo_update', 'create_todo_tools',
-            'lsp_definition', 'lsp_references', 'lsp_hover', 'lsp_document_symbols', 'lsp_workspace_symbols',
-            'store_memory', 'search_memory',
-            'store_learning', 'search_learning',
-            'session_search', 'create_session_tools',
-            'send_email', 'list_emails', 'read_email', 'reply_email', 'list_inboxes', 'create_inbox',
-            'smtp_send_email', 'smtp_read_inbox',
-            'create_cli_clarify_handler', 'create_bot_clarify_handler',
-            'clarify'
-        ]:
-            return getattr(module, name)
         if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'messaging_tools', 'search_tools', 'ast_grep_tools', 'edit_tools', 'todo_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
