@@ -82,6 +82,30 @@ class TestSetupCommand:
         env_content = env_file.read_text()
         assert "OPENAI_API_KEY=sk-test123" in env_content
 
+    def test_setup_mirrors_key_into_credential_store(self, temp_praison_home):
+        """setup should also populate the unified CredentialStore.
+
+        This closes the historic split where `setup` wrote only to
+        ~/.praisonai/.env while `auth`/injection read the CredentialStore,
+        so a key set via `setup` was invisible to those code paths. The store
+        is anchored under PRAISONAI_HOME so it stays in one base directory.
+        """
+        result = runner.invoke(app, [
+            "--non-interactive",
+            "--provider", "openai",
+            "--api-key", "sk-test1234567890abcdef",
+            "--model", "gpt-4o-mini",
+        ])
+        assert result.exit_code == 0
+
+        from praisonai.cli.configuration.credentials import CredentialStore
+
+        store = CredentialStore(temp_praison_home / "credentials.json")
+        cred = store.get_credential("openai")
+        assert cred is not None
+        assert cred.api_key == "sk-test1234567890abcdef"
+        assert cred.model == "gpt-4o-mini"
+
     def test_setup_non_interactive_anthropic(self, temp_praison_home):
         """Test setup in non-interactive mode with Anthropic provider."""
         result = runner.invoke(app, [

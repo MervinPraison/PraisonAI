@@ -56,42 +56,69 @@ class ProviderCredential:
 class CredentialStore:
     """
     Secure credential storage with atomic writes and proper permissions.
-    
-    Stores credentials in ~/.praison/credentials.json with 0o600 permissions
-    for security. All write operations are atomic to prevent corruption.
+
+    Stores credentials in ~/.praisonai/credentials.json with 0o600
+    permissions for security. All write operations are atomic to prevent
+    corruption.
+
+    The legacy ~/.praison/credentials.json location is kept as a read-only
+    backward-compatibility fallback: if the canonical file does not yet exist
+    but the legacy one does, the legacy file is read so existing users keep
+    working during the deprecation window. Writes always target the canonical
+    location so credentials converge on a single source of truth.
     """
-    
+
     def __init__(self, credentials_path: Optional[Path] = None):
         """
         Initialize credential store.
-        
+
         Args:
             credentials_path: Optional custom path for credentials file.
-                             Defaults to ~/.praison/credentials.json
+                             Defaults to ~/.praisonai/credentials.json
         """
         if credentials_path:
             self.credentials_path = credentials_path
+            self.legacy_credentials_path: Optional[Path] = None
         else:
             home = Path.home()
-            self.credentials_path = home / ".praison" / "credentials.json"
+            self.credentials_path = home / ".praisonai" / "credentials.json"
+            self.legacy_credentials_path = home / ".praison" / "credentials.json"
+
+    def _effective_read_path(self) -> Path:
+        """Return the path to read credentials from.
+
+        Prefers the canonical location; only falls back to the legacy
+        ~/.praison/credentials.json when the canonical file is absent.
+        """
+        if self.credentials_path.exists():
+            return self.credentials_path
+        legacy = self.legacy_credentials_path
+        if legacy is not None and legacy.exists():
+            return legacy
+        return self.credentials_path
     
     def _ensure_directory_exists(self) -> None:
         """Ensure parent directory exists, creating it if necessary."""
         self.credentials_path.parent.mkdir(parents=True, exist_ok=True)
     
     def _read_credentials(self) -> Dict[str, Dict[str, Any]]:
-        """Read and parse credentials file."""
+        """Read and parse credentials file.
+
+        Reads from the canonical path when present, otherwise transparently
+        falls back to the legacy ~/.praison/credentials.json location.
+        """
         try:
-            if not self.credentials_path.exists():
+            read_path = self._effective_read_path()
+            if not read_path.exists():
                 return {}
             
             # Check file permissions for security
-            file_stat = self.credentials_path.stat()
+            file_stat = read_path.stat()
             if file_stat.st_mode & 0o077:  # Check if group/other have any permissions
                 # Fix permissions automatically
-                os.chmod(self.credentials_path, 0o600)
+                os.chmod(read_path, 0o600)
             
-            with open(self.credentials_path, 'r') as f:
+            with open(read_path, 'r') as f:
                 return json.load(f)
         except (json.JSONDecodeError, FileNotFoundError, PermissionError):
             # Return empty dict on any read error

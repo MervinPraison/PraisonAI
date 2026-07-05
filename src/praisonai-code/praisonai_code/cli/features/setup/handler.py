@@ -128,6 +128,7 @@ class SetupHandler(CommandHandler):
         
         self._save_env(praison_home, env_vars, output)
         self._save_config(praison_home, config, output)
+        self._save_credentials(praison_home, provider, env_key, api_key, model, output)
         
         output.print_success("Setup complete")
         output.console.print(f"Configuration saved to {praison_home}")
@@ -243,6 +244,14 @@ class SetupHandler(CommandHandler):
         
         self._save_env(praison_home, env_vars, output)
         self._save_config(praison_home, config, output)
+        self._save_credentials(
+            praison_home,
+            provider_id,
+            env_key,
+            env_vars.get(env_key) if env_key else None,
+            model,
+            output,
+        )
         
         if create_starter:
             self._create_starter_yaml(output, model)
@@ -493,6 +502,44 @@ class SetupHandler(CommandHandler):
         config_file.chmod(0o600)
         output.print_success(f"Configuration saved to {config_file}")
     
+    def _save_credentials(
+        self,
+        praison_home: Path,
+        provider: Optional[str],
+        env_key: Optional[str],
+        api_key: Optional[str],
+        model: Optional[str],
+        output,
+    ) -> None:
+        """Mirror the API key into the unified CredentialStore.
+
+        Historically ``setup`` only wrote keys to ``~/.praisonai/.env`` while
+        ``auth`` / ``inject_credentials_into_env`` read from a separate
+        ``CredentialStore``. Writing here too gives both code paths a single
+        source of truth so a key set via ``setup`` is picked up everywhere.
+
+        The store is anchored under ``praison_home`` (which honours the
+        ``PRAISONAI_HOME`` override) so setup stays within one base directory.
+        """
+        # Only providers with a real API key can be stored; local providers
+        # (e.g. ollama) and empty keys are skipped silently.
+        if not provider or not env_key or not api_key:
+            return
+
+        try:
+            from ...configuration.credentials import CredentialStore
+
+            store = CredentialStore(praison_home / "credentials.json")
+            store.store_credential(
+                provider=provider,
+                api_key=api_key,
+                model=model,
+            )
+        except Exception as e:
+            # Never fail setup because the credential mirror failed; the .env
+            # file has already been written as the primary artifact.
+            output.print_warning(f"Could not save to credential store: {e}")
+
     def _create_starter_yaml(self, output, model: str) -> None:
         """Create a starter agents.yaml file in the current directory."""
         agents_file = Path.cwd() / "agents.yaml"

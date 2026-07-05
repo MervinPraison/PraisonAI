@@ -57,6 +57,47 @@ def test_credential_store():
         print("✅ Credential store tests passed")
 
 
+def test_credential_store_legacy_fallback():
+    """Legacy ~/.praison credentials are read, then migrated on write."""
+    import json
+    from unittest.mock import patch
+
+    from praisonai.cli.configuration.credentials import CredentialStore
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        home = Path(temp_dir)
+        with patch("pathlib.Path.home", return_value=home):
+            # Seed only the legacy location.
+            legacy_dir = home / ".praison"
+            legacy_dir.mkdir(parents=True)
+            legacy_file = legacy_dir / "credentials.json"
+            legacy_file.write_text(json.dumps(
+                {"openai": {"api_key": "sk-legacy1234567890", "auth_method": "apikey"}}
+            ))
+            os.chmod(legacy_file, 0o600)
+
+            # Reading falls back to the legacy file when canonical is absent.
+            store = CredentialStore()
+            assert store.credentials_path == home / ".praisonai" / "credentials.json"
+            cred = store.get_credential("openai")
+            assert cred is not None and cred.api_key == "sk-legacy1234567890"
+
+            # Writing a new credential converges everything onto the canonical
+            # file (legacy entry is carried over, not lost).
+            store.store_credential("anthropic", "sk-ant-new1234567890")
+            canonical = home / ".praisonai" / "credentials.json"
+            assert canonical.exists()
+            data = json.loads(canonical.read_text())
+            assert set(data.keys()) == {"openai", "anthropic"}
+
+            # Fresh store now reads the canonical file (both providers present).
+            store2 = CredentialStore()
+            assert store2.get_credential("openai") is not None
+            assert store2.get_credential("anthropic") is not None
+
+    print("✅ Credential store legacy fallback tests passed")
+
+
 _LLM_ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_MODEL_NAME",
@@ -208,6 +249,7 @@ if __name__ == "__main__":
     
     try:
         test_credential_store()
+        test_credential_store_legacy_fallback()
         test_llm_endpoint_resolution()
         test_config_schema()
         test_auth_integration()
