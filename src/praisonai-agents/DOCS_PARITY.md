@@ -18,23 +18,23 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 43 | 12046 |
+| ✅ Agent | 21 | 43 | 12052 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2951 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2140 |
 | ✅ Audio | 2 | 10 | 658 |
 | ✅ Auto Generation | 5 | 7 | 2046 |
 | ✅ Autonomy | 3 | 6 | 2163 |
-| ✅ Bots | 7 | 24 | 8787 |
+| ✅ Bots | 7 | 24 | 8789 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 111 | 28621 |
+| ✅ CLI | 5 | 111 | 28636 |
 | ✅ Chunking | 2 | 2 | 372 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3752 |
-| ✅ Conditions | 1 | 3 | 1124 |
+| ✅ Conditions | 1 | 3 | 1153 |
 | ✅ Configuration | 3 | 7 | 2299 |
-| ✅ Context Management | 16 | 33 | 11478 |
-| ✅ Database | 1 | 40 | 5750 |
+| ✅ Context Management | 16 | 33 | 11557 |
+| ✅ Database | 1 | 40 | 5753 |
 | ✅ Deep Research | 8 | 2 | 497 |
 | ✅ Display | 6 | 3 | 648 |
 | ✅ Embeddings | 6 | 23 | 1990 |
@@ -53,7 +53,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ LLM | 3 | 12 | 4292 |
 | ✅ Loops | 4 | 3 | 797 |
 | ✅ MCP | 1 | 52 | 11155 |
-| ✅ Memory | 6 | 17 | 6236 |
+| ✅ Memory | 6 | 17 | 6239 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2768 |
 | ✅ Optimizer | 1 | 2 | 750 |
@@ -76,13 +76,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2715 |
 | ✅ Telemetry | 1 | 2 | 576 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 126 | 32145 |
+| ✅ Tools | 12 | 126 | 32186 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
 | ✅ Web | 3 | 8 | 1910 |
-| ✅ Workflows | 5 | 16 | 6915 |
+| ✅ Workflows | 5 | 16 | 6220 |
 
 ## Documentation Without Features
 
