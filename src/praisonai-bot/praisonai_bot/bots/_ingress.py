@@ -23,15 +23,24 @@ Storage schema::
         channel_id TEXT, 
         message_id TEXT,
         payload TEXT,
-        status TEXT,  -- 'pending', 'claimed', 'completed'
+        status TEXT,  -- 'pending', 'claimed', 'completed', 'quarantined'
         claimed_at REAL,
         completed_at REAL,
         attempts INTEGER DEFAULT 0,
         UNIQUE(platform, account, channel_id, message_id)
     )
 
+Poison-message quarantine: an inbound entry that repeatedly fails to
+complete (e.g. it crashes the process during handling) is re-claimed on
+each boot. To avoid an infinite boot->replay->crash loop, ``replay()``
+caps ``attempts`` at ``max_attempts``; once exhausted the entry is routed
+to an optional ``InboundDLQ`` and marked ``quarantined`` instead of being
+reset to ``pending``. This mirrors the outbound ``OutboundQueue``
+``permanent_failure`` semantics.
+
 Public API:
-  - InboundJournal(path, *, max_size=50_000, ttl_seconds=30*86400, claim_timeout=300)
+  - InboundJournal(path, *, max_size=50_000, ttl_seconds=30*86400,
+                   claim_timeout=300, max_attempts=5, dlq=None)
   - receive(platform, account, channel_id, message_id, payload) -> Optional[str]
   - claim(key) -> ClaimContext  
   - complete(key)
@@ -56,6 +65,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TTL_SECONDS = 30 * 86400
 _DEFAULT_MAX_SIZE = 50_000
 _DEFAULT_CLAIM_TIMEOUT = 300  # 5 minutes
+# Cap on inbound claim attempts before an entry is quarantined. Mirrors the
+# outbound queue's max_attempts so a poison message cannot loop the gateway.
+_DEFAULT_MAX_ATTEMPTS = 5
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,14 @@ class InboundJournal:
         max_size: Maximum entries kept; oldest completed entries evicted when exceeded.
         ttl_seconds: Completed entries older than this are evicted.
         claim_timeout: Claimed entries older than this are considered stale for replay.
+        max_attempts: Maximum claim attempts before an entry is quarantined
+            instead of replayed. Prevents a poison message from looping the
+            gateway forever. Mirrors the outbound queue's ``max_attempts``.
+        dlq: Optional ``InboundDLQ`` (or any object with a compatible
+            ``enqueue(...)``). Quarantined entries are routed here so an
+            operator can inspect or replay them. If ``None``, exhausted
+            entries are still marked ``quarantined`` (never replayed) but not
+            copied to a dead-letter store.
     
     Example::
     
@@ -129,11 +149,15 @@ class InboundJournal:
         max_size: int = _DEFAULT_MAX_SIZE,
         ttl_seconds: int = _DEFAULT_TTL_SECONDS,
         claim_timeout: int = _DEFAULT_CLAIM_TIMEOUT,
+        max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+        dlq: Optional[Any] = None,
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self.claim_timeout = int(claim_timeout)
+        self.max_attempts = max(1, int(max_attempts))
+        self._dlq = dlq
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
@@ -307,7 +331,7 @@ class InboundJournal:
         """Return journal key for an uncompleted duplicate (caller holds lock)."""
         row = conn.execute(
             """
-            SELECT id, status, claimed_at FROM ingress_journal
+            SELECT id, status, claimed_at, attempts FROM ingress_journal
             WHERE platform = ? AND account = ? AND channel_id = ? AND message_id = ?
             """,
             (platform, account, channel_id, message_id),
@@ -315,12 +339,28 @@ class InboundJournal:
         if not row:
             return None
 
-        entry_id, status, claimed_at = row
-        if status == "completed":
+        entry_id, status, claimed_at, attempts = row
+        # Completed or already quarantined (poison) entries are never
+        # reprocessed on redelivery.
+        if status in ("completed", "quarantined"):
             return None
 
         if status == "claimed" and claimed_at is not None:
             if time.time() - claimed_at <= self.claim_timeout:
+                return None
+            # Stale claim: quarantine instead of re-offering if the entry has
+            # already exhausted its attempts, so a redelivered poison message
+            # cannot bypass the replay-path cap.
+            if attempts >= self.max_attempts:
+                conn.execute(
+                    """
+                    UPDATE ingress_journal
+                    SET status = 'quarantined', claimed_at = NULL
+                    WHERE id = ?
+                    """,
+                    (entry_id,),
+                )
+                conn.commit()
                 return None
             conn.execute(
                 """
@@ -392,30 +432,101 @@ class InboundJournal:
         return deleted
     
     def replay(self) -> int:
-        """Find and replay stale claimed entries. Returns count replayed."""
+        """Find and replay stale claimed entries. Returns count replayed.
+
+        Entries whose ``attempts`` have reached ``max_attempts`` are NOT
+        reset to ``pending``. Instead they are routed to the optional
+        ``InboundDLQ`` and marked ``quarantined`` so a poison message can
+        never loop the gateway forever. This mirrors the outbound queue's
+        ``attempts >= max_attempts -> permanent_failure`` behaviour.
+
+        Returns the number of entries reset to ``pending`` for replay
+        (quarantined entries are excluded from the count).
+        """
         stale_cutoff = time.time() - self.claim_timeout
-        
+
+        replay_ids: List[int] = []
+        quarantine_ids: List[int] = []
+        quarantine_entries: List[JournalEntry] = []
+
         with self._lock, self._connect() as conn:
-            # Find stale claimed entries  
+            # Find stale claimed entries, capturing attempts to decide fate.
             cur = conn.execute("""
-                SELECT id FROM ingress_journal
+                SELECT id, ts, platform, account, channel_id, message_id,
+                       payload, status, claimed_at, completed_at, attempts
+                FROM ingress_journal
                 WHERE status = 'claimed' AND claimed_at <= ?
             """, (stale_cutoff,))
-            
-            stale_ids = [row[0] for row in cur.fetchall()]
-            
-            if stale_ids:
-                # Reset them to pending for replay
-                placeholders = ",".join("?" * len(stale_ids))
+            stale = [JournalEntry(*row) for row in cur.fetchall()]
+
+            for entry in stale:
+                if entry.attempts >= self.max_attempts:
+                    quarantine_ids.append(entry.id)
+                    quarantine_entries.append(entry)
+                else:
+                    replay_ids.append(entry.id)
+
+            if replay_ids:
+                placeholders = ",".join("?" * len(replay_ids))
                 conn.execute(f"""
                     UPDATE ingress_journal
                     SET status = 'pending', claimed_at = NULL
                     WHERE id IN ({placeholders})
-                """, stale_ids)
-                
-                logger.info(f"InboundJournal: reset {len(stale_ids)} stale claimed entries for replay")
-                
-        return len(stale_ids)
+                """, replay_ids)
+                logger.info(
+                    "InboundJournal: reset %d stale claimed entries for replay",
+                    len(replay_ids),
+                )
+
+            if quarantine_ids:
+                placeholders = ",".join("?" * len(quarantine_ids))
+                conn.execute(f"""
+                    UPDATE ingress_journal
+                    SET status = 'quarantined', claimed_at = NULL
+                    WHERE id IN ({placeholders})
+                """, quarantine_ids)
+                logger.warning(
+                    "InboundJournal: quarantined %d poison entries after %d attempts",
+                    len(quarantine_ids), self.max_attempts,
+                )
+
+        # Route quarantined entries to the DLQ outside the journal lock so we
+        # never hold two store locks at once (the DLQ has its own lock).
+        for entry in quarantine_entries:
+            self._route_to_dlq(entry)
+
+        return len(replay_ids)
+
+    def _route_to_dlq(self, entry: JournalEntry) -> None:
+        """Best-effort copy of a quarantined entry into the inbound DLQ."""
+        if self._dlq is None:
+            return
+        try:
+            payload = json.loads(entry.payload) if entry.payload else {}
+        except (ValueError, TypeError):
+            payload = {}
+        try:
+            self._dlq.enqueue(
+                platform=entry.platform,
+                user_id=str(payload.get("user_id", entry.channel_id)),
+                prompt=str(payload.get("text", payload.get("prompt", entry.payload))),
+                error=f"Max inbound attempts exceeded ({entry.attempts})",
+                chat_id=str(entry.channel_id),
+                thread_id=str(payload.get("thread_id", "")),
+                user_name=str(payload.get("user_name", "")),
+            )
+        except Exception as e:  # pragma: no cover — defensive, DLQ is best-effort
+            logger.warning(
+                "InboundJournal: failed to route quarantined entry %d to DLQ: %s",
+                entry.id, e,
+            )
+
+    def quarantined_count(self) -> int:
+        """Return number of quarantined (poison) entries awaiting review."""
+        with self._lock, self._connect() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM ingress_journal WHERE status = 'quarantined'"
+            ).fetchone()[0])
     
     def size(self) -> int:
         """Return total number of entries."""
