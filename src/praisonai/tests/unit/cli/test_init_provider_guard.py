@@ -105,7 +105,7 @@ class TestInitGuardWiring:
         )
 
         with patch.object(instance, "parse_args", return_value=(args, [])), patch(
-            "praisonai_code.cli.legacy.env_security._load_env_once"
+            "praisonai_code.cli.legacy.praison_ai._load_env_once"
         ), patch.object(
             instance, "read_stdin_if_available", return_value=None
         ), patch.object(

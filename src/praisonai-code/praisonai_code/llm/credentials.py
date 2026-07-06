@@ -97,7 +97,7 @@ def inject_credentials_into_env() -> bool:
         return False
 
 
-def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
+def _provider_key_vars_for_model(model: Optional[str]) -> tuple[str, ...]:
     """Map a model id to the environment variable(s) for its provider."""
     if not model:
         return ()
