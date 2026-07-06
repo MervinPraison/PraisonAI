@@ -49,6 +49,10 @@ RETENTION_TRUNCATE = "truncate"
 RETENTION_KEEP_ALL = "keep_all"
 DEFAULT_RETENTION = RETENTION_COMPACT
 
+# Emit a one-off warning once archived_messages under "compact" retention grows
+# past this many entries, so operators can spot runaway sessions on disk.
+ARCHIVE_WARN_THRESHOLD = 10_000
+
 @dataclass
 class SessionMessage:
     """A single message in a session."""
@@ -317,17 +321,24 @@ class DefaultSessionStore:
         os.makedirs(self.session_dir, exist_ok=True)
     
     @staticmethod
-    def _summarise_overflow(overflow: List["SessionMessage"]) -> "SessionMessage":
-        """Roll up overflow turns into one synthetic summary message.
+    def _summarise_overflow(
+        new_turns: List["SessionMessage"],
+        prior_summary: Optional["SessionMessage"] = None,
+    ) -> "SessionMessage":
+        """Roll up newly overflowed turns into one synthetic summary message.
 
         Reuses the dependency-free deterministic summary shape from
         ``context.compressor.ContextCompressor._create_fallback_summary`` so a
         resumed session retains the *gist* of dropped-from-window turns without
         any LLM call, network, or optional dependency (Issue #2709).
+
+        ``prior_summary`` (when present) is carried forward so repeated rollups
+        don't collapse to "2 messages": its text is prepended and its
+        ``compacted_count`` accumulates the true number of archived turns.
         """
         payload = [
             {"role": m.role, "content": m.content, "name": m.metadata.get("name")}
-            for m in overflow
+            for m in new_turns
         ]
         try:
             from ..context.compressor import ContextCompressor
@@ -335,14 +346,24 @@ class DefaultSessionStore:
                 enable_session_tracking=False
             )._create_fallback_summary(payload)
         except Exception:  # pragma: no cover - summariser must never break persistence
-            summary_text = f"Previous conversation: {len(overflow)} messages compacted."
+            summary_text = f"Previous conversation: {len(new_turns)} messages compacted."
+
+        prior_count = 0
+        if prior_summary is not None:
+            prior_count = int(prior_summary.metadata.get("compacted_count", 0) or 0)
+            prior_text = prior_summary.content
+            # Strip our own "[Session Summary]\n" prefix before carrying forward.
+            prefix = "[Session Summary]\n"
+            if prior_text.startswith(prefix):
+                prior_text = prior_text[len(prefix):]
+            summary_text = f"{prior_text}\n---\n{summary_text}"
 
         return SessionMessage(
             role="system",
             content=f"[Session Summary]\n{summary_text}",
             metadata={
                 "compaction": True,
-                "compacted_count": len(overflow),
+                "compacted_count": prior_count + len(new_turns),
             },
         )
 
@@ -377,8 +398,8 @@ class DefaultSessionStore:
             return
 
         # retention == "compact": archive raw overflow, then roll up.
-        # Skip re-summarising an existing summary that is already at the head
-        # so repeated writes don't nest summaries.
+        # An existing summary already at the head of the overflow is carried
+        # forward (not re-archived) so repeated writes don't nest summaries.
         prior_summary = None
         if overflow and overflow[0].metadata.get("compaction"):
             prior_summary = overflow[0]
@@ -386,13 +407,27 @@ class DefaultSessionStore:
         else:
             to_archive = overflow
 
+        # Metadata-only re-writes can push the window over by re-adding the
+        # existing summary alone (no new raw turns). Nothing to compact — avoid
+        # a misleading "compacted 0 early turns" log and a redundant rollup.
+        if not to_archive:
+            session.messages = [prior_summary, *recent] if prior_summary else recent
+            return
+
         session.archived_messages.extend(to_archive)
-        summary = self._summarise_overflow(overflow)
+        if len(session.archived_messages) > ARCHIVE_WARN_THRESHOLD:
+            logger.warning(
+                "session %s: archived_messages has grown to %d entries; "
+                "consider retention='truncate' or pruning old sessions.",
+                session.session_id,
+                len(session.archived_messages),
+            )
+        summary = self._summarise_overflow(to_archive, prior_summary=prior_summary)
         session.messages = [summary, *recent]
         logger.info(
             "session %s: compacted %d early turns into a summary (retention=compact)",
             session.session_id,
-            len(overflow) if prior_summary is None else len(to_archive),
+            len(to_archive),
         )
 
     def _get_session_path(self, session_id: str) -> str:

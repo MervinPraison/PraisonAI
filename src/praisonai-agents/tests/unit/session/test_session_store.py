@@ -993,7 +993,29 @@ class TestRetentionPolicy:
             with caplog.at_level(logging.INFO):
                 for i in range(5):
                     store.add_user_message("s", f"m{i}")
-            assert any("compacted" in r.getMessage() for r in caplog.records)
+            compaction_logs = [
+                r for r in caplog.records if "compacted" in r.getMessage()
+            ]
+            # active_window=2 with 5 adds overflows exactly once per add past the
+            # window (adds 3, 4, 5 -> 3 rollups). Each rollup logs exactly once;
+            # a "compacted 0" spam regression would break this count.
+            assert len(compaction_logs) == 3
+            assert all(
+                "compacted 0" not in r.getMessage() for r in compaction_logs
+            )
+
+    def test_compact_preserves_true_count_across_rollups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=2)
+            for i in range(10):
+                store.add_user_message("s", f"m{i}")
+            session = store.get_session("s")
+            summary = session.messages[0]
+            assert summary.metadata.get("compaction") is True
+            # 10 messages, window=2 -> 8 raw turns archived; the running
+            # compacted_count must reflect all of them, not just the last batch.
+            assert summary.metadata.get("compacted_count") == 8
+            assert len(session.archived_messages) == 8
 
 
 class TestDefaultStoreEnvConfig:
