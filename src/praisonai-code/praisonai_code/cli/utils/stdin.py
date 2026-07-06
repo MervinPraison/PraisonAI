@@ -9,8 +9,8 @@ behave identically as Unix filters:
     git diff       | praisonai run  "Review these changes"
 
 Reading is guarded by ``select.select`` (Unix) or a stat-based pipe check plus a
-bounded read (Windows) so an interactive TTY (or a pipe with no EOF, common in
-CI/CD, subprocesses, IDE terminals, and Docker) is never stalled.
+time-bounded read (Windows) so an interactive TTY (or a pipe with no EOF, common
+in CI/CD, subprocesses, IDE terminals, and Docker) is never stalled.
 """
 
 from __future__ import annotations
@@ -26,15 +26,21 @@ logger = logging.getLogger(__name__)
 # can't buffer unbounded memory before the agent even starts.
 _MAX_STDIN_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Upper bound (seconds) for the bounded Windows read so an EOF-less pipe can
+# never hang the CLI. Redirected files/pipes with content return well within
+# this; an open pipe with no data simply times out and yields no input.
+_WINDOWS_READ_TIMEOUT = 0.25
+
 
 def _windows_stdin_is_pipe() -> bool:
     """Return ``True`` when Windows stdin is a pipe/file (not a console/TTY).
 
     ``select.select`` is socket-only on Windows, so we cannot use it to detect
     ready pipe data. Instead we classify the stdin handle: a redirected pipe or
-    file (``type f | praisonai`` / ``praisonai < f``) has data to read, whereas a
-    console is caught earlier by ``isatty()``. This never blocks because a
-    redirected handle reports EOF at the end of its content.
+    file (``type f | praisonai`` / ``praisonai < f``) may carry data, whereas a
+    console is caught earlier by ``isatty()``. This is only a cheap gate — the
+    actual read is time-bounded (see ``_read_stdin_windows``) so an open pipe
+    with no EOF can never block the caller.
     """
     try:
         import stat
@@ -46,12 +52,46 @@ def _windows_stdin_is_pipe() -> bool:
         return False
 
 
+def _read_stdin_windows() -> Optional[str]:
+    """Time-bounded stdin read for Windows where ``select`` can't poll pipes.
+
+    ``select.select`` is socket-only on Windows, so we cannot check pipe
+    readiness up front. Reading directly risks blocking forever on an open pipe
+    with no EOF (common in CI/CD, subprocesses, IDE terminals, Docker). To stay
+    non-blocking we perform the bounded read on a daemon thread and abandon it
+    if it does not complete within ``_WINDOWS_READ_TIMEOUT`` — a redirected
+    file/pipe with real content returns immediately, while an EOF-less pipe
+    simply yields no input instead of hanging.
+    """
+    import threading
+
+    result: list[Optional[str]] = [None]
+
+    def _reader() -> None:
+        try:
+            result[0] = sys.stdin.read(_MAX_STDIN_BYTES)
+        except Exception:
+            logger.debug("Failed to read piped stdin on Windows", exc_info=True)
+
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+    thread.join(_WINDOWS_READ_TIMEOUT)
+    if thread.is_alive():
+        # Pipe is open but produced no EOF within the window — treat as no
+        # piped input rather than blocking the CLI. The daemon thread will be
+        # reaped on interpreter exit.
+        logger.debug("Windows stdin read timed out; treating as no piped input")
+        return None
+    return result[0]
+
+
 def _stdin_has_data() -> bool:
     """Non-blocking check for whether piped stdin data is available to read.
 
-    Uses ``select.select`` on Unix (supports pipes) and a stat-based pipe/file
-    classification on Windows (where ``select`` is socket-only). Either way the
-    caller never blocks on an interactive TTY or an EOF-less pipe.
+    Unix uses ``select.select`` (supports pipes). Windows can't poll pipes with
+    ``select`` (socket-only), so this only classifies the handle as a candidate;
+    the actual Windows read is time-bounded so it never blocks even if this
+    returns ``True`` for an EOF-less pipe.
     """
     if sys.platform.startswith("win"):
         return _windows_stdin_is_pipe()
@@ -68,9 +108,9 @@ def read_stdin_if_available() -> Optional[str]:
     """Read piped stdin content if available.
 
     Returns the stripped stdin content, or ``None`` when stdin is a TTY, has no
-    data available, or reading fails. Non-blocking: uses ``select.select`` on
-    Unix and a stat-based pipe check on Windows so an open pipe with no EOF (or
-    an interactive console) never blocks the caller.
+    data available, or reading fails. Non-blocking on every platform: Unix uses
+    ``select.select`` and Windows uses a time-bounded read so an open pipe with
+    no EOF (or an interactive console) never blocks the caller.
 
     Reads at most ``_MAX_STDIN_BYTES`` to bound memory.
     """
@@ -79,9 +119,18 @@ def read_stdin_if_available() -> Optional[str]:
         if sys.stdin.isatty():
             return None
 
-        if _stdin_has_data():
-            stdin_content = sys.stdin.read(_MAX_STDIN_BYTES).strip()
-            return stdin_content if stdin_content else None
+        if not _stdin_has_data():
+            return None
+
+        if sys.platform.startswith("win"):
+            raw = _read_stdin_windows()
+        else:
+            raw = sys.stdin.read(_MAX_STDIN_BYTES)
+
+        if raw is None:
+            return None
+        stdin_content = raw.strip()
+        return stdin_content if stdin_content else None
     except Exception:
         # If there's any error reading stdin, don't crash the CLI — fall through
         # to None, but log at debug level so piping issues remain diagnosable.

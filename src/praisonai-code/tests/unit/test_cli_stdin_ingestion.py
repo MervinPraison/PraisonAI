@@ -89,6 +89,46 @@ def test_windows_stdin_is_pipe_detects_fifo(monkeypatch):
     assert stdin_util._windows_stdin_is_pipe() is True
 
 
+def test_read_stdin_windows_reads_redirected_content(monkeypatch):
+    # A redirected pipe/file with real content returns immediately on Windows.
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    fake = _FakeStdin("piped windows data")
+    monkeypatch.setattr(stdin_util.sys, "stdin", fake)
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: True)
+    assert stdin_util.read_stdin_if_available() == "piped windows data"
+
+
+def test_read_stdin_windows_does_not_block_on_eofless_pipe(monkeypatch):
+    # An open pipe with no EOF must NOT hang the CLI: the time-bounded read
+    # abandons the blocking read and returns None (issue #2702 hardening).
+    import threading
+    import time
+
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: True)
+    monkeypatch.setattr(stdin_util, "_WINDOWS_READ_TIMEOUT", 0.05)
+
+    release = threading.Event()
+
+    class _BlockingStdin:
+        def isatty(self):
+            return False
+
+        def read(self, *_a, **_k):
+            release.wait()  # simulate an EOF-less pipe that never returns
+            return "never delivered"
+
+    monkeypatch.setattr(stdin_util.sys, "stdin", _BlockingStdin())
+
+    start = time.monotonic()
+    result = stdin_util.read_stdin_if_available()
+    elapsed = time.monotonic() - start
+    release.set()  # let the daemon reader unblock so it can be reaped
+
+    assert result is None
+    assert elapsed < 1.0  # returned promptly instead of blocking forever
+
+
 def test_read_stdin_respects_size_cap(monkeypatch):
     # Read is bounded by _MAX_STDIN_BYTES so a huge pipe can't buffer unbounded.
     fake = _patch_stdin(monkeypatch, "x" * (stdin_util._MAX_STDIN_BYTES + 100))
