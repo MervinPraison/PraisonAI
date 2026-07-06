@@ -76,6 +76,48 @@ def test_extract_text_prefers_last_user_and_prepends_system():
     assert text.endswith("second")
 
 
+def test_extract_text_preserves_full_history_when_assistant_turns_present():
+    # Externally-built history (stateless OpenAI-SDK style) must not be dropped.
+    text = _extract_text(
+        [
+            {"role": "user", "content": "my name is Sam"},
+            {"role": "assistant", "content": "Hi Sam!"},
+            {"role": "user", "content": "what is my name?"},
+        ]
+    )
+    assert "Sam" in text
+    assert "User: my name is Sam" in text
+    assert "Assistant: Hi Sam!" in text
+    assert text.endswith("what is my name?")
+
+
+def test_openai_error_body_is_spec_shaped():
+    ep = GatewayApiEndpoints(_FakeGateway())
+
+    class _BadReq(_FakeReq):
+        async def json(self):
+            raise ValueError("boom")
+
+    resp = asyncio.run(ep.openai_chat(_BadReq(None)))
+    data = _body(resp)
+    assert resp.status_code == 400
+    assert isinstance(data["error"], dict)
+    assert data["error"]["message"] == "Invalid JSON payload"
+    assert data["error"]["type"] == "invalid_request_error"
+
+
+def test_anon_callers_get_isolated_sessions():
+    gw = _FakeGateway()
+    ep = GatewayApiEndpoints(gw)
+    req = _FakeReq(
+        {"model": "assistant", "messages": [{"role": "user", "content": "x"}]}
+    )
+    asyncio.run(ep.openai_chat(req))
+    asyncio.run(ep.openai_chat(req))
+    # No session header + no bearer token -> unique keys, never a shared session.
+    assert gw.created_sessions[0][1] != gw.created_sessions[1][1]
+
+
 def test_openai_chat_dispatches_to_registered_agent():
     ep = GatewayApiEndpoints(_FakeGateway())
     resp = asyncio.run(

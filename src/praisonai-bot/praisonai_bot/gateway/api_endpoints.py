@@ -24,36 +24,69 @@ def _now() -> int:
     return int(time.time())
 
 
-def _extract_text(messages: Any) -> str:
-    """Collapse an OpenAI ``messages`` array into a single user turn.
+def _msg_content(msg: Any) -> str:
+    """Extract the plain-text content from one OpenAI message dict."""
+    content = msg.get("content", "") if isinstance(msg, dict) else ""
+    if isinstance(content, list):
+        # OpenAI content-part arrays -> concatenate text parts.
+        content = "".join(
+            p.get("text", "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return str(content or "")
 
-    The gateway agent owns conversation memory via its session, so we forward
-    the latest user content. System messages are prepended once for context.
+
+def _extract_text(messages: Any) -> str:
+    """Collapse an OpenAI ``messages`` array into a single agent turn.
+
+    The gateway agent owns conversation memory via its session, so for a plain
+    single-turn request (system + one user message) we forward just the latest
+    user content and let the gateway's own history supply prior context.
+
+    However, standard OpenAI-SDK clients are stateless and resend the *entire*
+    conversation (assistant turns included) on every request. Dropping those
+    turns would make the agent answer without the context the caller supplied.
+    So when the array carries assistant turns (externally-built history), we
+    forward a labelled transcript of the full exchange instead of only the last
+    user line — no context is silently lost (Issue #2715 review, Greptile P1).
     """
     if not isinstance(messages, list):
         return str(messages or "")
+
     system_parts: List[str] = []
-    last_user = ""
+    turns: List[tuple] = []  # (role, text) for user/assistant turns
+    has_assistant = False
     for msg in messages:
         if not isinstance(msg, dict):
             continue
         role = msg.get("role")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            # OpenAI content-part arrays -> concatenate text parts.
-            content = "".join(
-                p.get("text", "")
-                for p in content
-                if isinstance(p, dict) and p.get("type") == "text"
-            )
-        content = str(content or "")
+        content = _msg_content(msg)
         if role == "system":
             system_parts.append(content)
+        elif role == "assistant":
+            has_assistant = True
+            turns.append(("assistant", content))
         elif role == "user":
-            last_user = content
-    if system_parts:
-        return "\n".join(system_parts + [last_user]).strip()
-    return last_user
+            turns.append(("user", content))
+
+    if not has_assistant:
+        # Single logical turn: forward the last user line; the gateway session
+        # holds any prior context from earlier turns it already handled.
+        last_user = next(
+            (t for r, t in reversed(turns) if r == "user"), ""
+        )
+        if system_parts:
+            return "\n".join(system_parts + [last_user]).strip()
+        return last_user
+
+    # Externally-supplied history: preserve the full exchange so the agent has
+    # every prior turn the caller sent, even on a brand-new gateway session.
+    lines: List[str] = list(system_parts)
+    for role, text in turns:
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {text}")
+    return "\n".join(lines).strip()
 
 
 class GatewayApiEndpoints:
@@ -103,6 +136,12 @@ class GatewayApiEndpoints:
         Uses an ``OpenAI-Session``/``X-Session-Id`` header when supplied so a
         client can pin a conversation; otherwise falls back to the bearer
         token (shared operator) so repeated calls reuse one agent session.
+
+        With no session header and no bearer token (e.g. auth disabled), we mint
+        a fresh unique key per request rather than a shared literal so unrelated
+        callers never land in the *same* agent session and silently share memory
+        (Issue #2715 review, Greptile P2). Such callers are stateless by design;
+        they should pass a session header to pin a conversation.
         """
         for header in ("openai-session", "x-session-id"):
             val = request.headers.get(header)
@@ -111,7 +150,29 @@ class GatewayApiEndpoints:
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer "):
             return "token:" + auth[7:][:16]
-        return "anon"
+        return "anon:" + uuid.uuid4().hex
+
+    @staticmethod
+    def _openai_error(message: str, status_code: int, err_type: str):
+        """Return an OpenAI-spec error body ``{"error": {message, type, code}}``.
+
+        The OpenAI Python SDK reads ``error.message`` from the parsed body, so a
+        bare string ``error`` field yields an empty message on the client side
+        (Issue #2715 review, Greptile P2).
+        """
+        from starlette.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "error": {
+                    "message": message,
+                    "type": err_type,
+                    "code": None,
+                    "param": None,
+                }
+            },
+            status_code=status_code,
+        )
 
     # ── OpenAI: models ─────────────────────────────────────────────────
     async def openai_models(self, request):
@@ -129,14 +190,18 @@ class GatewayApiEndpoints:
         try:
             body = await request.json()
         except ValueError:
-            return JSONResponse({"error": "Invalid JSON payload"}, status_code=400)
+            return self._openai_error(
+                "Invalid JSON payload", 400, "invalid_request_error"
+            )
         if not isinstance(body, dict):
-            return JSONResponse({"error": "Expected a JSON object"}, status_code=400)
+            return self._openai_error(
+                "Expected a JSON object", 400, "invalid_request_error"
+            )
 
         agent_id, agent = self._resolve_agent(body.get("model"))
         if agent is None:
-            return JSONResponse(
-                {"error": "No agents registered on this gateway"}, status_code=503
+            return self._openai_error(
+                "No agents registered on this gateway", 503, "server_error"
             )
 
         content = _extract_text(body.get("messages"))
@@ -170,6 +235,17 @@ class GatewayApiEndpoints:
         )
 
     def _sse_chat(self, agent_id, agent, session, content, completion_id):
+        """Emit a spec-shaped SSE chat-completion stream.
+
+        The frames are correctly ``chat.completion.chunk`` shaped and terminate
+        with ``[DONE]`` so any OpenAI streaming client parses them. The content
+        is delivered as a single chunk once the agent turn completes (buffered)
+        rather than token-by-token: true incremental token streaming would need
+        the agent's ``stream_emitter`` wired through the gateway hot path, which
+        is deliberately out of scope here to avoid a hot-path regression. Latency
+        to first *content* therefore matches non-streaming; response correctness
+        and client compatibility are unaffected.
+        """
         from starlette.responses import StreamingResponse
 
         async def gen():
@@ -216,14 +292,18 @@ class GatewayApiEndpoints:
         try:
             body = await request.json()
         except ValueError:
-            return JSONResponse({"error": "Invalid JSON payload"}, status_code=400)
+            return self._openai_error(
+                "Invalid JSON payload", 400, "invalid_request_error"
+            )
         if not isinstance(body, dict):
-            return JSONResponse({"error": "Expected a JSON object"}, status_code=400)
+            return self._openai_error(
+                "Expected a JSON object", 400, "invalid_request_error"
+            )
 
         agent_id, agent = self._resolve_agent(body.get("model"))
         if agent is None:
-            return JSONResponse(
-                {"error": "No agents registered on this gateway"}, status_code=503
+            return self._openai_error(
+                "No agents registered on this gateway", 503, "server_error"
             )
 
         # ``input`` may be a plain string or an OpenAI messages-style array.
