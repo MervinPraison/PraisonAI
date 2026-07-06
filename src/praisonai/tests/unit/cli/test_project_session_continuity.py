@@ -8,7 +8,7 @@ from praisonaiagents.session.store import DefaultSessionStore
 
 
 @pytest.fixture(autouse=True)
-def _isolated_session_stores(monkeypatch, tmp_path):
+def isolated_session_stores(monkeypatch, tmp_path):
     """Keep session I/O off shared CI dirs when pytest-xdist runs workers in parallel."""
     project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
     global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
@@ -78,21 +78,17 @@ def test_injected_session_store_not_overwritten():
     store.clear_session(session_id)
 
 
-def test_find_last_session_sees_global_agent_session(monkeypatch, tmp_path):
+def test_find_last_session_sees_global_agent_session(isolated_session_stores):
     """A session created via the core global store (e.g. Agent(session_id=...))
     must be visible to `--continue`/find_last_session and to the merged
     listing, not only project-scoped run sessions (Issue #2655).
 
-    Both stores are redirected to isolated temp dirs so the assertion that the
+    Both stores are redirected to isolated temp dirs (via the autouse
+    ``isolated_session_stores`` fixture) so the assertion that the
     freshly-created session is *the* most-recent one is deterministic and never
     contends with pre-existing sessions on the machine or parallel test runs.
     """
-    project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
-    global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
-    monkeypatch.setattr(
-        project_sessions, "get_project_session_store", lambda *a, **k: project_store
-    )
-    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: global_store)
+    _project_store, global_store = isolated_session_stores
 
     session_id = "issue-2655-global-session"
     global_store.add_user_message(session_id, "created by core Agent")
@@ -103,20 +99,16 @@ def test_find_last_session_sees_global_agent_session(monkeypatch, tmp_path):
     assert session_id in listed
 
 
-def test_find_last_session_skips_sub_agent_child(monkeypatch, tmp_path):
+def test_find_last_session_skips_sub_agent_child(isolated_session_stores):
     """`--continue` resolves to the last root session, never a sub-agent child
     marked with a parent_id in metadata (Issue #2655).
 
-    Stores are redirected to isolated temp dirs so the child (written last, and
+    Stores are redirected to isolated temp dirs (via the autouse
+    ``isolated_session_stores`` fixture) so the child (written last, and
     thus most-recent) never wins over the root purely because of a pre-existing
     session elsewhere on the machine.
     """
-    store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
-    empty_global = DefaultSessionStore(session_dir=str(tmp_path / "global"))
-    monkeypatch.setattr(
-        project_sessions, "get_project_session_store", lambda *a, **k: store
-    )
-    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: empty_global)
+    store, _empty_global = isolated_session_stores
 
     root_id = "issue-2655-root"
     child_id = "issue-2655-child"
