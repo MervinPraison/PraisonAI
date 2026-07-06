@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -21,6 +22,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    Iterator,
     List,
     Literal,
     Optional,
@@ -3153,3 +3155,135 @@ class RelayTransport(Protocol):
     async def disconnect(self) -> None:
         """Tear down the relay connection."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# Gateway pipeline span-tracing seam (Issue #2716)
+#
+# Running a bot fleet on the gateway means debugging latency/failures across an
+# async pipeline: inbound -> admission/queue -> agent turn -> each tool/LLM
+# call -> outbox -> delivery. Today an operator can correlate *logs* by a
+# single correlation id and read *counters* from ``/metrics``, but cannot see a
+# per-turn span breakdown or error spans in a distributed tracer
+# (Jaeger/Tempo/Datadog/Honeycomb).
+#
+# This is the missing *stage seam*: a dependency-free hook the wrapper gateway
+# can fire around each pipeline stage. Core holds only the protocol and a
+# zero-cost no-op default (``NullGatewayTraceHook``) so there is no OTel import
+# and no hot-path overhead when tracing is disabled. A ``praisonai-plugins``
+# OTel exporter implements the protocol and opens/closes real spans over OTLP,
+# reusing the existing correlation id as a span attribute — keeping the heavy
+# ``opentelemetry-sdk`` dependency out of core and the wrapper.
+#
+# The seam is intentionally a synchronous context-manager factory so it wraps
+# both sync and async stages uniformly (``with self._trace.stage(...):``) and
+# is trivially provable in isolation.
+# ---------------------------------------------------------------------------
+
+# Canonical gateway pipeline stage names, so a tracer plugin and the wrapper
+# agree on span names without a hard import between them.
+GATEWAY_TRACE_STAGES = (
+    "inbound",
+    "admit",
+    "agent.run",
+    "llm.call",
+    "tool.call",
+    "outbox.enqueue",
+    "delivery",
+)
+
+
+@runtime_checkable
+class GatewayTraceHook(Protocol):
+    """Structural contract for tracing a gateway pipeline stage as a span.
+
+    A hook is fired around each stage of the inbound -> agent -> tool ->
+    delivery pipeline. Implementations return a context manager whose scope is
+    the span: entering starts it, exiting ends it, and an exception propagating
+    out marks the span as failed. The default core implementation
+    (:class:`NullGatewayTraceHook`) is a no-op so tracing is zero-cost when no
+    exporter is attached.
+
+    The contract is deliberately dependency-free: no OpenTelemetry import lives
+    in core. A ``praisonai-plugins`` exporter implements ``stage`` with
+    ``tracer.start_as_current_span(...)`` and carries the correlation id as a
+    span attribute. Example::
+
+        with self._trace.stage(
+            "agent.run",
+            correlation_id=current_correlation_id(),
+            session=sid,
+        ):
+            reply = await agent.astart(text)
+    """
+
+    def stage(
+        self,
+        name: str,
+        *,
+        correlation_id: "Optional[str]" = None,
+        **attrs: Any,
+    ) -> "AbstractContextManager[Any]":
+        """Open a tracing scope for pipeline stage ``name``.
+
+        Args:
+            name: The stage name (see :data:`GATEWAY_TRACE_STAGES`), used as the
+                span name.
+            correlation_id: The inbound turn's correlation id, attached as a
+                span attribute so spans and logs share a key.
+            **attrs: Extra span attributes (e.g. ``session``, ``model``,
+                ``tool``, ``channel``).
+
+        Returns:
+            A context manager delimiting the span's lifetime.
+        """
+        ...
+
+
+class NullGatewayTraceHook:
+    """Zero-cost no-op :class:`GatewayTraceHook` used when tracing is disabled.
+
+    Every stage call returns a lightweight, argument-ignoring null context
+    manager (one small allocation per call), so firing the seam adds negligible
+    overhead on the hot path. This is the default a gateway uses until an
+    exporter plugin (e.g. the OTel/OTLP plugin in ``praisonai-plugins``) is
+    supplied.
+    """
+
+    @staticmethod
+    @contextmanager
+    def _null_scope() -> "Iterator[None]":
+        yield None
+
+    def stage(
+        self,
+        name: str,
+        *,
+        correlation_id: "Optional[str]" = None,
+        **attrs: Any,
+    ) -> "AbstractContextManager[Any]":
+        """Return a no-op context manager, ignoring all arguments."""
+        return self._null_scope()
+
+
+# Shared singleton: the default no-op hook is stateless, so one instance is
+# reused everywhere a gateway needs a zero-cost default.
+NULL_GATEWAY_TRACE_HOOK = NullGatewayTraceHook()
+
+
+def resolve_trace_hook(
+    hook: "Optional[GatewayTraceHook]",
+) -> "GatewayTraceHook":
+    """Return ``hook`` when a tracer is supplied, else the no-op default.
+
+    A tiny helper so a gateway can accept an optional ``tracer=`` argument and
+    always hold a callable hook without branching on ``None`` at every stage.
+
+    Args:
+        hook: A user/plugin-supplied trace hook, or ``None``.
+
+    Returns:
+        ``hook`` if not ``None``, otherwise the shared
+        :data:`NULL_GATEWAY_TRACE_HOOK`.
+    """
+    return hook if hook is not None else NULL_GATEWAY_TRACE_HOOK
