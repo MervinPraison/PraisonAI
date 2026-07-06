@@ -99,6 +99,8 @@ def inject_credentials_into_env() -> bool:
 
 def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
     """Map a model id to the environment variable(s) for its provider."""
+    if not model:
+        return ()
     m = model.lower()
     if m.startswith("anthropic/") or m.startswith("claude"):
         return ("ANTHROPIC_API_KEY",)

@@ -454,7 +454,7 @@ class PraisonAI:
                     result = self.handle_direct_prompt(combined_prompt)
                     # Result already printed by handle_direct_prompt, don't print again
                     return result
-                elif os.path.isfile(args.command) or args.command.lower().endswith((".yaml", ".yml")):
+                elif os.path.isfile(args.command) or (args.command or "").lower().endswith((".yaml", ".yml")):
                     # Treat as an agent file when it is an existing file or a YAML path
                     self.agent_file = args.command
                 else:
@@ -1639,7 +1639,7 @@ class PraisonAI:
             and args.command
             and args.command not in special_commands
             and not os.path.isfile(args.command)
-            and not args.command.lower().endswith((".yaml", ".yml"))
+            and not (args.command or "").lower().endswith((".yaml", ".yml"))
         ):
             args.direct_prompt = args.command
             args.command = None

@@ -104,16 +104,17 @@ class TestInitGuardWiring:
             merge=False,
         )
 
-        with patch.object(instance, "parse_args", return_value=(args, [])), patch.object(
-            cli_main, "_load_env_once"
+        with patch.object(instance, "parse_args", return_value=(args, [])), patch(
+            "praisonai_code.cli.legacy.env_security._load_env_once"
         ), patch.object(
             instance, "read_stdin_if_available", return_value=None
         ), patch.object(
             instance, "read_file_if_provided", return_value=None
-        ), patch.object(
-            cli_main, "_provider_preflight_message", return_value="SETUP GUIDANCE"
-        ), patch.object(
-            cli_main, "_get_auto_generator"
+        ), patch(
+            "praisonai_code.cli.main._provider_preflight_message",
+            return_value="SETUP GUIDANCE",
+        ), patch(
+            "praisonai_code.cli.legacy.praison_ai._get_auto_generator"
         ) as get_gen, patch("builtins.print"):
             result = instance.main()
 
