@@ -208,9 +208,12 @@ class InteractiveCLIApprovalBackend:
                 blanket ``tool_name:*`` pattern.
 
         Returns:
-            A permission glob pattern. Malformed/unknown shell commands fall
-            back to the literal target (single-use in practice) rather than a
-            broad ``tool:*`` grant, preserving a fail-closed posture.
+            A permission glob pattern. For ``scope="command"`` the result is
+            **never** the blanket ``tool_name:*``; malformed, missing, or
+            oversized arguments fall back to a literal (single-use) target so
+            the persisted rule can only match the exact invocation the user
+            approved, preserving a fail-closed posture. Only the explicit
+            ``scope="tool"`` choice emits ``tool_name:*``.
         """
         tool_name = request.tool_name
 
@@ -227,17 +230,26 @@ class InteractiveCLIApprovalBackend:
                 from praisonaiagents.permissions import derive_pattern
 
                 return derive_pattern(f"{tool_name}:{command}")
-            return f"{tool_name}:*"
+            # Missing/blank/non-string command: fall back to a literal,
+            # single-use target rather than the blanket ``tool:*`` grant.
+            return f"{tool_name}:{command}"
 
         # Non-shell tools: scope to the first argument value when it is a short
-        # string, otherwise fall back to the tool name. This never over-grants
-        # beyond the specific target the user actually approved.
+        # string, otherwise fall back to a literal single-use target. This never
+        # over-grants beyond the specific invocation the user approved (and, on
+        # the deny path, never over-denies the entire tool).
         if request.arguments:
             first_arg = next(iter(request.arguments.values()), "")
             if isinstance(first_arg, str) and first_arg and len(first_arg) < 100:
                 return f"{tool_name}:{first_arg}"
+            # Non-string / empty / oversized first argument: keep it literal so
+            # the rule matches only this exact value, not every use of the tool.
+            return f"{tool_name}:{first_arg}"
 
-        return f"{tool_name}:*"
+        # No arguments at all: match only the bare (argument-less) invocation,
+        # never the wildcard. ``scope="tool"`` above remains the sole path to
+        # ``tool_name:*``.
+        return f"{tool_name}:"
     
     def _decision_from_mode(self, request: ApprovalRequest) -> Optional[ApprovalDecision]:
         """
