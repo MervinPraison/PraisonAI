@@ -39,6 +39,16 @@ DEFAULT_SESSION_DIR = str(get_sessions_dir())
 DEFAULT_MAX_MESSAGES = 100
 DEFAULT_LOCK_TIMEOUT = 5.0  # seconds
 
+# Retention policies for the active-window overflow (Issue #2709).
+# - "compact":  summarise overflow into one synthetic message + archive raw turns
+#               (non-destructive default; nothing is silently dropped)
+# - "truncate": legacy behaviour — hard-slice to the tail, dropping older turns
+# - "keep_all": never trim the active window (unbounded history)
+RETENTION_COMPACT = "compact"
+RETENTION_TRUNCATE = "truncate"
+RETENTION_KEEP_ALL = "keep_all"
+DEFAULT_RETENTION = RETENTION_COMPACT
+
 @dataclass
 class SessionMessage:
     """A single message in a session."""
@@ -81,7 +91,12 @@ class SessionData:
     agent_id: Optional[str] = None  # Gateway agent ID (different from agent_name)
     # Runtime state for native transcript mirroring - Issue #1943
     runtime_state: Dict[str, Dict[str, Dict[str, Any]]] = field(default_factory=dict)  # {runtime_id: {turn_id: state}}
-    
+    # Durable append-only archive of turns rolled out of the active window
+    # under the "compact" retention policy - Issue #2709. Nothing is silently
+    # dropped: the active `messages` window is summary + recent turns, while the
+    # full record lives here for the record / later inspection.
+    archived_messages: List[SessionMessage] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = {
@@ -95,6 +110,7 @@ class SessionData:
             "gateway_session_id": self.gateway_session_id,
             "agent_id": self.agent_id,
             "runtime_state": self.runtime_state,
+            "archived_messages": [m.to_dict() for m in self.archived_messages],
         }
         for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
             if key in self.metadata:
@@ -108,6 +124,10 @@ class SessionData:
             SessionMessage.from_dict(m) 
             for m in data.get("messages", [])
         ]
+        archived = [
+            SessionMessage.from_dict(m)
+            for m in (data.get("archived_messages") or [])
+        ]
         return cls(
             session_id=data.get("session_id", ""),
             messages=messages,
@@ -119,6 +139,7 @@ class SessionData:
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
             runtime_state=data.get("runtime_state") or {},
+            archived_messages=archived,
         )
     
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -243,24 +264,137 @@ class DefaultSessionStore:
         session_dir: Optional[str] = None,
         max_messages: int = DEFAULT_MAX_MESSAGES,
         lock_timeout: float = DEFAULT_LOCK_TIMEOUT,
+        retention: Optional[str] = None,
+        active_window: Optional[int] = None,
     ):
         """
         Initialize session store.
         
         Args:
             session_dir: Directory for session files. Defaults to ~/.praisonai/sessions/
-            max_messages: Maximum messages to keep per session.
+            max_messages: Maximum messages to keep in the active window per
+                session. When ``retention`` is not given and a non-default
+                ``max_messages`` is passed explicitly, the store keeps the
+                legacy hard-truncate behaviour for backward compatibility.
             lock_timeout: Timeout for file lock acquisition.
+            retention: Overflow policy for the active window (Issue #2709):
+                - ``"compact"`` (default): summarise the oldest turns into a
+                  single synthetic summary message and archive the raw turns
+                  in the durable record — nothing is silently dropped.
+                - ``"truncate"``: legacy behaviour — hard-slice to the tail,
+                  permanently dropping older turns.
+                - ``"keep_all"``: never trim the active window.
+            active_window: Number of recent turns kept live in ``messages``
+                (defaults to ``max_messages``). Older turns are compacted or
+                truncated per ``retention``.
         """
         self.session_dir = session_dir or DEFAULT_SESSION_DIR
         self.max_messages = max_messages
         self.lock_timeout = lock_timeout
+
+        # Backward compatibility: an explicit non-default max_messages with no
+        # retention set keeps the old "truncate to tail" behaviour. New callers
+        # opt into non-destructive compaction via retention="compact" (default
+        # when nothing is specified).
+        if retention is None:
+            retention = (
+                RETENTION_TRUNCATE
+                if max_messages != DEFAULT_MAX_MESSAGES
+                else DEFAULT_RETENTION
+            )
+        if retention not in (RETENTION_COMPACT, RETENTION_TRUNCATE, RETENTION_KEEP_ALL):
+            raise ValueError(
+                f"Invalid retention {retention!r}; expected one of "
+                f"{RETENTION_COMPACT!r}, {RETENTION_TRUNCATE!r}, {RETENTION_KEEP_ALL!r}"
+            )
+        self.retention = retention
+        self.active_window = active_window if active_window is not None else max_messages
+
         self._lock = threading.RLock()
         self._cache: Dict[str, SessionData] = {}
         
         # Ensure session directory exists
         os.makedirs(self.session_dir, exist_ok=True)
     
+    @staticmethod
+    def _summarise_overflow(overflow: List["SessionMessage"]) -> "SessionMessage":
+        """Roll up overflow turns into one synthetic summary message.
+
+        Reuses the dependency-free deterministic summary shape from
+        ``context.compressor.ContextCompressor._create_fallback_summary`` so a
+        resumed session retains the *gist* of dropped-from-window turns without
+        any LLM call, network, or optional dependency (Issue #2709).
+        """
+        payload = [
+            {"role": m.role, "content": m.content, "name": m.metadata.get("name")}
+            for m in overflow
+        ]
+        try:
+            from ..context.compressor import ContextCompressor
+            summary_text = ContextCompressor(
+                enable_session_tracking=False
+            )._create_fallback_summary(payload)
+        except Exception:  # pragma: no cover - summariser must never break persistence
+            summary_text = f"Previous conversation: {len(overflow)} messages compacted."
+
+        return SessionMessage(
+            role="system",
+            content=f"[Session Summary]\n{summary_text}",
+            metadata={
+                "compaction": True,
+                "compacted_count": len(overflow),
+            },
+        )
+
+    def _enforce_window(self, session: SessionData) -> None:
+        """Apply the retention policy to the active message window.
+
+        - ``keep_all``: no-op (unbounded history).
+        - ``truncate``: legacy hard-slice to the tail (destructive, logged once).
+        - ``compact``: summarise the oldest overflow turns into a single
+          synthetic message, archive the raw turns in the durable record, and
+          keep ``[summary, *recent]`` as the active window (non-destructive).
+        """
+        window = self.active_window
+        if window is None or window <= 0:
+            return
+        if len(session.messages) <= window:
+            return
+
+        if self.retention == RETENTION_KEEP_ALL:
+            return
+
+        overflow = session.messages[:-window]
+        recent = session.messages[-window:]
+
+        if self.retention == RETENTION_TRUNCATE:
+            session.messages = recent
+            logger.info(
+                "session %s: truncated %d early turns (retention=truncate)",
+                session.session_id,
+                len(overflow),
+            )
+            return
+
+        # retention == "compact": archive raw overflow, then roll up.
+        # Skip re-summarising an existing summary that is already at the head
+        # so repeated writes don't nest summaries.
+        prior_summary = None
+        if overflow and overflow[0].metadata.get("compaction"):
+            prior_summary = overflow[0]
+            to_archive = overflow[1:]
+        else:
+            to_archive = overflow
+
+        session.archived_messages.extend(to_archive)
+        summary = self._summarise_overflow(overflow)
+        session.messages = [summary, *recent]
+        logger.info(
+            "session %s: compacted %d early turns into a summary (retention=compact)",
+            session.session_id,
+            len(overflow) if prior_summary is None else len(to_archive),
+        )
+
     def _get_session_path(self, session_id: str) -> str:
         """Get the file path for a session."""
         # Sanitize session_id for filesystem
@@ -322,8 +456,7 @@ class DefaultSessionStore:
             mutator(session)
             session.updated_at = datetime.now(timezone.utc).isoformat()
 
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages:]
+            self._enforce_window(session)
 
             try:
                 dir_path = os.path.dirname(filepath) or "."
@@ -358,9 +491,8 @@ class DefaultSessionStore:
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
+        # Apply retention policy to the active window (Issue #2709)
+        self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
             try:
@@ -434,9 +566,8 @@ class DefaultSessionStore:
             session.messages.append(message)
             session.updated_at = datetime.now(timezone.utc).isoformat()
             
-            # Trim messages if over limit
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages:]
+            # Apply retention policy to the active window (Issue #2709)
+            self._enforce_window(session)
             
             # Write atomically
             try:
@@ -502,8 +633,12 @@ class DefaultSessionStore:
             List of {"role": "user/assistant", "content": "..."} dicts.
         """
         session = self._read_session_fresh(session_id)
-        limit = max_messages or self.max_messages
-        return session.get_chat_history(limit)
+        # The active window is already bounded on write by the retention policy
+        # (compact/truncate) or intentionally unbounded (keep_all), so by
+        # default we return the full stored window rather than re-capping it at
+        # the legacy max_messages tail — that silent tail-cap was the defect in
+        # Issue #2709. Explicit max_messages still overrides.
+        return session.get_chat_history(max_messages)
     
     def get_session(self, session_id: str) -> SessionData:
         """Get full session data."""
@@ -1100,12 +1235,41 @@ _default_store: Optional[DefaultSessionStore] = None
 _store_lock = threading.Lock()
 
 def get_default_session_store() -> DefaultSessionStore:
-    """Get the global default session store instance."""
+    """Get the global default session store instance.
+
+    Retention is non-destructive ("compact") by default. It can be overridden
+    without code changes via environment variables so the same behaviour is
+    reachable from CLI/YAML surfaces (Issue #2709):
+
+    - ``PRAISONAI_SESSION_RETENTION``: ``compact`` | ``truncate`` | ``keep_all``
+    - ``PRAISONAI_SESSION_ACTIVE_WINDOW``: int, recent turns kept live
+    """
     global _default_store
     
     if _default_store is None:
         with _store_lock:
             if _default_store is None:
-                _default_store = DefaultSessionStore()
+                retention = os.environ.get("PRAISONAI_SESSION_RETENTION")
+                active_window_env = os.environ.get("PRAISONAI_SESSION_ACTIVE_WINDOW")
+                active_window: Optional[int] = None
+                if active_window_env:
+                    try:
+                        active_window = int(active_window_env)
+                    except ValueError:
+                        logger.warning(
+                            "Invalid PRAISONAI_SESSION_ACTIVE_WINDOW=%r; ignoring",
+                            active_window_env,
+                        )
+                try:
+                    _default_store = DefaultSessionStore(
+                        retention=retention,
+                        active_window=active_window,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Invalid PRAISONAI_SESSION_RETENTION=%r; using default",
+                        retention,
+                    )
+                    _default_store = DefaultSessionStore(active_window=active_window)
     
     return _default_store
