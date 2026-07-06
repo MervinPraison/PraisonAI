@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .telemetry import MinimalTelemetry
     from ..agent.agent import Agent
     from ..task.task import Task
-    from ..agents.agents import AgentManager
+    from ..agents.agents import Agents
 
 # Performance mode flag for auto-instrumentation (define early to avoid NameError)
 _performance_mode_enabled = False
