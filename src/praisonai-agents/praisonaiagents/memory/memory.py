@@ -2085,26 +2085,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
     def _safe_mem0_search(self, mem0_client, **kwargs):
         """
         Defensive wrapper for mem0.search() to handle MongoDB vector store compatibility.
-        
-        Catches TypeError about unexpected 'vectors' kwarg and falls back gracefully.
-        This addresses the upstream mem0 bug: https://github.com/mem0ai/mem0/issues/3185
+
+        Delegates to the shared ``safe_mem0_search`` helper so the workaround for the
+        upstream mem0 bug (https://github.com/mem0ai/mem0/issues/3185) lives in a single
+        place. Catches the TypeError about an unexpected 'vectors' kwarg and falls back
+        gracefully; any other TypeError is re-raised.
         """
-        try:
-            return mem0_client.search(**kwargs)
-        except TypeError as e:
-            error_msg = str(e).lower()
-            if "unexpected keyword argument" in error_msg and "vectors" in error_msg:
-                logger.warning(
-                    "Detected mem0 MongoDB vector store compatibility issue. "
-                    "This is a known upstream bug: https://github.com/mem0ai/mem0/issues/3185. "
-                    "The MongoDB vector store requires Atlas and has signature mismatches. "
-                    "Consider using Qdrant or Chroma as mem0 vector store backends instead."
-                )
-                # Return empty results rather than crashing
-                return []
-            else:
-                # Re-raise if it's a different TypeError
-                raise
+        from .adapters.factories import safe_mem0_search
+        return safe_mem0_search(mem0_client, **kwargs)
 
     def __del__(self):
         """
