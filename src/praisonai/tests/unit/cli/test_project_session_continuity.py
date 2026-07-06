@@ -1,7 +1,11 @@
 """Tests for praison run project-scoped session continuity."""
 
+import pytest
+
 import praisonai.cli.state.project_sessions as project_sessions
 from praisonaiagents import Agent
+
+pytestmark = pytest.mark.xdist_group("cli-session-store")
 
 
 def test_build_cli_memory_config_enables_history():
@@ -23,16 +27,20 @@ def test_apply_cli_session_continuity_restores_project_history():
         name="RunAgent",
         memory=project_sessions.build_cli_memory_config(session_id, session_id),
     )
-    project_sessions.apply_cli_session_continuity(agent, session_id)
+    project_sessions.apply_cli_session_continuity(
+        agent, session_id, auto_save=session_id
+    )
 
     assert agent._session_store.session_dir == store.session_dir
     assert agent._session_id == session_id
+    assert agent.auto_save == session_id
     assert len(agent.chat_history) == 2
     assert agent.chat_history[0]["content"] == "remember this"
 
     agent.chat_history.append({"role": "user", "content": "follow-up"})
     agent.chat_history.append({"role": "assistant", "content": "reply"})
     agent._auto_save_session()
+    assert agent._auto_save_last_index == len(agent.chat_history)
 
     saved = store.get_chat_history(session_id)
     assert len(saved) == 4
