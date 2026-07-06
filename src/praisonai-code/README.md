@@ -58,10 +58,10 @@ importing the wrapper. Only commands in `_WRAPPER_RESIDENT_COMMANDS` (see
 |---------|-------------------|-------|
 | `praisonai-code --version` | Yes | |
 | `run --help`, `config`, `doctor` | Yes | |
-| `run --output plain "…"` | Yes | In-process `Agent` (verified) |
+| `run --output verbose "…"` | Yes | In-process `Agent` (verified). `run` modes: `silent` (default), `actions`, `verbose`, `json`, `stream` |
 | `run "…"` (default) | Yes | Resolves via `praisonai_code.cli.commands.run` |
 | `run --output actions "…"` | Yes (intended) | Currently affected by an `auto_save` shadow-import bug — tracked separately |
-| `chat --output plain "…"` | Yes | One-shot; interactive REPL also in code package |
+| `chat --output plain "…"` | Yes | One-shot; interactive REPL also in code package. `chat` modes: `actions` (default), `plain`, `verbose`, `json`, `silent` |
 | `code --help` | Yes | Full code assistant command registered |
 | `daemon start` (foreground) | Yes | |
 | `daemon start --background` | Yes | Spawns `python -m praisonai_code.runtime` |

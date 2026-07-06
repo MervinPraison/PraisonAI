@@ -67,10 +67,10 @@ require `pip install praisonai`.
 
 | Command | Standalone? |
 |---------|-------------|
-| `run --output plain` | Yes |
+| `run --output verbose` | Yes (`run` modes: `silent`, `actions`, `verbose`, `json`, `stream`) |
 | `run` (default) | Yes (`praisonai_code.cli.commands.run`) |
 | `run --output actions` | Yes (intended) — currently affected by `auto_save` shadow-import bug |
-| `chat --output plain` | Yes |
+| `chat --output plain` | Yes (`chat` modes: `actions`, `plain`, `verbose`, `json`, `silent`) |
 | `code --help` | Yes |
 | `daemon start --background` | Yes (`praisonai_code.runtime`) |
 | `batch`, `docs`, `langfuse`, `flow`, `train`, … | No — `_WRAPPER_RESIDENT_COMMANDS`, needs wrapper |
