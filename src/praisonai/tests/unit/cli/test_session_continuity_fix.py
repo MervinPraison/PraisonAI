@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from praisonai.cli.utils.project import build_cli_memory_config, apply_cli_session_continuity
 
 
@@ -15,6 +17,7 @@ def test_build_cli_memory_config_enables_history():
     assert cfg.auto_save == "sess-1"
 
 
+@pytest.mark.no_session_isolation
 def test_apply_cli_session_continuity_uses_project_store(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
