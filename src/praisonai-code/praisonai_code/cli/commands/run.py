@@ -70,6 +70,7 @@ def _require_wrapper_for_default_run(
     )
     raise typer.Exit(1)
 
+
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
     """Parse permission flags into a config dict.
     
@@ -1229,10 +1230,6 @@ def _run_prompt(
         
         praison.args = args
 
-        _require_wrapper_for_default_run(
-            prompt, agent=None, command=None, output_mode=output_mode
-        )
-        
         result = praison.handle_direct_prompt(prompt)
         
         _record_session_usage(session_id or auto_save_name, model, output)
