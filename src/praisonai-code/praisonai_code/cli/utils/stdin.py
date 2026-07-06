@@ -8,13 +8,15 @@ behave identically as Unix filters:
     cat error.log | praisonai run  "Diagnose the root cause"
     git diff       | praisonai run  "Review these changes"
 
-Reading is guarded by ``select.select`` so an interactive TTY (or a pipe with no
-EOF, common in CI/CD, subprocesses, IDE terminals, and Docker) is never stalled.
+Reading is guarded by ``select.select`` (Unix) or a stat-based pipe check plus a
+bounded read (Windows) so an interactive TTY (or a pipe with no EOF, common in
+CI/CD, subprocesses, IDE terminals, and Docker) is never stalled.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -25,35 +27,59 @@ logger = logging.getLogger(__name__)
 _MAX_STDIN_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+def _windows_stdin_is_pipe() -> bool:
+    """Return ``True`` when Windows stdin is a pipe/file (not a console/TTY).
+
+    ``select.select`` is socket-only on Windows, so we cannot use it to detect
+    ready pipe data. Instead we classify the stdin handle: a redirected pipe or
+    file (``type f | praisonai`` / ``praisonai < f``) has data to read, whereas a
+    console is caught earlier by ``isatty()``. This never blocks because a
+    redirected handle reports EOF at the end of its content.
+    """
+    try:
+        import stat
+
+        mode = os.fstat(sys.stdin.fileno()).st_mode
+        # Named pipe (FIFO) or a regular file redirection both carry piped data.
+        return stat.S_ISFIFO(mode) or stat.S_ISREG(mode)
+    except Exception:
+        return False
+
+
+def _stdin_has_data() -> bool:
+    """Non-blocking check for whether piped stdin data is available to read.
+
+    Uses ``select.select`` on Unix (supports pipes) and a stat-based pipe/file
+    classification on Windows (where ``select`` is socket-only). Either way the
+    caller never blocks on an interactive TTY or an EOF-less pipe.
+    """
+    if sys.platform.startswith("win"):
+        return _windows_stdin_is_pipe()
+
+    import select
+
+    # Non-blocking check: only read if data is actually available. Without this,
+    # sys.stdin.read() blocks forever in non-TTY environments (subprocesses,
+    # CI/CD, IDE terminals, Docker) where stdin is a pipe with no EOF.
+    return bool(select.select([sys.stdin], [], [], 0.0)[0])
+
+
 def read_stdin_if_available() -> Optional[str]:
     """Read piped stdin content if available.
 
     Returns the stripped stdin content, or ``None`` when stdin is a TTY, has no
-    data available, or reading fails. Non-blocking: uses ``select.select`` so an
-    open pipe with no EOF never blocks the caller.
+    data available, or reading fails. Non-blocking: uses ``select.select`` on
+    Unix and a stat-based pipe check on Windows so an open pipe with no EOF (or
+    an interactive console) never blocks the caller.
 
-    Reads at most ``_MAX_STDIN_BYTES`` to bound memory. On platforms where
-    ``select.select`` does not support pipes (notably Windows), the read is
-    skipped rather than risking a block.
+    Reads at most ``_MAX_STDIN_BYTES`` to bound memory.
     """
     try:
         # A TTY means interactive input, not piped data.
         if sys.stdin.isatty():
             return None
 
-        # select.select() only supports pipes/stdin on Unix-like platforms; on
-        # Windows it is socket-only, so skip the piped-read path there rather
-        # than blocking on sys.stdin.read().
-        if sys.platform.startswith("win"):
-            return None
-
-        import select
-
-        # Non-blocking check: only read if data is actually available. Without
-        # this, sys.stdin.read() blocks forever in non-TTY environments
-        # (subprocesses, CI/CD, IDE terminals, Docker) where stdin is a pipe
-        # with no EOF.
-        if select.select([sys.stdin], [], [], 0.0)[0]:
+        if _stdin_has_data():
             stdin_content = sys.stdin.read(_MAX_STDIN_BYTES).strip()
             return stdin_content if stdin_content else None
     except Exception:
