@@ -554,7 +554,33 @@ class MCP:
                 filtered_tools.append(tool_def)
         
         return filtered_tools
-    
+
+    def apply_tool_filters(
+        self,
+        allowed_tools: Optional[List[str]] = None,
+        disabled_tools: Optional[List[str]] = None,
+    ) -> "MCP":
+        """Public API to (re)apply allow/deny tool filters to this instance.
+
+        Lets callers (e.g. the loader) express include/exclude intent without
+        reaching into private state. ``allowed_tools`` wins over
+        ``disabled_tools`` when both are supplied.
+
+        Args:
+            allowed_tools: Only these tool names are kept (allowlist).
+            disabled_tools: These tool names are removed (denylist).
+
+        Returns:
+            self, to allow fluent chaining.
+        """
+        if allowed_tools is not None:
+            self.allowed_tools = allowed_tools
+        if disabled_tools is not None:
+            self.disabled_tools = disabled_tools
+        if self.allowed_tools or self.disabled_tools:
+            self._tools = self._apply_tool_filters(self._tools)
+        return self
+
     def _build_safe_env(self, custom_env: Optional[dict] = None) -> dict:
         """
         Build a safe environment for stdio MCP servers.
@@ -638,12 +664,21 @@ class MCP:
             prefix: The server name to derive the prefix from. It is
                 sanitized to contain only ``[0-9A-Za-z_]`` characters.
 
+        Raises:
+            ValueError: If ``prefix`` sanitizes to an empty string, since an
+                empty prefix would silently reintroduce the cross-server name
+                collisions this method exists to prevent.
+
         Returns:
             self, to allow fluent chaining.
         """
         sanitized = self._sanitize_prefix(prefix)
         if not sanitized:
-            return self
+            raise ValueError(
+                f"Cannot derive a valid tool prefix from server name {prefix!r}; "
+                "provide a name containing at least one alphanumeric or "
+                "underscore character."
+            )
 
         self._tool_prefix = sanitized
 
@@ -756,17 +791,27 @@ class MCP:
         Used for transports (SSE/HTTP/WebSocket) whose clients build their
         own OpenAI schemas so their names stay in sync with the prefixed
         callable ``__name__`` values consumed during dispatch.
+
+        Returns a new list with copied dicts so the call is idempotent and
+        never mutates the clients' internal tool representations (avoids
+        double-prefixing if a client caches its schema dicts).
         """
         if not self._tool_prefix or not openai_tools:
             return openai_tools
 
-        items = openai_tools if isinstance(openai_tools, list) else [openai_tools]
+        is_list = isinstance(openai_tools, list)
+        items = openai_tools if is_list else [openai_tools]
+        result = []
         for item in items:
-            fn = item.get("function") if isinstance(item, dict) else None
-            if isinstance(fn, dict) and fn.get("name"):
-                fn["name"] = self._prefixed_name(fn["name"])
+            if isinstance(item, dict):
+                item = dict(item)
+                fn = item.get("function")
+                if isinstance(fn, dict) and fn.get("name"):
+                    item["function"] = dict(fn)
+                    item["function"]["name"] = self._prefixed_name(fn["name"])
+            result.append(item)
 
-        return openai_tools
+        return result if is_list else result[0]
     
     def __enter__(self):
         """Context manager entry - return self for use in 'with' statements."""

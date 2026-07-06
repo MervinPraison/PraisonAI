@@ -119,12 +119,13 @@ class _FakeMCP:
         self.allowed_tools = None
         self.disabled_tools = None
 
-    # Mirror the real MCP.with_tool_prefix behaviour.
+    # Mirror the real MCP.with_tool_prefix behaviour (delegating sanitization
+    # to the real MCP so the double can't drift from production logic).
     def with_tool_prefix(self, prefix):
-        import re
-        sanitized = re.sub(r"[^0-9A-Za-z_]", "_", prefix or "").strip("_")
+        from praisonaiagents.mcp.mcp import MCP
+        sanitized = MCP._sanitize_prefix(prefix or "")
         if not sanitized:
-            return self
+            raise ValueError(f"invalid prefix from {prefix!r}")
         self._tool_prefix = sanitized
         for tool in self._tools:
             original = getattr(tool, "__original_name__", tool.__name__)
@@ -140,6 +141,16 @@ class _FakeMCP:
             disabled = set(self.disabled_tools)
             return [t for t in tools if t.__name__ not in disabled]
         return tools
+
+    # Mirror the public MCP.apply_tool_filters contract used by the loader.
+    def apply_tool_filters(self, allowed_tools=None, disabled_tools=None):
+        if allowed_tools is not None:
+            self.allowed_tools = allowed_tools
+        if disabled_tools is not None:
+            self.disabled_tools = disabled_tools
+        if self.allowed_tools or self.disabled_tools:
+            self._tools = self._apply_tool_filters(self._tools)
+        return self
 
 
 def _patch_configs(monkeypatch, mapping):
@@ -218,6 +229,37 @@ def test_duplicate_server_name_raises(monkeypatch):
     ]
     with pytest.raises(ValueError, match="collision"):
         load_mcp_tools(configs=configs)
+
+
+def test_identical_server_name_raises(monkeypatch):
+    """Two configs with the exact same name also raise, not silently duplicate."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    _patch_configs(monkeypatch, {"filesystem": _FakeMCP(["a"])})
+    configs = [
+        MCPConfig(name="filesystem", command="x"),
+        MCPConfig(name="filesystem", command="y"),
+    ]
+    with pytest.raises(ValueError, match="collision"):
+        load_mcp_tools(configs=configs)
+
+
+def test_single_loaded_instance_keeps_bare_names(monkeypatch):
+    """If only one config yields an instance, it must stay unprefixed (backward compat)."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    # 'github' resolves to None (e.g. missing optional dep); only 'filesystem' loads.
+    _patch_configs(monkeypatch, {"filesystem": _FakeMCP(["read_file", "search"])})
+    configs = [
+        MCPConfig(name="filesystem", command="x"),
+        MCPConfig(name="github", command="y"),
+    ]
+    result = load_mcp_tools(configs=configs)
+    assert len(result) == 1
+    names = {t.__name__ for t in result[0]._tools}
+    assert names == {"read_file", "search"}
 
 
 def test_include_exclude_filters_applied(monkeypatch):

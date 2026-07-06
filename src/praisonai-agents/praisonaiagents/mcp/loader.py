@@ -12,9 +12,12 @@ from .mcp import MCP
 
 
 def _sanitize_server_name(name: str) -> str:
-    """Sanitize a server name for use as a stable, deterministic tool prefix."""
-    import re
-    return re.sub(r"[^0-9A-Za-z_]", "_", name or "").strip("_")
+    """Sanitize a server name for use as a stable, deterministic tool prefix.
+
+    Delegates to :meth:`MCP._sanitize_prefix` so collision detection here can
+    never drift from the prefix actually applied by ``MCP.with_tool_prefix``.
+    """
+    return MCP._sanitize_prefix(name or "")
 
 
 def load_mcp_tools(
@@ -90,7 +93,7 @@ def load_mcp_tools(
         seen: dict = {}
         for config in enabled_configs:
             sanitized = _sanitize_server_name(config.name)
-            if sanitized in seen and seen[sanitized] != config.name:
+            if sanitized in seen:
                 raise ValueError(
                     f"MCP server name collision: '{config.name}' and "
                     f"'{seen[sanitized]}' both map to prefix '{sanitized}'. "
@@ -98,26 +101,32 @@ def load_mcp_tools(
                 )
             seen[sanitized] = config.name
 
-    multiple_servers = len(enabled_configs) > 1
-
+    # First materialize the MCP instances and apply per-server tool filters.
+    # We defer the prefixing decision until we know how many instances were
+    # actually created: a config may yield None (e.g. missing optional deps),
+    # and a lone surviving server must keep bare names for backward compat.
+    loaded: list = []
     for config in enabled_configs:
-        # Convert config to MCP instance
         mcp = config.to_mcp_instance()
-        if mcp:
-            # Apply include/exclude tool filtering if configured (B3).
-            # Filters may be declared on the config (forward-compatible via
-            # getattr so older MCPConfig objects without these fields work).
-            allowed = getattr(config, "allowed_tools", None) or getattr(config, "include_tools", None)
-            disabled = getattr(config, "disabled_tools", None) or getattr(config, "exclude_tools", None)
-            if allowed or disabled:
-                mcp.allowed_tools = allowed
-                mcp.disabled_tools = disabled
-                mcp._tools = mcp._apply_tool_filters(mcp._tools)
+        if not mcp:
+            continue
 
-            # Apply tool prefix if multiple servers (B4) to avoid collisions.
-            if prefix_tools and multiple_servers:
-                mcp.with_tool_prefix(config.name)
+        # Apply include/exclude tool filtering if configured (B3).
+        # Filters may be declared on the config (forward-compatible via
+        # getattr so older MCPConfig objects without these fields work).
+        allowed = getattr(config, "allowed_tools", None) or getattr(config, "include_tools", None)
+        disabled = getattr(config, "disabled_tools", None) or getattr(config, "exclude_tools", None)
+        if allowed or disabled:
+            mcp.apply_tool_filters(allowed_tools=allowed, disabled_tools=disabled)
 
-            mcp_clients.append(mcp)
+        loaded.append((config, mcp))
+
+    # Apply tool prefix only when more than one server was actually loaded
+    # (B4) to avoid collisions while preserving single-server bare names.
+    multiple_servers = len(loaded) > 1
+    for config, mcp in loaded:
+        if prefix_tools and multiple_servers:
+            mcp.with_tool_prefix(config.name)
+        mcp_clients.append(mcp)
 
     return mcp_clients
