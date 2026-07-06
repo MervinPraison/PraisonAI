@@ -231,6 +231,20 @@ class DeliveryConfigSchema(BaseModel):
     store: Optional[str] = None  # optional canonical SQLite store override
 
 
+class SttConfigSchema(BaseModel):
+    """Schema for inbound speech-to-text (STT) configuration (Issue #2721).
+
+    Inbound voice notes are transcribed and fed to the agent by default so the
+    conversation continues seamlessly by voice. Set ``enabled: false`` to opt
+    out; when disabled (or on failure) the turn still reaches the agent with a
+    visible placeholder rather than being silently dropped.
+    """
+    enabled: bool = True
+    echo_transcripts: bool = False  # Echo the recognised text back to the user
+    language: Optional[str] = None  # Optional forced language code (e.g. "en")
+    model: Optional[str] = None  # Optional STT model override (default whisper-1)
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
     platform: Optional[str] = None
@@ -262,6 +276,10 @@ class ChannelConfigSchema(BaseModel):
     # forward the cached path to the agent's vision capability. Set to 0 to
     # disable inbound media handling.
     max_inbound_media_bytes: int = Field(default=20 * 1024 * 1024, ge=0)
+    # Inbound speech-to-text (Issue #2721): when a user sends a voice note,
+    # adapters transcribe it and feed the transcript to the agent. On by
+    # default; set ``stt.enabled: false`` to opt out.
+    stt: Optional[SttConfigSchema] = None
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp

@@ -4248,6 +4248,18 @@ class WebSocketGateway:
             
             config = BotConfig(**config_kwargs)
 
+            # Carry the inbound STT policy (Issue #2721) through the config's
+            # metadata passthrough (BotConfig has no native ``stt`` field),
+            # mirroring how ``max_inbound_media_bytes`` flows. On by default so
+            # voice notes are transcribed out of the box; ``stt.enabled: false``
+            # opts out. A bare ``stt: true/false`` shorthand is also accepted.
+            _raw_stt = ch_cfg.get("stt")
+            if _raw_stt is not None:
+                try:
+                    config.metadata["stt"] = _raw_stt
+                except Exception:  # pragma: no cover — defensive
+                    pass
+
             # Warn if no allowlist is configured
             if not config.allowed_users:
                 logger.warning(
@@ -4260,6 +4272,10 @@ class WebSocketGateway:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
                 if bot is None:
                     continue
+                # Issue #2721: enable inbound speech-to-text so voice notes are
+                # transcribed and fed to the agent. On by default; the resolved
+                # policy (config.metadata["stt"]) drives the opt-out.
+                self._enable_stt(bot, config)
                 # Issue #2454: share the gateway-wide admission gate with this
                 # channel bot so inbound runs are admitted through the global
                 # concurrency ceiling / fair queue. No-op when not configured.
@@ -4281,6 +4297,24 @@ class WebSocketGateway:
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _enable_stt(self, bot: Any, config: Any) -> None:
+        """Enable inbound speech-to-text on a channel bot (Issue #2721).
+
+        Voice notes are transcribed and fed to the agent by default. The
+        resolved policy is read from ``config.metadata["stt"]`` so an operator
+        can opt out with ``stt.enabled: false``. No-op for adapters that don't
+        expose ``enable_stt`` (e.g. email), preserving today's behaviour.
+        """
+        enable = getattr(bot, "enable_stt", None)
+        if not callable(enable):
+            return
+        try:
+            from praisonai_bot.bots._stt import resolve_stt_config
+            stt = resolve_stt_config(config)
+            enable(stt.enabled)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("Failed to configure STT for bot: %s", e, exc_info=True)
 
     def _stamp_admission_gate(self, bot: Any) -> None:
         """Share the gateway-wide admission gate with a channel bot (Issue #2454).
@@ -4979,7 +5013,16 @@ class WebSocketGateway:
             config_kwargs["default_tools"] = _raw_yaml_tools
         
         config = BotConfig(**config_kwargs)
-        
+
+        # Issue #2721: carry the inbound STT policy through metadata (same as
+        # start_channels) so a hot-reloaded channel still transcribes voice.
+        _raw_stt = ch_cfg.get("stt")
+        if _raw_stt is not None:
+            try:
+                config.metadata["stt"] = _raw_stt
+            except Exception:  # pragma: no cover — defensive
+                pass
+
         # Warn if no allowlist is configured
         if not config.allowed_users:
             logger.warning(
@@ -4993,6 +5036,8 @@ class WebSocketGateway:
             bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
             if bot is None:
                 return
+            # Issue #2721: enable inbound STT on the hot-reloaded channel too.
+            self._enable_stt(bot, config)
             # Issue #2454: stamp the shared admission gate so a channel restarted
             # during hot-reload still enforces the global concurrency ceiling.
             self._stamp_admission_gate(bot)

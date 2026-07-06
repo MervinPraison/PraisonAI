@@ -155,6 +155,82 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for audio file transcription."""
         self._stt_enabled = enabled
+
+    async def _transcribe_audio(self, event: Dict[str, Any]) -> Optional[str]:
+        """Transcribe an inbound Slack voice/audio file (Issue #2721).
+
+        Downloads the first audio file attached to the event via the bot token
+        (``url_private_download``), caches it through the shared SSRF-safe media
+        helper, and transcribes it with the shared STT tool. Returns the
+        transcript, or ``None`` when STT is disabled, no audio is present, or
+        transcription fails — callers fall back to a visible placeholder rather
+        than dropping the message.
+        """
+        if not self._stt_enabled:
+            return None
+
+        files = event.get("files") or []
+        audio_file = None
+        for f in files:
+            mimetype = (f.get("mimetype") or "").lower()
+            filetype = (f.get("filetype") or "").lower()
+            if mimetype.startswith("audio/") or filetype in (
+                "m4a", "mp3", "ogg", "wav", "opus", "webm", "mp4",
+            ):
+                audio_file = f
+                break
+        if audio_file is None:
+            return None
+
+        url = audio_file.get("url_private_download") or audio_file.get("url_private")
+        if not url:
+            return None
+
+        try:
+            import aiohttp
+
+            from ._media import cache_inbound_media, resolve_max_inbound_media_bytes
+            from ._stt import resolve_stt_config, transcribe_media_path
+
+            max_bytes = resolve_max_inbound_media_bytes(self.config)
+            if not max_bytes or max_bytes <= 0:
+                return None
+
+            token = getattr(self.config, "token", "") or ""
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        logger.warning("Slack audio download failed: HTTP %s", resp.status)
+                        return None
+                    data = await resp.content.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                logger.warning("Inbound Slack audio exceeds %s bytes; skipping", max_bytes)
+                return None
+
+            path = cache_inbound_media(
+                data,
+                kind="audio",
+                max_bytes=max_bytes,
+                filename=audio_file.get("name"),
+            )
+            try:
+                stt_cfg = resolve_stt_config(self.config)
+                return await asyncio.to_thread(
+                    transcribe_media_path,
+                    path,
+                    language=stt_cfg.language,
+                    model=stt_cfg.model,
+                )
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        except Exception as e:
+            logger.error("Slack audio transcription error: %s", e)
+            return None
     
     @property
     def is_running(self) -> bool:
@@ -224,7 +300,21 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 return
             
             bot_message = self._convert_event_to_message(event)
-            
+
+            # Issue #2721: transcribe an inbound voice/audio note so the turn
+            # reaches the agent by voice. On disable/failure, fall back to a
+            # visible placeholder instead of dropping an audio-only message.
+            if not (bot_message.content or "").strip() and (event.get("files") or []):
+                transcript = await self._transcribe_audio(event)
+                if transcript:
+                    bot_message.content = transcript
+                elif any(
+                    (f.get("mimetype") or "").lower().startswith("audio/")
+                    for f in (event.get("files") or [])
+                ):
+                    from ._stt import DEFAULT_VOICE_PLACEHOLDER
+                    bot_message.content = DEFAULT_VOICE_PLACEHOLDER
+
             # Add channel type for pairing system
             bot_message._channel_type = "slack"
             

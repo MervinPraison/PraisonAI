@@ -279,6 +279,32 @@ async def test_audio_message_transcription():
     bot._transcribe_audio.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_voice_message_not_dropped_when_transcription_unavailable():
+    """Issue #2721: a voice note must reach the agent even when STT is off.
+
+    When ``_transcribe_audio`` returns ``None`` (STT disabled or failure), the
+    pipeline should fall back to a visible placeholder rather than silently
+    dropping the message.
+    """
+    from praisonai_bot.bots._stt import DEFAULT_VOICE_PLACEHOLDER
+
+    bot = create_test_bot(unknown_user_policy="allow")
+
+    # Simulate STT disabled / transcription failure.
+    bot._transcribe_audio = AsyncMock(return_value=None)
+
+    update = create_mock_telegram_update(text=None, chat_type="private")
+    update.message.text = None
+    update.message.voice = MagicMock()
+
+    message = await process_inbound_telegram_message(update, bot)
+
+    assert message is not None, "Voice message must not be silently dropped"
+    assert message.content == DEFAULT_VOICE_PLACEHOLDER
+    bot._transcribe_audio.assert_called_once()
+
+
 def test_security_pipeline_exists():
     """Basic smoke test to ensure the security pipeline function exists and is importable."""
     from praisonai_bot.bots.telegram import process_inbound_telegram_message

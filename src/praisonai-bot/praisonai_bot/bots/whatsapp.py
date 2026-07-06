@@ -157,12 +157,19 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Web mode adapter (lazy initialized)
         self._web_adapter: Any = None
 
+        # Audio capabilities — inbound speech-to-text (Issue #2721).
+        self._stt_enabled: bool = False
+
         # ChatCommandMixin setup
         self._command_handlers: Dict[str, Callable] = {}
         self._command_info: Dict[str, Dict[str, Any]] = {}
 
         # Register built-in commands
         self._register_builtins()
+
+    def enable_stt(self, enabled: bool = True) -> None:
+        """Enable inbound speech-to-text transcription (Issue #2721)."""
+        self._stt_enabled = enabled
 
     def _register_builtins(self) -> None:
         """Register built-in /status, /new, /help commands."""
@@ -702,10 +709,26 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             content = ""
             bot_message_type = MessageType.AUDIO
             path = await self._cache_inbound_media(msg.get("audio", {}).get("id"), "audio")
+            # Issue #2721: transcribe inbound voice notes and feed the transcript
+            # to the agent. On failure/disable, fall back to a visible placeholder
+            # (and still forward the cached audio) rather than dropping the turn.
+            transcript = None
+            if path and self._stt_enabled:
+                from ._stt import resolve_stt_config, transcribe_media_path
+                stt_cfg = resolve_stt_config(self.config)
+                transcript = await asyncio.to_thread(
+                    transcribe_media_path,
+                    path,
+                    language=stt_cfg.language,
+                    model=stt_cfg.model,
+                )
+            if transcript:
+                content = transcript
             if path:
                 attachments.append(path)
-            else:
-                content = "[Audio received]"
+            if not content:
+                from ._stt import DEFAULT_VOICE_PLACEHOLDER
+                content = DEFAULT_VOICE_PLACEHOLDER
         elif msg_type == "video":
             content = msg.get("video", {}).get("caption", "")
             bot_message_type = MessageType.VIDEO
