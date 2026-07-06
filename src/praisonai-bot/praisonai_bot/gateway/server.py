@@ -687,6 +687,8 @@ class WebSocketGateway:
         port: int = 8765,
         config: Optional[GatewayConfig] = None,
         session_store: Optional[SessionStoreProtocol] = None,
+        openai_api: Optional[bool] = None,
+        mcp: Optional[bool] = None,
     ):
         """Initialize the gateway.
         
@@ -695,8 +697,21 @@ class WebSocketGateway:
             port: Port to listen on
             config: Optional gateway configuration
             session_store: Optional session store for persistence
+            openai_api: Serve OpenAI-compatible endpoints
+                (``/v1/chat/completions``, ``/v1/responses``, ``/v1/models``)
+                backed by this gateway's live agents/sessions. Overrides
+                ``config.api.openai`` when set.
+            mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing this
+                gateway's agents as tools. Overrides ``config.api.mcp`` when set.
         """
         self.config = config or GatewayConfig(host=host, port=port)
+
+        # Explicit constructor toggles win over any config-provided defaults so
+        # ``WebSocketGateway(openai_api=True, mcp=True)`` works without a config.
+        if openai_api is not None:
+            self.config.api.openai = bool(openai_api)
+        if mcp is not None:
+            self.config.api.mcp = bool(mcp)
         
         # Set bind_host for bind-aware authentication
         self.config.bind_host = self.config.host
@@ -1103,12 +1118,14 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            api_cfg = getattr(self.config, "api", None)
             return JSONResponse({
                 "name": "PraisonAI Gateway",
                 "version": "1.0.0",
                 "agents": list(self._agents.keys()),
                 "sessions": len(self._sessions),
                 "clients": len(self._clients),
+                "api": api_cfg.to_dict() if api_cfg is not None else {},
             })
         
         async def _reject_connection(
@@ -1756,7 +1773,54 @@ class WebSocketGateway:
             Route("/api/channels/{name}/reconnect", reconnect_channel_handler, methods=["POST"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
-        
+
+        # Issue #2715: additive, config-gated OpenAI-compatible / MCP protocol
+        # surfaces on the SAME app and auth. Each request dispatches into the
+        # gateway's own registered agents and shares its session store and
+        # admission gate, so OpenAI-SDK/MCP clients reach the same stateful
+        # agent as chat users. Disabled by default (config.api.*).
+        api_cfg = getattr(self.config, "api", None)
+        if api_cfg is not None and getattr(api_cfg, "enabled", False):
+            from .api_endpoints import GatewayApiEndpoints
+            self._api_endpoints = GatewayApiEndpoints(self)
+
+            def _api_guarded(handler):
+                async def _wrapped(request):
+                    auth_err = _check_auth(request)
+                    if auth_err:
+                        return auth_err
+                    return await handler(request)
+                return _wrapped
+
+            if api_cfg.openai:
+                routes += [
+                    Route(
+                        "/v1/chat/completions",
+                        _api_guarded(self._api_endpoints.openai_chat),
+                        methods=["POST"],
+                    ),
+                    Route(
+                        "/v1/responses",
+                        _api_guarded(self._api_endpoints.openai_responses),
+                        methods=["POST"],
+                    ),
+                    Route(
+                        "/v1/models",
+                        _api_guarded(self._api_endpoints.openai_models),
+                        methods=["GET"],
+                    ),
+                ]
+                logger.info("Gateway OpenAI-compatible API enabled (/v1/*)")
+            if api_cfg.mcp:
+                routes += [
+                    Route(
+                        "/mcp",
+                        _api_guarded(self._api_endpoints.mcp_jsonrpc),
+                        methods=["POST"],
+                    ),
+                ]
+                logger.info("Gateway MCP endpoint enabled (/mcp)")
+
         app = Starlette(routes=routes)
         
         config = uvicorn.Config(
@@ -5451,6 +5515,22 @@ class WebSocketGateway:
             self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
         if "max_queued_frames" in gw_cfg:
             self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
+        # Issue #2715: additive OpenAI-compatible / MCP protocol surfaces.
+        # YAML ``gateway.api: { openai: true, mcp: true }`` enables them; a
+        # CLI ``--openai-api`` / ``--mcp`` override (stamped on the instance)
+        # wins so operators can toggle without editing the file.
+        api_yaml = gw_cfg.get("api")
+        if isinstance(api_yaml, dict):
+            if "openai" in api_yaml:
+                self.config.api.openai = bool(api_yaml["openai"])
+            if "mcp" in api_yaml:
+                self.config.api.mcp = bool(api_yaml["mcp"])
+        _openai_ovr = getattr(self, "_openai_api_override", None)
+        if _openai_ovr is not None:
+            self.config.api.openai = bool(_openai_ovr)
+        _mcp_ovr = getattr(self, "_mcp_override", None)
+        if _mcp_ovr is not None:
+            self.config.api.mcp = bool(_mcp_ovr)
         # Issue #2375: graceful-drain timeout on shutdown. When set, the
         # shutdown path waits (bounded) for in-flight turns/sessions to
         # finish before tearing down. 0/unset preserves prior behaviour.
