@@ -703,7 +703,6 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             return
 
         try:
-            import discord
             from discord import app_commands
         except ImportError:
             return
@@ -715,6 +714,22 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         import re
 
         prefix = getattr(self.config, "command_prefix", "/") or "/"
+
+        def _make_callback(cmd_name: str, cmd_prefix: str):
+            # Factory keeps captured values out of the callback signature so
+            # discord.py 2.x's annotation inspection (which requires every
+            # parameter after ``interaction`` to be annotated) does not reject it.
+            async def _callback(interaction):
+                try:
+                    await interaction.response.send_message(
+                        f"Type `{cmd_prefix}{cmd_name}` as a message to run this command.",
+                        ephemeral=True,
+                    )
+                except Exception:  # noqa: BLE001 — never break the interaction
+                    pass
+
+            return _callback
+
         registered = 0
         for name, description in entries:
             if not name:
@@ -724,20 +739,11 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 continue
             desc = (str(description) or "").strip()[:100] or safe_name
 
-            async def _callback(interaction, _name=safe_name, _prefix=prefix):
-                try:
-                    await interaction.response.send_message(
-                        f"Type `{_prefix}{_name}` as a message to run this command.",
-                        ephemeral=True,
-                    )
-                except Exception:  # noqa: BLE001 — never break the interaction
-                    pass
-
             try:
                 cmd = app_commands.Command(
                     name=safe_name,
                     description=desc,
-                    callback=_callback,
+                    callback=_make_callback(safe_name, prefix),
                 )
                 tree.add_command(cmd, override=True)
                 registered += 1

@@ -7,6 +7,7 @@ Telegram, Discord, and Slack bots.  Keep them in one place.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING, Any
@@ -282,7 +283,6 @@ class CommandRegistry:
         handler = cmd_info.get("handler")
         if handler is None:
             return None
-        import asyncio
 
         result = handler(*args, **kwargs)
         if asyncio.iscoroutine(result):
