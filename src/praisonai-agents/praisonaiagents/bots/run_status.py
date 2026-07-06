@@ -113,6 +113,12 @@ class StallWatchdog:
 
     def __init__(self, *, soft_s: float = 20.0, hard_s: float = 60.0) -> None:
         if hard_s < soft_s:
+            logger.warning(
+                "StallWatchdog: hard_s (%s) < soft_s (%s); clamping hard_s up "
+                "to soft_s. SOFT will be unreachable — fix the thresholds.",
+                hard_s,
+                soft_s,
+            )
             hard_s = soft_s
         self._soft_s = float(soft_s)
         self._hard_s = float(hard_s)
@@ -153,9 +159,12 @@ class RunStatusController:
 
     Args:
         caps: Platform capabilities used to gate reaction vs label rendering.
-            When ``caps`` exposes a truthy ``supports_reactions`` (or dict-style
-            ``reactions``) the controller renders reactions; otherwise it uses
-            the label callback.
+            When ``caps`` exposes a truthy ``supports_reactions``/``reactions``
+            attribute (or dict-style ``reactions`` key) the controller renders
+            reactions; a falsy value forces the label callback. When neither
+            signal is present (e.g. the standard ``PlatformCapabilities``
+            dataclass) the controller defaults to reactions if a reaction
+            callback was injected.
         set_status_reaction: Async callback ``(emoji) -> None`` to set the
             single status reaction (implementations typically swap the prior
             emoji). Optional.
@@ -221,13 +230,19 @@ class RunStatusController:
         caps = self._caps
         if caps is None:
             return True
+        # Prefer an explicit ``supports_reactions`` attribute, then the
+        # ``reactions`` field used by ``ChannelCapabilities`` (dict) and any
+        # attribute-style caps object. ``PlatformCapabilities`` (the frozen
+        # dataclass) exposes neither today, so absent any signal we default to
+        # preferring reactions when a reaction callback is present.
         supports = getattr(caps, "supports_reactions", None)
         if supports is None:
+            supports = getattr(caps, "reactions", None)
+        if supports is None:
             # Dict-style ChannelCapabilities fallback.
-            try:
-                supports = caps.get("reactions")  # type: ignore[attr-defined]
-            except AttributeError:
-                supports = None
+            get = getattr(caps, "get", None)
+            if callable(get):
+                supports = get("reactions")
         return bool(supports) if supports is not None else True
 
     async def _render(self, *, emoji: str, label: str) -> None:

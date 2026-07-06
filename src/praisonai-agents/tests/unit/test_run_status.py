@@ -29,7 +29,13 @@ class FakeClock:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.get_event_loop() is deprecated outside a running loop (3.10+) and
+    # will raise on future releases; run each coroutine on a fresh loop.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class Recorder:
@@ -208,6 +214,36 @@ class TestCapabilityGating:
 
         class Caps:
             supports_reactions = False
+
+        c = RunStatusController(
+            caps=Caps(),
+            enabled=True,
+            set_status_reaction=rec.react,
+            edit_status_label=rec.label,
+        )
+        _run(c.on_phase(RunPhase.TOOL))
+        assert rec.labels == ["using a tool…"]
+        assert rec.reactions == []
+
+    def test_dict_caps_reactions_field_gates(self):
+        # ChannelCapabilities is a dict with a ``reactions`` key.
+        rec = Recorder()
+        c = RunStatusController(
+            caps={"reactions": False},
+            enabled=True,
+            set_status_reaction=rec.react,
+            edit_status_label=rec.label,
+        )
+        _run(c.on_phase(RunPhase.TOOL))
+        assert rec.labels == ["using a tool…"]
+        assert rec.reactions == []
+
+    def test_attr_reactions_field_gates(self):
+        # An attribute-style caps object exposing ``reactions`` is honoured.
+        rec = Recorder()
+
+        class Caps:
+            reactions = False
 
         c = RunStatusController(
             caps=Caps(),
