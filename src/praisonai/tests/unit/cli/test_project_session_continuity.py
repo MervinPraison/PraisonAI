@@ -1,18 +1,30 @@
 """Tests for praison run project-scoped session continuity."""
 
-from praisonai.cli.state.project_sessions import (
-    apply_cli_session_continuity,
-    build_cli_memory_config,
-    find_last_session,
-    get_project_session_store,
-    list_project_sessions,
-)
+import pytest
+
+import praisonai.cli.state.project_sessions as project_sessions
 from praisonaiagents import Agent
-from praisonaiagents.session.store import get_default_session_store
+from praisonaiagents.session.store import DefaultSessionStore
+
+
+@pytest.fixture(autouse=True)
+def _isolated_session_stores(monkeypatch, tmp_path):
+    """Keep session I/O off shared CI dirs when pytest-xdist runs workers in parallel."""
+    project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
+    global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
+    monkeypatch.setattr(
+        project_sessions, "get_project_session_store", lambda *a, **k: project_store
+    )
+    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: global_store)
+    monkeypatch.setattr(
+        "praisonaiagents.session.store.get_default_session_store",
+        lambda: global_store,
+    )
+    return project_store, global_store
 
 
 def test_build_cli_memory_config_enables_history():
-    cfg = build_cli_memory_config(session_id="sess-1", auto_save="sess-1")
+    cfg = project_sessions.build_cli_memory_config(session_id="sess-1", auto_save="sess-1")
     assert cfg is not None
     assert cfg.session_id == "sess-1"
     assert cfg.auto_save == "sess-1"
@@ -20,14 +32,17 @@ def test_build_cli_memory_config_enables_history():
 
 
 def test_apply_cli_session_continuity_restores_project_history():
-    store = get_project_session_store()
+    store = project_sessions.get_project_session_store()
     session_id = "continuity-unit-test"
     store.clear_session(session_id)
     store.add_user_message(session_id, "remember this")
     store.add_assistant_message(session_id, "acknowledged")
 
-    agent = Agent(name="RunAgent", memory=build_cli_memory_config(session_id, session_id))
-    apply_cli_session_continuity(agent, session_id)
+    agent = Agent(
+        name="RunAgent",
+        memory=project_sessions.build_cli_memory_config(session_id, session_id),
+    )
+    project_sessions.apply_cli_session_continuity(agent, session_id)
 
     assert agent._session_store.session_dir == store.session_dir
     assert agent._session_id == session_id
@@ -46,12 +61,15 @@ def test_apply_cli_session_continuity_restores_project_history():
 
 
 def test_injected_session_store_not_overwritten():
-    store = get_project_session_store()
+    store = project_sessions.get_project_session_store()
     session_id = "store-injection-test"
     store.clear_session(session_id)
 
-    agent = Agent(name="RunAgent", memory=build_cli_memory_config(session_id, session_id))
-    apply_cli_session_continuity(agent, session_id)
+    agent = Agent(
+        name="RunAgent",
+        memory=project_sessions.build_cli_memory_config(session_id, session_id),
+    )
+    project_sessions.apply_cli_session_continuity(agent, session_id)
     injected_dir = agent._session_store.session_dir
 
     agent._init_session_store()
@@ -69,20 +87,19 @@ def test_find_last_session_sees_global_agent_session(monkeypatch, tmp_path):
     freshly-created session is *the* most-recent one is deterministic and never
     contends with pre-existing sessions on the machine or parallel test runs.
     """
-    from praisonaiagents.session.store import DefaultSessionStore
-    import praisonai.cli.state.project_sessions as ps
-
     project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
     global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
-    monkeypatch.setattr(ps, "get_project_session_store", lambda *a, **k: project_store)
-    monkeypatch.setattr(ps, "_get_default_store", lambda: global_store)
+    monkeypatch.setattr(
+        project_sessions, "get_project_session_store", lambda *a, **k: project_store
+    )
+    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: global_store)
 
     session_id = "issue-2655-global-session"
     global_store.add_user_message(session_id, "created by core Agent")
 
-    assert find_last_session() == session_id
+    assert project_sessions.find_last_session() == session_id
 
-    listed = {s.get("session_id") for s in list_project_sessions()}
+    listed = {s.get("session_id") for s in project_sessions.list_project_sessions()}
     assert session_id in listed
 
 
@@ -94,13 +111,12 @@ def test_find_last_session_skips_sub_agent_child(monkeypatch, tmp_path):
     thus most-recent) never wins over the root purely because of a pre-existing
     session elsewhere on the machine.
     """
-    from praisonaiagents.session.store import DefaultSessionStore
-    import praisonai.cli.state.project_sessions as ps
-
     store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
     empty_global = DefaultSessionStore(session_dir=str(tmp_path / "global"))
-    monkeypatch.setattr(ps, "get_project_session_store", lambda *a, **k: store)
-    monkeypatch.setattr(ps, "_get_default_store", lambda: empty_global)
+    monkeypatch.setattr(
+        project_sessions, "get_project_session_store", lambda *a, **k: store
+    )
+    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: empty_global)
 
     root_id = "issue-2655-root"
     child_id = "issue-2655-child"
@@ -109,4 +125,4 @@ def test_find_last_session_skips_sub_agent_child(monkeypatch, tmp_path):
     store.add_user_message(child_id, "sub-agent work")
     store.update_session_metadata(child_id, parent_id=root_id)
 
-    assert find_last_session() == root_id
+    assert project_sessions.find_last_session() == root_id
