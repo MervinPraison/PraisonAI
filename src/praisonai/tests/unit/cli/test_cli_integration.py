@@ -53,12 +53,12 @@ def test_run_command_session_args():
 def test_session_list_filtering():
     """Test session list command with project filtering."""
     print("=== Testing Session List Project Filtering ===")
-    
-    from praisonai.cli.state.project_sessions import get_project_session_store
+
+    import praisonai.cli.state.project_sessions as project_sessions
     from praisonai.cli.utils.project import get_project_id, get_project_name
-    
+
     # Create test sessions
-    store = get_project_session_store()
+    store = project_sessions.get_project_session_store()
     test_sessions = ["session-1", "session-2", "session-3"]
     
     for session_id in test_sessions:

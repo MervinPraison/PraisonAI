@@ -1,26 +1,7 @@
 """Tests for praison run project-scoped session continuity."""
 
-import pytest
-
 import praisonai.cli.state.project_sessions as project_sessions
 from praisonaiagents import Agent
-from praisonaiagents.session.store import DefaultSessionStore
-
-
-@pytest.fixture(autouse=True)
-def isolated_session_stores(monkeypatch, tmp_path):
-    """Keep session I/O off shared CI dirs when pytest-xdist runs workers in parallel."""
-    project_store = DefaultSessionStore(session_dir=str(tmp_path / "project"))
-    global_store = DefaultSessionStore(session_dir=str(tmp_path / "global"))
-    monkeypatch.setattr(
-        project_sessions, "get_project_session_store", lambda *a, **k: project_store
-    )
-    monkeypatch.setattr(project_sessions, "_get_default_store", lambda: global_store)
-    monkeypatch.setattr(
-        "praisonaiagents.session.store.get_default_session_store",
-        lambda: global_store,
-    )
-    return project_store, global_store
 
 
 def test_build_cli_memory_config_enables_history():
