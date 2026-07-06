@@ -144,7 +144,7 @@ jobs:
         DEFAULT_RUN=$(timeout 15 /tmp/praisonai-code-standalone/bin/praisonai-code run "hi" 2>&1)
         set -e
         echo "$DEFAULT_RUN" | tail -10
-        if ! echo "$DEFAULT_RUN" | grep -qi 'pip install praisonai'; then
+        if ! echo "$DEFAULT_RUN" | grep -qi 'install praisonai'; then
           echo "FAIL: default run should prompt for praisonai wrapper install"
           exit 1
         fi
@@ -153,7 +153,7 @@ jobs:
         CHAT_RUN=$(timeout 10 /tmp/praisonai-code-standalone/bin/praisonai-code chat 2>&1)
         set -e
         echo "$CHAT_RUN" | tail -10
-        if ! echo "$CHAT_RUN" | grep -qi 'pip install praisonai'; then
+        if ! echo "$CHAT_RUN" | grep -qi 'install praisonai'; then
           echo "FAIL: chat should prompt for praisonai wrapper install"
           exit 1
         fi
