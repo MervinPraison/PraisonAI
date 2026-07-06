@@ -49,17 +49,32 @@ click, textual, PyYAML, python-dotenv, litellm, mcp, pydantic — see
 
 ### Standalone limits (`pip install praisonai-code` only)
 
+The terminal-native commands (`run`, `chat`, `code`, `doctor`, `daemon`) live in
+`praisonai_code.cli.commands.*` and resolve via `LazyCommandGroup` without
+importing the wrapper. Only commands in `_WRAPPER_RESIDENT_COMMANDS` (see
+`praisonai_code/cli/app.py`) require `pip install praisonai`.
+
 | Command | Works standalone? | Notes |
 |---------|-------------------|-------|
+| `praisonai-code --version` | Yes | |
 | `run --help`, `config`, `doctor` | Yes | |
-| `run --output actions "…"` | Yes | In-process `Agent` |
-| `run "…"` (default) | No | Requires `pip install praisonai` |
-| `chat`, `code` | No | TUI / interactive legacy live in wrapper |
+| `run --output plain "…"` | Yes | In-process `Agent` (verified) |
+| `run "…"` (default) | Yes | Resolves via `praisonai_code.cli.commands.run` |
+| `run --output actions "…"` | Yes (intended) | Currently affected by an `auto_save` shadow-import bug — tracked separately |
+| `chat --output plain "…"` | Yes | One-shot; interactive REPL also in code package |
+| `code --help` | Yes | Full code assistant command registered |
 | `daemon start` (foreground) | Yes | |
 | `daemon start --background` | Yes | Spawns `python -m praisonai_code.runtime` |
+| `batch`, `docs`, `langfuse`, `flow`, `n8n`, `train`, … | No | `_WRAPPER_RESIDENT_COMMANDS` — needs `pip install praisonai` |
+| `bot`, `gateway`, `pairing`, … | No | Needs `praisonai` bot package |
 
-For full terminal UX (`chat`, `code`, default `run`), install the wrapper:
-`pip install praisonai`.
+**Known limitations:**
+- `praisonai-code --help` may crash on Windows (cp1252) due to emoji in command
+  descriptions — tracked separately.
+- Piped stdin (`file | run`) is not yet supported on Windows.
+
+For bots, gateway, batch, observability sinks, and the wrapper-resident commands
+above, install the full wrapper: `pip install praisonai`.
 
 Completed C7 steps:
 - `praisonai_code._registry` — vendored plugin registry (no wrapper import)

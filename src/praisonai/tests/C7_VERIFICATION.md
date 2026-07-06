@@ -60,12 +60,25 @@ OPENAI_API_KEY=... praisonai run "Say hello in one word"
 
 ## Standalone command matrix
 
+`run`, `chat`, `code`, `doctor`, and `daemon` live in
+`praisonai_code.cli.commands.*` and resolve via `LazyCommandGroup` without the
+wrapper. Only `_WRAPPER_RESIDENT_COMMANDS` (see `praisonai_code/cli/app.py`)
+require `pip install praisonai`.
+
 | Command | Standalone? |
 |---------|-------------|
-| `run --output actions` | Yes |
-| `run` (default) | No — needs wrapper |
-| `chat`, `code` | No — needs wrapper |
+| `run --output plain` | Yes |
+| `run` (default) | Yes (`praisonai_code.cli.commands.run`) |
+| `run --output actions` | Yes (intended) — currently affected by `auto_save` shadow-import bug |
+| `chat --output plain` | Yes |
+| `code --help` | Yes |
 | `daemon start --background` | Yes (`praisonai_code.runtime`) |
+| `batch`, `docs`, `langfuse`, `flow`, `train`, … | No — `_WRAPPER_RESIDENT_COMMANDS`, needs wrapper |
+| `bot`, `gateway`, … | No — needs `praisonai` bot package |
+
+> Note: full `praisonai` wrapper still required for bots, gateway, batch, and
+> observability stacks. `praisonai-code --help` may crash on Windows (cp1252
+> emoji) and piped stdin is unsupported on Windows — both tracked separately.
 
 ## Moved modules (C7)
 
