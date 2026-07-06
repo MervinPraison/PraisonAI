@@ -223,6 +223,13 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             
             self._is_running = True
             logger.info(f"Discord bot started: {self._client.user.name}")
+
+            # Project the shared command registry into Discord's native slash
+            # menu so typing "/" surfaces the available commands.
+            try:
+                await self.publish_command_menu(self.build_command_menu_entries())
+            except Exception as e:  # noqa: BLE001 — menu is best-effort, never fatal
+                logger.debug(f"Failed to publish Discord command menu (non-fatal): {e}")
         
         @self._client.event
         async def on_message(message):
@@ -675,6 +682,76 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     async def health(self):
         """Get detailed health status of the Discord bot."""
         return await self._default_health()
+
+    async def publish_command_menu(self, entries: List[tuple]) -> None:
+        """Register commands as Discord application commands for ``/`` autocomplete.
+
+        Projects the shared command registry's ``(name, description)`` pairs
+        into Discord's native slash-command menu via the client's
+        ``CommandTree`` so typing ``/`` shows the available commands with
+        descriptions. Each registered command is a thin shim: on invocation it
+        replies telling the user the command is recognised, since the existing
+        text-command path (``on_message``) remains the execution route. This
+        keeps discoverability (the world-class missing piece) additive and
+        backward-compatible. Best-effort: any failure is logged and swallowed
+        so bot startup is never blocked.
+
+        Args:
+            entries: ``(name, description)`` pairs to publish.
+        """
+        if not entries or self._client is None:
+            return
+
+        try:
+            import discord
+            from discord import app_commands
+        except ImportError:
+            return
+
+        tree = getattr(self._client, "tree", None)
+        if tree is None:
+            return
+
+        import re
+
+        prefix = getattr(self.config, "command_prefix", "/") or "/"
+        registered = 0
+        for name, description in entries:
+            if not name:
+                continue
+            safe_name = str(name).lower()
+            if not re.fullmatch(r"[a-z0-9_-]{1,32}", safe_name):
+                continue
+            desc = (str(description) or "").strip()[:100] or safe_name
+
+            async def _callback(interaction, _name=safe_name, _prefix=prefix):
+                try:
+                    await interaction.response.send_message(
+                        f"Type `{_prefix}{_name}` as a message to run this command.",
+                        ephemeral=True,
+                    )
+                except Exception:  # noqa: BLE001 — never break the interaction
+                    pass
+
+            try:
+                cmd = app_commands.Command(
+                    name=safe_name,
+                    description=desc,
+                    callback=_callback,
+                )
+                tree.add_command(cmd, override=True)
+                registered += 1
+            except Exception as e:  # noqa: BLE001 — skip any bad entry
+                logger.debug(f"Could not add Discord command /{safe_name}: {e}")
+
+        if not registered:
+            return
+
+        try:
+            await tree.sync()
+            logger.info(f"Published {registered} commands to Discord slash menu")
+        except Exception as e:  # noqa: BLE001 — best-effort
+            logger.debug(f"Discord command sync failed (non-fatal): {e}")
 
     def _format_status(self) -> str:
         """Format /status response."""

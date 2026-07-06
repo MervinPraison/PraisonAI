@@ -1002,7 +1002,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         self._is_running = True
         logger.info(f"Telegram bot started: @{self._bot_user.username}")
-        
+
+        # Project the shared command registry into Telegram's native command
+        # menu so typing "/" surfaces the available commands with descriptions.
+        try:
+            await self.publish_command_menu(self.build_command_menu_entries())
+        except Exception as e:  # noqa: BLE001 — menu is best-effort, never fatal
+            logger.debug(f"Failed to publish Telegram command menu (non-fatal): {e}")
+
         # Initialize connection monitor for resilience
         from ._resilience import ConnectionMonitor, TELEGRAM_BACKOFF, is_recoverable_error, is_conflict_error, sleep_with_abort
         self._monitor = ConnectionMonitor(platform="telegram", policy=TELEGRAM_BACKOFF)
@@ -1563,6 +1570,48 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
     async def health(self):
         """Get detailed health status of the Telegram bot."""
         return await self._default_health()
+
+    async def publish_command_menu(self, entries: List[tuple]) -> None:
+        """Register commands in Telegram's native menu via ``set_my_commands``.
+
+        Projects the shared command registry's ``(name, description)`` pairs
+        into the platform menu so typing ``/`` shows the available commands
+        with descriptions. Telegram requires command names of 1-32 chars from
+        ``[a-z0-9_]`` and descriptions of 1-256 chars, so entries are
+        sanitised and out-of-range ones skipped. Best-effort: any failure is
+        logged and swallowed so bot startup is never blocked.
+
+        Args:
+            entries: ``(name, description)`` pairs to publish.
+        """
+        if not entries or self._application is None:
+            return
+
+        try:
+            from telegram import BotCommand
+        except ImportError:
+            return
+
+        import re
+
+        commands = []
+        for name, description in entries:
+            if not name:
+                continue
+            safe_name = str(name).lower()
+            if not re.fullmatch(r"[a-z0-9_]{1,32}", safe_name):
+                continue
+            desc = (str(description) or "").strip()[:256] or safe_name
+            commands.append(BotCommand(safe_name, desc))
+
+        if not commands:
+            return
+
+        try:
+            await self._application.bot.set_my_commands(commands)
+            logger.info(f"Published {len(commands)} commands to Telegram menu")
+        except Exception as e:  # noqa: BLE001 — best-effort
+            logger.debug(f"set_my_commands failed (non-fatal): {e}")
 
     def _format_status(self) -> str:
         """Format /status response."""

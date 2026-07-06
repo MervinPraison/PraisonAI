@@ -99,6 +99,71 @@ class ChatCommandMixin:
             return True
         return platform.lower() in channels_map[name]
 
+    def build_command_menu_entries(
+        self, user_id: Optional[str] = None
+    ) -> List[tuple]:
+        """Build ``(name, description)`` pairs for the native command menu.
+
+        Sources the shared :class:`CommandRegistry` (the single source of
+        truth for built-in commands) and merges in any adapter-registered
+        custom commands, filtered by the platform command-channel map and the
+        per-command :class:`CommandAccessPolicy` when both are available.
+
+        Args:
+            user_id: The user the menu is being built for. When provided and a
+                ``_command_policy`` exists, entries are filtered to the
+                commands that user may run. When ``None`` the full (unfiltered)
+                menu is returned.
+
+        Returns:
+            A sorted list of ``(name, description)`` tuples, or ``[]`` if the
+            registry is unavailable.
+        """
+        registry = getattr(self, '_command_registry', None)
+        if registry is None:
+            try:
+                from ._commands import get_command_registry
+
+                registry = get_command_registry()
+            except Exception:  # noqa: BLE001 — menu building must never raise
+                return []
+
+        platform = getattr(self, 'platform', None)
+
+        extra: Dict[str, str] = {}
+        info_map = getattr(self, '_command_info', {}) or {}
+        for name in getattr(self, '_command_handlers', {}) or {}:
+            if not self.is_command_allowed(name, platform):
+                continue
+            info = info_map.get(name)
+            extra[name] = getattr(info, 'description', '') or "Custom command"
+
+        policy = getattr(self, '_command_policy', None)
+        try:
+            return registry.menu_entries(
+                platform=platform or "unknown",
+                policy=policy,
+                user_id=user_id,
+                extra_commands=extra,
+            )
+        except Exception:  # noqa: BLE001 — menu building must never raise
+            return []
+
+    async def publish_command_menu(self, entries: List[tuple]) -> None:
+        """Project command entries into the platform's native command menu.
+
+        Adapters override this to register commands so typed-``/`` autocomplete
+        works out of the box (Telegram ``set_my_commands``; Discord application
+        commands; Slack subcommand map). The base implementation is a no-op so
+        platforms that do not support native menus—or have not implemented the
+        capability yet—degrade gracefully.
+
+        Args:
+            entries: ``(name, description)`` pairs from
+                :meth:`build_command_menu_entries`.
+        """
+        return None
+
 
 class MessageHookMixin:
     """Mixin that fires MESSAGE_RECEIVED / MESSAGE_SENDING / MESSAGE_SENT hooks.

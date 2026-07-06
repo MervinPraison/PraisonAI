@@ -204,6 +204,91 @@ class CommandRegistry:
         """
         return set(self._commands.keys())
     
+    def menu_entries(
+        self,
+        platform: str = "unknown",
+        policy: Optional[CommandAccessPolicy] = None,
+        user_id: Optional[str] = None,
+        extra_commands: Optional[Dict[str, str]] = None,
+    ) -> List[tuple]:
+        """Return ``(name, description)`` pairs for native command-menu registration.
+
+        This is the single source of truth adapters project into a platform's
+        native command menu (Telegram ``set_my_commands``, Discord application
+        commands, Slack subcommands). Entries are policy-filtered so a caller
+        only ever sees the commands they are permitted to run.
+
+        Args:
+            platform: Platform name (informational; menus are the same today
+                across platforms but the argument allows future per-platform
+                filtering).
+            policy: Optional access policy used to filter the visible commands.
+                When ``None`` all commands are returned (legacy permissive).
+            user_id: The user the menu is being built for. Required for
+                per-user policy filtering; when ``None`` an unrestricted menu
+                is returned.
+            extra_commands: Optional ``{name: description}`` map of adapter-
+                registered custom commands to include alongside the built-ins.
+
+        Returns:
+            A list of ``(name, description)`` tuples sorted by command name.
+        """
+        all_names = self.get_command_names()
+        if extra_commands:
+            all_names = all_names | set(extra_commands.keys())
+
+        if policy is not None and user_id is not None:
+            allowed = policy.get_allowed_commands(user_id, all_names)
+        else:
+            allowed = all_names
+
+        entries: List[tuple] = []
+        for name in sorted(allowed):
+            cmd_info = self._commands.get(name)
+            if cmd_info is not None:
+                desc = cmd_info.get("description", "No description")
+            elif extra_commands and name in extra_commands:
+                desc = extra_commands[name] or "Custom command"
+            else:
+                desc = "No description"
+            entries.append((name, desc))
+        return entries
+
+    async def dispatch(
+        self,
+        name: str,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """Invoke a registered command's handler, if one is bound.
+
+        Adapters may route through this instead of maintaining a local
+        name→handler chain. Built-in commands only expose a handler when one
+        was bound via :meth:`register`; when a command has no handler this
+        returns ``None`` so the caller can fall back to its own handling.
+
+        Args:
+            name: Command name (without the leading ``/``).
+            *args: Positional arguments forwarded to the handler.
+            **kwargs: Keyword arguments forwarded to the handler.
+
+        Returns:
+            The handler's result, or ``None`` when the command is unknown or
+            has no bound handler.
+        """
+        cmd_info = self._commands.get(name)
+        if not cmd_info:
+            return None
+        handler = cmd_info.get("handler")
+        if handler is None:
+            return None
+        import asyncio
+
+        result = handler(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
+
     def format_help(
         self, 
         user_id: str,
