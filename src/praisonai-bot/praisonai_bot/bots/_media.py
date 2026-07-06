@@ -149,6 +149,14 @@ def _is_safe_url(url: str) -> bool:
     return True
 
 
+# Public alias so adapters that download media themselves (e.g. Slack fetching
+# ``url_private_download`` via the bot token) can reuse the same SSRF guard the
+# URL-fetch path applies, rather than importing a private name.
+def is_safe_url(url: str) -> bool:
+    """Public alias of :func:`_is_safe_url` for adapter-side SSRF vetting."""
+    return _is_safe_url(url)
+
+
 class _SafeRedirectHandler:
     """Re-validate every redirect target so SSRF cannot be reached via 3xx."""
 

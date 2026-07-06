@@ -722,6 +722,8 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     language=stt_cfg.language,
                     model=stt_cfg.model,
                 )
+                if transcript and stt_cfg.echo_transcripts:
+                    transcript = f"[Voice message]: {transcript}"
             if transcript:
                 content = transcript
             if path:
