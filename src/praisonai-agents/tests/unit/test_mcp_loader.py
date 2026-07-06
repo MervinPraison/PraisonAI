@@ -99,6 +99,142 @@ def test_prefix_collision_handling():
     assert callable(load_mcp_tools)
 
 
+class _FakeTool:
+    """Minimal callable tool stub with a mutable __name__."""
+
+    def __init__(self, name):
+        self.__name__ = name
+        self.__qualname__ = name
+
+    def __call__(self, *args, **kwargs):  # pragma: no cover - not invoked
+        return None
+
+
+class _FakeMCP:
+    """Lightweight stand-in for the real MCP client for loader tests."""
+
+    def __init__(self, tool_names):
+        self._tools = [_FakeTool(n) for n in tool_names]
+        self._tool_prefix = None
+        self.allowed_tools = None
+        self.disabled_tools = None
+
+    # Mirror the real MCP.with_tool_prefix behaviour.
+    def with_tool_prefix(self, prefix):
+        import re
+        sanitized = re.sub(r"[^0-9A-Za-z_]", "_", prefix or "").strip("_")
+        if not sanitized:
+            return self
+        self._tool_prefix = sanitized
+        for tool in self._tools:
+            original = getattr(tool, "__original_name__", tool.__name__)
+            tool.__original_name__ = original
+            tool.__name__ = f"{sanitized}_{original}"
+        return self
+
+    def _apply_tool_filters(self, tools):
+        if self.allowed_tools:
+            allowed = set(self.allowed_tools)
+            return [t for t in tools if t.__name__ in allowed]
+        if self.disabled_tools:
+            disabled = set(self.disabled_tools)
+            return [t for t in tools if t.__name__ not in disabled]
+        return tools
+
+
+def _patch_configs(monkeypatch, mapping):
+    """Patch MCPConfig.to_mcp_instance to return fake MCPs keyed by name."""
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    def fake_to_instance(self):
+        return mapping.get(self.name)
+
+    monkeypatch.setattr(MCPConfig, "to_mcp_instance", fake_to_instance)
+
+
+def test_multiple_servers_are_prefixed(monkeypatch):
+    """Two servers sharing a tool name get namespaced (B4)."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    fs = _FakeMCP(["read_file", "search"])
+    gh = _FakeMCP(["search"])
+    _patch_configs(monkeypatch, {"filesystem": fs, "github": gh})
+
+    configs = [
+        MCPConfig(name="filesystem", command="x"),
+        MCPConfig(name="github", command="y"),
+    ]
+    result = load_mcp_tools(configs=configs)
+
+    names = {t.__name__ for mcp in result for t in mcp._tools}
+    assert names == {"filesystem_read_file", "filesystem_search", "github_search"}
+    # Colliding 'search' is now disambiguated.
+    assert "filesystem_search" in names
+    assert "github_search" in names
+
+
+def test_single_server_keeps_bare_names(monkeypatch):
+    """Single-server loads must not gain gratuitous prefixes (backward compat)."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    fs = _FakeMCP(["read_file", "search"])
+    _patch_configs(monkeypatch, {"filesystem": fs})
+
+    result = load_mcp_tools(configs=[MCPConfig(name="filesystem", command="x")])
+    names = {t.__name__ for t in result[0]._tools}
+    assert names == {"read_file", "search"}
+
+
+def test_prefix_tools_false_disables_namespacing(monkeypatch):
+    """prefix_tools=False keeps raw names even with multiple servers."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    fs = _FakeMCP(["search"])
+    gh = _FakeMCP(["search"])
+    _patch_configs(monkeypatch, {"filesystem": fs, "github": gh})
+
+    configs = [
+        MCPConfig(name="filesystem", command="x"),
+        MCPConfig(name="github", command="y"),
+    ]
+    result = load_mcp_tools(configs=configs, prefix_tools=False)
+    for mcp in result:
+        for tool in mcp._tools:
+            assert tool.__name__ == "search"
+
+
+def test_duplicate_server_name_raises(monkeypatch):
+    """Same sanitized server name twice raises a clear error, not silent shadowing."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    _patch_configs(monkeypatch, {"filesystem": _FakeMCP(["a"])})
+    configs = [
+        MCPConfig(name="file-system", command="x"),
+        MCPConfig(name="file system", command="y"),
+    ]
+    with pytest.raises(ValueError, match="collision"):
+        load_mcp_tools(configs=configs)
+
+
+def test_include_exclude_filters_applied(monkeypatch):
+    """include/exclude filters are honoured per server (B3)."""
+    from praisonaiagents.mcp.loader import load_mcp_tools
+    from praisonaiagents.memory.mcp_config import MCPConfig
+
+    fs = _FakeMCP(["read_file", "write_file", "delete_file"])
+    _patch_configs(monkeypatch, {"filesystem": fs})
+
+    config = MCPConfig(name="filesystem", command="x")
+    config.disabled_tools = ["delete_file"]
+    result = load_mcp_tools(configs=[config])
+    names = {t.__name__ for t in result[0]._tools}
+    assert names == {"read_file", "write_file"}
+
+
 def test_safe_env_build():
     """Test safe environment building (B5)."""
     try:

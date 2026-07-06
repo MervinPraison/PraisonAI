@@ -11,6 +11,12 @@ from ..memory.mcp_config import MCPConfig, MCPConfigManager
 from .mcp import MCP
 
 
+def _sanitize_server_name(name: str) -> str:
+    """Sanitize a server name for use as a stable, deterministic tool prefix."""
+    import re
+    return re.sub(r"[^0-9A-Za-z_]", "_", name or "").strip("_")
+
+
 def load_mcp_tools(
     names: Optional[List[str]] = None,
     *,
@@ -28,8 +34,15 @@ def load_mcp_tools(
         names: Specific config names to load (None = all enabled)
         configs: Optional injected configs from wrapper TOML loader
         prefix_tools: Whether to prefix tool names when multiple servers
-            are loaded to avoid collisions (default: True).
-            NOTE: Currently not implemented - collisions possible with multiple servers.
+            are loaded to avoid collisions (default: True). When more than
+            one server is loaded, each server's tools are namespaced as
+            ``<server_name>_<tool_name>`` (e.g. ``filesystem_read_file``).
+            Single-server loads keep bare tool names for backward
+            compatibility.
+
+    Raises:
+        ValueError: If two loaded configs share the same (sanitized) server
+            name, which would produce ambiguous namespaced tool names.
     
     Returns:
         List of MCP client instances ready for agent use
@@ -68,25 +81,43 @@ def load_mcp_tools(
         else:
             target_configs = manager.get_enabled_configs()
     
-    for config in target_configs:
-        if not config.enabled:
-            continue
-            
+    enabled_configs = [c for c in target_configs if c and c.enabled]
+
+    # Detect residual collisions: two servers whose sanitized names are
+    # identical would produce ambiguous namespaced tool names. Fail loudly
+    # instead of silently shadowing (the very bug this loader guards against).
+    if prefix_tools and len(enabled_configs) > 1:
+        seen: dict = {}
+        for config in enabled_configs:
+            sanitized = _sanitize_server_name(config.name)
+            if sanitized in seen and seen[sanitized] != config.name:
+                raise ValueError(
+                    f"MCP server name collision: '{config.name}' and "
+                    f"'{seen[sanitized]}' both map to prefix '{sanitized}'. "
+                    "Use distinct server names to keep tool namespacing unambiguous."
+                )
+            seen[sanitized] = config.name
+
+    multiple_servers = len(enabled_configs) > 1
+
+    for config in enabled_configs:
         # Convert config to MCP instance
         mcp = config.to_mcp_instance()
         if mcp:
-            # Apply tool filtering if configured (B3)
-            # TODO: Wire include/exclude filters when B3 is implemented
-            
-            # Apply tool prefix if multiple servers (B4)
-            if prefix_tools and len(target_configs) > 1:
-                # Sanitize server name for use as prefix
-                server_name = config.name.replace('-', '_').replace(' ', '_')
-                # TODO: Tool name prefixing not yet implemented
-                # Need to modify tool names in MCP instance to avoid collisions
-                # e.g., "read_file" -> "filesystem_read_file"
-                pass
-            
+            # Apply include/exclude tool filtering if configured (B3).
+            # Filters may be declared on the config (forward-compatible via
+            # getattr so older MCPConfig objects without these fields work).
+            allowed = getattr(config, "allowed_tools", None) or getattr(config, "include_tools", None)
+            disabled = getattr(config, "disabled_tools", None) or getattr(config, "exclude_tools", None)
+            if allowed or disabled:
+                mcp.allowed_tools = allowed
+                mcp.disabled_tools = disabled
+                mcp._tools = mcp._apply_tool_filters(mcp._tools)
+
+            # Apply tool prefix if multiple servers (B4) to avoid collisions.
+            if prefix_tools and multiple_servers:
+                mcp.with_tool_prefix(config.name)
+
             mcp_clients.append(mcp)
-    
+
     return mcp_clients
