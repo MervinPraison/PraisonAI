@@ -33,6 +33,44 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
+def _direct_prompt_needs_wrapper(
+    target: Optional[str],
+    *,
+    agent: Optional[str],
+    command: Optional[str],
+    output_mode: Optional[str],
+) -> bool:
+    """True when a text prompt run uses wrapper-only handle_direct_prompt path."""
+    if agent or command or not target or _is_yaml_file(target):
+        return False
+    return output_mode not in ("actions", "json", "stream", "stream-json")
+
+
+def _require_wrapper_for_default_run(
+    target: Optional[str],
+    *,
+    agent: Optional[str],
+    command: Optional[str],
+    output_mode: Optional[str],
+) -> None:
+    """Fail fast with install hint before credential/setup checks."""
+    if not _direct_prompt_needs_wrapper(
+        target, agent=agent, command=command, output_mode=output_mode
+    ):
+        return
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if wrapper_available():
+        return
+    output = get_output_controller()
+    output.print_error(
+        "Default run mode requires the praisonai wrapper. "
+        "Install with: pip install praisonai\n"
+        "Standalone alternative: praisonai run --output actions \"your prompt\""
+    )
+    raise typer.Exit(1)
+
+
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
     """Parse permission flags into a config dict.
     
@@ -543,6 +581,10 @@ def run_main(
     except ValueError as exc:
         output.print_error(str(exc))
         raise typer.Exit(1)
+
+    _require_wrapper_for_default_run(
+        target, agent=agent, command=command, output_mode=output_mode
+    )
 
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
@@ -1091,7 +1133,6 @@ def _run_prompt(
                 )
             
             # Add session support to Agent if needed
-            from ..utils.project import build_cli_memory_config, apply_cli_session_continuity
             memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
@@ -1189,16 +1230,6 @@ def _run_prompt(
         
         praison.args = args
 
-        from praisonai_code._wrapper_bridge import wrapper_available
-
-        if not wrapper_available():
-            output.print_error(
-                "Default run mode requires the praisonai wrapper. "
-                "Install with: pip install praisonai\n"
-                "Standalone alternative: praisonai run --output actions \"your prompt\""
-            )
-            raise typer.Exit(1)
-        
         result = praison.handle_direct_prompt(prompt)
         
         _record_session_usage(session_id or auto_save_name, model, output)
