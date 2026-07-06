@@ -45,8 +45,8 @@ def test_project_session_store():
     store = project_sessions.get_project_session_store()
     
     print("✅ Session store created")
-    print(f"   Project ID: {getattr(store, 'project_id', 'n/a')}")
-    print(f"   Project Name: {getattr(store, 'project_name', 'n/a')}")
+    print(f"   Project ID: {store.project_id}")
+    print(f"   Project Name: {store.project_name}")
     print(f"   Session Dir: {store.session_dir}")
     
     # Test adding messages
@@ -71,11 +71,7 @@ def test_project_session_store():
         print(f"   ID: {session.get('session_id')}, Messages: {session.get('message_count')}")
     
     # Test getting last session
-    if hasattr(store, "get_last_session_id"):
-        last_session_id = store.get_last_session_id()
-    else:
-        sessions = store.list_sessions(limit=1)
-        last_session_id = sessions[0].get("session_id") if sessions else None
+    last_session_id = store.get_last_session_id()
     print(f"✅ Last session ID: {last_session_id}")
     
     # Cleanup
