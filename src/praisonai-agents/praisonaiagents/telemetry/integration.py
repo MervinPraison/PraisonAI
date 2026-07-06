@@ -570,7 +570,7 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
     try:
         # Import the classes
         from ..agent.agent import Agent
-        from ..agents.agents import AgentManager
+        from ..agents.agents import Agents
         
         # Store original __init__ methods
         original_agent_init = Agent.__init__
