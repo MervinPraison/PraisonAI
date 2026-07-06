@@ -5,6 +5,7 @@ CLI backend string resolution in the wrapper layer, maintaining proper
 dependency direction per AGENTS.md.
 """
 
+import threading
 from typing import Union, Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:  # zero runtime cost — only for static analysis / IDEs
@@ -62,7 +63,7 @@ def _build_agent_class():
     return Agent
 
 
-_Agent = None
+_build_lock = threading.Lock()
 
 
 def __getattr__(name: str):
@@ -70,13 +71,19 @@ def __getattr__(name: str):
 
     This defers the eager ``praisonaiagents`` import (previously at module top)
     so that reaching ``praisonai.agent`` no longer pays ~420 ms up front. The
-    class is built and cached on first attribute access.
+    class is built once, under a lock, and written back into the module's
+    ``__dict__`` so subsequent accesses resolve directly (bypassing
+    ``__getattr__``) and every caller observes the *same* class object — keeping
+    ``isinstance`` / ``type(...) is Agent`` checks consistent across threads.
     """
-    global _Agent
     if name == "Agent":
-        if _Agent is None:
-            _Agent = _build_agent_class()
-        return _Agent
+        with _build_lock:
+            # Double-checked: another thread may have built it while we waited.
+            agent = globals().get("Agent")
+            if agent is None:
+                agent = _build_agent_class()
+                globals()["Agent"] = agent
+        return agent
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
