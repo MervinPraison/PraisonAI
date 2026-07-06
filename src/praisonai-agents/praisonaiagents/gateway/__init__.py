@@ -94,6 +94,12 @@ from .protocols import (
     # Out-of-process platform-connector relay (Issue #2485)
     CapabilityDescriptor,
     RelayTransport,
+    # Gateway pipeline span-tracing seam (Issue #2716)
+    GATEWAY_TRACE_STAGES,
+    GatewayTraceHook,
+    NullGatewayTraceHook,
+    NULL_GATEWAY_TRACE_HOOK,
+    resolve_trace_hook,
 )
 from .hooks import (
     HookAction,
@@ -247,6 +253,12 @@ __all__ = [
     # Out-of-process platform-connector relay (Issue #2485)
     "CapabilityDescriptor",
     "RelayTransport",
+    # Gateway pipeline span-tracing seam (Issue #2716)
+    "GATEWAY_TRACE_STAGES",
+    "GatewayTraceHook",
+    "NullGatewayTraceHook",
+    "NULL_GATEWAY_TRACE_HOOK",
+    "resolve_trace_hook",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
