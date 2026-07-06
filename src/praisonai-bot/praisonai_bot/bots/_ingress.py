@@ -242,12 +242,19 @@ class InboundJournal:
             except sqlite3.IntegrityError:
                 # Duplicate message_id — return key only if still unprocessed
                 conn.rollback()
-                return self._key_for_existing_locked(
+                key, quarantined = self._key_for_existing_locked(
                     conn, platform, account, channel_id, message_id
                 )
             except Exception:
                 conn.rollback() 
                 raise
+
+        # Route a poison entry quarantined on the redelivery path to the DLQ
+        # outside the journal lock, mirroring replay(). Done here so operators
+        # relying on DLQ alerting still see entries quarantined by receive().
+        if quarantined is not None:
+            self._route_to_dlq(quarantined)
+        return key
     
     @contextmanager
     def claim(self, key: str):
@@ -327,41 +334,62 @@ class InboundJournal:
         account: str,
         channel_id: str,
         message_id: str,
-    ) -> Optional[str]:
-        """Return journal key for an uncompleted duplicate (caller holds lock)."""
+    ) -> tuple[Optional[str], Optional[JournalEntry]]:
+        """Return (key, quarantined_entry) for an uncompleted duplicate.
+
+        Caller holds the journal lock. ``key`` is the journal key when the
+        entry may be (re)processed, else ``None``. ``quarantined_entry`` is a
+        :class:`JournalEntry` when this call transitioned an exhausted poison
+        message to ``quarantined`` and it should be routed to the DLQ *outside*
+        the lock; otherwise ``None``.
+        """
         row = conn.execute(
             """
-            SELECT id, status, claimed_at, attempts FROM ingress_journal
+            SELECT id, ts, platform, account, channel_id, message_id,
+                   payload, status, claimed_at, completed_at, attempts
+            FROM ingress_journal
             WHERE platform = ? AND account = ? AND channel_id = ? AND message_id = ?
             """,
             (platform, account, channel_id, message_id),
         ).fetchone()
         if not row:
-            return None
+            return None, None
 
-        entry_id, status, claimed_at, attempts = row
+        entry = JournalEntry(*row)
+        entry_id, status, claimed_at, attempts = (
+            entry.id, entry.status, entry.claimed_at, entry.attempts
+        )
         # Completed or already quarantined (poison) entries are never
         # reprocessed on redelivery.
         if status in ("completed", "quarantined"):
-            return None
+            return None, None
 
-        if status == "claimed" and claimed_at is not None:
-            if time.time() - claimed_at <= self.claim_timeout:
-                return None
-            # Stale claim: quarantine instead of re-offering if the entry has
-            # already exhausted its attempts, so a redelivered poison message
-            # cannot bypass the replay-path cap.
-            if attempts >= self.max_attempts:
-                conn.execute(
-                    """
-                    UPDATE ingress_journal
-                    SET status = 'quarantined', claimed_at = NULL
-                    WHERE id = ?
-                    """,
-                    (entry_id,),
-                )
-                conn.commit()
-                return None
+        # Exhausted-attempts guard applies to both stale 'claimed' entries
+        # (crash loop) and 'pending' entries (a handler that keeps raising,
+        # which _release_claim resets to 'pending'). Either way a redelivered
+        # poison message must not bypass the cap.
+        stale_claim = (
+            status == "claimed"
+            and claimed_at is not None
+            and time.time() - claimed_at > self.claim_timeout
+        )
+        if status == "claimed" and not stale_claim:
+            # Active claim still within timeout — do not disturb it.
+            return None, None
+
+        if attempts >= self.max_attempts:
+            conn.execute(
+                """
+                UPDATE ingress_journal
+                SET status = 'quarantined', claimed_at = NULL
+                WHERE id = ?
+                """,
+                (entry_id,),
+            )
+            conn.commit()
+            return None, entry
+
+        if stale_claim:
             conn.execute(
                 """
                 UPDATE ingress_journal
@@ -372,7 +400,7 @@ class InboundJournal:
             )
             conn.commit()
 
-        return self._make_key(platform, account, channel_id, message_id, entry_id)
+        return self._make_key(platform, account, channel_id, message_id, entry_id), None
 
     def _key_for_existing(
         self,
@@ -383,52 +411,64 @@ class InboundJournal:
     ) -> Optional[str]:
         """Return journal key for an uncompleted duplicate, else None if done/in-flight."""
         with self._lock, self._connect() as conn:
-            return self._key_for_existing_locked(
+            key, quarantined = self._key_for_existing_locked(
                 conn, platform, account, channel_id, message_id
             )
+        if quarantined is not None:
+            self._route_to_dlq(quarantined)
+        return key
     
     # ── Maintenance ─────────────────────────────────────────────────
     def _evict_expired_locked(self, conn: sqlite3.Connection) -> int:
-        """Remove completed entries older than ttl_seconds."""
+        """Remove completed or quarantined entries older than ttl_seconds.
+
+        Quarantined (poison) entries are inert — they are never replayed — so
+        they must also age out under the TTL, otherwise a stream of distinct
+        poison messages accumulates forever and eventually crowds out healthy
+        traffic. They have no ``completed_at`` so we key their TTL on ``ts``.
+        """
         cutoff = time.time() - self.ttl_seconds
         cur = conn.execute("""
-            DELETE FROM ingress_journal 
-            WHERE status = 'completed' AND completed_at <= ?
-        """, (cutoff,))
+            DELETE FROM ingress_journal
+            WHERE (status = 'completed' AND completed_at <= ?)
+               OR (status = 'quarantined' AND ts <= ?)
+        """, (cutoff, cutoff))
         return int(cur.rowcount or 0)
     
     def _evict_overflow_locked(self, conn: sqlite3.Connection) -> int:
-        """Remove oldest entries if over max_size. Prefers completed, then oldest pending."""
+        """Remove oldest entries if over max_size.
+
+        Eviction cascade prefers inert rows so healthy in-flight work is shed
+        last: completed → quarantined → oldest pending. Including quarantined
+        ahead of pending prevents accumulated poison messages from crowding
+        out real traffic once the journal fills up.
+        """
         n = conn.execute("SELECT COUNT(*) FROM ingress_journal").fetchone()[0]
         if n <= self.max_size:
             return 0
             
         excess = n - self.max_size
-        
-        # First try to delete completed entries
-        completed_cur = conn.execute("""
-            DELETE FROM ingress_journal WHERE id IN (
-                SELECT id FROM ingress_journal 
-                WHERE status = 'completed'
-                ORDER BY completed_at ASC 
-                LIMIT ?
-            )
-        """, (excess,))
-        deleted = int(completed_cur.rowcount or 0)
-        
-        # If we still have excess after deleting completed entries, delete oldest pending
-        remaining_excess = excess - deleted
-        if remaining_excess > 0:
-            pending_cur = conn.execute("""
+        deleted = 0
+
+        # Cascade through inert-then-active statuses, oldest first.
+        for status, order_col in (
+            ("completed", "completed_at"),
+            ("quarantined", "ts"),
+            ("pending", "ts"),
+        ):
+            remaining = excess - deleted
+            if remaining <= 0:
+                break
+            cur = conn.execute(f"""
                 DELETE FROM ingress_journal WHERE id IN (
-                    SELECT id FROM ingress_journal 
-                    WHERE status = 'pending'
-                    ORDER BY ts ASC 
+                    SELECT id FROM ingress_journal
+                    WHERE status = '{status}'
+                    ORDER BY {order_col} ASC
                     LIMIT ?
                 )
-            """, (remaining_excess,))
-            deleted += int(pending_cur.rowcount or 0)
-            
+            """, (remaining,))
+            deleted += int(cur.rowcount or 0)
+
         return deleted
     
     def replay(self) -> int:
