@@ -1416,7 +1416,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-bot"
-version = "0.0.10"
+version = "0.0.11"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1498,7 +1498,7 @@ provides-extras = ["gateway", "bot", "bot-whatsapp-web", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.129"
+version = "1.6.130"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
