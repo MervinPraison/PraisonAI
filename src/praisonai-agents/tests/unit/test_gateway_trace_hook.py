@@ -6,7 +6,7 @@ helper, matching the shape of the sibling gateway policy protocols
 (send / idle / drain / concurrency / rate-limit).
 """
 
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 
@@ -83,9 +83,7 @@ def test_custom_hook_scope_wraps_stage():
         def stage(self, name, *, correlation_id=None, **attrs):
             return self._span(name, correlation_id, attrs)
 
-        from contextlib import contextmanager as _cm
-
-        @_cm
+        @contextmanager
         def _span(self, name, correlation_id, attrs):
             events.append(("start", name, correlation_id))
             try:

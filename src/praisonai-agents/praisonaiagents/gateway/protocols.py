@@ -3243,10 +3243,11 @@ class GatewayTraceHook(Protocol):
 class NullGatewayTraceHook:
     """Zero-cost no-op :class:`GatewayTraceHook` used when tracing is disabled.
 
-    Every stage returns the same cached, argument-ignoring null context
-    manager, so firing the seam adds no allocation and no overhead on the hot
-    path. This is the default a gateway uses until an exporter plugin (e.g. the
-    OTel/OTLP plugin in ``praisonai-plugins``) is supplied.
+    Every stage call returns a lightweight, argument-ignoring null context
+    manager (one small allocation per call), so firing the seam adds negligible
+    overhead on the hot path. This is the default a gateway uses until an
+    exporter plugin (e.g. the OTel/OTLP plugin in ``praisonai-plugins``) is
+    supplied.
     """
 
     @staticmethod
