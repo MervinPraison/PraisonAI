@@ -2416,6 +2416,11 @@ Your Goal: {self.goal}"""
                         reason = getattr(cancel_token, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
 
+                    # G2 - thread cancel token into the LLM tool loop so /stop halts
+                    # mid-flight runs between tool iterations on every provider
+                    if cancel_token is not None:
+                        llm_kwargs['cancel_token'] = cancel_token
+
                     response_text = self.llm_instance.get_response(**llm_kwargs)
 
                     self._add_to_chat_history("assistant", response_text)
@@ -2901,7 +2906,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
                         reason = getattr(_cancel, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
-                    
+
+                    # G2 - thread cancel token into the LLM tool loop so /stop halts
+                    # mid-flight runs between tool iterations on every provider
+                    if _cancel is not None:
+                        llm_kwargs['cancel_token'] = _cancel
+
                     response_text = await self.llm_instance.get_response_async(**llm_kwargs)
 
                     # LLM call succeeded - now it's safe to commit any compacted history
