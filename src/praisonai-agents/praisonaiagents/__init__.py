@@ -524,6 +524,9 @@ _LAZY_IMPORTS = {
     'BotConfig': ('praisonaiagents.bots.config', 'BotConfig'),
     'BotOSProtocol': ('praisonaiagents.bots.protocols', 'BotOSProtocol'),
     'BotOSConfig': ('praisonaiagents.bots.config', 'BotOSConfig'),
+    'PlatformCapabilities': ('praisonaiagents.bots.protocols', 'PlatformCapabilities'),
+    'BasePlatformAdapter': ('praisonaiagents.bots.base', 'BasePlatformAdapter'),
+    'SendResult': ('praisonaiagents.bots.base', 'SendResult'),
     
     # Sandbox protocols and config (implementations in praisonai wrapper)
     'SandboxProtocol': ('praisonaiagents.sandbox.protocols', 'SandboxProtocol'),

@@ -30,6 +30,10 @@ from .protocols import (
     PlatformCapabilities,
     WebhookVerifierProtocol,
 )
+from .base import (
+    BasePlatformAdapter,
+    SendResult,
+)
 from .presentation import (
     MessagePresentation,
     PresentationBlock,
@@ -107,6 +111,8 @@ __all__ = [
     "adapt_presentation",
     "PlatformCapabilities",
     "WebhookVerifierProtocol",
+    "BasePlatformAdapter",
+    "SendResult",
     "InteractiveContext",
     "InteractiveRegistry",
     "InteractiveHandler",
