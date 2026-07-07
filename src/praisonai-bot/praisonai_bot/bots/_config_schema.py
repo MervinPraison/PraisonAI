@@ -146,6 +146,11 @@ class StreamingConfigSchema(BaseModel):
     min_delta: int = 120  # Minimum character delta before edit
     placeholder_text: str = "🤔 Thinking..."
     progress_prefix: str = "🤔 "
+    # Progress rendering style: "line" (single overwritten tool line) or
+    # "feed" (bounded multi-line rolling status feed). Applies to progress mode.
+    progress_style: str = "line"
+    progress_max_lines: int = 8  # Max trailing lines shown in feed style
+    progress_max_line_chars: int = 120  # Per-line char cap in feed style
     # Flood-control / resilience for progressive edits
     disable_progressive_edits_after: int = 3  # Consecutive edit failures before giving up
     flood_backoff_factor: float = 2.0  # Multiply interval on each flood/429
@@ -174,6 +179,16 @@ class StreamingConfigSchema(BaseModel):
     def validate_min_delta(cls, v: int) -> int:
         if v < 1:
             raise ValueError("min_delta must be at least 1 character")
+        return v
+
+    @field_validator("progress_style")
+    @classmethod
+    def validate_progress_style(cls, v: str) -> str:
+        allowed = {"line", "feed"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid progress_style '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
         return v
 
 
