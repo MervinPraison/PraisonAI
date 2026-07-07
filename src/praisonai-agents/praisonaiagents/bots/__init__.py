@@ -61,6 +61,12 @@ from .agent_reply import (
     extract_presentation,
 )
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
+from .silence import (
+    SILENT_REPLY_TOKEN,
+    is_intentional_silence_response,
+    BotLoopPolicy,
+    BotLoopGuard,
+)
 
 __all__ = [
     "BotProtocol",
@@ -109,4 +115,8 @@ __all__ = [
     "REPLY_NAMESPACE",
     "AgentReply",
     "extract_presentation",
+    "SILENT_REPLY_TOKEN",
+    "is_intentional_silence_response",
+    "BotLoopPolicy",
+    "BotLoopGuard",
 ]
