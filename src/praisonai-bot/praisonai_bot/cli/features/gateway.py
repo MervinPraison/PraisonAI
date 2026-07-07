@@ -117,6 +117,8 @@ class GatewayHandler:
         queue_depth: Optional[int] = None,
         overflow_policy: Optional[str] = None,
         reliability: Optional[str] = None,
+        openai_api: Optional[bool] = None,
+        mcp: Optional[bool] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -200,6 +202,11 @@ class GatewayHandler:
             # CLI --reliability preset overrides gateway.reliability in YAML (#2531)
             if reliability is not None:
                 self._gateway._reliability_override = reliability
+            # CLI --openai-api / --mcp override gateway.api.* in YAML (#2715)
+            if openai_api is not None:
+                self._gateway._openai_api_override = openai_api
+            if mcp is not None:
+                self._gateway._mcp_override = mcp
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
@@ -227,7 +234,9 @@ class GatewayHandler:
 
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
-        self._gateway = WebSocketGateway(config=config)
+        self._gateway = WebSocketGateway(
+            config=config, openai_api=openai_api, mcp=mcp
+        )
         # Resolved graceful-drain window for this no-config run. Defaults to the
         # explicit ``--drain-timeout`` (``None`` → gateway default) and is
         # replaced below by the ``--reliability`` preset's drain when a preset

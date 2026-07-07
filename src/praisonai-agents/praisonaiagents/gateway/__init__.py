@@ -111,6 +111,7 @@ from .hooks import (
 from .config import (
     GatewayConfig,
     SessionConfig,
+    ApiConfig,
     ChannelRouteConfig,
     MultiChannelGatewayConfig,
     # Push config
@@ -268,6 +269,7 @@ __all__ = [
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
+    "ApiConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
     "PushConfig",

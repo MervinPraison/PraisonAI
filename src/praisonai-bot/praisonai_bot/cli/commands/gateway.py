@@ -25,6 +25,17 @@ def gateway_start(
         "--preflight/--no-preflight",
         help="Validate channel credentials before starting (fail fast on bad tokens)",
     ),
+    openai_api: bool = typer.Option(
+        False,
+        "--openai-api",
+        help="Serve OpenAI-compatible endpoints (/v1/chat/completions, "
+        "/v1/responses, /v1/models) backed by the gateway's live agents",
+    ),
+    mcp: bool = typer.Option(
+        False,
+        "--mcp",
+        help="Serve an MCP JSON-RPC endpoint (/mcp) exposing the gateway's agents",
+    ),
 ):
     """Start the gateway server.
 
@@ -33,6 +44,7 @@ def gateway_start(
         praisonai gateway start --config gateway.yaml
         praisonai gateway start --agents agents.yaml --port 9000
         praisonai gateway start --config gateway.yaml --no-preflight
+        praisonai gateway start --config gateway.yaml --openai-api --mcp
         GATEWAY_PORT=9000 praisonai gateway start
     """
     import os
@@ -66,7 +78,16 @@ def gateway_start(
                 raise typer.Exit(1)
 
     handler = GatewayHandler()
-    handler.start(host=host, port=port, agent_file=agents, config_file=config)
+    # Pass True only when the flag is set so an unset flag does not override a
+    # YAML ``gateway.api.*`` value (None = "fall back to config").
+    handler.start(
+        host=host,
+        port=port,
+        agent_file=agents,
+        config_file=config,
+        openai_api=True if openai_api else None,
+        mcp=True if mcp else None,
+    )
 
 
 @app.command("stop")
