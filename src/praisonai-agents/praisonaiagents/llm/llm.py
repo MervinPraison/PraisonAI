@@ -417,6 +417,10 @@ Respond with ONLY a valid JSON tool call in this format:
         self._claude_memory_tool = None  # Lazy initialized
         self._console = None  # Lazy load console when needed
         self.max_iter = max_iter or 20  # Default to 20 to match ExecutionConfig default
+        # Structured stop reason for the last tool-execution loop:
+        # "completed" | "max_steps" | "error". Lets callers distinguish a finished
+        # task from one truncated by the step budget (see ExecutionConfig.max_steps).
+        self._last_stop_reason = "completed"
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -2318,6 +2322,9 @@ Now provide your final answer using this result. Summarize the information natur
             response_text = ""  # Initialize to prevent UnboundLocalError on API errors
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
+            # Structured stop reason so callers can distinguish completion from
+            # truncation (unified with the OpenAI-native path). "completed" default.
+            self._last_stop_reason = "completed"
 
             while iteration_count < max_iterations:
                 try:
@@ -2495,6 +2502,7 @@ Now provide your final answer using this result. Summarize the information natur
 
                             # Safety: break after max_iter iterations
                             if iteration_count >= self.max_iter:
+                                self._last_stop_reason = "max_steps"
                                 final_response_text = self._finalise_on_limit(
                                     messages, response_text, temperature=temperature,
                                     **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
@@ -3180,7 +3188,9 @@ Now provide your final answer using this result. Summarize the information natur
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
                             logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            self._last_stop_reason = "max_steps"
+                            if not (final_response_text and final_response_text.strip()):
+                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
                             break
                         elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
                             # Limit the batch to stay within the total limit
@@ -3320,6 +3330,7 @@ Now provide your final answer using this result. Summarize the information natur
                         
                         # Safety check: prevent infinite loops for any provider
                         if iteration_count >= self.max_iter:
+                            self._last_stop_reason = "max_steps"
                             final_response_text = self._finalise_on_limit(
                                 messages, response_text, temperature=temperature,
                                 **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
@@ -4150,6 +4161,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
+            # Structured stop reason (unified with the OpenAI-native path).
+            self._last_stop_reason = "completed"
 
             while iteration_count < max_iterations:
                 response_text = ""
@@ -4223,7 +4236,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
                             logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            self._last_stop_reason = "max_steps"
+                            if not (final_response_text and final_response_text.strip()):
+                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
                             break
                         elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
                             # Limit the batch to stay within the total limit
@@ -4260,6 +4275,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             })
 
                         if iteration_count >= self.max_iter:
+                            self._last_stop_reason = "max_steps"
                             final_response_text = await self._finalise_on_limit_async(
                                 messages, response_text, temperature=temperature,
                                 **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
@@ -4452,7 +4468,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Allow execution if we haven't reached the limit yet, but limit the batch size
                     if tool_call_count >= max_tool_calls_per_turn:
                         logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                        final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        self._last_stop_reason = "max_steps"
+                        if not (final_response_text and final_response_text.strip()):
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
                         break
                     elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
                         # Limit the batch to stay within the total limit
@@ -4672,6 +4690,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count >= self.max_iter:
+                        self._last_stop_reason = "max_steps"
                         final_response_text = await self._finalise_on_limit_async(
                             messages, response_text, temperature=temperature,
                             **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}

@@ -17,6 +17,15 @@ from pydantic import BaseModel
 from dataclasses import dataclass
 import inspect
 
+# Graceful "wrap-up" instruction injected when the step budget is nearly
+# exhausted, so the model produces a coherent final answer instead of being
+# hard-cut. Shared by both tool-execution loops for consistent behaviour.
+_MAX_STEPS_WRAPUP_PROMPT = (
+    "You are approaching the maximum number of tool-use steps for this task. "
+    "Stop calling tools now and provide your best final answer, summarising the "
+    "work completed so far and clearly noting anything left incomplete."
+)
+
 # Lazy imports for optional dependencies
 _openai_module = None
 _rich_console = None
@@ -1498,11 +1507,24 @@ class OpenAIClient:
         
         # Continue tool execution loop until no more tool calls are needed
         iteration_count = 0
+        # Structured stop reason so callers can distinguish completion from
+        # truncation (unified with the LiteLLM path). "completed" by default.
+        self._last_stop_reason = "completed"
+        _wrapup_injected = False
         
         while iteration_count < max_iterations:
             # Trigger LLM callback for status/trace output
             from ..main import execute_sync_callback
             execute_sync_callback('llm_start', model=model, agent_name=None)
+
+            # Graceful wrap-up: on the final permitted step, ask the model to
+            # produce a coherent final answer instead of being hard-cut.
+            if not _wrapup_injected and max_iterations > 1 and iteration_count == max_iterations - 1:
+                messages.append({
+                    "role": "user",
+                    "content": _MAX_STEPS_WRAPUP_PROMPT,
+                })
+                _wrapup_injected = True
             
             if stream:
                 # Process as streaming response with formatted tools
@@ -1697,6 +1719,10 @@ class OpenAIClient:
                 # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
+                # If we've exhausted the budget while the model still wants tools,
+                # the task was truncated rather than completed.
+                if iteration_count >= max_iterations:
+                    self._last_stop_reason = "max_steps"
             else:
                 # No tool calls, we're done
                 break
@@ -1749,8 +1775,19 @@ class OpenAIClient:
         
         # Continue tool execution loop until no more tool calls are needed
         iteration_count = 0
+        # Structured stop reason (unified with the sync/LiteLLM paths).
+        self._last_stop_reason = "completed"
+        _wrapup_injected = False
         
         while iteration_count < max_iterations:
+            # Graceful wrap-up on the final permitted step.
+            if not _wrapup_injected and max_iterations > 1 and iteration_count == max_iterations - 1:
+                messages.append({
+                    "role": "user",
+                    "content": _MAX_STEPS_WRAPUP_PROMPT,
+                })
+                _wrapup_injected = True
+
             if stream:
                 # Process as streaming response with formatted tools
                 final_response = await self.process_stream_response_async(
@@ -1923,6 +1960,8 @@ class OpenAIClient:
                 # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
+                if iteration_count >= max_iterations:
+                    self._last_stop_reason = "max_steps"
             else:
                 # No tool calls, we're done
                 break
