@@ -95,6 +95,21 @@ assert('verdict after head accepted', mg.findMergeGateVerdict(
   '2026-06-12T09:00:00Z'
 ) === 'APPROVE');
 
+const fallbackApprove = [
+  {
+    body: 'MERGE_GATE_VERDICT: APPROVE\n\nAutomated fallback — Claude assess did not post a verdict comment.',
+    created_at: '2026-06-12T10:00:00Z',
+  },
+];
+assert(
+  'automated fallback APPROVE ignored when Opus required',
+  mg.findMergeGateVerdict(fallbackApprove, null, '2026-06-12T09:00:00Z', { excludeAutomatedFallback: true }) === null
+);
+assert(
+  'automated fallback APPROVE still visible without Opus-only filter',
+  mg.findMergeGateVerdict(fallbackApprove, null, '2026-06-12T09:00:00Z') === 'APPROVE'
+);
+
 const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
 assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
 

@@ -262,7 +262,6 @@ jobs:
 
       - name: Claude merge gate assessment (read-only)
         id: assess
-        continue-on-error: true
         uses: ./.github/actions/claude-code-action
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -309,8 +308,9 @@ jobs:
             Read
           timeout_minutes: 15
 
-      - name: Post fallback verdict if Claude did not comment
+      - name: Post fallback BLOCK if Opus did not comment
         id: fallback_verdict
+        if: steps.assess.outcome != 'success'
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -322,24 +322,24 @@ jobs:
 
             const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
             const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-            const existing = mergeGate.findMergeGateVerdict(ctx.comments, minCreatedAt, ctx.headPushedAt);
+            const existing = mergeGate.findMergeGateVerdict(
+              ctx.comments, minCreatedAt, ctx.headPushedAt, { excludeAutomatedFallback: true }
+            );
             if (existing) {
-              core.info(`Verdict already posted: ${existing}`);
-              core.setOutput('verdict', existing);
+              core.info(`Opus verdict already posted: ${existing}`);
               return;
             }
 
             const check = await mergeGate.evaluatePipelineQuiescent(
               github, owner, repo, prNumber, core, { forMergeStep: true }
             );
-            const verdict = check.ready ? 'APPROVE' : 'BLOCK';
             const lines = [
-              `MERGE_GATE_VERDICT: ${verdict}`,
+              'MERGE_GATE_VERDICT: BLOCK',
               '',
-              'Automated fallback — Claude assess did not post a verdict comment (e.g. GitHub MCP unavailable).',
+              'Automated fallback — Opus merge gate assessment did not complete.',
             ];
             if (check.ready) {
-              lines.push('All deterministic merge gates passed.');
+              lines.push('Deterministic gates passed, but Opus MERGE_GATE_VERDICT is required before merge.');
             } else {
               lines.push('Blockers:', ...check.reasons.map((r) => `- ${r}`));
             }
@@ -347,11 +347,9 @@ jobs:
               owner, repo, issue_number: prNumber,
               body: lines.join('\n'),
             });
-            core.info(`Posted fallback verdict: ${verdict}`);
-            core.setOutput('verdict', verdict);
+            core.info('Posted fallback BLOCK — Opus verdict required');
 
-      - name: Verify verdict posted
-        id: verdict
+      - name: Require Opus MERGE_GATE_VERDICT
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -364,9 +362,17 @@ jobs:
               github, context.repo.owner, context.repo.repo, ${{ matrix.pr_number }}
             );
             const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-            const verdict = mergeGate.findMergeGateVerdict(comments, minCreatedAt, ctx.headPushedAt);
-            core.setOutput('verdict', verdict || 'NONE');
-            if (!verdict) core.warning('No recent MERGE_GATE_VERDICT comment found after assessment');
+            const verdict = mergeGate.findMergeGateVerdict(
+              comments, minCreatedAt, ctx.headPushedAt, { excludeAutomatedFallback: true }
+            );
+            if (!verdict) {
+              core.setFailed(
+                'Opus merge gate assessment must post MERGE_GATE_VERDICT on this PR (automated fallback APPROVE is not accepted).'
+              );
+              return;
+            }
+            core.info(`Opus merge gate verdict: ${verdict}`);
+            core.setOutput('verdict', verdict);
 
       - name: Remove merge gate active label
         if: always()
@@ -447,7 +453,9 @@ jobs:
               const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
               const comments = ctx.comments;
               const verdictMin = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-              const verdict = mergeGate.findMergeGateVerdict(comments, verdictMin, ctx.headPushedAt);
+              const verdict = mergeGate.findMergeGateVerdict(
+                comments, verdictMin, ctx.headPushedAt, { excludeAutomatedFallback: true }
+              );
               if (verdict !== 'APPROVE') {
                 core.info(`Skip merge: verdict=${verdict || 'NONE'}`);
                 await removeLabels();
