@@ -30,6 +30,7 @@ class SuiteExecutor:
         timeout: int = 60,
         fail_fast: bool = False,
         stream_output: bool = True,
+        dry_run: bool = False,
         max_items: Optional[int] = None,
         require_env: Optional[List[str]] = None,
         env_overrides: Optional[dict] = None,
@@ -50,6 +51,7 @@ class SuiteExecutor:
             timeout: Per-item timeout in seconds.
             fail_fast: Stop on first failure.
             stream_output: Stream output to terminal.
+            dry_run: Detect runnable items without executing them.
             max_items: Maximum items to process.
             require_env: Global required env vars.
             env_overrides: Environment variable overrides.
@@ -66,6 +68,7 @@ class SuiteExecutor:
         self.timeout = timeout
         self.fail_fast = fail_fast
         self.stream_output = stream_output
+        self.dry_run = dry_run
         self.max_items = max_items
         self.require_env = require_env or []
         self.env_overrides = env_overrides or {}
@@ -176,7 +179,27 @@ class SuiteExecutor:
                     if on_item_end:
                         on_item_end(result, idx, total)
                     continue
-            
+            if self.dry_run:
+                result = RunResult(
+                    item_id=item.item_id,
+                    suite=item.suite,
+                    group=item.group,
+                    source_path=item.source_path,
+                    block_index=item.block_index,
+                    language=item.language,
+                    line_start=item.line_start,
+                    line_end=item.line_end,
+                    runnable_decision=item.runnable_decision,
+                    status="not_run",
+                    skip_reason="Dry run",
+                    code_hash=item.code_hash,
+                )
+                results.append(result)
+
+                if on_item_end:
+                    on_item_end(result, idx, total)
+
+                continue
             # Execute
             result = runner.run(
                 item,
