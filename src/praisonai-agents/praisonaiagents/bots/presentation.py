@@ -513,6 +513,33 @@ class PresentationLimits:
             supports_web_apps=False,
         )
 
+    @staticmethod
+    def whatsapp() -> "PresentationLimits":
+        """Get WhatsApp Cloud API-specific limits.
+
+        WhatsApp interactive messages support two native shapes:
+
+        * *reply buttons* — at most 3 buttons, each label capped at 20 chars.
+        * *list messages* — a single "menu" whose rows map naturally to select
+          options (up to 10 rows), each row title capped at 24 chars.
+
+        ``supports_select`` is True because a native list message renders a
+        ``select`` block directly, and the WhatsApp renderer promotes button
+        overflow (>3) into a list message as well. WhatsApp has no markdown and
+        no web-app buttons, so those degrade via ``adapt_presentation``.
+        """
+        return PresentationLimits(
+            max_buttons=10,  # list-message row cap; ≤3 render as reply buttons
+            max_button_rows=1,
+            max_button_label=24,  # list-row title hard cap; renderer caps reply buttons at 20
+            max_options=10,  # list-message rows
+            max_option_label=24,  # list-row title hard cap
+            max_text_length=4096,
+            supports_markdown=False,
+            supports_select=True,
+            supports_web_apps=False,
+        )
+
 
 def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> PresentationButton:
     """Return a copy of a button adapted to the given limits.
