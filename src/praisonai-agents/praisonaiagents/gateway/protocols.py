@@ -3287,3 +3287,256 @@ def resolve_trace_hook(
         :data:`NULL_GATEWAY_TRACE_HOOK`.
     """
     return hook if hook is not None else NULL_GATEWAY_TRACE_HOOK
+
+
+# ---------------------------------------------------------------------------
+# Gateway self-lifecycle command guardrail (Issue #2753)
+#
+# A running gateway is a long-lived process that hosts an agent which can act on
+# the same host — it can call a shell tool or author a scheduled job. Nothing
+# inspects the *content* of an agent-issued command to stop it from targeting
+# the gateway's own lifecycle: ``praisonai gateway stop``, ``pkill -f
+# 'praisonai gateway'``, or ``systemctl --user stop`` the gateway unit would
+# take the process itself down (self-DoS), and under an external supervisor can
+# become a respawn flap. Approval gating does not help — it decides *whether*
+# an agent may run a tool, not *whether a specific command is self-destructive*.
+#
+# This is the pure, import-free decision seam for a default-deny lifecycle
+# guardrail, symmetric with the other gateway policy protocols above
+# (``SendPolicy``, ``ScaleToZeroPolicy``, ``DrainMarkerPolicy``, …). The wrapper
+# consults it *before* a shell/CLI tool executes and *before* a scheduled job
+# is registered; a denied command returns a clean, model-readable reason rather
+# than running. Matching is command-anchored (structural token inspection, not
+# prose) so ordinary English mentioning "stop the gateway" is never tripped,
+# and it scans the command string (and any resolved script text). It is
+# on-by-default and opt-outable via ``enabled=False``.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LifecycleCommandDecision:
+    """Closed decision shape for a self-lifecycle command evaluation.
+
+    Attributes:
+        allow: Whether the command may run (``True``) or is refused
+            (``False``) because it targets this gateway's own lifecycle.
+        reason: Model-readable explanation, populated on denial so the caller
+            can surface *why* the command was blocked.
+        matched: The specific command fragment that triggered the deny (for
+            logging / the blocked-attempt audit line); empty when allowed.
+    """
+
+    allow: bool
+    reason: str = ""
+    matched: str = ""
+
+
+@runtime_checkable
+class LifecycleCommandPolicyProtocol(Protocol):
+    """Protocol for guarding an agent from stopping its own gateway.
+
+    Pure, import-free decision contract consulted by the wrapper *before* a
+    shell/CLI tool executes and *before* a scheduled job is registered. The
+    wrapper supplies the resolved command string (and, when a script file is
+    involved, its text); the policy returns a :class:`LifecycleCommandDecision`
+    that either allows the command or refuses it because its effect is to
+    stop / restart / reload / kill *this* gateway process. Concrete pattern
+    sets are swappable (a plugin may supply a richer one); this contract keeps
+    the *decision* testable in isolation, symmetric with
+    :class:`SendPolicyProtocol` / :class:`GatewayConcurrencyPolicyProtocol`.
+
+    A config-driven default (:class:`LifecycleCommandGuardPolicy`) is provided
+    for the common ``praisonai gateway stop`` / ``pkill … gateway`` /
+    ``systemctl stop <unit>`` case.
+    """
+
+    def evaluate(
+        self,
+        command: str,
+        *,
+        agent_id: str = "",
+    ) -> LifecycleCommandDecision:
+        """Return a :class:`LifecycleCommandDecision` for ``command``."""
+        ...
+
+
+class LifecycleCommandGuardPolicy:
+    """Config-driven, command-anchored guard against gateway self-lifecycle hits.
+
+    The default referenced by ``gateway.lifecycle_guard`` blocks in
+    ``gateway.yaml`` and the ``BotOS(..., lifecycle_policy=...)`` Python
+    surface. It is intentionally minimal and dependency-free so the decision
+    lives in core and is provable in isolation; the wrapper owns the consult
+    points (shell-tool executor, scheduler job registration) and the audit log.
+
+    Matching is *structural*, not prose-based, to avoid false positives on
+    ordinary English (e.g. "please stop the gateway from spamming"):
+
+    * ``praisonai gateway stop|restart|reload`` — the CLI self-control verbs,
+      matched only when ``praisonai`` and ``gateway`` appear as adjacent
+      command tokens followed by a lifecycle verb.
+    * ``pkill`` / ``kill`` / ``killall`` naming the gateway (``praisonai`` /
+      ``gateway`` in the argument list, or a ``-f`` pattern mentioning it).
+    * ``systemctl`` / ``launchctl`` / ``sc`` ``stop`` / ``restart`` / ``kill``
+      on a unit whose name mentions the gateway.
+
+    The scan is applied to every ``;``/``&&``/``||``/pipe-separated segment of
+    the command *and* to any additional script text supplied, so a command that
+    shells out to a wrapper script cannot smuggle the intent past the guard.
+
+    ``default_allow`` is a fail posture: on any internal parsing error the guard
+    keeps today's behaviour (allow) unless ``default_allow=False`` is set for a
+    strict, fail-closed deployment. ``enabled=False`` disables the guard
+    entirely (an operator who legitimately wants an agent to manage the
+    process).
+
+    Example::
+
+        LifecycleCommandGuardPolicy()                    # on by default
+        LifecycleCommandGuardPolicy(enabled=False)       # opt out
+        LifecycleCommandGuardPolicy(process_names=["praisonai", "mybot"])
+    """
+
+    _CLI_VERBS = frozenset({"stop", "restart", "reload", "kill", "down"})
+    _SERVICE_MGRS = frozenset({"systemctl", "launchctl", "service", "sc"})
+    _SERVICE_VERBS = frozenset(
+        {"stop", "restart", "reload", "kill", "disable", "down"}
+    )
+    _KILL_CMDS = frozenset({"pkill", "kill", "killall", "kill9", "kill-9"})
+    _SEGMENT_SPLIT = ("&&", "||", "|", ";", "\n")
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        process_names: Optional[List[str]] = None,
+        default_allow: bool = True,
+    ):
+        self.enabled = bool(enabled)
+        names = process_names if process_names else ["praisonai", "gateway"]
+        # Lower-cased, de-duplicated identity tokens that name *this* gateway.
+        self.process_names = [str(n).strip().lower() for n in names if str(n).strip()]
+        self.default_allow = bool(default_allow)
+
+    def _mentions_self(self, text: str) -> bool:
+        """Whether ``text`` names this gateway process/unit."""
+        return any(name in text for name in self.process_names)
+
+    @staticmethod
+    def _tokenize(segment: str) -> List[str]:
+        """Best-effort shell tokenization; falls back to whitespace split."""
+        import shlex
+
+        try:
+            return shlex.split(segment)
+        except ValueError:
+            return segment.split()
+
+    def _segment_targets_self(self, segment: str) -> str:
+        """Return the offending fragment if ``segment`` hits our lifecycle.
+
+        Returns an empty string when the segment is benign.
+        """
+        lowered = segment.lower()
+        tokens = [t.lower() for t in self._tokenize(segment)]
+        if not tokens:
+            return ""
+        # Drop common leading privilege/env prefixes so the real command verb
+        # (e.g. ``sudo praisonai gateway stop``) is inspected structurally.
+        idx = 0
+        while idx < len(tokens) and tokens[idx] in ("sudo", "env", "nohup", "exec"):
+            idx += 1
+        head = tokens[idx:]
+        if not head:
+            return ""
+
+        cmd = head[0]
+        # Normalise a path-qualified executable (``/usr/bin/pkill``) to its base.
+        base = cmd.rsplit("/", 1)[-1]
+
+        # 1) praisonai gateway <verb>
+        if "praisonai" in head and "gateway" in head:
+            gi = head.index("gateway")
+            after = head[gi + 1 :]
+            if any(v in self._CLI_VERBS for v in after):
+                return segment.strip()
+
+        # 2) kill / pkill / killall naming the gateway
+        if base in self._KILL_CMDS:
+            args = head[1:]
+            # -f/-fl pattern match, or an explicit process-name argument.
+            if self._mentions_self(" ".join(args)):
+                return segment.strip()
+
+        # 3) service manager stop/restart on our unit
+        if base in self._SERVICE_MGRS:
+            args = head[1:]
+            if any(v in self._SERVICE_VERBS for v in args) and self._mentions_self(
+                lowered
+            ):
+                return segment.strip()
+
+        return ""
+
+    def evaluate(
+        self,
+        command: str,
+        *,
+        agent_id: str = "",
+    ) -> LifecycleCommandDecision:
+        """Return a :class:`LifecycleCommandDecision` for ``command``.
+
+        Args:
+            command: The resolved command / scheduled-job command string (may
+                also carry appended script text — every segment is scanned).
+            agent_id: Optional agent identity (accepted for parity with the
+                other policy protocols; unused by the default guard).
+
+        Returns:
+            An *allow* decision when the command is benign, or a *deny*
+            decision naming the offending fragment when it would stop / restart
+            / kill this gateway.
+        """
+        if not self.enabled:
+            return LifecycleCommandDecision(allow=True)
+        if not isinstance(command, str) or not command.strip():
+            return LifecycleCommandDecision(allow=True)
+
+        try:
+            segments: List[str] = [command]
+            for sep in self._SEGMENT_SPLIT:
+                expanded: List[str] = []
+                for seg in segments:
+                    expanded.extend(seg.split(sep))
+                segments = expanded
+
+            for seg in segments:
+                offending = self._segment_targets_self(seg)
+                if offending:
+                    return LifecycleCommandDecision(
+                        allow=False,
+                        reason=(
+                            "Refusing: command would stop/restart/kill this "
+                            "gateway process (self-lifecycle guard)"
+                        ),
+                        matched=offending,
+                    )
+        except Exception:
+            # Parsing must never crash the caller: honour the configured fail
+            # posture (fail-open by default, fail-closed when default_allow is
+            # False for a strict, hosted gateway).
+            if not self.default_allow:
+                return LifecycleCommandDecision(
+                    allow=False,
+                    reason=(
+                        "Refusing: could not prove command is safe for this "
+                        "gateway (self-lifecycle guard, fail-closed)"
+                    ),
+                    matched=command.strip(),
+                )
+            return LifecycleCommandDecision(allow=True)
+
+        return LifecycleCommandDecision(allow=True)
+
+
+# Backward-compatible alias following the repo's ``*Protocol`` convention.
+LifecycleCommandPolicy = LifecycleCommandPolicyProtocol
