@@ -14,10 +14,40 @@ This approach follows the protocol-driven core principle by moving heavy impleme
 out of the core Memory class while preserving backward compatibility.
 """
 
+import logging
 import os
 import threading
 from typing import Any, Dict, List, Optional
 from ..protocols import MemoryProtocol
+
+logger = logging.getLogger(__name__)
+
+
+def safe_mem0_search(mem0_client, **kwargs) -> List[Dict[str, Any]]:
+    """
+    Defensive wrapper for mem0.search() to handle MongoDB vector store compatibility.
+
+    Catches the specific TypeError about an unexpected 'vectors' kwarg and falls back
+    gracefully by returning an empty result set. This addresses the upstream mem0 bug:
+    https://github.com/mem0ai/mem0/issues/3185
+
+    Any other TypeError is re-raised unchanged.
+    """
+    try:
+        return mem0_client.search(**kwargs)
+    except TypeError as e:
+        error_msg = str(e).lower()
+        if "unexpected keyword argument" in error_msg and "vectors" in error_msg:
+            logger.warning(
+                "Detected mem0 MongoDB vector store compatibility issue. "
+                "This is a known upstream bug: https://github.com/mem0ai/mem0/issues/3185. "
+                "The MongoDB vector store requires Atlas and has signature mismatches. "
+                "Consider using Qdrant or Chroma as mem0 vector store backends instead."
+            )
+            # Return empty results rather than crashing
+            return []
+        # Re-raise if it's a different TypeError
+        raise
 
 
 def create_mem0_memory_adapter(**kwargs) -> MemoryProtocol:
@@ -199,15 +229,8 @@ class Mem0MemoryAdapter:
         """Search mem0 for relevant memories."""
         search_params = {"query": query, "limit": limit}
         search_params.update(kwargs)
-        
-        try:
-            return self.mem0_client.search(**search_params)
-        except TypeError as e:
-            # Handle known mem0 MongoDB compatibility issue
-            if "unexpected keyword argument" in str(e).lower() and "vectors" in str(e).lower():
-                # Return empty results rather than crashing
-                return []
-            raise
+
+        return safe_mem0_search(self.mem0_client, **search_params)
     
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from mem0."""
