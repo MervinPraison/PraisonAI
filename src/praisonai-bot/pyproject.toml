@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-bot"
-version = "0.0.17"
+version = "0.0.18"
 description = "Bots, gateway, and channel CLI for PraisonAI — messaging platforms and WebSocket control plane extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
