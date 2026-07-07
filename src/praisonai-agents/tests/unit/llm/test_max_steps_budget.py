@@ -26,11 +26,13 @@ def test_max_steps_defaults_to_none_and_falls_back_to_max_iter():
     assert cfg.resolved_max_tool_calls() == cfg.max_tool_calls_per_turn == 10
 
 
-def test_max_steps_when_set_governs_both_budgets():
+def test_max_steps_governs_outer_loop_but_not_per_turn_tool_calls():
     cfg = ExecutionConfig(max_steps=50)
     assert cfg.resolved_max_steps() == 50
-    # The single knob also drives the per-turn tool-call guardrail.
-    assert cfg.resolved_max_tool_calls() == 50
+    # max_steps bounds outer-loop iterations only; the per-turn parallel
+    # tool-call guardrail stays independent so a single parallel-tool response
+    # can't silently exhaust the whole step budget.
+    assert cfg.resolved_max_tool_calls() == cfg.max_tool_calls_per_turn == 10
 
 
 def test_max_steps_validation_rejects_non_positive():
@@ -60,7 +62,8 @@ def test_agent_resolves_max_steps_for_both_loops():
     )
     # chat_mixin resolvers used by the OpenAI-native loop
     assert agent._resolve_max_steps() == 33
-    assert agent._resolve_max_tool_calls() == 33
+    # per-turn guardrail stays independent of max_steps (defaults to 10)
+    assert agent._resolve_max_tool_calls() == 10
     # LiteLLM loop reads the same budget via LLM.max_iter (set from resolved_max_steps)
     assert agent.max_iter == 33
 
@@ -161,6 +164,33 @@ def test_openai_loop_sets_max_steps_when_budget_exhausted(monkeypatch):
 
     assert client._last_stop_reason == "max_steps"
     assert injected["wrapup"] is True
+    # The graceful wrap-up control message must NOT leak into the caller's
+    # conversation history (it would poison subsequent turns).
+    assert all(
+        m.get("content") != oc._MAX_STEPS_WRAPUP_PROMPT for m in messages
+    ), "wrap-up prompt leaked into caller's messages list"
+    assert messages == [{"role": "user", "content": "do a big task"}]
+
+
+def test_agent_last_stop_reason_reports_max_steps_via_openai_client():
+    """agent.last_stop_reason surfaces the OpenAI-native backend's truncation."""
+    agent = Agent(name="coder", instructions="Be helpful")
+
+    class _StubClient:
+        _last_stop_reason = "max_steps"
+
+    # Populate the raw (name-mangled) attribute the property reads from,
+    # without triggering the lazy OpenAI client creation.
+    agent._Agent__openai_client = _StubClient()
+    assert agent.last_stop_reason == "max_steps"
+
+
+def test_agent_last_stop_reason_does_not_create_openai_client():
+    """Reading last_stop_reason must not lazily instantiate the OpenAI client."""
+    agent = Agent(name="coder", instructions="Be helpful")
+    assert agent._Agent__openai_client is None
+    _ = agent.last_stop_reason
+    assert agent._Agent__openai_client is None
 
 
 def test_openai_loop_completed_when_no_tool_calls(monkeypatch):

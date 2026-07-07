@@ -1502,6 +1502,11 @@ class OpenAIClient:
         """
         start_time = time.time()
         
+        # Work on a local copy so the tool-loop mutations (assistant/tool
+        # turns and the graceful wrap-up control message) never leak back into
+        # the caller's conversation history and pollute subsequent turns.
+        messages = list(messages)
+        
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
@@ -1769,6 +1774,11 @@ class OpenAIClient:
             Final ChatCompletion response or None if error
         """
         start_time = time.time()
+        
+        # Work on a local copy so the tool-loop mutations (assistant/tool
+        # turns and the graceful wrap-up control message) never leak back into
+        # the caller's conversation history and pollute subsequent turns.
+        messages = list(messages)
         
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)

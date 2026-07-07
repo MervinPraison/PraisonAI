@@ -53,7 +53,7 @@ class ChatMixin:
         return default
 
     def _resolve_max_tool_calls(self, default: int = 10) -> int:
-        """Resolve the per-turn tool-call budget, unified with ``max_steps``."""
+        """Resolve the per-turn tool-call guardrail (independent of ``max_steps``)."""
         execution = getattr(self, "execution", None)
         if execution is not None:
             resolver = getattr(execution, "resolved_max_tool_calls", None)

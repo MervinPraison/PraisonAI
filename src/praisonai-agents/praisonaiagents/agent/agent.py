@@ -2798,8 +2798,14 @@ Summary:"""
         instead of parsing a magic string. Reads from whichever backend
         (OpenAI-native or LiteLLM) executed the last turn.
         """
+        # Read from the already-instantiated backends only. ``__openai_client``
+        # is the raw (name-mangled) attribute, never the lazy ``_openai_client``
+        # property, so this never triggers OpenAI client creation for
+        # LiteLLM-only agents.
         for backend in (getattr(self, 'llm_instance', None),
-                        self.__openai_client):
+                        getattr(self, '_Agent__openai_client', None)):
+            if backend is None:
+                continue
             reason = getattr(backend, '_last_stop_reason', None)
             if reason:
                 return reason

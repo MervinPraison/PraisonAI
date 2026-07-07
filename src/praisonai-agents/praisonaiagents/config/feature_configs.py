@@ -863,14 +863,14 @@ class ExecutionConfig:
         return self.max_iter
 
     def resolved_max_tool_calls(self) -> int:
-        """Per-turn tool-call budget, unified with max_steps when set.
+        """Per-turn tool-call guardrail (max parallel tool calls in one response).
 
-        When max_steps is provided it also governs the tool-call guardrail so a
-        single knob controls both loops; otherwise the standalone
-        max_tool_calls_per_turn default is preserved (backward compatible).
+        This is intentionally *independent* of ``max_steps``: ``max_steps``
+        bounds outer-loop iterations (one LLM round-trip each), whereas this
+        caps how many tool calls may fire within a single LLM response. Coupling
+        them would let a single parallel-tool response exhaust the step budget
+        (e.g. ``max_steps=5`` truncating after one round of 5 parallel calls).
         """
-        if self.max_steps is not None:
-            return self.max_steps
         return self.max_tool_calls_per_turn
 
     def to_dict(self) -> Dict[str, Any]:
