@@ -66,10 +66,11 @@ def _get_hooks_module():
     if _hooks_module is None:
         with _lazy_import_lock:
             if _hooks_module is None:
-                from ..hooks import HookRunner, HookRegistry
+                from ..hooks import HookRunner, HookRegistry, get_default_registry
                 _hooks_module = {
                     'HookRunner': HookRunner,
                     'HookRegistry': HookRegistry,
+                    'get_default_registry': get_default_registry,
                 }
     return _hooks_module
 
@@ -237,8 +238,14 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         """Lazy-loaded HookRunner for event-based hooks (zero overhead when not used)."""
         if self.__hook_runner is None:
             hooks_mod = _get_hooks_module()
+            # Default to the global registry so plugins bridged via
+            # PluginManager.wire_into_hook_registry() are actually fired.
+            if isinstance(self._hooks_registry_param, hooks_mod['HookRegistry']):
+                registry = self._hooks_registry_param
+            else:
+                registry = hooks_mod['get_default_registry']()
             self.__hook_runner = hooks_mod['HookRunner'](
-                registry=self._hooks_registry_param if isinstance(self._hooks_registry_param, hooks_mod['HookRegistry']) else None,
+                registry=registry,
                 cwd=os.getcwd()
             )
         return self.__hook_runner

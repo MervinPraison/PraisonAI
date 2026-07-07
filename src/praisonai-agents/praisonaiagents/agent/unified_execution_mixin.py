@@ -211,8 +211,8 @@ class UnifiedExecutionMixin:
             
             # Update prompt if modified by hooks
             for res in hook_results:
-                if res.output and res.output.modified_data and "prompt" in res.output.modified_data:
-                    prompt = res.output.modified_data["prompt"]
+                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
+                    prompt = res.output.modified_input["prompt"]
                     llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
 
             # Reset the final display flag for each new conversation

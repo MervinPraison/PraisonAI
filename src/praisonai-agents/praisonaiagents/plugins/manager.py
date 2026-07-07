@@ -12,9 +12,13 @@ from praisonaiagents._logging import get_logger
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin
+
+if TYPE_CHECKING:
+    from ..hooks.registry import HookRegistry
+    from ..hooks.types import HookEvent
 
 logger = get_logger(__name__)
 
@@ -109,9 +113,18 @@ class PluginManager:
         return False
     
     def disable(self, name: str) -> bool:
-        """Disable a plugin."""
+        """Disable a plugin.
+
+        Also removes any hooks the plugin previously wired into the runtime
+        hook registry, so disabling actually stops its lifecycle methods from
+        firing during subsequent agent execution.
+        """
         if name in self._enabled:
             self._enabled[name] = False
+            try:
+                self.unwire_from_hook_registry(name)
+            except Exception as e:
+                logger.debug(f"Failed to unwire plugin '{name}': {e}")
             return True
         return False
     
@@ -437,96 +450,256 @@ class PluginManager:
     
     def discover_entry_points(self) -> int:
         """
-        Discover plugins registered via pip entry_points.
-        
-        Looks for entry_points in the "praisonaiagents.plugins" group.
-        Compatible with Python 3.8+ using importlib.metadata backport.
-        
-        Returns:
-            Number of plugins loaded
-        """
-        # Lazy import to reduce startup time
-        def _get_entry_points():
-            try:
-                from importlib.metadata import entry_points as _ep
-                return _ep
-            except ImportError:
-                logger.warning("importlib.metadata not available - cannot discover entry_points plugins")
-                return None
-        
-        get_ep = _get_entry_points()
-        if get_ep is None:
-            return 0
-            
-        try:
-            # Python 3.10+ style - try group= first
-            eps = get_ep(group="praisonaiagents.plugins")
-        except TypeError:
-            # Python 3.9 fallback - call then get group
-            try:
-                all_eps = get_ep()
-                eps = all_eps.get("praisonaiagents.plugins", [])
-            except Exception:
-                eps = []
-
-        loaded = 0
-        # Use lock to ensure thread-safe discovery of multiple entry points
-        with self._lock:
-            for ep in eps:
-                try:
-                    plugin_class = ep.load()
-                    plugin = plugin_class()
-                    # register() also acquires lock but that's fine (RLock allows re-entry)
-                    if self.register(plugin):
-                        loaded += 1
-                        logger.info(f"Loaded entry_point plugin: {ep.name}")
-                except Exception as e:
-                    logger.error(f"Failed to load entry_point plugin {ep.name}: {e}")
-        
-        return loaded
-
-    # =========================================================================
-    # Entry Point Discovery Support (External Packages)
-    # =========================================================================
-
-    def discover_entry_points(self) -> int:
-        """
         Auto-discover and load protocol-driven plugins installed via pip
-        that register in the 'praisonai.plugins' entry-point group.
-        
+        that register in the ``praisonai.plugins`` entry-point group.
+
+        This is the group declared by the ``praisonai-plugins`` package.
+        Compatible with Python 3.8+ using importlib.metadata.
+
         Returns:
             Number of plugins loaded successfully.
         """
-        loaded = 0
         try:
-            import importlib.metadata
-            # Python 3.10+
-            entry_points = importlib.metadata.entry_points(group="praisonai.plugins")
+            import importlib.metadata as _md
         except ImportError:
             logger.debug("importlib.metadata not available. Cannot discover plugins.")
             return 0
+
+        try:
+            # Python 3.10+ style - selectable entry points
+            entry_points = _md.entry_points(group="praisonai.plugins")
         except TypeError:
-            # Python 3.8/3.9 fallback
+            # Python 3.8/3.9 fallback - dict-like interface
             try:
-                entry_points = importlib.metadata.entry_points().get("praisonai.plugins", [])
+                entry_points = _md.entry_points().get("praisonai.plugins", [])
             except Exception as e:
                 logger.error(f"Failed to get entry points: {e}")
                 return 0
-                
-        for ep in entry_points:
-            try:
-                plugin_cls = ep.load()
-                # Duck-type check or inheritance check isn't strictly necessary if it conforms to Plugin interface at runtime
-                if callable(plugin_cls):
-                    plugin = plugin_cls()
-                    if self.register(plugin):
-                        loaded += 1
-                else:
-                    logger.warning(f"Entry point {ep.name} is not callable")
-            except Exception as e:
-                logger.error(f"Failed to load plugin from entry point {ep.name}: {e}")
-                
+
+        loaded = 0
+        # Use lock to ensure thread-safe discovery of multiple entry points.
+        # register() also acquires the lock but that's fine (RLock allows re-entry).
+        with self._lock:
+            for ep in entry_points:
+                try:
+                    plugin_cls = ep.load()
+                    if callable(plugin_cls):
+                        plugin = plugin_cls()
+                        if self.register(plugin):
+                            loaded += 1
+                            logger.info(f"Loaded entry_point plugin: {ep.name}")
+                    else:
+                        logger.warning(f"Entry point {ep.name} is not callable")
+                except Exception as e:
+                    logger.error(f"Failed to load plugin from entry point {ep.name}: {e}")
+
         return loaded
+
+    # =========================================================================
+    # Hook Registry Bridge (connect discovered plugins to the runtime engine)
+    # =========================================================================
+
+    def wire_into_hook_registry(self, registry: Optional["HookRegistry"] = None) -> int:
+        """
+        Bridge enabled plugins into the runtime hook engine.
+
+        Each enabled ``Plugin``'s lifecycle methods are adapted into
+        ``HookDefinition``s and registered on the hook registry that the
+        Agent's ``HookRunner`` actually consults. Without this bridge, plugins
+        discovered via entry points are registered but never fired during real
+        agent/bot execution.
+
+        Args:
+            registry: Target hook registry. Defaults to the global default
+                registry (the one the Agent runtime uses).
+
+        Returns:
+            Number of hook definitions registered.
+        """
+        from ..hooks.registry import get_default_registry
+
+        registry = registry if registry is not None else get_default_registry()
+
+        count = 0
+        with self._lock:
+            for name, plugin in self._plugins.items():
+                if not self._enabled.get(name, False):
+                    continue
+                if getattr(plugin, "_wired_into_registry", None) is registry:
+                    # Avoid double-registration on repeated enable() calls
+                    continue
+                hook_ids: List[str] = []
+                for event, func in _adapt_plugin_hooks(plugin):
+                    hook_id = registry.register_function(
+                        event=event,
+                        func=func,
+                        name=f"{name}:{event.value}",
+                    )
+                    hook_ids.append(hook_id)
+                    count += 1
+                try:
+                    plugin._wired_into_registry = registry
+                    plugin._wired_hook_ids = hook_ids
+                except Exception:
+                    pass
+        return count
+
+    def unwire_from_hook_registry(self, name: str) -> int:
+        """
+        Remove a plugin's previously wired hooks from its hook registry.
+
+        Complements :meth:`wire_into_hook_registry` so that ``disable()`` on a
+        plugin that was already bridged actually stops its lifecycle methods
+        from firing during subsequent agent execution.
+
+        Args:
+            name: The plugin name to unwire.
+
+        Returns:
+            Number of hook definitions removed.
+        """
+        with self._lock:
+            plugin = self._plugins.get(name)
+            if plugin is None:
+                return 0
+            registry = getattr(plugin, "_wired_into_registry", None)
+            if registry is None:
+                return 0
+            removed = 0
+            for hook_id in getattr(plugin, "_wired_hook_ids", []) or []:
+                if registry.unregister(hook_id):
+                    removed += 1
+            try:
+                plugin._wired_into_registry = None
+                plugin._wired_hook_ids = []
+            except Exception:
+                pass
+            return removed
+
+def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]]:
+    """
+    Adapt a plugin's overridden lifecycle methods into hook functions.
+
+    Yields ``(HookEvent, func)`` pairs where ``func`` takes a ``HookInput`` and
+    returns a ``HookResult``. Only methods the plugin actually overrides (or
+    declares in ``PluginInfo.hooks``) are adapted, so plugins that implement a
+    single guardrail don't get spuriously invoked for every event.
+
+    Mutations are applied in place on the ``HookInput`` payload where the core
+    runtime reads them back (e.g. ``before_llm_input.messages`` in chat_mixin),
+    matching the existing BEFORE_LLM contract.
+    """
+    from ..hooks.types import HookEvent, HookResult
+
+    base = Plugin
+
+    def _overrides(method_name: str) -> bool:
+        # Declared in PluginInfo.hooks OR overridden on the concrete class
+        try:
+            declared = getattr(plugin.info, "hooks", None) or []
+            declared_values = {h.value if hasattr(h, "value") else h for h in declared}
+            if method_name in declared_values:
+                return True
+        except Exception:
+            pass
+        own = getattr(type(plugin), method_name, None)
+        parent = getattr(base, method_name, None)
+        return own is not None and own is not parent
+
+    def _permission_result(value: Optional[bool], reason: str) -> HookResult:
+        if value is True:
+            return HookResult.allow(reason)
+        if value is False:
+            return HookResult.deny(reason)
+        return HookResult.allow()
+
+    if _overrides("before_agent"):
+        def before_agent_hook(data, _p=plugin):
+            new_prompt = _p.before_agent(getattr(data, "prompt", ""),
+                                         {"agent_name": getattr(data, "agent_name", None)})
+            if isinstance(new_prompt, str) and hasattr(data, "prompt"):
+                data.prompt = new_prompt
+            return HookResult.allow()
+        yield HookEvent.BEFORE_AGENT, before_agent_hook
+
+    if _overrides("after_agent"):
+        def after_agent_hook(data, _p=plugin):
+            new_resp = _p.after_agent(getattr(data, "response", ""),
+                                      {"agent_name": getattr(data, "agent_name", None)})
+            if isinstance(new_resp, str) and hasattr(data, "response"):
+                data.response = new_resp
+            return HookResult.allow()
+        yield HookEvent.AFTER_AGENT, after_agent_hook
+
+    if _overrides("before_llm"):
+        def before_llm_hook(data, _p=plugin):
+            messages = getattr(data, "messages", [])
+            result = _p.before_llm(messages, {"model": getattr(data, "model", "")})
+            if isinstance(result, tuple) and result and isinstance(result[0], list):
+                if hasattr(data, "messages"):
+                    data.messages[:] = result[0]
+            return HookResult.allow()
+        yield HookEvent.BEFORE_LLM, before_llm_hook
+
+    if _overrides("after_llm"):
+        def after_llm_hook(data, _p=plugin):
+            new_resp = _p.after_llm(getattr(data, "response", ""),
+                                    {"tokens_used": getattr(data, "tokens_used", 0)})
+            if isinstance(new_resp, str) and hasattr(data, "response"):
+                data.response = new_resp
+            return HookResult.allow()
+        yield HookEvent.AFTER_LLM, after_llm_hook
+
+    if _overrides("before_tool"):
+        def before_tool_hook(data, _p=plugin):
+            args = getattr(data, "tool_input", {}) or {}
+            new_args = _p.before_tool(getattr(data, "tool_name", ""), args)
+            if isinstance(new_args, dict) and isinstance(getattr(data, "tool_input", None), dict):
+                data.tool_input.clear()
+                data.tool_input.update(new_args)
+            return HookResult.allow()
+        yield HookEvent.BEFORE_TOOL, before_tool_hook
+
+    if _overrides("after_tool"):
+        def after_tool_hook(data, _p=plugin):
+            _p.after_tool(getattr(data, "tool_name", ""), getattr(data, "tool_output", None))
+            return HookResult.allow()
+        yield HookEvent.AFTER_TOOL, after_tool_hook
+
+    if _overrides("before_tool_definitions"):
+        def before_tool_definitions_hook(data, _p=plugin):
+            defs = getattr(data, "tool_definitions", []) or []
+            new_defs = _p.before_tool_definitions(defs)
+            if isinstance(new_defs, list) and isinstance(getattr(data, "tool_definitions", None), list):
+                data.tool_definitions[:] = new_defs
+            return HookResult.allow()
+        yield HookEvent.BEFORE_TOOL_DEFINITIONS, before_tool_definitions_hook
+
+    if _overrides("before_message"):
+        def before_message_hook(data, _p=plugin):
+            content = getattr(data, "content", "")
+            new = _p.before_message({"content": content})
+            if isinstance(new, dict) and "content" in new and hasattr(data, "content"):
+                data.content = new["content"]
+            return HookResult.allow()
+        yield HookEvent.MESSAGE_RECEIVED, before_message_hook
+
+    if _overrides("after_message"):
+        def after_message_hook(data, _p=plugin):
+            content = getattr(data, "content", "")
+            new = _p.after_message({"content": content})
+            if isinstance(new, dict) and "content" in new and hasattr(data, "content"):
+                data.content = new["content"]
+            return HookResult.allow()
+        yield HookEvent.MESSAGE_SENDING, after_message_hook
+
+    if _overrides("on_permission_ask"):
+        def on_permission_ask_hook(data, _p=plugin):
+            target = getattr(data, "tool_name", "") or getattr(data, "target", "")
+            reason = getattr(data, "reason", "") or "Permission requested"
+            return _permission_result(_p.on_permission_ask(target, reason), reason)
+        yield HookEvent.ON_PERMISSION_ASK, on_permission_ask_hook
+
 
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None

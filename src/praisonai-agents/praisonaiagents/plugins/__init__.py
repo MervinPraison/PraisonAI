@@ -138,6 +138,14 @@ def enable(plugins: list = None) -> None:
             manager.enable(plugin_info.get("name", ""))
     
     import logging
+    # Bridge enabled plugins into the runtime hook engine so their lifecycle
+    # methods actually fire during Agent/bot execution.
+    try:
+        wired = manager.wire_into_hook_registry()
+        logging.debug(f"Wired {wired} plugin hook(s) into the default registry")
+    except Exception as e:
+        logging.warning(f"Failed to wire plugins into hook registry: {e}")
+
     logging.debug(f"Plugins enabled: {plugins if plugins else 'all'}")
 
 
