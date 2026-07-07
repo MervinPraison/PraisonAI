@@ -308,14 +308,25 @@ async function getMergeState(github, owner, repo, prNumber) {
   };
 }
 
-async function allChecksGreenOnSha(github, owner, repo, sha, core) {
+async function listChecksOnSha(github, owner, repo, sha) {
   const { data } = await github.rest.checks.listForRef({
     owner,
     repo,
     ref: sha,
     per_page: 100,
   });
-  const runs = (data.check_runs || []).filter((r) => r.head_sha === sha);
+  return (data.check_runs || []).filter((r) => r.head_sha === sha);
+}
+
+function listFailedChecksOnSha(runs) {
+  return (runs || []).filter((run) => {
+    if (run.status !== 'completed') return false;
+    return run.conclusion === 'failure';
+  });
+}
+
+async function allChecksGreenOnSha(github, owner, repo, sha, core) {
+  const runs = await listChecksOnSha(github, owner, repo, sha);
   if (runs.length === 0) {
     core?.info?.(`No check runs on ${sha.slice(0, 7)} — allowing (e.g. docs-only PR)`);
     return true;
@@ -844,6 +855,8 @@ module.exports = {
   finalClaudeCompletedOnSha,
   getMergeState,
   OPTIONAL_CANCELLED_CHECKS,
+  listChecksOnSha,
+  listFailedChecksOnSha,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,
   claudeRunBlocksPr,
