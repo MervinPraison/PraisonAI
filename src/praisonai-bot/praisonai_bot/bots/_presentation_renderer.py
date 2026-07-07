@@ -524,8 +524,10 @@ class WhatsAppPresentationRenderer:
                 if block.options and select_block is None:
                     select_block = block
 
-        body = "\n\n".join(p for p in text_parts if p) or "\u200b"
-        body = body[:1024]  # WhatsApp interactive body cap
+        # Full body for text/list paths (WhatsApp allows up to 4096 chars for
+        # text and list-message bodies). Reply-button messages have a tighter
+        # 1024-char body cap, applied separately in that branch below.
+        body = ("\n\n".join(p for p in text_parts if p) or "\u200b")[:4096]
 
         # Link buttons (url actions) cannot be reply buttons; keep them as text
         # links appended to the body so the URL is still reachable.
@@ -558,15 +560,23 @@ class WhatsAppPresentationRenderer:
                 if option.description:
                     row["description"] = option.description[:72]
                 rows.append(row)
+            # A list message can only surface the select options as rows, so any
+            # non-URL tappable buttons that accompany the select would otherwise
+            # be dropped. Inline their labels into the body so they remain
+            # visible (URL buttons are already carried in the footer below).
+            list_body = body
+            if tappable:
+                tappable_lines = "\n".join(f"• {b.label}" for b in tappable)
+                list_body = (body + "\n\n" + tappable_lines)[:4096]
             interactive = {
                 "type": "list",
-                "body": {"text": body},
+                "body": {"text": list_body},
                 "action": {
                     "button": (select_block.placeholder or "Select")[:20],
                     "sections": [{"title": "Options", "rows": rows}],
                 },
             }
-            result: Dict[str, Any] = {"text": body, "interactive": interactive}
+            result: Dict[str, Any] = {"text": list_body, "interactive": interactive}
             if url_lines:
                 result["interactive"]["footer"] = {"text": "\n".join(url_lines)[:60]}
             return result
@@ -578,14 +588,16 @@ class WhatsAppPresentationRenderer:
                         "type": "reply",
                         "reply": {
                             "id": WhatsAppPresentationRenderer._button_id(b),
-                            "title": b.label[:20],
+                            "title": b.label[:20],  # reply-button title hard cap
                         },
                     }
                     for b in tappable
                 ]
                 interactive = {
                     "type": "button",
-                    "body": {"text": body},
+                    # Reply-button messages cap the body at 1024 chars (tighter
+                    # than the 4096 allowed for text/list bodies).
+                    "body": {"text": body[:1024]},
                     "action": {"buttons": reply_buttons},
                 }
             else:

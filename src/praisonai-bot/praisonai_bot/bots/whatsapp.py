@@ -933,51 +933,60 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             import aiohttp
         except ImportError:
             return None
+
+        from ._presentation_renderer import WhatsAppPresentationRenderer
+
+        # Rendering is pure/local: a failure here is a renderer bug, not a
+        # delivery failure, so keep it isolated and return None gracefully.
         try:
-            from ._presentation_renderer import WhatsAppPresentationRenderer
-
             rendered = WhatsAppPresentationRenderer.render(presentation)
-            interactive = rendered.get("interactive")
-            if not interactive:
-                # No native interactive content — send as plain text.
-                msg = await self.send_message(target, rendered.get("text") or "\u200b")
-                return msg.message_id or None
-
-            url = f"{GRAPH_API_BASE}/{self._phone_number_id}/messages"
-            headers = {
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": target,
-                "type": "interactive",
-                "interactive": interactive,
-            }
-
-            await self._rate_limiter.acquire(target)
-
-            async def _post() -> dict:
-                async with self._http_session.post(
-                    url, headers=headers, json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    result = await resp.json()
-                    if isinstance(result, dict) and "error" in result:
-                        raise RuntimeError(
-                            f"WhatsApp interactive send error: {result['error']}"
-                        )
-                    return result
-
-            result = await self.deliver_outbound(
-                _post,
-                channel_id=target,
-                reply_text=rendered.get("text") or "",
-            )
-            return result.get("messages", [{}])[0].get("id", "") or None
         except Exception as e:
             logger.error(f"Failed to render WhatsApp presentation: {e}")
             return None
+
+        interactive = rendered.get("interactive")
+        if not interactive:
+            # No native interactive content — send as plain text. send_message
+            # applies its own durable-delivery contract (propagating permanent
+            # failures) so we don't swallow delivery errors here.
+            msg = await self.send_message(target, rendered.get("text") or "\u200b")
+            return msg.message_id or None
+
+        url = f"{GRAPH_API_BASE}/{self._phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": target,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+
+        await self._rate_limiter.acquire(target)
+
+        async def _post() -> dict:
+            async with self._http_session.post(
+                url, headers=headers, json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                result = await resp.json()
+                if isinstance(result, dict) and "error" in result:
+                    raise RuntimeError(
+                        f"WhatsApp interactive send error: {result['error']}"
+                    )
+                return result
+
+        # Durable delivery: let permanent failures propagate (parity with
+        # send_message) so callers never treat an undelivered interactive
+        # message as successfully sent.
+        result = await self.deliver_outbound(
+            _post,
+            channel_id=target,
+            reply_text=rendered.get("text") or "",
+        )
+        return result.get("messages", [{}])[0].get("id", "") or None
 
     async def _cache_inbound_media(
         self, media_id: Optional[str], kind: str, filename: Optional[str] = None

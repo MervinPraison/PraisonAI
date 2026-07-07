@@ -25,7 +25,9 @@ def _approval_presentation():
 class TestWhatsAppLimits:
     def test_limits_exist(self):
         limits = PresentationLimits.whatsapp()
-        assert limits.max_button_label == 20
+        # 24 = list-row title budget; the renderer caps reply-button titles at
+        # the tighter 20-char limit when it emits reply buttons.
+        assert limits.max_button_label == 24
         assert limits.supports_select is True
         assert limits.supports_web_apps is False
 
@@ -108,6 +110,30 @@ class TestWhatsAppRenderer:
         assert interactive["type"] == "list"
         rows = interactive["action"]["sections"][0]["rows"]
         assert {r["id"] for r in rows} == {"free", "pro"}
+
+    def test_select_with_buttons_preserves_tappable_labels(self):
+        from praisonai_bot.bots._presentation_renderer import (
+            WhatsAppPresentationRenderer,
+        )
+
+        presentation = MessagePresentation(blocks=[
+            PresentationBlock.make_text("Pick a plan"),
+            PresentationBlock.make_select(
+                [SelectOption(label="Free", value="free")],
+                placeholder="Plans",
+            ),
+            PresentationBlock.make_buttons([
+                PresentationButton(
+                    label="Contact sales",
+                    action=PresentationAction(type=ActionType.CALLBACK, value="sales"),
+                ),
+            ]),
+        ])
+        rendered = WhatsAppPresentationRenderer.render(presentation)
+        assert rendered["interactive"]["type"] == "list"
+        # The tappable (non-URL) button must survive as readable text rather
+        # than being silently dropped by the list path.
+        assert "Contact sales" in rendered["interactive"]["body"]["text"]
 
     def test_url_button_inlined_not_dropped(self):
         from praisonai_bot.bots._presentation_renderer import (

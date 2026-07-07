@@ -531,7 +531,7 @@ class PresentationLimits:
         return PresentationLimits(
             max_buttons=10,  # list-message row cap; ≤3 render as reply buttons
             max_button_rows=1,
-            max_button_label=20,  # reply-button label hard cap
+            max_button_label=24,  # list-row title hard cap; renderer caps reply buttons at 20
             max_options=10,  # list-message rows
             max_option_label=24,  # list-row title hard cap
             max_text_length=4096,
