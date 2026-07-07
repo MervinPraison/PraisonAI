@@ -598,6 +598,33 @@ class DefaultSessionStore:
             self._cache[session_id] = session
         return session
 
+    def _atomic_write_json(self, filepath: str, data: Any) -> bool:
+        """Atomically write JSON data to disk (temp file + os.replace)."""
+        temp_path = None
+        try:
+            dir_path = os.path.dirname(filepath) or "."
+            os.makedirs(dir_path, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=dir_path,
+                delete=False,
+                suffix=".tmp",
+            ) as f:
+                temp_path = f.name
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            os.replace(temp_path, filepath)
+            return True
+        except (IOError, OSError, TypeError, ValueError) as e:
+            logger.error(f"Atomic write failed for {filepath}: {e}")
+            try:
+                if temp_path is not None:
+                    os.remove(temp_path)
+            except (IOError, OSError):
+                pass
+            return False
+
     def _modify_session_locked(
         self,
         session_id: str,
@@ -615,33 +642,14 @@ class DefaultSessionStore:
 
             self._enforce_window(session)
 
-            try:
-                dir_path = os.path.dirname(filepath) or "."
-                os.makedirs(dir_path, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=dir_path,
-                    delete=False,
-                    suffix=".tmp",
-                ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
-                    temp_path = f.name
-
-                os.replace(temp_path, filepath)
-
-                with self._lock:
-                    self._cache[session_id] = session
-
-                return True
-            except (IOError, OSError) as e:
-                logger.error(f"Failed to {error_label} {session_id}: {e}")
-                try:
-                    if "temp_path" in locals():
-                        os.remove(temp_path)
-                except (IOError, OSError):
-                    pass
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to {error_label} {session_id}")
                 return False
+
+            with self._lock:
+                self._cache[session_id] = session
+
+            return True
     
     def _save_session(self, session: SessionData) -> bool:
         """Save session to disk with atomic write."""
@@ -652,31 +660,10 @@ class DefaultSessionStore:
         self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
-            try:
-                # Atomic write: write to temp file, then rename
-                dir_path = os.path.dirname(filepath)
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=dir_path,
-                    delete=False,
-                    suffix=".tmp"
-                ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
-                    temp_path = f.name
-                
-                # Atomic rename
-                os.replace(temp_path, filepath)
-                return True
-            except (IOError, OSError) as e:
-                logger.error(f"Failed to save session {session.session_id}: {e}")
-                # Clean up temp file if it exists
-                try:
-                    if 'temp_path' in locals():
-                        os.remove(temp_path)
-                except (IOError, OSError):
-                    pass
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to save session {session.session_id}")
                 return False
+            return True
     
     def add_message(
         self,
@@ -727,34 +714,15 @@ class DefaultSessionStore:
             self._enforce_window(session)
             
             # Write atomically
-            try:
-                dir_path = os.path.dirname(filepath) or "."
-                os.makedirs(dir_path, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=dir_path,
-                    delete=False,
-                    suffix=".tmp"
-                ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
-                    temp_path = f.name
-                
-                os.replace(temp_path, filepath)
-                
-                # Update cache
-                with self._lock:
-                    self._cache[session_id] = session
-                
-                return True
-            except (IOError, OSError) as e:
-                logger.error(f"Failed to save session {session_id}: {e}")
-                try:
-                    if 'temp_path' in locals():
-                        os.remove(temp_path)
-                except (IOError, OSError):
-                    pass
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                logger.error(f"Failed to save session {session_id}")
                 return False
+
+            # Update cache
+            with self._lock:
+                self._cache[session_id] = session
+
+            return True
     
     def add_user_message(
         self,
