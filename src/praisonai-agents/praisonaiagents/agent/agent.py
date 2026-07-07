@@ -4402,10 +4402,13 @@ Summary:"""
                 verbose=1 if self.verbose else 0
             )
             
-            # Log discovered rules
+            # Log discovered rules; drop the manager when no rules exist so
+            # zero-config workspaces incur no per-run overhead.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
                 logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+            else:
+                self._rules_manager = None
         except ImportError:
             logging.debug("RulesManager not available")
             self._rules_manager = None

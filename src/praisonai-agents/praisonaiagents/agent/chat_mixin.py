@@ -56,12 +56,6 @@ class ChatMixin:
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
         
-        # Add rules context if rules manager is enabled (lazy initialization)
-        if self._rules_manager_initialized and self._rules_manager:
-            rules_context = self.get_rules_context()
-            if rules_context:
-                system_prompt += f"\n\n## Rules (Guidelines you must follow)\n{rules_context}"
-        
         # Add memory context if memory is enabled
         if self._memory_instance:
             # Use cache-optimized context if model supports prompt caching and cache boundary is requested
