@@ -912,11 +912,18 @@ class AgentsGenerator:
             framework_from_config,
             validate_workflow_framework,
         )
-        effective_framework = (self.framework or framework_from_config(config))
+        # Validate the YAML-declared framework first so a non-native workflow
+        # YAML (e.g. framework: crewai) can't slip through just because the
+        # generator instance still holds the default 'praisonai'.
         validate_workflow_framework(
-            effective_framework,
+            framework_from_config(config),
             source="agents.yaml workflow section",
         )
+        if self.framework:
+            validate_workflow_framework(
+                self.framework,
+                source="AgentsGenerator framework",
+            )
 
         # Pass model from config_list to workflow as default_llm
         if self.config_list and self.config_list[0].get('model'):

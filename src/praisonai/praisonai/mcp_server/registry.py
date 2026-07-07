@@ -142,7 +142,7 @@ class MCPToolRegistry:
     def __init__(self):
         self._tools: Dict[str, MCPToolDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
     
     def register(
         self,
@@ -183,11 +183,14 @@ class MCPToolRegistry:
             # Swap out pending loaders atomically so concurrent callers don't
             # iterate a list being cleared underneath them or double-run loaders.
             pending, self._lazy_loaders = self._lazy_loaders, []
-        for loader in pending:
-            try:
-                loader()
-            except Exception as e:
-                logger.warning(f"Lazy loader failed: {e}")
+            # Run loaders while holding the (re-entrant) lock so a concurrent
+            # caller blocks until loading completes instead of observing an
+            # empty/partial registry mid-load.
+            for loader in pending:
+                try:
+                    loader()
+                except Exception as e:
+                    logger.warning(f"Lazy loader failed: {e}")
     
     def get(self, name: str) -> Optional[MCPToolDefinition]:
         """Get a tool by name."""
@@ -388,7 +391,7 @@ class MCPResourceRegistry:
     def __init__(self):
         self._resources: Dict[str, MCPResourceDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
     
     def register(
         self,
@@ -486,7 +489,7 @@ class MCPPromptRegistry:
     def __init__(self):
         self._prompts: Dict[str, MCPPromptDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
     
     def register(
         self,
