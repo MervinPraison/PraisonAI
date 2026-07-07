@@ -29,6 +29,42 @@ if TYPE_CHECKING:
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
 
+    def _resolve_max_steps(self, default: int = 10) -> int:
+        """Resolve the unified multi-step tool budget shared by both loops.
+
+        Reads ``ExecutionConfig.max_steps`` when set (single knob honoured by the
+        OpenAI-native and LiteLLM tool-execution loops); otherwise falls back to
+        ``max_iter`` and finally ``default`` for backward compatibility.
+        """
+        execution = getattr(self, "execution", None)
+        if execution is not None:
+            resolver = getattr(execution, "resolved_max_steps", None)
+            if callable(resolver):
+                try:
+                    return int(resolver())
+                except Exception:
+                    pass
+            max_steps = getattr(execution, "max_steps", None)
+            if max_steps is not None:
+                return int(max_steps)
+            max_iter = getattr(execution, "max_iter", None)
+            if max_iter is not None:
+                return int(max_iter)
+        return default
+
+    def _resolve_max_tool_calls(self, default: int = 10) -> int:
+        """Resolve the per-turn tool-call guardrail (independent of ``max_steps``)."""
+        execution = getattr(self, "execution", None)
+        if execution is not None:
+            resolver = getattr(execution, "resolved_max_tool_calls", None)
+            if callable(resolver):
+                try:
+                    return int(resolver())
+                except Exception:
+                    pass
+            return int(getattr(execution, "max_tool_calls_per_turn", default))
+        return default
+
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
         
@@ -1682,7 +1718,7 @@ Your Goal: {self.goal}"""
                     stream_callback=stream_callback,
                     emit_events=emit_events,
                     verbose=self.verbose,
-                    max_iterations=10,
+                    max_iterations=self._resolve_max_steps(),
                     reasoning_steps=reasoning_steps,
                     task_name=task_name,
                     task_description=task_description,
@@ -1721,7 +1757,7 @@ Your Goal: {self.goal}"""
                 stream_callback=stream_callback,
                 emit_events=emit_events,
                 verbose=self.verbose,
-                max_iterations=10,
+                max_iterations=self._resolve_max_steps(),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -1824,7 +1860,7 @@ Your Goal: {self.goal}"""
                 stream_callback=stream_callback,
                 emit_events=emit_events,
                 verbose=self.verbose,
-                max_iterations=10,
+                max_iterations=self._resolve_max_steps(),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -2447,7 +2483,7 @@ Your Goal: {self.goal}"""
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -2944,7 +2980,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'task_id': task_id,
                         'execute_tool_fn': self.execute_tool_async,
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        'max_tool_calls_per_turn': getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
+                        'max_tool_calls_per_turn': self._resolve_max_tool_calls(),
                         'reasoning_steps': reasoning_steps,
                         'stream': stream
                     }
@@ -3693,7 +3729,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_id=kwargs.get('task_id'),
                         execute_tool_fn=self.execute_tool,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10)
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls()
                     ):
                         response_content += chunk
                         yield chunk

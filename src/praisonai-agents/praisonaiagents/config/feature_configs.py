@@ -770,6 +770,12 @@ class ExecutionConfig:
     """
     # Iteration limits
     max_iter: int = 20
+
+    # Unified multi-step tool budget (loop steps). When set, this is the single
+    # knob honoured identically by BOTH tool-execution loops (OpenAI-native and
+    # LiteLLM/custom) instead of the divergent max_iter/max_tool_calls_per_turn
+    # defaults. None = fall back to max_iter (backward compatible).
+    max_steps: Optional[int] = None
     
     # Rate limiting
     max_rpm: Optional[int] = None
@@ -835,6 +841,9 @@ class ExecutionConfig:
 
     def __post_init__(self) -> None:
         """Post-initialization processing with deprecation warnings and validation."""
+        # Validate the unified step budget early (before any early returns below).
+        if self.max_steps is not None and self.max_steps < 1:
+            raise ValueError("ExecutionConfig.max_steps must be >= 1 when set.")
         # Handle context_compaction serialization round-trip
         if isinstance(self.context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
@@ -884,10 +893,33 @@ class ExecutionConfig:
         if self.retry_jitter < 0:
             raise ValueError("ExecutionConfig.retry_jitter must be non-negative.")
 
+    def resolved_max_steps(self) -> int:
+        """Single, unified step budget honoured by both tool-execution loops.
+
+        Returns max_steps when explicitly set, otherwise falls back to max_iter
+        so existing defaults keep working (backward compatible).
+        """
+        if self.max_steps is not None:
+            return self.max_steps
+        return self.max_iter
+
+    def resolved_max_tool_calls(self) -> int:
+        """Per-turn tool-call guardrail (max parallel tool calls in one response).
+
+        This is intentionally *independent* of ``max_steps``: ``max_steps``
+        bounds outer-loop iterations (one LLM round-trip each), whereas this
+        caps how many tool calls may fire within a single LLM response. Coupling
+        them would let a single parallel-tool response exhaust the step budget
+        (e.g. ``max_steps=5`` truncating after one round of 5 parallel calls).
+        """
+        return self.max_tool_calls_per_turn
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
             "max_iter": self.max_iter,
+            "max_steps": self.max_steps,
+            "max_tool_calls_per_turn": self.max_tool_calls_per_turn,
             "max_rpm": self.max_rpm,
             "max_execution_time": self.max_execution_time,
             "max_retry_limit": self.max_retry_limit,
@@ -921,6 +953,8 @@ class ExecutionConfig:
         
         return cls(
             max_iter=data.get("max_iter", 20),
+            max_steps=data.get("max_steps", None),
+            max_tool_calls_per_turn=data.get("max_tool_calls_per_turn", 10),
             max_rpm=data.get("max_rpm", None),
             max_execution_time=data.get("max_execution_time", None),
             max_retry_limit=data.get("max_retry_limit", 2),

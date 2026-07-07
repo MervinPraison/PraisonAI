@@ -954,7 +954,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
                 default=ExecutionConfig(),
             )
         if _exec_config:
-            max_iter = _exec_config.max_iter
+            # Unified step budget: when max_steps is set it governs the LiteLLM
+            # loop (LLM.max_iter) too, so both tool-execution loops honour the
+            # same budget. Falls back to max_iter when max_steps is unset.
+            _resolver = getattr(_exec_config, "resolved_max_steps", None)
+            max_iter = _resolver() if callable(_resolver) else _exec_config.max_iter
             max_rpm = _exec_config.max_rpm
             max_execution_time = _exec_config.max_execution_time
             max_retry_limit = _exec_config.max_retry_limit
@@ -2794,6 +2798,29 @@ Summary:"""
                 else:
                     raise e
         return self.__openai_client
+
+    @property
+    def last_stop_reason(self) -> str:
+        """Structured reason the last tool-execution loop stopped.
+
+        One of ``"completed"`` (task finished), ``"max_steps"`` (the unified
+        step budget from ``ExecutionConfig.max_steps`` was reached and the run was
+        truncated) or ``"error"``. Lets CLI/CI callers branch on truncation
+        instead of parsing a magic string. Reads from whichever backend
+        (OpenAI-native or LiteLLM) executed the last turn.
+        """
+        # Read from the already-instantiated backends only. ``__openai_client``
+        # is the raw (name-mangled) attribute, never the lazy ``_openai_client``
+        # property, so this never triggers OpenAI client creation for
+        # LiteLLM-only agents.
+        for backend in (getattr(self, 'llm_instance', None),
+                        getattr(self, '_Agent__openai_client', None)):
+            if backend is None:
+                continue
+            reason = getattr(backend, '_last_stop_reason', None)
+            if reason:
+                return reason
+        return "completed"
 
     @property
     def agent_id(self) -> str:
