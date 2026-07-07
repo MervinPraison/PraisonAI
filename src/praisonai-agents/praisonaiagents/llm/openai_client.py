@@ -791,76 +791,15 @@ class OpenAIClient:
         )
 
     def _generate_tool_definition(self, func: Callable) -> Optional[Dict]:
-        """Generate a tool definition from a callable function."""
+        """Generate a tool definition from a callable function.
+
+        Delegates to the shared core helper so tool schemas are identical across
+        the agent, LLM and OpenAI-client layers (including array 'items'
+        normalisation required by strict providers).
+        """
         try:
-            sig = inspect.signature(func)
-            
-            # Skip self, *args, **kwargs
-            parameters_list = []
-            for name, param in sig.parameters.items():
-                if name == "self":
-                    continue
-                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                    continue
-                parameters_list.append((name, param))
-            
-            parameters = {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-            
-            # Parse docstring for parameter descriptions
-            docstring = inspect.getdoc(func)
-            param_descriptions = {}
-            if docstring:
-                import re
-                param_section = re.split(r'\s*Args:\s*', docstring)
-                if len(param_section) > 1:
-                    param_lines = param_section[1].split('\n')
-                    for line in param_lines:
-                        line = line.strip()
-                        if line and ':' in line:
-                            param_name, param_desc = line.split(':', 1)
-                            param_descriptions[param_name.strip()] = param_desc.strip()
-            
-            for name, param in parameters_list:
-                param_type = "string"  # Default type
-                param_info = {}
-                
-                if param.annotation != inspect.Parameter.empty:
-                    if param.annotation is int:
-                        param_type = "integer"
-                    elif param.annotation is float:
-                        param_type = "number"
-                    elif param.annotation is bool:
-                        param_type = "boolean"
-                    elif param.annotation is list:
-                        param_type = "array"
-                        # OpenAI requires 'items' for array types
-                        param_info["items"] = {"type": "string"}
-                    elif param.annotation is dict:
-                        param_type = "object"
-                
-                param_info["type"] = param_type
-                if name in param_descriptions:
-                    param_info["description"] = param_descriptions[name]
-                
-                parameters["properties"][name] = param_info
-                if param.default == inspect.Parameter.empty:
-                    parameters["required"].append(name)
-            
-            # Extract description from docstring
-            description = docstring.split('\n')[0] if docstring else f"Function {func.__name__}"
-            
-            return {
-                "type": "function",
-                "function": {
-                    "name": func.__name__,
-                    "description": description,
-                    "parameters": parameters
-                }
-            }
+            from ..tools.schema import build_tool_definition
+            return build_tool_definition(func)
         except Exception as e:
             logging.error(f"Error generating tool definition: {e}")
             return None
