@@ -1296,10 +1296,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         return paths
 
     async def _transcribe_audio(self, update) -> Optional[str]:
-        """Download and transcribe voice/audio message."""
+        """Download and transcribe a voice/audio message (Issue #2721).
+
+        Returns the transcript, or ``None`` when STT is disabled or
+        transcription fails. Callers must fall back to a visible placeholder
+        rather than dropping the message.
+        """
         if not self._stt_enabled:
             return None
-        
+
+        from ._stt import resolve_stt_config, transcribe_media_path
+
+        stt_cfg = resolve_stt_config(self.config)
+
+        temp_path: Optional[str] = None
         try:
             # Get file info
             if update.message.voice:
@@ -1308,30 +1318,29 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 file = await update.message.audio.get_file()
             else:
                 return None
-            
+
             # Download to temp file
             temp_path = os.path.join(tempfile.gettempdir(), f"voice_{file.file_id}.ogg")
             await file.download_to_drive(temp_path)
-            
-            # Transcribe using existing stt_tool
-            try:
-                from praisonai_bot.tools.audio import stt_tool
-                result = stt_tool(temp_path)
-                if result.get("success"):
-                    text = result.get("text", "")
-                    logger.info(f"Transcribed voice message: {text[:50]}...")
-                    return f"[Voice message]: {text}"
-                else:
-                    logger.warning(f"STT failed: {result.get('error')}")
-                    return None
-            finally:
-                # Clean up temp file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    
+
+            text = transcribe_media_path(
+                temp_path, language=stt_cfg.language, model=stt_cfg.model
+            )
+            if not text:
+                return None
+            if stt_cfg.echo_transcripts:
+                return f"[Voice message]: {text}"
+            return text
         except Exception as e:
             logger.error(f"Audio transcription error: {e}")
             return None
+        finally:
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
     
     async def _send_response_with_media(
         self,
@@ -1823,7 +1832,11 @@ async def process_inbound_telegram_message(
     # Extract message text (including audio transcription)
     message_text = None
     if update.message.voice or update.message.audio:
-        message_text = await bot._transcribe_audio(update)
+        # Issue #2721: transcribe inbound voice notes. If STT is disabled or
+        # transcription fails, fall back to a visible placeholder so the turn
+        # still reaches the agent instead of being silently dropped.
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER
+        message_text = await bot._transcribe_audio(update) or DEFAULT_VOICE_PLACEHOLDER
     elif update.message.text:
         message_text = update.message.text
     elif update.message.photo or update.message.document:
