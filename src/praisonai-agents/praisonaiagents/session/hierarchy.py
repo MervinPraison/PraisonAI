@@ -82,6 +82,10 @@ class ExtendedSessionData(SessionData):
             SessionMessage.from_dict(m) 
             for m in data.get("messages", [])
         ]
+        archived = [
+            SessionMessage.from_dict(m)
+            for m in (data.get("archived_messages") or [])
+        ]
         snapshots = [
             SessionSnapshot.from_dict(s)
             for s in data.get("snapshots", [])
@@ -94,6 +98,7 @@ class ExtendedSessionData(SessionData):
             agent_name=data.get("agent_name"),
             user_id=data.get("user_id"),
             metadata=data.get("metadata", {}),
+            archived_messages=archived,
             parent_id=data.get("parent_id"),
             forked_from_message_id=data.get("forked_from_message_id"),
             children_ids=data.get("children_ids", []),
