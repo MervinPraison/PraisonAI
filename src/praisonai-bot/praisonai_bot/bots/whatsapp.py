@@ -33,6 +33,10 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from praisonaiagents.bots.presentation import (
+        MessagePresentation,
+        PresentationLimits,
+    )
 
 from praisonai_bot.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
@@ -897,6 +901,83 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             )
 
         return sent_msg or BotMessage(content=text)
+
+    @property
+    def presentation_limits(self) -> "PresentationLimits":
+        """WhatsApp presentation limits (see ``SupportsPresentation``)."""
+        from praisonaiagents.bots.presentation import PresentationLimits
+        return PresentationLimits.whatsapp()
+
+    def truncate_presentation(
+        self, presentation: "MessagePresentation"
+    ) -> "MessagePresentation":
+        """Adapt a portable presentation to WhatsApp's limits."""
+        from praisonaiagents.bots.presentation import adapt_presentation
+        return adapt_presentation(presentation, self.presentation_limits)
+
+    async def render_presentation(
+        self,
+        target: str,
+        presentation: "MessagePresentation",
+    ) -> Optional[str]:
+        """Render a portable presentation as a WhatsApp interactive message.
+
+        Implements ``SupportsPresentation``: delegates to
+        ``WhatsAppPresentationRenderer`` (which runs ``adapt_presentation``
+        internally) to produce a native interactive ``button``/``list`` payload,
+        then sends it via the Cloud API. When the presentation has no
+        interactive content, falls back to a plain text send. Returns the sent
+        message id, or ``None`` if delivery failed.
+        """
+        try:
+            import aiohttp
+        except ImportError:
+            return None
+        try:
+            from ._presentation_renderer import WhatsAppPresentationRenderer
+
+            rendered = WhatsAppPresentationRenderer.render(presentation)
+            interactive = rendered.get("interactive")
+            if not interactive:
+                # No native interactive content — send as plain text.
+                msg = await self.send_message(target, rendered.get("text") or "\u200b")
+                return msg.message_id or None
+
+            url = f"{GRAPH_API_BASE}/{self._phone_number_id}/messages"
+            headers = {
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": target,
+                "type": "interactive",
+                "interactive": interactive,
+            }
+
+            await self._rate_limiter.acquire(target)
+
+            async def _post() -> dict:
+                async with self._http_session.post(
+                    url, headers=headers, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    result = await resp.json()
+                    if isinstance(result, dict) and "error" in result:
+                        raise RuntimeError(
+                            f"WhatsApp interactive send error: {result['error']}"
+                        )
+                    return result
+
+            result = await self.deliver_outbound(
+                _post,
+                channel_id=target,
+                reply_text=rendered.get("text") or "",
+            )
+            return result.get("messages", [{}])[0].get("id", "") or None
+        except Exception as e:
+            logger.error(f"Failed to render WhatsApp presentation: {e}")
+            return None
 
     async def _cache_inbound_media(
         self, media_id: Optional[str], kind: str, filename: Optional[str] = None

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from praisonaiagents.bots.presentation import (
@@ -22,6 +22,28 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class PresentationRenderer(Protocol):
+    """Protocol every channel presentation renderer implements.
+
+    A renderer converts a portable :class:`MessagePresentation` into a native,
+    platform-specific payload. It must run ``adapt_presentation`` against its
+    own :meth:`get_limits` before mapping blocks to native widgets so that
+    capability-driven degradation (button overflow, unsupported selects/web
+    apps, label truncation) is applied uniformly.
+    """
+
+    @staticmethod
+    def get_limits() -> "PresentationLimits":
+        """Return this channel's capability limits."""
+        ...
+
+    @staticmethod
+    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+        """Render *presentation* into a native, platform-specific payload."""
+        ...
 
 
 class TelegramPresentationRenderer:
@@ -413,3 +435,238 @@ class DiscordPresentationRenderer:
             result["flags"] = 64  # EPHEMERAL flag
         
         return result
+
+
+class WhatsAppPresentationRenderer:
+    """Renders presentations as WhatsApp Cloud API interactive messages.
+
+    WhatsApp natively supports two interactive shapes:
+
+    * ``interactive.type == "button"`` — up to 3 tappable reply buttons.
+    * ``interactive.type == "list"`` — a menu whose rows map to select
+      options (up to 10). Used for ``select`` blocks and for button rows that
+      overflow the 3-button reply limit.
+
+    The returned payload is the ``interactive`` object (plus a ``body`` text)
+    ready to nest under ``{"type": "interactive", "interactive": ...}``. When a
+    presentation has no interactive block, a plain ``{"text": ...}`` payload is
+    returned so callers can fall back to a text send.
+    """
+
+    # WhatsApp reply buttons: at most 3 per message.
+    _MAX_REPLY_BUTTONS = 3
+    # WhatsApp list rows: at most 10 across all sections.
+    _MAX_LIST_ROWS = 10
+    # Reply-button id / list-row id cap (Cloud API rejects ids > 256 chars).
+    _MAX_ID_LEN = 256
+
+    @staticmethod
+    def get_limits() -> "PresentationLimits":
+        """Get WhatsApp-specific presentation limits."""
+        from praisonaiagents.bots.presentation import PresentationLimits
+        return PresentationLimits.whatsapp()
+
+    @staticmethod
+    def _button_id(button: "PresentationButton") -> str:
+        """Derive a stable reply id (callback/reply/command value) for a button."""
+        action = button.action
+        value: Optional[str] = None
+        if action is not None:
+            atype = action.type.value if hasattr(action.type, "value") else action.type
+            if atype == "command" and action.command:
+                value = f"cmd:{action.command}"
+            elif action.value:
+                value = action.value
+            elif action.url:
+                value = action.url
+        if not value:
+            value = button.label
+        return value[: WhatsAppPresentationRenderer._MAX_ID_LEN]
+
+    @staticmethod
+    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+        """Render a presentation for WhatsApp Cloud API.
+
+        Returns one of:
+        * ``{"text": <str>}`` — no interactive content.
+        * ``{"text": <body>, "interactive": {...}}`` — a native interactive
+          message (button or list), where ``interactive`` is the Cloud API
+          ``interactive`` object.
+        """
+        from praisonaiagents.bots.presentation import (
+            BlockType,
+            PresentationLimits,
+            adapt_presentation,
+        )
+
+        presentation = adapt_presentation(presentation, PresentationLimits.whatsapp())
+
+        text_parts: List[str] = []
+        buttons: List["PresentationButton"] = []
+        select_block: Optional["PresentationBlock"] = None
+
+        for block in presentation.blocks:
+            btype = block.type.value if hasattr(block.type, "value") else block.type
+            if btype in (BlockType.TEXT, "text"):
+                if block.text:
+                    text_parts.append(block.text)
+            elif btype in (BlockType.CONTEXT, "context"):
+                if block.text:
+                    text_parts.append(block.text)
+            elif btype in (BlockType.DIVIDER, "divider"):
+                text_parts.append("—" * 20)
+            elif btype in (BlockType.BUTTONS, "buttons"):
+                if block.buttons:
+                    buttons.extend(block.buttons)
+            elif btype in (BlockType.SELECT, "select"):
+                # adapt_presentation keeps selects for WhatsApp (supports_select
+                # is True); render the first select as a list message.
+                if block.options and select_block is None:
+                    select_block = block
+
+        body = "\n\n".join(p for p in text_parts if p) or "\u200b"
+        body = body[:1024]  # WhatsApp interactive body cap
+
+        # Link buttons (url actions) cannot be reply buttons; keep them as text
+        # links appended to the body so the URL is still reachable.
+        url_lines: List[str] = []
+
+        def _is_url_button(btn: "PresentationButton") -> bool:
+            if btn.url:
+                return True
+            action = btn.action
+            if action is not None:
+                atype = action.type.value if hasattr(action.type, "value") else action.type
+                return atype == "url" and bool(action.url)
+            return False
+
+        tappable = [b for b in buttons if not _is_url_button(b)]
+        for b in buttons:
+            if _is_url_button(b):
+                link = b.url or (b.action.url if b.action else None)
+                if link:
+                    url_lines.append(f"{b.label}: {link}")
+
+        # Prefer a native select list; otherwise map buttons to button/list.
+        if select_block is not None and select_block.options:
+            rows = []
+            for option in select_block.options[: WhatsAppPresentationRenderer._MAX_LIST_ROWS]:
+                row = {
+                    "id": (option.value or option.label)[: WhatsAppPresentationRenderer._MAX_ID_LEN],
+                    "title": option.label[:24],
+                }
+                if option.description:
+                    row["description"] = option.description[:72]
+                rows.append(row)
+            interactive = {
+                "type": "list",
+                "body": {"text": body},
+                "action": {
+                    "button": (select_block.placeholder or "Select")[:20],
+                    "sections": [{"title": "Options", "rows": rows}],
+                },
+            }
+            result: Dict[str, Any] = {"text": body, "interactive": interactive}
+            if url_lines:
+                result["interactive"]["footer"] = {"text": "\n".join(url_lines)[:60]}
+            return result
+
+        if tappable:
+            if len(tappable) <= WhatsAppPresentationRenderer._MAX_REPLY_BUTTONS:
+                reply_buttons = [
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": WhatsAppPresentationRenderer._button_id(b),
+                            "title": b.label[:20],
+                        },
+                    }
+                    for b in tappable
+                ]
+                interactive = {
+                    "type": "button",
+                    "body": {"text": body},
+                    "action": {"buttons": reply_buttons},
+                }
+            else:
+                # Overflow: promote reply buttons into a list message.
+                rows = []
+                for b in tappable[: WhatsAppPresentationRenderer._MAX_LIST_ROWS]:
+                    rows.append({
+                        "id": WhatsAppPresentationRenderer._button_id(b),
+                        "title": b.label[:24],
+                    })
+                interactive = {
+                    "type": "list",
+                    "body": {"text": body},
+                    "action": {
+                        "button": "Choose",
+                        "sections": [{"title": "Options", "rows": rows}],
+                    },
+                }
+            result = {"text": body, "interactive": interactive}
+            if url_lines:
+                result["interactive"]["footer"] = {"text": "\n".join(url_lines)[:60]}
+            return result
+
+        # No interactive content: plain text (append any url links).
+        if url_lines:
+            body = (body + "\n\n" + "\n".join(url_lines))[:4096]
+        return {"text": body}
+
+
+# Registry keyed by platform id so adapters resolve their renderer uniformly.
+# New channels plug in by adding an entry here; adapters call ``render_for``.
+_RENDERERS: Dict[str, type] = {
+    "telegram": TelegramPresentationRenderer,
+    "slack": SlackPresentationRenderer,
+    "discord": DiscordPresentationRenderer,
+    "whatsapp": WhatsAppPresentationRenderer,
+}
+
+
+def get_renderer(platform: str) -> Optional[type]:
+    """Return the registered renderer class for *platform*, or ``None``."""
+    return _RENDERERS.get(platform)
+
+
+def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
+    """Flatten a presentation to a plain-text payload for channels without a
+    native renderer.
+
+    Text/context/divider blocks become lines; buttons and select options are
+    listed as readable text (with any URLs inlined) so the content is never
+    silently dropped.
+    """
+    from praisonaiagents.bots.presentation import BlockType
+
+    lines: List[str] = []
+    for block in presentation.blocks:
+        btype = block.type.value if hasattr(block.type, "value") else block.type
+        if btype in (BlockType.TEXT, "text", BlockType.CONTEXT, "context"):
+            if block.text:
+                lines.append(block.text)
+        elif btype in (BlockType.DIVIDER, "divider"):
+            lines.append("—" * 20)
+        elif btype in (BlockType.BUTTONS, "buttons"):
+            for b in (block.buttons or []):
+                url = b.url or (b.action.url if b.action else None)
+                lines.append(f"• {b.label}" + (f": {url}" if url else ""))
+        elif btype in (BlockType.SELECT, "select"):
+            for o in (block.options or []):
+                lines.append(f"• {o.label}")
+    return {"text": "\n".join(lines) if lines else "\u200b"}
+
+
+def render_for(platform: str, presentation: "MessagePresentation") -> Dict[str, Any]:
+    """Render *presentation* for *platform* through the renderer registry.
+
+    Resolves the platform's registered :class:`PresentationRenderer` and
+    returns its native payload. Channels with no registered renderer fall back
+    to :func:`fallback_text` so interactive content still degrades gracefully
+    to readable plain text rather than being dropped.
+    """
+    renderer = _RENDERERS.get(platform)
+    if renderer is not None:
+        return renderer.render(presentation)
+    return fallback_text(presentation)
