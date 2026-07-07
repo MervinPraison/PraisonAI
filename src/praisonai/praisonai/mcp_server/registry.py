@@ -10,6 +10,7 @@ MCP Protocol Version: 2025-11-25
 import base64
 import inspect
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -141,6 +142,7 @@ class MCPToolRegistry:
     def __init__(self):
         self._tools: Dict[str, MCPToolDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
+        self._lock = threading.Lock()
     
     def register(
         self,
@@ -172,16 +174,20 @@ class MCPToolRegistry:
     
     def register_lazy(self, loader: Callable[[], None]) -> None:
         """Register a lazy loader that will be called before listing tools."""
-        self._lazy_loaders.append(loader)
+        with self._lock:
+            self._lazy_loaders.append(loader)
     
     def _ensure_loaded(self) -> None:
-        """Ensure all lazy loaders have been called."""
-        for loader in self._lazy_loaders:
+        """Ensure all lazy loaders have been called (thread-safe, run-once)."""
+        with self._lock:
+            # Swap out pending loaders atomically so concurrent callers don't
+            # iterate a list being cleared underneath them or double-run loaders.
+            pending, self._lazy_loaders = self._lazy_loaders, []
+        for loader in pending:
             try:
                 loader()
             except Exception as e:
                 logger.warning(f"Lazy loader failed: {e}")
-        self._lazy_loaders.clear()
     
     def get(self, name: str) -> Optional[MCPToolDefinition]:
         """Get a tool by name."""
@@ -382,6 +388,7 @@ class MCPResourceRegistry:
     def __init__(self):
         self._resources: Dict[str, MCPResourceDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
+        self._lock = threading.Lock()
     
     def register(
         self,
@@ -410,16 +417,18 @@ class MCPResourceRegistry:
     
     def register_lazy(self, loader: Callable[[], None]) -> None:
         """Register a lazy loader."""
-        self._lazy_loaders.append(loader)
+        with self._lock:
+            self._lazy_loaders.append(loader)
     
     def _ensure_loaded(self) -> None:
-        """Ensure all lazy loaders have been called."""
-        for loader in self._lazy_loaders:
+        """Ensure all lazy loaders have been called (thread-safe, run-once)."""
+        with self._lock:
+            pending, self._lazy_loaders = self._lazy_loaders, []
+        for loader in pending:
             try:
                 loader()
             except Exception as e:
                 logger.warning(f"Lazy loader failed: {e}")
-        self._lazy_loaders.clear()
     
     def get(self, uri: str) -> Optional[MCPResourceDefinition]:
         """Get a resource by URI."""
@@ -477,6 +486,7 @@ class MCPPromptRegistry:
     def __init__(self):
         self._prompts: Dict[str, MCPPromptDefinition] = {}
         self._lazy_loaders: List[Callable[[], None]] = []
+        self._lock = threading.Lock()
     
     def register(
         self,
@@ -504,16 +514,18 @@ class MCPPromptRegistry:
     
     def register_lazy(self, loader: Callable[[], None]) -> None:
         """Register a lazy loader."""
-        self._lazy_loaders.append(loader)
+        with self._lock:
+            self._lazy_loaders.append(loader)
     
     def _ensure_loaded(self) -> None:
-        """Ensure all lazy loaders have been called."""
-        for loader in self._lazy_loaders:
+        """Ensure all lazy loaders have been called (thread-safe, run-once)."""
+        with self._lock:
+            pending, self._lazy_loaders = self._lazy_loaders, []
+        for loader in pending:
             try:
                 loader()
             except Exception as e:
                 logger.warning(f"Lazy loader failed: {e}")
-        self._lazy_loaders.clear()
     
     def get(self, name: str) -> Optional[MCPPromptDefinition]:
         """Get a prompt by name."""
