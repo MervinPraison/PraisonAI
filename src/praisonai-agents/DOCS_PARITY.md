@@ -18,70 +18,70 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 43 | 12135 |
+| ✅ Agent | 21 | 43 | 12143 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2951 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2148 |
-| ✅ Audio | 2 | 12 | 989 |
-| ✅ Auto Generation | 5 | 8 | 2284 |
-| ✅ Autonomy | 3 | 6 | 2183 |
-| ✅ Bots | 7 | 25 | 9552 |
+| ✅ Audio | 2 | 12 | 1000 |
+| ✅ Auto Generation | 5 | 8 | 2301 |
+| ✅ Autonomy | 3 | 6 | 2192 |
+| ✅ Bots | 7 | 27 | 10294 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 112 | 29307 |
+| ✅ CLI | 5 | 112 | 29407 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3799 |
 | ✅ Conditions | 1 | 3 | 1175 |
 | ✅ Configuration | 3 | 7 | 2330 |
-| ✅ Context Management | 16 | 33 | 11755 |
+| ✅ Context Management | 16 | 33 | 11782 |
 | ✅ Database | 1 | 40 | 5746 |
 | ✅ Deep Research | 8 | 2 | 497 |
 | ✅ Display | 6 | 3 | 648 |
 | ✅ Embeddings | 6 | 23 | 1990 |
 | ✅ Evaluation | 1 | 6 | 2511 |
 | ✅ Events | 1 | 2 | 735 |
-| ✅ Execution | 3 | 4 | 1493 |
+| ✅ Execution | 3 | 4 | 1513 |
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1863 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 43 | 15347 |
+| ✅ Gateway | 7 | 45 | 15940 |
 | ✅ Guardrails | 4 | 4 | 1667 |
 | ✅ Handoffs | 11 | 6 | 2705 |
-| ✅ Hooks | 2 | 9 | 3740 |
+| ✅ Hooks | 2 | 9 | 3739 |
 | ✅ Image | 1 | 11 | 1113 |
-| ✅ Knowledge | 4 | 12 | 3679 |
+| ✅ Knowledge | 4 | 12 | 3662 |
 | ✅ LLM | 3 | 14 | 4715 |
 | ✅ Loops | 4 | 3 | 801 |
 | ✅ MCP | 1 | 52 | 11156 |
-| ✅ Memory | 6 | 17 | 6358 |
+| ✅ Memory | 6 | 17 | 6386 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
 | ✅ Optimizer | 1 | 2 | 750 |
-| ✅ Output | 3 | 5 | 1126 |
+| ✅ Output | 3 | 5 | 1130 |
 | ✅ Parallel Execution | 3 | 2 | 419 |
-| ✅ Planning | 6 | 6 | 1440 |
+| ✅ Planning | 6 | 6 | 1441 |
 | ✅ Plugins | 8 | 3 | 1025 |
 | ✅ Prompts | 2 | 7 | 1235 |
 | ✅ Providers | 1 | 55 | 7263 |
 | ✅ Query | 1 | 2 | 657 |
 | ✅ RAG | 5 | 15 | 2908 |
 | ✅ Realtime | 2 | 5 | 584 |
-| ✅ Reflection | 3 | 3 | 665 |
+| ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 935 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2488 |
 | ✅ Security | 1 | 3 | 2787 |
-| ✅ Sessions | 4 | 12 | 4512 |
-| ✅ Skills | 6 | 13 | 4856 |
+| ✅ Sessions | 4 | 13 | 4746 |
+| ✅ Skills | 6 | 13 | 4824 |
 | ✅ Tasks | 2 | 6 | 2715 |
 | ✅ Telemetry | 1 | 2 | 590 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 126 | 32346 |
+| ✅ Tools | 12 | 126 | 32345 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 3 | 8 | 1910 |
+| ✅ Web | 3 | 8 | 1926 |
 | ✅ Workflows | 5 | 16 | 6397 |
 
 ## Documentation Without Features
