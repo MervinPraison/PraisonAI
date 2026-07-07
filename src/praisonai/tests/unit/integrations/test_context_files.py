@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from praisonai.integration.context_files import load_context_files
+from praisonai.integration.context_files import (
+    PathContextAttacher,
+    load_context_files,
+    load_context_files_for_path,
+)
 
 
 @pytest.fixture
@@ -98,3 +102,117 @@ def test_walk_up_disabled_skips_global_file(project, monkeypatch, tmp_path):
     out = load_context_files(cwd=nested, walk_up=False)
     # walk_up=False is cwd-only: the global file must not leak in.
     assert out == "PACKAGE"
+
+
+@pytest.fixture
+def monorepo(tmp_path, monkeypatch):
+    """A monorepo with a root and two sibling packages, fake git root."""
+    root = tmp_path / "repo"
+    foo = root / "packages" / "foo"
+    bar = root / "packages" / "bar"
+    foo.mkdir(parents=True)
+    bar.mkdir(parents=True)
+    monkeypatch.setattr(
+        "praisonai.integration.context_files._get_git_root",
+        lambda start: root,
+    )
+    return root, foo, bar
+
+
+def test_subtree_attached_only_after_file_under_it_is_read(monorepo):
+    root, foo, _bar = monorepo
+    (root / "AGENTS.md").write_text("ROOT RULES")
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    attacher = PathContextAttacher(already_loaded="ROOT RULES")
+
+    # Touch a file under packages/foo -> the subtree file is attached now.
+    out = attacher.attach_for_path(foo / "main.py")
+    assert "FOO RULES" in out
+    # Root rules were already loaded up front, so they are not re-attached.
+    assert "ROOT RULES" not in out
+
+
+def test_sibling_without_instructions_attaches_nothing_new(monorepo):
+    root, _foo, bar = monorepo
+    (root / "AGENTS.md").write_text("ROOT RULES")
+
+    attacher = PathContextAttacher(already_loaded="ROOT RULES")
+    out = attacher.attach_for_path(bar / "main.py")
+    # bar has no own AGENTS.md and root was already loaded -> nothing new.
+    assert out == ""
+
+
+def test_dedup_against_already_loaded_up_front(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    # Simulate the foo rules already being part of up-front context.
+    attacher = PathContextAttacher(already_loaded="FOO RULES")
+    out = attacher.attach_for_path(foo / "main.py")
+    assert out == ""
+
+
+def test_dedup_against_concatenated_already_loaded(monorepo):
+    _root, foo, _bar = monorepo
+    (_root / "AGENTS.md").write_text("ROOT RULES")
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    # Up-front context is the concatenation produced by load_context_files().
+    combined = "ROOT RULES\n\nFOO RULES"
+    attacher = PathContextAttacher(already_loaded=combined)
+    out = attacher.attach_for_path(foo / "main.py")
+    # Both files were part of the concatenated up-front load -> nothing new.
+    assert out == ""
+
+
+def test_per_subtree_cache_avoids_rewalk(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    attacher = PathContextAttacher()
+    first = attacher.attach_for_path(foo / "a.py")
+    assert "FOO RULES" in first
+    # Second touch of the same directory returns cached result; and because the
+    # file was already emitted, a different dir touch won't re-emit it.
+    second = attacher.attach_for_path(foo / "b.py")
+    assert second == first
+
+
+def test_already_emitted_file_not_reattached_across_dirs(monorepo):
+    _root, foo, _bar = monorepo
+    sub = foo / "sub"
+    sub.mkdir()
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    attacher = PathContextAttacher()
+    first = attacher.attach_for_path(foo / "a.py")
+    assert "FOO RULES" in first
+    # Touching a deeper dir walks up through foo again, but FOO RULES was
+    # already emitted, so it is not duplicated.
+    deeper = attacher.attach_for_path(sub / "b.py")
+    assert "FOO RULES" not in deeper
+
+
+def test_char_budget_bounds_output(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("X" * 500)
+
+    attacher = PathContextAttacher(max_chars=100)
+    out = attacher.attach_for_path(foo / "main.py")
+    assert len(out) <= 100 + len("\n... [subtree context truncated]")
+    assert "truncated" in out
+
+
+def test_stateless_helper_discovers_nearest(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    out = load_context_files_for_path(foo / "main.py")
+    assert "FOO RULES" in out
+
+
+def test_no_instruction_files_returns_empty(monorepo):
+    _root, foo, _bar = monorepo
+    attacher = PathContextAttacher()
+    assert attacher.attach_for_path(foo / "main.py") == ""
