@@ -41,6 +41,8 @@ const BLOCK_LABELS = new Set([
   'no-auto-merge',
   'auto-merged-by-gate',
 ]);
+/** Superseded concurrency runs; must not block merge when real tests passed. */
+const OPTIONAL_CANCELLED_CHECKS = new Set(['detect-and-trigger']);
 const BOT_REVIEWER_PATTERNS = [
   'coderabbit',
   'qodo',
@@ -65,6 +67,12 @@ function isClaudeTriggerNoise(c) {
   if (body.includes('MERGE_GATE_VERDICT')) return true;
   if (body.includes('Merged by **Claude PR merge gate**')) return true;
   return false;
+}
+
+function isClaudeFinalReplyComment(c) {
+  const login = (c.user?.login || '').toLowerCase();
+  if (!login.includes('praisonai-triage')) return false;
+  return (c.body || '').includes('Claude finished');
 }
 
 function hasRecentClaudeTrigger(comments, minutes = 35) {
@@ -175,6 +183,11 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
   if (headTime <= finalTime + 60000) return false;
+  const claudeRepliedAfterFinal = comments.some((c) => {
+    if (!isClaudeFinalReplyComment(c)) return false;
+    return new Date(c.created_at).getTime() >= finalTime - 60000;
+  });
+  if (claudeRepliedAfterFinal) return false;
   const claudeSinceHead = comments.some((c) => {
     if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
     if (isClaudeTriggerNoise(c)) return false;
@@ -311,7 +324,9 @@ async function allChecksGreenOnSha(github, owner, repo, sha, core) {
       core?.info?.(`Check pending: ${run.name} (${run.status})`);
       return false;
     }
-    const ok = ['success', 'neutral', 'skipped'].includes(run.conclusion);
+    const ok =
+      ['success', 'neutral', 'skipped'].includes(run.conclusion) ||
+      (run.conclusion === 'cancelled' && OPTIONAL_CANCELLED_CHECKS.has(run.name));
     if (!ok) {
       core?.info?.(`Check failed: ${run.name} (${run.conclusion})`);
       return false;
@@ -751,6 +766,7 @@ module.exports = {
   AUTO_ACTORS,
   isFinalClaudeTriggerComment,
   isClaudeTriggerNoise,
+  isClaudeFinalReplyComment,
   hasRecentClaudeTrigger,
   hasRecentConflictComment,
   isConflictRebaseTriggerComment,
@@ -761,6 +777,7 @@ module.exports = {
   hasFinalClaudeReviewTrigger,
   finalClaudeCompletedOnSha,
   getMergeState,
+  OPTIONAL_CANCELLED_CHECKS,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,
   claudeRunBlocksPr,
