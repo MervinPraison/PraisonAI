@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 396,
+    "pythonCoreFeatures": 399,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 102,
+    "gapCount": 105,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 89
+    "priorityP3": 92
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -50,6 +50,7 @@
       "BALANCED_POLICY",
       "BackendNotAvailableError",
       "BaseFrameworkAdapter",
+      "BasePlatformAdapter",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -209,6 +210,7 @@
       "PlanStorage",
       "PlanningAgent",
       "PlanningConfig",
+      "PlatformCapabilities",
       "Plugin",
       "PluginHook",
       "PluginInfo",
@@ -255,6 +257,7 @@
       "SandboxStatus",
       "ScopeRequiredError",
       "SecurityPolicy",
+      "SendResult",
       "Session",
       "SessionConfig",
       "SessionErrorEvent",
@@ -483,7 +486,8 @@
         "BotOSProtocol",
         "BotProtocol",
         "BotUser",
-        "MessageType"
+        "MessageType",
+        "PlatformCapabilities"
       ],
       "conditions": [
         "ConditionProtocol",
@@ -653,6 +657,7 @@
         "BALANCED_POLICY",
         "BackendNotAvailableError",
         "BaseFrameworkAdapter",
+        "BasePlatformAdapter",
         "BudgetExceededError",
         "CONSERVATIVE_POLICY",
         "ChromaMemory",
@@ -697,6 +702,7 @@
         "RetryBackoffConfig",
         "RunStatus",
         "ScopeRequiredError",
+        "SendResult",
         "SessionErrorEvent",
         "SessionIdleEvent",
         "StopReason",
@@ -4323,6 +4329,15 @@
         "category": "other"
       },
       {
+        "feature": "BasePlatformAdapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "typescript": true,
@@ -5286,6 +5301,15 @@
         "category": "config"
       },
       {
+        "feature": "PlatformCapabilities",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "bots"
+      },
+      {
         "feature": "Plugin",
         "python": true,
         "typescript": true,
@@ -5527,6 +5551,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "sandbox"
+      },
+      {
+        "feature": "SendResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "SessionConfig",

@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 396 | **Rust Features:** 667 | **Parity:** 72.7%
+> **Python Features:** 399 | **Rust Features:** 667 | **Parity:** 72.2%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 396 |
+| Python Core Features | 399 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **108** |
+| **Actual Gap Count** | **111** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **72.7%** |
+| **Parity** | **72.2%** |
 
 ## Implemented Features
 
@@ -705,6 +705,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `BALANCED_POLICY`
 - ❌ `BackendNotAvailableError`
 - ❌ `BaseFrameworkAdapter`
+- ❌ `BasePlatformAdapter`
 - ❌ `BaseTool`
 - ❌ `BotOSConfig`
 - ❌ `BotOSProtocol`
@@ -750,11 +751,13 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `NetworkError`
 - ❌ `ObservabilityEventType`
 - ❌ `ObservabilityHooks`
+- ❌ `PlatformCapabilities`
 - ❌ `PraisonAIConfigError`
 - ❌ `PraisonAIError`
 - ❌ `RetryBackoffConfig`
 - ❌ `RulesConfig`
 - ❌ `RunStatus`
+- ❌ `SendResult`
 - ❌ `SessionErrorEvent`
 - ❌ `SessionIdleEvent`
 - ❌ `SkillState`

@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 396,
+    "pythonCoreFeatures": 399,
     "rustFeatures": 667,
-    "gapCount": 114,
-    "parityPercentage": 168.4
+    "gapCount": 117,
+    "parityPercentage": 167.2
   },
   "pythonCoreSDK": {
     "exports": [
@@ -46,6 +46,7 @@
       "BALANCED_POLICY",
       "BackendNotAvailableError",
       "BaseFrameworkAdapter",
+      "BasePlatformAdapter",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -205,6 +206,7 @@
       "PlanStorage",
       "PlanningAgent",
       "PlanningConfig",
+      "PlatformCapabilities",
       "Plugin",
       "PluginHook",
       "PluginInfo",
@@ -251,6 +253,7 @@
       "SandboxStatus",
       "ScopeRequiredError",
       "SecurityPolicy",
+      "SendResult",
       "Session",
       "SessionConfig",
       "SessionErrorEvent",
@@ -3251,6 +3254,15 @@
         "category": "other"
       },
       {
+        "feature": "BasePlatformAdapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "rust": true,
@@ -4214,6 +4226,15 @@
         "category": "config"
       },
       {
+        "feature": "PlatformCapabilities",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "bots"
+      },
+      {
         "feature": "Plugin",
         "python": true,
         "rust": true,
@@ -4455,6 +4476,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "sandbox"
+      },
+      {
+        "feature": "SendResult",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "SessionConfig",

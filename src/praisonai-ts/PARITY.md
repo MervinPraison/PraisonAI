@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 396 |
+| Python Core Features | 399 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **102** |
+| **Gap Count** | **105** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 89 |
+| P3 (Low) | 92 |
 
 ## Gap Matrix
 
@@ -160,7 +160,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 89 todo)
+### P3_Advanced (180 done, 92 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -174,6 +174,7 @@
 | `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `BackendNotAvailableError` | ✅ | ❌ | low | ⏳ TODO |
 | `BaseFrameworkAdapter` | ✅ | ❌ | high | ⏳ TODO |
+| `BasePlatformAdapter` | ✅ | ❌ | high | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CONSERVATIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
@@ -214,12 +215,14 @@
 | `NetworkError` | ✅ | ❌ | low | ⏳ TODO |
 | `ObservabilityEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
+| `PlatformCapabilities` | ✅ | ❌ | high | ⏳ TODO |
 | `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RulesConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `ScopeRequiredError` | ✅ | ❌ | low | ⏳ TODO |
+| `SendResult` | ✅ | ❌ | low | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
@@ -466,10 +469,10 @@ from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentOSConfig, Age
 </details>
 
 <details>
-<summary><strong>bots</strong> (8 exports)</summary>
+<summary><strong>bots</strong> (9 exports)</summary>
 
 ```python
-from praisonaiagents import BotChannel, BotConfig, BotMessage, BotOSConfig, BotOSProtocol, BotProtocol, BotUser, MessageType
+from praisonaiagents import BotChannel, BotConfig, BotMessage, BotOSConfig, BotOSProtocol, BotProtocol, BotUser, MessageType, PlatformCapabilities
 ```
 
 </details>
@@ -592,7 +595,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (93 exports)</summary>
+<summary><strong>other</strong> (95 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
