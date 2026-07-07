@@ -252,6 +252,38 @@ class TestModelSwitching:
 # TODO 1.6: Background Job Management Tests
 # ============================================================================
 
+class _MemJobStore:
+    """In-memory BackgroundJobStore for testing durable reconciliation.
+
+    Stores shallow copies so mutations to the live in-memory JobInfo do not
+    retroactively alter what was persisted at an earlier transition.
+    """
+
+    def __init__(self):
+        self._data = {}
+
+    def upsert(self, job):
+        import copy
+        self._data[job.job_id] = copy.copy(job)
+
+    def get(self, job_id):
+        return self._data.get(job_id)
+
+    def list_unreconciled(self):
+        from praisonaiagents.background.job_manager import JobStatus
+        out = []
+        for job in self._data.values():
+            if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
+                out.append(job)
+            elif (
+                job.status == JobStatus.COMPLETED
+                and job.origin
+                and not job.delivered
+            ):
+                out.append(job)
+        return out
+
+
 class TestBackgroundJobManagement:
     """Tests for background job auto-management."""
     
@@ -278,6 +310,136 @@ class TestBackgroundJobManagement:
         
         status = manager.get_status(job_id)
         assert status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.COMPLETED]
+
+    def test_no_store_reconcile_is_noop(self):
+        """Without a store, reconcile_on_start is a zero-count no-op."""
+        from praisonaiagents.background.job_manager import BackgroundJobManager
+
+        manager = BackgroundJobManager()
+        assert manager.reconcile_on_start() == {
+            "lost": 0, "redelivered": 0, "rehydrated": 0,
+        }
+
+    def test_lost_status_and_delivered_flag_exist(self):
+        """New durability primitives are present without breaking defaults."""
+        from praisonaiagents.background.job_manager import JobStatus, JobInfo
+
+        assert JobStatus.LOST.value == "lost"
+        info = JobInfo(job_id="x", status=JobStatus.PENDING)
+        assert info.delivered is False
+
+    def test_store_persists_job_transitions(self):
+        """A supplied store receives job state on each transition."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus,
+        )
+
+        store = _MemJobStore()
+        manager = BackgroundJobManager(store=store)
+        job_id = manager.start_job(lambda: "ok")
+        manager.get_result(job_id, timeout=5)
+
+        persisted = store.get(job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.COMPLETED
+        assert persisted.result == "ok"
+
+    def test_reconcile_marks_orphaned_running_as_lost(self):
+        """A RUNNING job left by a crash is reconciled to LOST and queryable."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(job_id="orphan", status=JobStatus.RUNNING))
+
+        manager = BackgroundJobManager(store=store)
+        counts = manager.reconcile_on_start()
+
+        assert counts["lost"] == 1
+        assert store.get("orphan").status == JobStatus.LOST
+        assert manager.get_status("orphan") == JobStatus.LOST
+
+    def test_reconcile_redelivers_undelivered_completed(self):
+        """A COMPLETED-but-undelivered job replays deliver-back on restart."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(
+            job_id="done",
+            status=JobStatus.COMPLETED,
+            origin={"chat_id": 7},
+            result="answer",
+        ))
+
+        delivered = []
+        manager = BackgroundJobManager(store=store)
+        counts = manager.reconcile_on_start(
+            redeliver=lambda job: delivered.append(job.job_id),
+        )
+
+        assert counts["redelivered"] == 1
+        assert delivered == ["done"]
+        assert store.get("done").delivered is True
+
+    def test_reconcile_skips_already_delivered(self):
+        """An already-delivered completed job is not re-delivered."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(
+            job_id="done",
+            status=JobStatus.COMPLETED,
+            origin={"chat_id": 7},
+            delivered=True,
+        ))
+
+        delivered = []
+        manager = BackgroundJobManager(store=store)
+        counts = manager.reconcile_on_start(
+            redeliver=lambda job: delivered.append(job.job_id),
+        )
+
+        assert counts["redelivered"] == 0
+        assert delivered == []
+
+    def test_reconcile_marks_orphaned_pending_as_lost(self):
+        """A PENDING job left by a crash (never started) is reconciled to LOST."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(job_id="pending_orphan", status=JobStatus.PENDING))
+
+        manager = BackgroundJobManager(store=store)
+        counts = manager.reconcile_on_start()
+
+        assert counts["lost"] == 1
+        assert store.get("pending_orphan").status == JobStatus.LOST
+        assert manager.get_status("pending_orphan") == JobStatus.LOST
+
+    def test_reconciled_lost_job_is_evictable(self):
+        """A reconciled LOST job is cleaned up by cleanup_completed (no leak)."""
+        from praisonaiagents.background.job_manager import (
+            BackgroundJobManager, JobStatus, JobInfo,
+        )
+
+        store = _MemJobStore()
+        store.upsert(JobInfo(job_id="orphan", status=JobStatus.RUNNING))
+
+        manager = BackgroundJobManager(store=store)
+        manager.reconcile_on_start()
+
+        assert manager.get_status("orphan") == JobStatus.LOST
+        removed = manager.cleanup_completed(max_age=-1)
+        assert removed == 1
+        with pytest.raises(KeyError):
+            manager.list_jobs()["orphan"]
 
 
 # ============================================================================
