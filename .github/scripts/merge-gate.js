@@ -744,8 +744,8 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
       per_page: 100,
     }));
   }
-  const mergeReady = mergeReadyIssues
-    .filter((issue) => issue.pull_request)
+  const mergeReady = (mergeReadyIssues || [])
+    .filter((issue) => issue?.pull_request)
     .map((issue) => issue.number)
     .sort((a, b) => a - b);
 
@@ -775,15 +775,15 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
           sort: 'created',
           direction: 'asc',
         })).data;
-  return prs.map((pr) => pr.number);
+  return (prs || []).map((pr) => pr.number);
 }
 
-async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCandidates, core) {
+async function selectMergeGateCandidates(github, owner, repo, prNumbers = [], maxCandidates = 3, core) {
   const readyList = [];
   const skipped = [];
   for (const num of prNumbers) {
     if (readyList.length >= maxCandidates) {
-      core?.info?.(`Found ${maxCandidates} candidate(s) — skipping remaining PR scans`);
+      core?.info?.(`Found ${readyList.length} candidate(s) — skipping remaining PR scans`);
       break;
     }
     const result = await evaluatePipelineQuiescent(github, owner, repo, num, core);
@@ -795,7 +795,7 @@ async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCand
   }
   readyList.sort((a, b) => a.pr_number - b.pr_number);
   return {
-    candidates: readyList.slice(0, maxCandidates),
+    candidates: readyList,
     skipped,
   };
 }
