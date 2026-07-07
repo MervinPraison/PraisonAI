@@ -12,6 +12,6 @@ the remaining terminal-agent modules, with PEP 562 shims left behind at the
 old ``praisonai.*`` paths for backward compatibility.
 """
 
-__version__ = "0.0.30"
+__version__ = "0.0.31"
 
 __all__ = ["__version__"]
