@@ -45,9 +45,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 6 | 1863 |
 | ✅ Flow | 1 | 3 | 777 |
 | ✅ Gateway | 7 | 42 | 15118 |
-| ✅ Guardrails | 4 | 4 | 1642 |
-| ✅ Handoffs | 11 | 6 | 2654 |
-| ✅ Hooks | 2 | 9 | 3704 |
+| ✅ Guardrails | 4 | 4 | 1664 |
+| ✅ Handoffs | 11 | 6 | 2674 |
+| ✅ Hooks | 2 | 9 | 3729 |
 | ✅ Image | 1 | 11 | 1113 |
 | ✅ Knowledge | 4 | 12 | 3675 |
 | ✅ LLM | 3 | 14 | 4707 |
@@ -57,9 +57,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
 | ✅ Optimizer | 1 | 2 | 750 |
-| ✅ Output | 3 | 5 | 1102 |
+| ✅ Output | 3 | 5 | 1126 |
 | ✅ Parallel Execution | 3 | 2 | 419 |
-| ✅ Planning | 6 | 6 | 1418 |
+| ✅ Planning | 6 | 6 | 1440 |
 | ✅ Plugins | 8 | 3 | 1025 |
 | ✅ Prompts | 2 | 7 | 1235 |
 | ✅ Providers | 1 | 55 | 7263 |
@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 665 |
 | ✅ Retrieval | 2 | 5 | 915 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 6 | 2464 |
+| ✅ Sandbox | 5 | 6 | 2488 |
 | ✅ Security | 1 | 3 | 2787 |
 | ✅ Sessions | 4 | 12 | 4307 |
 | ✅ Skills | 6 | 13 | 4856 |
