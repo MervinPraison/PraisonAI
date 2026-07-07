@@ -18,7 +18,7 @@ def code_main(
     prompt: Optional[str] = typer.Argument(None, help="Code task or question"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
+    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names (e.g. web_search,github) or a tools.py file path"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     file: Optional[List[str]] = typer.Option(None, "--file", "-f", help="Attach file(s) to context"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools (file operations)"),

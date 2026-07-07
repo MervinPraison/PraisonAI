@@ -60,7 +60,7 @@ def chat_main(
         flag_value="true",
     ),
     no_memory: bool = typer.Option(False, "--no-memory", help="Disable memory"),
-    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
+    tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names (e.g. web_search,github) or a tools.py file path"),
     toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
