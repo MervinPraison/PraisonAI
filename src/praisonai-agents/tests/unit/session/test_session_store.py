@@ -1061,3 +1061,110 @@ class TestDefaultStoreEnvConfig:
                 assert store.retention == RETENTION_COMPACT
             finally:
                 self._reset_store(store_module)
+
+
+class TestCompactionCheckpoint:
+    """Tests for compaction checkpoint persistence (Issue #2741)."""
+
+    @pytest.fixture
+    def temp_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            yield store
+
+    def test_checkpoint_dataclass_roundtrip(self):
+        """CompactionCheckpoint serializes and deserializes losslessly."""
+        from praisonaiagents.session.store import CompactionCheckpoint
+
+        cp = CompactionCheckpoint(
+            summary="condensed history",
+            message_index=3,
+            tokens_before=1000,
+            tokens_after=200,
+        )
+        restored = CompactionCheckpoint.from_dict(cp.to_dict())
+        assert restored.summary == "condensed history"
+        assert restored.message_index == 3
+        assert restored.tokens_before == 1000
+        assert restored.tokens_after == 200
+        assert restored.as_message() == {"role": "system", "content": "condensed history"}
+
+    def test_append_checkpoint_persists(self, temp_store):
+        """append_compaction_checkpoint writes a durable checkpoint."""
+        temp_store.add_user_message("s1", "m1")
+        temp_store.add_assistant_message("s1", "m2")
+
+        ok = temp_store.append_compaction_checkpoint(
+            "s1", "SUMMARY", tokens_before=500, tokens_after=100
+        )
+        assert ok is True
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is not None
+        assert session.last_compaction.summary == "SUMMARY"
+        assert session.last_compaction.message_index == 2
+
+    def test_working_history_uses_checkpoint(self, temp_store):
+        """Resume reconstructs summary + tail, not the raw transcript."""
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.add_assistant_message("s1", "old-2")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY OF OLD")
+        # New messages after the checkpoint form the retained tail.
+        temp_store.add_user_message("s1", "new-1")
+        temp_store.add_assistant_message("s1", "new-2")
+
+        working = temp_store.get_working_history("s1")
+        assert working[0] == {"role": "system", "content": "SUMMARY OF OLD"}
+        assert [m["content"] for m in working[1:]] == ["new-1", "new-2"]
+        # Raw history is still fully available for audit/replay.
+        raw = temp_store.get_chat_history("s1")
+        assert [m["content"] for m in raw] == ["old-1", "old-2", "new-1", "new-2"]
+
+    def test_working_history_backward_compat_no_checkpoint(self, temp_store):
+        """Sessions without a checkpoint resume from raw messages unchanged."""
+        temp_store.add_user_message("s1", "a")
+        temp_store.add_assistant_message("s1", "b")
+
+        working = temp_store.get_working_history("s1")
+        assert [m["content"] for m in working] == ["a", "b"]
+
+    def test_checkpoint_persists_across_instances(self, temp_store):
+        """Checkpoint survives being reloaded by a fresh store instance."""
+        session_dir = temp_store.session_dir
+        temp_store.add_user_message("s1", "old")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+        temp_store.add_user_message("s1", "tail")
+
+        store2 = DefaultSessionStore(session_dir=session_dir)
+        working = store2.get_working_history("s1")
+        assert working[0]["content"] == "SUMMARY"
+        assert working[-1]["content"] == "tail"
+
+    def test_trim_shifts_checkpoint_index(self):
+        """Trimming the transcript head keeps the checkpoint anchor aligned."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, max_messages=4)
+            for i in range(3):
+                store.add_user_message("s1", f"pre-{i}")
+            store.append_compaction_checkpoint("s1", "SUMMARY")  # index == 3
+            for i in range(3):
+                store.add_user_message("s1", f"post-{i}")
+
+            # Only the last 4 raw messages remain after trimming.
+            raw = store.get_chat_history("s1")
+            assert len(raw) == 4
+            # Working history = summary + whatever tail survived the trim.
+            working = store.get_working_history("s1")
+            assert working[0]["content"] == "SUMMARY"
+            # Tail should be the post-compaction messages that survived.
+            assert working[-1]["content"] == "post-2"
+
+    def test_empty_summary_not_persisted(self, temp_store):
+        """A blank summary still stores a checkpoint object but is harmless."""
+        temp_store.add_user_message("s1", "a")
+        temp_store.append_compaction_checkpoint("s1", "")
+        session = temp_store.get_session("s1")
+        # Checkpoint exists but summary is empty; working history still valid.
+        assert session.last_compaction is not None
+        working = temp_store.get_working_history("s1")
+        assert working[0]["content"] == ""
