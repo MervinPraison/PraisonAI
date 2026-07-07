@@ -160,7 +160,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "call": (".commands.call", "app", "Voice/call interaction mode"),
     "realtime": (".commands.realtime", "app", "Realtime interaction mode"),
     "train": (".commands.train", "app", "Model training and fine-tuning"),
-    "ui": (".commands.ui", "app", "🤖 Clean Chat UI (praisonaiui)"),
+    "ui": (".commands.ui", "app", "Clean Chat UI (praisonaiui)"),
     "context": (".commands.context", "app", "Context management"),
     "research": (".commands.research", "app", "Research and analysis"),
     "memory": (".commands.memory", "app", "Memory management"),
@@ -207,18 +207,18 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "pairing": (".commands.pairing", "app", "Manage bot user pairing"),
     "identity": (".commands.identity", "app", "Manage cross-platform user identity links"),
     "kanban": (".commands.kanban", "app", "Kanban task management"),
-    "claw": (".commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
+    "claw": (".commands.claw", "app", "PraisonAI Dashboard (full UI)"),
     "mint_link": (".commands.mint_link", "app", "Generate gateway magic links"),
-    "dashboard": (".commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
+    "dashboard": (".commands.dashboard", "app", "Unified Dashboard (Flow + Claw + UI)"),
 
     "browser": (".commands.browser", "app", "Browser control for agent automation"),
     "plugins": (".commands.plugins", "app", "Plugin management and inspection"),
     "sandbox": (".commands.sandbox", "app", "Sandbox container management"),
     "flow": (".commands.flow", "app", "Visual workflow builder (Langflow)"),
-    "langfuse": (".commands.langfuse", "app", "🔍 Langfuse observability platform"),
-    "langextract": (".commands.langextract", "app", "🧠 Langextract visual trace layer"),
-    "port": (".commands.port", "app", "🔌 Manage port usage and resolve conflicts"),
-    "up": (".commands.up", "app", "🚀 Start unified PraisonAI stack (Langfuse + Langflow)"),
+    "langfuse": (".commands.langfuse", "app", "Langfuse observability platform"),
+    "langextract": (".commands.langextract", "app", "Langextract visual trace layer"),
+    "port": (".commands.port", "app", "Manage port usage and resolve conflicts"),
+    "up": (".commands.up", "app", "Start unified PraisonAI stack (Langfuse + Langflow)"),
 }
 
 # C9: Bot/channel commands implemented in ``praisonai_bot.cli.commands.*``.

@@ -15,7 +15,7 @@ import typer
 
 app = typer.Typer(
     help=(
-        "🤖 PraisonAI Clean Chat UI (Pattern B host via bundled default_app). "
+        "PraisonAI Clean Chat UI (Pattern B host via bundled default_app). "
         "Pattern C: AIUIGateway. Legacy: PRAISONAI_HOST_LEGACY=1."
     )
 )
