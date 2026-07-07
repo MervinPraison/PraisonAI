@@ -1635,7 +1635,7 @@ Example structure:
         workflow_yaml = {
             'name': data.get('name', 'Auto-Generated Workflow'),
             'description': data.get('description', ''),
-            'framework': 'praisonai',
+            'framework': self.framework,
             'workflow': {
                 'output': 'verbose',  # Use output= instead of deprecated verbose=
                 'planning': False,

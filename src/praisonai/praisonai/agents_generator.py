@@ -870,19 +870,29 @@ class AgentsGenerator:
             cli_config=getattr(self, 'cli_config', None),
         )
 
+    async def _aload_config(self):
+        """Async-safe config loading (blocking file I/O off the event loop)."""
+        import asyncio
+        return await asyncio.to_thread(self._load_config)
+
+    async def _aprepare_for_run(self, config):
+        """Async-safe run preparation (heavy imports + adapter.setup() off the loop)."""
+        import asyncio
+        return await asyncio.to_thread(self._prepare_for_run, config)
+
     async def agenerate_crew_and_kickoff(self):
         """
         Async version of generate_crew_and_kickoff.
         Generates a crew of agents and initiates tasks based on the provided configuration.
         """
-        config = self._load_config()
+        config = await self._aload_config()
         if config is None:
             return
         if self._is_workflow_yaml(config):
             return await self._arun_yaml_workflow(config)
 
-        # Use shared preparation logic
-        prep = self._prepare_for_run(config)
+        # Use shared preparation logic (off the event loop to avoid blocking imports)
+        prep = await self._aprepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         return await prep['adapter'].arun(
@@ -896,92 +906,28 @@ class AgentsGenerator:
         )
 
 
-    async def _arun_yaml_workflow(self, config):
+    def _build_yaml_workflow(self, config):
         """
-        Async version of _run_yaml_workflow using YAMLWorkflowParser.
-        
-        This method handles agents.yaml files that have:
-        - process: workflow
-        
+        Single source of truth for YAML workflow preparation.
+
+        Handles: praisonaiagents availability check, parser import guard,
+        name defaulting, framework validation, default_llm merge, yaml.dump,
+        and parser.parse_string. Returns the parsed workflow plus input data.
+
         Args:
-            config: YAML configuration dictionary
-            
+            config (dict): The parsed YAML configuration
+
         Returns:
-            str: Workflow execution result
+            Tuple[Any, Any]: (workflow, input_data)
         """
         if not is_available("praisonaiagents"):
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
-        
+
         try:
             from praisonaiagents.workflows import YAMLWorkflowParser
         except ImportError as err:
             raise ImportError("YAMLWorkflowParser not available. Please update praisonaiagents.") from err
-        
-        # Ensure name is present
-        if 'name' not in config:
-            config['name'] = config.get('topic', 'Workflow')
 
-        from .framework_adapters.workflow_framework import (
-            framework_from_config,
-            validate_workflow_framework,
-        )
-        effective_framework = (self.framework or framework_from_config(config))
-        validate_workflow_framework(
-            effective_framework,
-            source="agents.yaml workflow section",
-        )
-        
-        # Pass model from config_list to workflow as default_llm
-        if self.config_list and self.config_list[0].get('model'):
-            model_from_cli = self.config_list[0]['model']
-            if 'workflow' not in config:
-                config['workflow'] = {}
-            if 'default_llm' not in config['workflow']:
-                config['workflow']['default_llm'] = model_from_cli
-        
-        import yaml as yaml_module
-        yaml_content = yaml_module.dump(config, default_flow_style=False)
-        
-        parser = YAMLWorkflowParser()
-        workflow = parser.parse_string(yaml_content)
-        
-        input_data = config.get('input', config.get('topic', ''))
-        
-        self.logger.info(f"Starting async YAML workflow with topic: {input_data}")
-        
-        if hasattr(workflow, 'astart'):
-            result = await workflow.astart(input_data)
-        else:
-            import asyncio
-            result = await asyncio.to_thread(workflow.start, input_data)
-            
-        if result.get("status") == "completed":
-            return result.get("output", "Workflow completed successfully")
-        else:
-            return f"Workflow failed: {result.get('error', 'Unknown error')}"
-
-    def _run_yaml_workflow(self, config):
-        """
-        Run a YAML workflow using the YAMLWorkflowParser.
-        
-        This method handles agents.yaml files that have:
-        - process: workflow
-        - steps section with workflow patterns (route, parallel, loop, repeat)
-        
-        Args:
-            config (dict): The parsed YAML configuration
-            
-        Returns:
-            str: Result of the workflow execution
-        """
-        if not is_available("praisonaiagents"):
-            raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
-        
-        try:
-            from praisonaiagents.workflows import YAMLWorkflowParser
-        except ImportError:
-            raise ImportError("YAMLWorkflowParser not available. Please update praisonaiagents.")
-        
         # Ensure name is present (YAMLWorkflowParser handles roles->agents conversion)
         if 'name' not in config:
             config['name'] = config.get('topic', 'Workflow')
@@ -990,41 +936,92 @@ class AgentsGenerator:
             framework_from_config,
             validate_workflow_framework,
         )
-        effective_framework = (self.framework or framework_from_config(config))
+        # Validate the YAML-declared framework first so a non-native workflow
+        # YAML (e.g. framework: crewai) can't slip through just because the
+        # generator instance still holds the default 'praisonai'.
         validate_workflow_framework(
-            effective_framework,
+            framework_from_config(config),
             source="agents.yaml workflow section",
         )
-        
+        if self.framework:
+            validate_workflow_framework(
+                self.framework,
+                source="AgentsGenerator framework",
+            )
+
         # Pass model from config_list to workflow as default_llm
         if self.config_list and self.config_list[0].get('model'):
             model_from_cli = self.config_list[0]['model']
-            # Set default_llm in workflow config if not already set
             if 'workflow' not in config:
                 config['workflow'] = {}
             if 'default_llm' not in config['workflow']:
                 config['workflow']['default_llm'] = model_from_cli
-        
+
         # Convert config back to YAML string for parser
         # Note: YAMLWorkflowParser handles 'roles' to 'agents' conversion internally
         import yaml as yaml_module
         yaml_content = yaml_module.dump(config, default_flow_style=False)
-        
-        # Parse and execute
+
         parser = YAMLWorkflowParser()
         workflow = parser.parse_string(yaml_content)
-        
+
         # Get input: 'input' is canonical, 'topic' is alias for backward compatibility
         input_data = config.get('input', config.get('topic', ''))
-        
-        # Execute workflow
-        self.logger.debug(f"Running workflow: {workflow.name}")
-        result = workflow.start(input_data)
-        
+
+        return workflow, input_data
+
+    @staticmethod
+    def _finalise_workflow_result(result):
+        """Normalize a workflow execution result into a string."""
         if result.get("status") == "completed":
             return result.get("output", "Workflow completed successfully")
+        return f"Workflow failed: {result.get('error', 'Unknown error')}"
+
+    async def _arun_yaml_workflow(self, config):
+        """
+        Async version of _run_yaml_workflow using YAMLWorkflowParser.
+
+        This method handles agents.yaml files that have:
+        - process: workflow
+
+        Args:
+            config: YAML configuration dictionary
+
+        Returns:
+            str: Workflow execution result
+        """
+        import asyncio
+        workflow, input_data = await asyncio.to_thread(self._build_yaml_workflow, config)
+
+        self.logger.info(f"Starting async YAML workflow with topic: {input_data}")
+
+        if hasattr(workflow, 'astart'):
+            result = await workflow.astart(input_data)
         else:
-            return f"Workflow failed: {result.get('error', 'Unknown error')}"
+            result = await asyncio.to_thread(workflow.start, input_data)
+
+        return self._finalise_workflow_result(result)
+
+    def _run_yaml_workflow(self, config):
+        """
+        Run a YAML workflow using the YAMLWorkflowParser.
+
+        This method handles agents.yaml files that have:
+        - process: workflow
+        - steps section with workflow patterns (route, parallel, loop, repeat)
+
+        Args:
+            config (dict): The parsed YAML configuration
+
+        Returns:
+            str: Result of the workflow execution
+        """
+        workflow, input_data = self._build_yaml_workflow(config)
+
+        self.logger.debug(f"Running workflow: {workflow.name}")
+        result = workflow.start(input_data)
+
+        return self._finalise_workflow_result(result)
 
 
 # Standalone function for backward compatibility with tests
