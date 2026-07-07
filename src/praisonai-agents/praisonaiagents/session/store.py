@@ -821,10 +821,15 @@ class DefaultSessionStore:
     
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
+
+        def _apply(session: SessionData) -> None:
+            session.messages.clear()
+            # Issue #2741: drop the compaction anchor too so a subsequently
+            # rebuilt transcript is not misread as a compacted tail.
+            session.last_compaction = None
+
         return self._modify_session_locked(
-            session_id,
-            lambda session: session.messages.clear(),
-            error_label="clear session",
+            session_id, _apply, error_label="clear session"
         )
 
     def set_chat_history(
@@ -836,6 +841,11 @@ class DefaultSessionStore:
 
         def _apply(session: SessionData) -> None:
             session.messages.clear()
+            # Issue #2741: replacing the whole transcript invalidates any prior
+            # compaction anchor (its message_index no longer maps to these
+            # messages). Clear it so get_working_history returns the full new
+            # history instead of clamping to an empty tail and dropping messages.
+            session.last_compaction = None
             for msg in messages:
                 session.messages.append(
                     SessionMessage(
@@ -869,8 +879,14 @@ class DefaultSessionStore:
 
         Backward compatible: sessions without a checkpoint resume from raw
         messages exactly as before.
+
+        A blank/whitespace-only summary is treated as a no-op so we never
+        replay an empty ``{"role": "system", "content": ""}`` message into the
+        LLM context on resume.
         """
         summary = summary or ""
+        if not summary.strip():
+            return False
 
         def _apply(session: SessionData) -> None:
             session.last_compaction = CompactionCheckpoint(

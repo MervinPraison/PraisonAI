@@ -922,7 +922,13 @@ Your Goal: {self.goal}"""
         """
         import logging
         store = getattr(self, "_session_store", None)
-        session_id = getattr(self, "_session_id", None)
+        # Issue #2741: write to the same key the resume read path uses
+        # (_history_session_id), falling back to _session_id. These are usually
+        # identical, but can diverge when both session_id= and
+        # MemoryConfig(session_id=...) are supplied with different values.
+        session_id = getattr(self, "_history_session_id", None) or getattr(
+            self, "_session_id", None
+        )
         if store is None or session_id is None:
             return
         summary = getattr(result, "summary", "") or ""

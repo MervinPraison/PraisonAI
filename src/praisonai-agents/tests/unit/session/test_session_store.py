@@ -1160,11 +1160,48 @@ class TestCompactionCheckpoint:
             assert working[-1]["content"] == "post-2"
 
     def test_empty_summary_not_persisted(self, temp_store):
-        """A blank summary still stores a checkpoint object but is harmless."""
+        """A blank/whitespace summary is a no-op and never writes a checkpoint.
+
+        This prevents replaying an empty ``{"role": "system", "content": ""}``
+        message into the LLM context on resume.
+        """
         temp_store.add_user_message("s1", "a")
-        temp_store.append_compaction_checkpoint("s1", "")
+        assert temp_store.append_compaction_checkpoint("s1", "") is False
+        assert temp_store.append_compaction_checkpoint("s1", "   ") is False
         session = temp_store.get_session("s1")
-        # Checkpoint exists but summary is empty; working history still valid.
-        assert session.last_compaction is not None
+        # No checkpoint written; resume falls back to raw history.
+        assert session.last_compaction is None
         working = temp_store.get_working_history("s1")
-        assert working[0]["content"] == ""
+        assert working == [{"role": "user", "content": "a"}]
+
+    def test_set_chat_history_clears_stale_checkpoint(self, temp_store):
+        """Replacing the transcript invalidates the compaction anchor.
+
+        Regression for the stale-checkpoint data-loss path: without clearing
+        ``last_compaction``, a smaller replacement transcript would clamp the
+        tail to empty and silently drop every replaced message on resume.
+        """
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.add_assistant_message("s1", "old-2")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+
+        # Simulate api.save_state(): replace with a fresh, smaller transcript.
+        temp_store.set_chat_history(
+            "s1", [{"role": "user", "content": "fresh"}]
+        )
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is None
+        # Working history returns the full new transcript, nothing dropped.
+        working = temp_store.get_working_history("s1")
+        assert working == [{"role": "user", "content": "fresh"}]
+
+    def test_clear_session_clears_checkpoint(self, temp_store):
+        """clear_session drops the compaction anchor along with messages."""
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+        temp_store.clear_session("s1")
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is None
+        assert temp_store.get_working_history("s1") == []
