@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 396 |
+| Python Core Features | 395 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **102** |
+| **Gap Count** | **101** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 89 |
+| P3 (Low) | 88 |
 
 ## Gap Matrix
 
@@ -160,7 +160,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 89 todo)
+### P3_Advanced (180 done, 88 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -217,7 +217,6 @@
 | `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
-| `RulesConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `ScopeRequiredError` | ✅ | ❌ | low | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
@@ -484,7 +483,7 @@ from praisonaiagents import ConditionProtocol, DictCondition, ExpressionConditio
 </details>
 
 <details>
-<summary><strong>config</strong> (77 exports)</summary>
+<summary><strong>config</strong> (76 exports)</summary>
 
 ```python
 from praisonaiagents import AUTONOMY_PRESETS, ArrayMode, AutonomyLevel, CACHING_PRESETS, CONTEXT_PRESETS, CachingConfig, ChunkingStrategy, ConfigValidationError, DefaultsConfig, EXECUTION_PRESETS...
