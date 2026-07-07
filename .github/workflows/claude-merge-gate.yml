@@ -38,7 +38,7 @@ concurrency:
 
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
-  MAX_CANDIDATES: 1
+  MAX_CANDIDATES: 3
   DISPATCH_PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || '' }}
 
 permissions:
@@ -56,26 +56,28 @@ jobs:
       pull-requests: read
       issues: read
       actions: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Dispatch merge gate when PR pipeline is ready
         uses: actions/github-script@v7
-        env:
-          PAT: ${{ secrets.GH_TOKEN }}
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const wr = context.payload.workflow_run;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-
-            if (!process.env.PAT) {
-              core.setFailed('GH_TOKEN secret is required for merge gate auto-dispatch (needs repo + workflow scope).');
-              return;
-            }
 
             if (wr.conclusion !== 'success') {
               core.info(`Skip dispatch: ${wr.name} conclusion=${wr.conclusion}`);
@@ -121,17 +123,26 @@ jobs:
       pull-requests: read
       issues: write
       actions: read
+      id-token: write
     outputs:
       matrix: ${{ steps.scan.outputs.matrix }}
       has_candidates: ${{ steps.scan.outputs.has_candidates }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Scan open PRs for merge gate eligibility
         id: scan
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
@@ -156,10 +167,9 @@ jobs:
                 skipped.push({ pr: n, reasons: result.reasons });
               }
             } else {
-              const prs = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: 'open', per_page: 100, sort: 'created', direction: 'asc',
-              });
-              const prNumbers = prs.map((p) => p.number);
+              const prNumbers = await mergeGate.listPrNumbersForMergeGateScan(
+                github, owner, repo, core
+              );
               const selected = await mergeGate.selectMergeGateCandidates(
                 github, owner, repo, prNumbers, maxCandidates, core
               );
@@ -196,7 +206,7 @@ jobs:
               });
             }
 
-            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 20 }, core);
+            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 10 }, core);
 
   claude-assess:
     needs: scan-candidates
@@ -230,7 +240,7 @@ jobs:
         id: mark_active
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             core.setOutput('started_at', new Date().toISOString());
             await github.rest.issues.addLabels({
@@ -252,7 +262,6 @@ jobs:
 
       - name: Claude merge gate assessment (read-only)
         id: assess
-        continue-on-error: true
         uses: ./.github/actions/claude-code-action
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -299,11 +308,12 @@ jobs:
             Read
           timeout_minutes: 15
 
-      - name: Post fallback verdict if Claude did not comment
+      - name: Post fallback BLOCK if Opus did not comment
         id: fallback_verdict
+        if: steps.assess.outcome != 'success'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const mergeGate = require('/tmp/merge-gate.js');
             const owner = context.repo.owner;
@@ -312,24 +322,24 @@ jobs:
 
             const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
             const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-            const existing = mergeGate.findMergeGateVerdict(ctx.comments, minCreatedAt, ctx.headPushedAt);
+            const existing = mergeGate.findMergeGateVerdict(
+              ctx.comments, minCreatedAt, ctx.headPushedAt, { excludeAutomatedFallback: true }
+            );
             if (existing) {
-              core.info(`Verdict already posted: ${existing}`);
-              core.setOutput('verdict', existing);
+              core.info(`Opus verdict already posted: ${existing}`);
               return;
             }
 
             const check = await mergeGate.evaluatePipelineQuiescent(
               github, owner, repo, prNumber, core, { forMergeStep: true }
             );
-            const verdict = check.ready ? 'APPROVE' : 'BLOCK';
             const lines = [
-              `MERGE_GATE_VERDICT: ${verdict}`,
+              'MERGE_GATE_VERDICT: BLOCK',
               '',
-              'Automated fallback — Claude assess did not post a verdict comment (e.g. GitHub MCP unavailable).',
+              'Automated fallback — Opus merge gate assessment did not complete.',
             ];
             if (check.ready) {
-              lines.push('All deterministic merge gates passed.');
+              lines.push('Deterministic gates passed, but Opus MERGE_GATE_VERDICT is required before merge.');
             } else {
               lines.push('Blockers:', ...check.reasons.map((r) => `- ${r}`));
             }
@@ -337,14 +347,12 @@ jobs:
               owner, repo, issue_number: prNumber,
               body: lines.join('\n'),
             });
-            core.info(`Posted fallback verdict: ${verdict}`);
-            core.setOutput('verdict', verdict);
+            core.info('Posted fallback BLOCK — Opus verdict required');
 
-      - name: Verify verdict posted
-        id: verdict
+      - name: Require Opus MERGE_GATE_VERDICT
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const mergeGate = require('/tmp/merge-gate.js');
             const comments = await mergeGate.listAllComments(
@@ -354,15 +362,23 @@ jobs:
               github, context.repo.owner, context.repo.repo, ${{ matrix.pr_number }}
             );
             const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-            const verdict = mergeGate.findMergeGateVerdict(comments, minCreatedAt, ctx.headPushedAt);
-            core.setOutput('verdict', verdict || 'NONE');
-            if (!verdict) core.warning('No recent MERGE_GATE_VERDICT comment found after assessment');
+            const verdict = mergeGate.findMergeGateVerdict(
+              comments, minCreatedAt, ctx.headPushedAt, { excludeAutomatedFallback: true }
+            );
+            if (!verdict) {
+              core.setFailed(
+                'Opus merge gate assessment must post MERGE_GATE_VERDICT on this PR (automated fallback APPROVE is not accepted).'
+              );
+              return;
+            }
+            core.info(`Opus merge gate verdict: ${verdict}`);
+            core.setOutput('verdict', verdict);
 
       - name: Remove merge gate active label
         if: always()
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const prNumber = ${{ matrix.pr_number }};
             try {
@@ -396,8 +412,17 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
 
       - name: Re-check gates and merge
         uses: actions/github-script@v7
@@ -405,7 +430,7 @@ jobs:
           MERGE_METHOD: ${{ github.event.inputs.merge_method || 'merge' }}
           SCAN_HEAD_SHA: ${{ matrix.head_sha }}
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
@@ -428,7 +453,9 @@ jobs:
               const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
               const comments = ctx.comments;
               const verdictMin = new Date(Date.now() - 25 * 60 * 1000).toISOString();
-              const verdict = mergeGate.findMergeGateVerdict(comments, verdictMin, ctx.headPushedAt);
+              const verdict = mergeGate.findMergeGateVerdict(
+                comments, verdictMin, ctx.headPushedAt, { excludeAutomatedFallback: true }
+              );
               if (verdict !== 'APPROVE') {
                 core.info(`Skip merge: verdict=${verdict || 'NONE'}`);
                 await removeLabels();

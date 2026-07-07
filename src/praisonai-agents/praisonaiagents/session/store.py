@@ -39,6 +39,20 @@ DEFAULT_SESSION_DIR = str(get_sessions_dir())
 DEFAULT_MAX_MESSAGES = 100
 DEFAULT_LOCK_TIMEOUT = 5.0  # seconds
 
+# Retention policies for the active-window overflow (Issue #2709).
+# - "compact":  summarise overflow into one synthetic message + archive raw turns
+#               (non-destructive default; nothing is silently dropped)
+# - "truncate": legacy behaviour — hard-slice to the tail, dropping older turns
+# - "keep_all": never trim the active window (unbounded history)
+RETENTION_COMPACT = "compact"
+RETENTION_TRUNCATE = "truncate"
+RETENTION_KEEP_ALL = "keep_all"
+DEFAULT_RETENTION = RETENTION_COMPACT
+
+# Emit a one-off warning once archived_messages under "compact" retention grows
+# past this many entries, so operators can spot runaway sessions on disk.
+ARCHIVE_WARN_THRESHOLD = 10_000
+
 @dataclass
 class SessionMessage:
     """A single message in a session."""
@@ -67,6 +81,53 @@ class SessionMessage:
         )
 
 @dataclass
+class CompactionCheckpoint:
+    """A durable checkpoint of an in-run context compaction (Issue #2741).
+
+    Persists the summary produced by ``compact_conversation`` plus the number
+    of messages that were live in the session at the time of compaction, so a
+    later ``--continue`` / ``resume`` can reconstruct the *compacted* working
+    history (summary + tail) instead of replaying the raw transcript.
+    """
+    summary: str
+    # Length of ``SessionData.messages`` at compaction time. Messages appended
+    # after this index are the "tail" that follow the summary on resume.
+    message_index: int = 0
+    role: str = "system"  # Role to use when replaying the summary as a message
+    tokens_before: int = 0
+    tokens_after: int = 0
+    timestamp: float = field(default_factory=time.time)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "message_index": self.message_index,
+            "role": self.role,
+            "tokens_before": self.tokens_before,
+            "tokens_after": self.tokens_after,
+            "timestamp": self.timestamp,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CompactionCheckpoint":
+        return cls(
+            summary=data.get("summary", ""),
+            message_index=data.get("message_index", 0),
+            role=data.get("role", "system"),
+            tokens_before=data.get("tokens_before", 0),
+            tokens_after=data.get("tokens_after", 0),
+            timestamp=data.get("timestamp", time.time()),
+            metadata=data.get("metadata", {}),
+        )
+
+    def as_message(self) -> Dict[str, str]:
+        """Render this checkpoint's summary as an LLM-compatible message."""
+        return {"role": self.role, "content": self.summary}
+
+
+@dataclass
 class SessionData:
     """Complete session data structure."""
     session_id: str
@@ -81,7 +142,14 @@ class SessionData:
     agent_id: Optional[str] = None  # Gateway agent ID (different from agent_name)
     # Runtime state for native transcript mirroring - Issue #1943
     runtime_state: Dict[str, Dict[str, Dict[str, Any]]] = field(default_factory=dict)  # {runtime_id: {turn_id: state}}
-    
+    # Durable append-only archive of turns rolled out of the active window
+    # under the "compact" retention policy - Issue #2709. Nothing is silently
+    # dropped: the active `messages` window is summary + recent turns, while the
+    # full record lives here for the record / later inspection.
+    archived_messages: List[SessionMessage] = field(default_factory=list)
+    # Compaction checkpoint for cheap resume - Issue #2741 (optional, backward compatible)
+    last_compaction: Optional[CompactionCheckpoint] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = {
@@ -95,7 +163,10 @@ class SessionData:
             "gateway_session_id": self.gateway_session_id,
             "agent_id": self.agent_id,
             "runtime_state": self.runtime_state,
+            "archived_messages": [m.to_dict() for m in self.archived_messages],
         }
+        if self.last_compaction is not None:
+            data["last_compaction"] = self.last_compaction.to_dict()
         for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
             if key in self.metadata:
                 data[key] = self.metadata[key]
@@ -108,6 +179,16 @@ class SessionData:
             SessionMessage.from_dict(m) 
             for m in data.get("messages", [])
         ]
+        archived = [
+            SessionMessage.from_dict(m)
+            for m in (data.get("archived_messages") or [])
+        ]
+        last_compaction_data = data.get("last_compaction")
+        last_compaction = (
+            CompactionCheckpoint.from_dict(last_compaction_data)
+            if last_compaction_data
+            else None
+        )
         return cls(
             session_id=data.get("session_id", ""),
             messages=messages,
@@ -119,6 +200,8 @@ class SessionData:
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
             runtime_state=data.get("runtime_state") or {},
+            archived_messages=archived,
+            last_compaction=last_compaction,
         )
     
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -131,6 +214,49 @@ class SessionData:
         if max_messages and len(messages) > max_messages:
             messages = messages[-max_messages:]
         return [{"role": m.role, "content": m.content} for m in messages]
+
+    def trim_messages(self, max_messages: int) -> None:
+        """Trim the transcript head to ``max_messages``, keeping the checkpoint
+        anchor consistent (Issue #2741).
+
+        When older messages are dropped, the compaction checkpoint's
+        ``message_index`` is shifted by the same amount so the retained tail
+        continues to line up on resume.
+        """
+        overflow = len(self.messages) - max_messages
+        if overflow <= 0:
+            return
+        self.messages = self.messages[-max_messages:]
+        if self.last_compaction is not None:
+            self.last_compaction.message_index = max(
+                0, self.last_compaction.message_index - overflow
+            )
+
+    def get_working_history(
+        self, max_messages: Optional[int] = None
+    ) -> List[Dict[str, str]]:
+        """Reconstruct compacted working history for cheap resume (Issue #2741).
+
+        If a compaction checkpoint exists, returns the summary followed by the
+        messages appended *after* compaction (the retained tail). Falls back to
+        the full raw history when no checkpoint is present, keeping pre-existing
+        sessions fully backward compatible.
+        """
+        checkpoint = self.last_compaction
+        if checkpoint is None:
+            return self.get_chat_history(max_messages)
+
+        # Messages appended after the compaction point are the retained tail.
+        index = max(0, min(checkpoint.message_index, len(self.messages)))
+        tail = self.messages[index:]
+        history = [checkpoint.as_message()]
+        history.extend({"role": m.role, "content": m.content} for m in tail)
+        if max_messages and len(history) > max_messages:
+            # Always preserve the summary at the head, trim the tail.
+            head = history[:1]
+            body = history[1:][-(max_messages - 1):] if max_messages > 1 else []
+            history = head + body
+        return history
 
 class FileLock:
     """
@@ -243,24 +369,189 @@ class DefaultSessionStore:
         session_dir: Optional[str] = None,
         max_messages: int = DEFAULT_MAX_MESSAGES,
         lock_timeout: float = DEFAULT_LOCK_TIMEOUT,
+        retention: Optional[str] = None,
+        active_window: Optional[int] = None,
     ):
         """
         Initialize session store.
         
         Args:
             session_dir: Directory for session files. Defaults to ~/.praisonai/sessions/
-            max_messages: Maximum messages to keep per session.
+            max_messages: Maximum messages to keep in the active window per
+                session. When ``retention`` is not given and a non-default
+                ``max_messages`` is passed explicitly, the store keeps the
+                legacy hard-truncate behaviour for backward compatibility.
             lock_timeout: Timeout for file lock acquisition.
+            retention: Overflow policy for the active window (Issue #2709):
+                - ``"compact"`` (default): summarise the oldest turns into a
+                  single synthetic summary message and archive the raw turns
+                  in the durable record — nothing is silently dropped.
+                - ``"truncate"``: legacy behaviour — hard-slice to the tail,
+                  permanently dropping older turns.
+                - ``"keep_all"``: never trim the active window.
+            active_window: Number of recent turns kept live in ``messages``
+                (defaults to ``max_messages``). Older turns are compacted or
+                truncated per ``retention``.
         """
         self.session_dir = session_dir or DEFAULT_SESSION_DIR
         self.max_messages = max_messages
         self.lock_timeout = lock_timeout
+
+        # Backward compatibility: an explicit non-default max_messages with no
+        # retention set keeps the old "truncate to tail" behaviour. New callers
+        # opt into non-destructive compaction via retention="compact" (default
+        # when nothing is specified).
+        if retention is None:
+            retention = (
+                RETENTION_TRUNCATE
+                if max_messages != DEFAULT_MAX_MESSAGES
+                else DEFAULT_RETENTION
+            )
+        if retention not in (RETENTION_COMPACT, RETENTION_TRUNCATE, RETENTION_KEEP_ALL):
+            raise ValueError(
+                f"Invalid retention {retention!r}; expected one of "
+                f"{RETENTION_COMPACT!r}, {RETENTION_TRUNCATE!r}, {RETENTION_KEEP_ALL!r}"
+            )
+        self.retention = retention
+        self.active_window = active_window if active_window is not None else max_messages
+
         self._lock = threading.RLock()
         self._cache: Dict[str, SessionData] = {}
         
         # Ensure session directory exists
         os.makedirs(self.session_dir, exist_ok=True)
     
+    @staticmethod
+    def _summarise_overflow(
+        new_turns: List["SessionMessage"],
+        prior_summary: Optional["SessionMessage"] = None,
+    ) -> "SessionMessage":
+        """Roll up newly overflowed turns into one synthetic summary message.
+
+        Reuses the dependency-free deterministic summary shape from
+        ``context.compressor.ContextCompressor._create_fallback_summary`` so a
+        resumed session retains the *gist* of dropped-from-window turns without
+        any LLM call, network, or optional dependency (Issue #2709).
+
+        ``prior_summary`` (when present) is carried forward so repeated rollups
+        don't collapse to "2 messages": its text is prepended and its
+        ``compacted_count`` accumulates the true number of archived turns.
+        """
+        payload = [
+            {"role": m.role, "content": m.content, "name": m.metadata.get("name")}
+            for m in new_turns
+        ]
+        try:
+            from ..context.compressor import ContextCompressor
+            summary_text = ContextCompressor(
+                enable_session_tracking=False
+            )._create_fallback_summary(payload)
+        except Exception:  # pragma: no cover - summariser must never break persistence
+            summary_text = f"Previous conversation: {len(new_turns)} messages compacted."
+
+        prior_count = 0
+        if prior_summary is not None:
+            prior_count = int(prior_summary.metadata.get("compacted_count", 0) or 0)
+            prior_text = prior_summary.content
+            # Strip our own "[Session Summary]\n" prefix before carrying forward.
+            prefix = "[Session Summary]\n"
+            if prior_text.startswith(prefix):
+                prior_text = prior_text[len(prefix):]
+            summary_text = f"{prior_text}\n---\n{summary_text}"
+
+        return SessionMessage(
+            role="system",
+            content=f"[Session Summary]\n{summary_text}",
+            metadata={
+                "compaction": True,
+                "compacted_count": prior_count + len(new_turns),
+            },
+        )
+
+    def _enforce_window(self, session: SessionData) -> None:
+        """Apply the retention policy to the active message window.
+
+        - ``keep_all``: no-op (unbounded history).
+        - ``truncate``: legacy hard-slice to the tail (destructive, logged once).
+        - ``compact``: summarise the oldest overflow turns into a single
+          synthetic message, archive the raw turns in the durable record, and
+          keep ``[summary, *recent]`` as the active window (non-destructive).
+        """
+        window = self.active_window
+        if window is None or window <= 0:
+            return
+        if len(session.messages) <= window:
+            return
+
+        if self.retention == RETENTION_KEEP_ALL:
+            return
+
+        overflow = session.messages[:-window]
+        recent = session.messages[-window:]
+
+        if self.retention == RETENTION_TRUNCATE:
+            session.messages = recent
+            # Keep the compaction checkpoint anchor aligned with the retained
+            # tail after the head is dropped (Issue #2741).
+            self._shift_checkpoint_anchor(session, len(overflow))
+            logger.info(
+                "session %s: truncated %d early turns (retention=truncate)",
+                session.session_id,
+                len(overflow),
+            )
+            return
+
+        # retention == "compact": archive raw overflow, then roll up.
+        # An existing summary already at the head of the overflow is carried
+        # forward (not re-archived) so repeated writes don't nest summaries.
+        prior_summary = None
+        if overflow and overflow[0].metadata.get("compaction"):
+            prior_summary = overflow[0]
+            to_archive = overflow[1:]
+        else:
+            to_archive = overflow
+
+        # Metadata-only re-writes can push the window over by re-adding the
+        # existing summary alone (no new raw turns). Nothing to compact — avoid
+        # a misleading "compacted 0 early turns" log and a redundant rollup.
+        if not to_archive:
+            new_messages = [prior_summary, *recent] if prior_summary else recent
+            self._shift_checkpoint_anchor(
+                session, len(session.messages) - len(new_messages)
+            )
+            session.messages = new_messages
+            return
+
+        session.archived_messages.extend(to_archive)
+        if len(session.archived_messages) > ARCHIVE_WARN_THRESHOLD:
+            logger.warning(
+                "session %s: archived_messages has grown to %d entries; "
+                "consider retention='truncate' or pruning old sessions.",
+                session.session_id,
+                len(session.archived_messages),
+            )
+        summary = self._summarise_overflow(to_archive, prior_summary=prior_summary)
+        new_messages = [summary, *recent]
+        self._shift_checkpoint_anchor(
+            session, len(session.messages) - len(new_messages)
+        )
+        session.messages = new_messages
+        logger.info(
+            "session %s: compacted %d early turns into a summary (retention=compact)",
+            session.session_id,
+            len(to_archive),
+        )
+
+    @staticmethod
+    def _shift_checkpoint_anchor(session: SessionData, dropped: int) -> None:
+        """Shift the compaction checkpoint anchor after ``dropped`` head
+        messages are removed from the active window (Issue #2741)."""
+        if dropped <= 0 or session.last_compaction is None:
+            return
+        session.last_compaction.message_index = max(
+            0, session.last_compaction.message_index - dropped
+        )
+
     def _get_session_path(self, session_id: str) -> str:
         """Get the file path for a session."""
         # Sanitize session_id for filesystem
@@ -322,8 +613,7 @@ class DefaultSessionStore:
             mutator(session)
             session.updated_at = datetime.now(timezone.utc).isoformat()
 
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages:]
+            self._enforce_window(session)
 
             try:
                 dir_path = os.path.dirname(filepath) or "."
@@ -358,9 +648,8 @@ class DefaultSessionStore:
         filepath = self._get_session_path(session.session_id)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
+        # Apply retention policy to the active window (Issue #2709)
+        self._enforce_window(session)
         
         with FileLock(filepath, self.lock_timeout):
             try:
@@ -434,9 +723,8 @@ class DefaultSessionStore:
             session.messages.append(message)
             session.updated_at = datetime.now(timezone.utc).isoformat()
             
-            # Trim messages if over limit
-            if len(session.messages) > self.max_messages:
-                session.messages = session.messages[-self.max_messages:]
+            # Apply retention policy to the active window (Issue #2709)
+            self._enforce_window(session)
             
             # Write atomically
             try:
@@ -502,8 +790,12 @@ class DefaultSessionStore:
             List of {"role": "user/assistant", "content": "..."} dicts.
         """
         session = self._read_session_fresh(session_id)
-        limit = max_messages or self.max_messages
-        return session.get_chat_history(limit)
+        # The active window is already bounded on write by the retention policy
+        # (compact/truncate) or intentionally unbounded (keep_all), so by
+        # default we return the full stored window rather than re-capping it at
+        # the legacy max_messages tail — that silent tail-cap was the defect in
+        # Issue #2709. Explicit max_messages still overrides.
+        return session.get_chat_history(max_messages)
     
     def get_session(self, session_id: str) -> SessionData:
         """Get full session data."""
@@ -529,10 +821,15 @@ class DefaultSessionStore:
     
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
+
+        def _apply(session: SessionData) -> None:
+            session.messages.clear()
+            # Issue #2741: drop the compaction anchor too so a subsequently
+            # rebuilt transcript is not misread as a compacted tail.
+            session.last_compaction = None
+
         return self._modify_session_locked(
-            session_id,
-            lambda session: session.messages.clear(),
-            error_label="clear session",
+            session_id, _apply, error_label="clear session"
         )
 
     def set_chat_history(
@@ -544,6 +841,11 @@ class DefaultSessionStore:
 
         def _apply(session: SessionData) -> None:
             session.messages.clear()
+            # Issue #2741: replacing the whole transcript invalidates any prior
+            # compaction anchor (its message_index no longer maps to these
+            # messages). Clear it so get_working_history returns the full new
+            # history instead of clamping to an empty tail and dropping messages.
+            session.last_compaction = None
             for msg in messages:
                 session.messages.append(
                     SessionMessage(
@@ -557,6 +859,63 @@ class DefaultSessionStore:
         return self._modify_session_locked(
             session_id, _apply, error_label="set chat history"
         )
+
+    def append_compaction_checkpoint(
+        self,
+        session_id: str,
+        summary: str,
+        *,
+        role: str = "system",
+        tokens_before: int = 0,
+        tokens_after: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Persist a compaction checkpoint so resume is cheap (Issue #2741).
+
+        Records the summary produced by an in-run ``compact_conversation`` and
+        anchors it to the current end of the persisted transcript. On resume,
+        :meth:`get_working_history` replays this summary followed by any
+        messages appended afterward, instead of the full raw log.
+
+        Backward compatible: sessions without a checkpoint resume from raw
+        messages exactly as before.
+
+        A blank/whitespace-only summary is treated as a no-op so we never
+        replay an empty ``{"role": "system", "content": ""}`` message into the
+        LLM context on resume.
+        """
+        summary = summary or ""
+        if not summary.strip():
+            return False
+
+        def _apply(session: SessionData) -> None:
+            session.last_compaction = CompactionCheckpoint(
+                summary=summary,
+                message_index=len(session.messages),
+                role=role,
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+                metadata=metadata or {},
+            )
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="append compaction checkpoint"
+        )
+
+    def get_working_history(
+        self,
+        session_id: str,
+        max_messages: Optional[int] = None,
+    ) -> List[Dict[str, str]]:
+        """Get compacted working history for cheap resume (Issue #2741).
+
+        Uses the latest compaction checkpoint when present (summary + retained
+        tail); otherwise falls back to raw chat history for backward
+        compatibility.
+        """
+        session = self._read_session_fresh(session_id)
+        limit = max_messages or self.max_messages
+        return session.get_working_history(limit)
 
     def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
         """Merge run stats / metadata fields into a persisted session."""
@@ -1100,12 +1459,41 @@ _default_store: Optional[DefaultSessionStore] = None
 _store_lock = threading.Lock()
 
 def get_default_session_store() -> DefaultSessionStore:
-    """Get the global default session store instance."""
+    """Get the global default session store instance.
+
+    Retention is non-destructive ("compact") by default. It can be overridden
+    without code changes via environment variables so the same behaviour is
+    reachable from CLI/YAML surfaces (Issue #2709):
+
+    - ``PRAISONAI_SESSION_RETENTION``: ``compact`` | ``truncate`` | ``keep_all``
+    - ``PRAISONAI_SESSION_ACTIVE_WINDOW``: int, recent turns kept live
+    """
     global _default_store
     
     if _default_store is None:
         with _store_lock:
             if _default_store is None:
-                _default_store = DefaultSessionStore()
+                retention = os.environ.get("PRAISONAI_SESSION_RETENTION")
+                active_window_env = os.environ.get("PRAISONAI_SESSION_ACTIVE_WINDOW")
+                active_window: Optional[int] = None
+                if active_window_env:
+                    try:
+                        active_window = int(active_window_env)
+                    except ValueError:
+                        logger.warning(
+                            "Invalid PRAISONAI_SESSION_ACTIVE_WINDOW=%r; ignoring",
+                            active_window_env,
+                        )
+                try:
+                    _default_store = DefaultSessionStore(
+                        retention=retention,
+                        active_window=active_window,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Invalid PRAISONAI_SESSION_RETENTION=%r; using default",
+                        retention,
+                    )
+                    _default_store = DefaultSessionStore(active_window=active_window)
     
     return _default_store

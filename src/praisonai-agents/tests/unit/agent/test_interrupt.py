@@ -117,3 +117,58 @@ class TestInterruptController:
         for _ in range(1000):
             assert not controller.is_set()
             assert controller.reason is None
+
+
+class TestLLMLoopCancellation:
+    """The litellm tool loop (llm/llm.py) must honour the InterruptController.
+
+    Regression tests for #2748: /stop must promptly halt a mid-flight run on
+    every provider path, not just the OpenAI completion path.
+    """
+
+    def _make_llm(self):
+        try:
+            from praisonaiagents.llm.llm import LLM
+        except Exception:
+            pytest.skip("litellm not installed")
+        try:
+            return LLM(model="anthropic/claude-3-haiku-20240307")
+        except Exception:
+            pytest.skip("litellm not available or model construction failed")
+
+    def test_sync_loop_returns_cancelled_outcome(self):
+        """A pre-set controller short-circuits get_response before any LLM call."""
+        llm = self._make_llm()
+        controller = InterruptController()
+        controller.request("user_stop")
+
+        result = llm.get_response(
+            prompt="hello",
+            tools=None,
+            verbose=False,
+            stream=False,
+            cancel_token=controller,
+        )
+
+        assert isinstance(result, str)
+        assert "interrupted" in result.lower()
+        assert "user_stop" in result
+
+    @pytest.mark.asyncio
+    async def test_async_loop_returns_cancelled_outcome(self):
+        """A pre-set controller short-circuits get_response_async before any LLM call."""
+        llm = self._make_llm()
+        controller = InterruptController()
+        controller.request("user_stop")
+
+        result = await llm.get_response_async(
+            prompt="hello",
+            tools=None,
+            verbose=False,
+            stream=False,
+            cancel_token=controller,
+        )
+
+        assert isinstance(result, str)
+        assert "interrupted" in result.lower()
+        assert "user_stop" in result

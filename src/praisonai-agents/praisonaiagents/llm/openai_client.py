@@ -17,6 +17,15 @@ from pydantic import BaseModel
 from dataclasses import dataclass
 import inspect
 
+# Graceful "wrap-up" instruction injected when the step budget is nearly
+# exhausted, so the model produces a coherent final answer instead of being
+# hard-cut. Shared by both tool-execution loops for consistent behaviour.
+_MAX_STEPS_WRAPUP_PROMPT = (
+    "You are approaching the maximum number of tool-use steps for this task. "
+    "Stop calling tools now and provide your best final answer, summarising the "
+    "work completed so far and clearly noting anything left incomplete."
+)
+
 # Lazy imports for optional dependencies
 _openai_module = None
 _rich_console = None
@@ -791,76 +800,15 @@ class OpenAIClient:
         )
 
     def _generate_tool_definition(self, func: Callable) -> Optional[Dict]:
-        """Generate a tool definition from a callable function."""
+        """Generate a tool definition from a callable function.
+
+        Delegates to the shared core helper so tool schemas are identical across
+        the agent, LLM and OpenAI-client layers (including array 'items'
+        normalisation required by strict providers).
+        """
         try:
-            sig = inspect.signature(func)
-            
-            # Skip self, *args, **kwargs
-            parameters_list = []
-            for name, param in sig.parameters.items():
-                if name == "self":
-                    continue
-                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                    continue
-                parameters_list.append((name, param))
-            
-            parameters = {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-            
-            # Parse docstring for parameter descriptions
-            docstring = inspect.getdoc(func)
-            param_descriptions = {}
-            if docstring:
-                import re
-                param_section = re.split(r'\s*Args:\s*', docstring)
-                if len(param_section) > 1:
-                    param_lines = param_section[1].split('\n')
-                    for line in param_lines:
-                        line = line.strip()
-                        if line and ':' in line:
-                            param_name, param_desc = line.split(':', 1)
-                            param_descriptions[param_name.strip()] = param_desc.strip()
-            
-            for name, param in parameters_list:
-                param_type = "string"  # Default type
-                param_info = {}
-                
-                if param.annotation != inspect.Parameter.empty:
-                    if param.annotation is int:
-                        param_type = "integer"
-                    elif param.annotation is float:
-                        param_type = "number"
-                    elif param.annotation is bool:
-                        param_type = "boolean"
-                    elif param.annotation is list:
-                        param_type = "array"
-                        # OpenAI requires 'items' for array types
-                        param_info["items"] = {"type": "string"}
-                    elif param.annotation is dict:
-                        param_type = "object"
-                
-                param_info["type"] = param_type
-                if name in param_descriptions:
-                    param_info["description"] = param_descriptions[name]
-                
-                parameters["properties"][name] = param_info
-                if param.default == inspect.Parameter.empty:
-                    parameters["required"].append(name)
-            
-            # Extract description from docstring
-            description = docstring.split('\n')[0] if docstring else f"Function {func.__name__}"
-            
-            return {
-                "type": "function",
-                "function": {
-                    "name": func.__name__,
-                    "description": description,
-                    "parameters": parameters
-                }
-            }
+            from ..tools.schema import build_tool_definition
+            return build_tool_definition(func)
         except Exception as e:
             logging.error(f"Error generating tool definition: {e}")
             return None
@@ -1554,16 +1502,34 @@ class OpenAIClient:
         """
         start_time = time.time()
         
+        # Work on a local copy so the tool-loop mutations (assistant/tool
+        # turns and the graceful wrap-up control message) never leak back into
+        # the caller's conversation history and pollute subsequent turns.
+        messages = list(messages)
+        
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
         # Continue tool execution loop until no more tool calls are needed
         iteration_count = 0
+        # Structured stop reason so callers can distinguish completion from
+        # truncation (unified with the LiteLLM path). "completed" by default.
+        self._last_stop_reason = "completed"
+        _wrapup_injected = False
         
         while iteration_count < max_iterations:
             # Trigger LLM callback for status/trace output
             from ..main import execute_sync_callback
             execute_sync_callback('llm_start', model=model, agent_name=None)
+
+            # Graceful wrap-up: on the final permitted step, ask the model to
+            # produce a coherent final answer instead of being hard-cut.
+            if not _wrapup_injected and max_iterations > 1 and iteration_count == max_iterations - 1:
+                messages.append({
+                    "role": "user",
+                    "content": _MAX_STEPS_WRAPUP_PROMPT,
+                })
+                _wrapup_injected = True
             
             if stream:
                 # Process as streaming response with formatted tools
@@ -1758,6 +1724,10 @@ class OpenAIClient:
                 # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
+                # If we've exhausted the budget while the model still wants tools,
+                # the task was truncated rather than completed.
+                if iteration_count >= max_iterations:
+                    self._last_stop_reason = "max_steps"
             else:
                 # No tool calls, we're done
                 break
@@ -1805,13 +1775,29 @@ class OpenAIClient:
         """
         start_time = time.time()
         
+        # Work on a local copy so the tool-loop mutations (assistant/tool
+        # turns and the graceful wrap-up control message) never leak back into
+        # the caller's conversation history and pollute subsequent turns.
+        messages = list(messages)
+        
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
         # Continue tool execution loop until no more tool calls are needed
         iteration_count = 0
+        # Structured stop reason (unified with the sync/LiteLLM paths).
+        self._last_stop_reason = "completed"
+        _wrapup_injected = False
         
         while iteration_count < max_iterations:
+            # Graceful wrap-up on the final permitted step.
+            if not _wrapup_injected and max_iterations > 1 and iteration_count == max_iterations - 1:
+                messages.append({
+                    "role": "user",
+                    "content": _MAX_STEPS_WRAPUP_PROMPT,
+                })
+                _wrapup_injected = True
+
             if stream:
                 # Process as streaming response with formatted tools
                 final_response = await self.process_stream_response_async(
@@ -1984,6 +1970,8 @@ class OpenAIClient:
                 # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
+                if iteration_count >= max_iterations:
+                    self._last_stop_reason = "max_steps"
             else:
                 # No tool calls, we're done
                 break

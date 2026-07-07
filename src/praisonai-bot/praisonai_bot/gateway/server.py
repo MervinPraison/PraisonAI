@@ -687,6 +687,8 @@ class WebSocketGateway:
         port: int = 8765,
         config: Optional[GatewayConfig] = None,
         session_store: Optional[SessionStoreProtocol] = None,
+        openai_api: Optional[bool] = None,
+        mcp: Optional[bool] = None,
     ):
         """Initialize the gateway.
         
@@ -695,8 +697,21 @@ class WebSocketGateway:
             port: Port to listen on
             config: Optional gateway configuration
             session_store: Optional session store for persistence
+            openai_api: Serve OpenAI-compatible endpoints
+                (``/v1/chat/completions``, ``/v1/responses``, ``/v1/models``)
+                backed by this gateway's live agents/sessions. Overrides
+                ``config.api.openai`` when set.
+            mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing this
+                gateway's agents as tools. Overrides ``config.api.mcp`` when set.
         """
         self.config = config or GatewayConfig(host=host, port=port)
+
+        # Explicit constructor toggles win over any config-provided defaults so
+        # ``WebSocketGateway(openai_api=True, mcp=True)`` works without a config.
+        if openai_api is not None:
+            self.config.api.openai = bool(openai_api)
+        if mcp is not None:
+            self.config.api.mcp = bool(mcp)
         
         # Set bind_host for bind-aware authentication
         self.config.bind_host = self.config.host
@@ -1103,12 +1118,14 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            api_cfg = getattr(self.config, "api", None)
             return JSONResponse({
                 "name": "PraisonAI Gateway",
                 "version": "1.0.0",
                 "agents": list(self._agents.keys()),
                 "sessions": len(self._sessions),
                 "clients": len(self._clients),
+                "api": api_cfg.to_dict() if api_cfg is not None else {},
             })
         
         async def _reject_connection(
@@ -1756,7 +1773,54 @@ class WebSocketGateway:
             Route("/api/channels/{name}/reconnect", reconnect_channel_handler, methods=["POST"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
-        
+
+        # Issue #2715: additive, config-gated OpenAI-compatible / MCP protocol
+        # surfaces on the SAME app and auth. Each request dispatches into the
+        # gateway's own registered agents and shares its session store and
+        # admission gate, so OpenAI-SDK/MCP clients reach the same stateful
+        # agent as chat users. Disabled by default (config.api.*).
+        api_cfg = getattr(self.config, "api", None)
+        if api_cfg is not None and getattr(api_cfg, "enabled", False):
+            from .api_endpoints import GatewayApiEndpoints
+            self._api_endpoints = GatewayApiEndpoints(self)
+
+            def _api_guarded(handler):
+                async def _wrapped(request):
+                    auth_err = _check_auth(request)
+                    if auth_err:
+                        return auth_err
+                    return await handler(request)
+                return _wrapped
+
+            if api_cfg.openai:
+                routes += [
+                    Route(
+                        "/v1/chat/completions",
+                        _api_guarded(self._api_endpoints.openai_chat),
+                        methods=["POST"],
+                    ),
+                    Route(
+                        "/v1/responses",
+                        _api_guarded(self._api_endpoints.openai_responses),
+                        methods=["POST"],
+                    ),
+                    Route(
+                        "/v1/models",
+                        _api_guarded(self._api_endpoints.openai_models),
+                        methods=["GET"],
+                    ),
+                ]
+                logger.info("Gateway OpenAI-compatible API enabled (/v1/*)")
+            if api_cfg.mcp:
+                routes += [
+                    Route(
+                        "/mcp",
+                        _api_guarded(self._api_endpoints.mcp_jsonrpc),
+                        methods=["POST"],
+                    ),
+                ]
+                logger.info("Gateway MCP endpoint enabled (/mcp)")
+
         app = Starlette(routes=routes)
         
         config = uvicorn.Config(
@@ -4184,6 +4248,18 @@ class WebSocketGateway:
             
             config = BotConfig(**config_kwargs)
 
+            # Carry the inbound STT policy (Issue #2721) through the config's
+            # metadata passthrough (BotConfig has no native ``stt`` field),
+            # mirroring how ``max_inbound_media_bytes`` flows. On by default so
+            # voice notes are transcribed out of the box; ``stt.enabled: false``
+            # opts out. A bare ``stt: true/false`` shorthand is also accepted.
+            _raw_stt = ch_cfg.get("stt")
+            if _raw_stt is not None:
+                try:
+                    config.metadata["stt"] = _raw_stt
+                except Exception:  # pragma: no cover — defensive
+                    pass
+
             # Warn if no allowlist is configured
             if not config.allowed_users:
                 logger.warning(
@@ -4196,6 +4272,10 @@ class WebSocketGateway:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
                 if bot is None:
                     continue
+                # Issue #2721: enable inbound speech-to-text so voice notes are
+                # transcribed and fed to the agent. On by default; the resolved
+                # policy (config.metadata["stt"]) drives the opt-out.
+                self._enable_stt(bot, config)
                 # Issue #2454: share the gateway-wide admission gate with this
                 # channel bot so inbound runs are admitted through the global
                 # concurrency ceiling / fair queue. No-op when not configured.
@@ -4217,6 +4297,24 @@ class WebSocketGateway:
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _enable_stt(self, bot: Any, config: Any) -> None:
+        """Enable inbound speech-to-text on a channel bot (Issue #2721).
+
+        Voice notes are transcribed and fed to the agent by default. The
+        resolved policy is read from ``config.metadata["stt"]`` so an operator
+        can opt out with ``stt.enabled: false``. No-op for adapters that don't
+        expose ``enable_stt`` (e.g. email), preserving today's behaviour.
+        """
+        enable = getattr(bot, "enable_stt", None)
+        if not callable(enable):
+            return
+        try:
+            from praisonai_bot.bots._stt import resolve_stt_config
+            stt = resolve_stt_config(config)
+            enable(stt.enabled)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("Failed to configure STT for bot: %s", e, exc_info=True)
 
     def _stamp_admission_gate(self, bot: Any) -> None:
         """Share the gateway-wide admission gate with a channel bot (Issue #2454).
@@ -4915,7 +5013,16 @@ class WebSocketGateway:
             config_kwargs["default_tools"] = _raw_yaml_tools
         
         config = BotConfig(**config_kwargs)
-        
+
+        # Issue #2721: carry the inbound STT policy through metadata (same as
+        # start_channels) so a hot-reloaded channel still transcribes voice.
+        _raw_stt = ch_cfg.get("stt")
+        if _raw_stt is not None:
+            try:
+                config.metadata["stt"] = _raw_stt
+            except Exception:  # pragma: no cover — defensive
+                pass
+
         # Warn if no allowlist is configured
         if not config.allowed_users:
             logger.warning(
@@ -4929,6 +5036,8 @@ class WebSocketGateway:
             bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
             if bot is None:
                 return
+            # Issue #2721: enable inbound STT on the hot-reloaded channel too.
+            self._enable_stt(bot, config)
             # Issue #2454: stamp the shared admission gate so a channel restarted
             # during hot-reload still enforces the global concurrency ceiling.
             self._stamp_admission_gate(bot)
@@ -5451,6 +5560,22 @@ class WebSocketGateway:
             self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
         if "max_queued_frames" in gw_cfg:
             self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
+        # Issue #2715: additive OpenAI-compatible / MCP protocol surfaces.
+        # YAML ``gateway.api: { openai: true, mcp: true }`` enables them; a
+        # CLI ``--openai-api`` / ``--mcp`` override (stamped on the instance)
+        # wins so operators can toggle without editing the file.
+        api_yaml = gw_cfg.get("api")
+        if isinstance(api_yaml, dict):
+            if "openai" in api_yaml:
+                self.config.api.openai = bool(api_yaml["openai"])
+            if "mcp" in api_yaml:
+                self.config.api.mcp = bool(api_yaml["mcp"])
+        _openai_ovr = getattr(self, "_openai_api_override", None)
+        if _openai_ovr is not None:
+            self.config.api.openai = bool(_openai_ovr)
+        _mcp_ovr = getattr(self, "_mcp_override", None)
+        if _mcp_ovr is not None:
+            self.config.api.mcp = bool(_mcp_ovr)
         # Issue #2375: graceful-drain timeout on shutdown. When set, the
         # shutdown path waits (bounded) for in-flight turns/sessions to
         # finish before tearing down. 0/unset preserves prior behaviour.

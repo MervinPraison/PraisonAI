@@ -120,7 +120,7 @@ from ..config.presets import (
 )
 from ..config.feature_configs import (
     OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
-    PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
+    PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
 )
@@ -463,90 +463,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             logging.debug(f"Function {function_name} not found or not callable")
             return None
 
-        import inspect
-        # Langchain tools
-        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
-            original_func = func
-            func = func.run
-            function_name = original_func.__name__
-        # CrewAI tools
-        elif inspect.isclass(func) and hasattr(func, '_run'):
-            original_func = func
-            func = func._run
-            function_name = original_func.__name__
-
-        sig = inspect.signature(func)
-        logging.debug(f"Function signature: {sig}")
-        
-        # Skip self, *args, **kwargs, so they don't get passed in arguments
-        parameters_list = []
-        for name, param in sig.parameters.items():
-            if name == "self":
-                continue
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            parameters_list.append((name, param))
-
-        parameters = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-        
-        # Parse docstring for parameter descriptions
-        docstring = inspect.getdoc(func)
-        logging.debug(f"Function docstring: {docstring}")
-        
-        param_descriptions = {}
-        if docstring:
-            import re
-            param_section = re.split(r'\s*Args:\s*', docstring)
-            logging.debug(f"Param section split: {param_section}")
-            if len(param_section) > 1:
-                param_lines = param_section[1].split('\n')
-                for line in param_lines:
-                    line = line.strip()
-                    if line and ':' in line:
-                        param_name, param_desc = line.split(':', 1)
-                        param_descriptions[param_name.strip()] = param_desc.strip()
-        
-        logging.debug(f"Parameter descriptions: {param_descriptions}")
-
-        for name, param in parameters_list:
-            param_type = "string"  # Default type
-            if param.annotation != inspect.Parameter.empty:
-                if param.annotation == int:
-                    param_type = "integer"
-                elif param.annotation == float:
-                    param_type = "number"
-                elif param.annotation == bool:
-                    param_type = "boolean"
-                elif param.annotation == list:
-                    param_type = "array"
-                elif param.annotation == dict:
-                    param_type = "object"
-            
-            param_info = {"type": param_type}
-            if name in param_descriptions:
-                param_info["description"] = param_descriptions[name]
-            
-            parameters["properties"][name] = param_info
-            if param.default == inspect.Parameter.empty:
-                parameters["required"].append(name)
-        
-        logging.debug(f"Generated parameters: {parameters}")
-
-        # Extract description from docstring
-        description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
-        
-        tool_def = {
-            "type": "function",
-            "function": {
-                "name": function_name,
-                "description": description,
-                "parameters": parameters
-            }
-        }
+        # Delegate signature introspection + schema generation to the shared
+        # core helper so all layers produce identical, provider-safe schemas
+        # (including array 'items' normalisation).
+        from ..tools.schema import build_tool_definition
+        tool_def = build_tool_definition(func, function_name)
         logging.debug(f"Generated tool definition: {tool_def}")
         return tool_def
 
@@ -582,6 +503,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         knowledge: Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
         planning: Optional[Union[bool, str, 'PlanningConfig']] = False,
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
+        rules: Optional[Union[bool, 'RulesConfig']] = None,  # Auto-apply per-project rules (AGENTS.md, .praisonai/rules/)
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
         context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
@@ -641,6 +563,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             reflection: Self-reflection. Accepts:
                 - bool: True enables with defaults
                 - ReflectionConfig: Custom configuration
+            rules: Auto-apply per-project rules/instructions (AGENTS.md, CLAUDE.md,
+                .praisonai/rules/*.md) into the system prompt on every run. Accepts:
+                - None/True: auto-discover and apply when instruction files exist (default)
+                - False: opt out (reproducible/sandboxed runs)
+                - RulesConfig: Custom configuration (char_budget, files, workspace_path)
             self_improve: Autonomous skill self-improvement loop (off by default).
                 After each task, runs a guarded review pass restricted to the
                 ``skill_manage`` tool that asks the agent to capture a reusable
@@ -1027,7 +954,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
                 default=ExecutionConfig(),
             )
         if _exec_config:
-            max_iter = _exec_config.max_iter
+            # Unified step budget: when max_steps is set it governs the LiteLLM
+            # loop (LLM.max_iter) too, so both tool-execution loops honour the
+            # same budget. Falls back to max_iter when max_steps is unset.
+            _resolver = getattr(_exec_config, "resolved_max_steps", None)
+            max_iter = _resolver() if callable(_resolver) else _exec_config.max_iter
             max_rpm = _exec_config.max_rpm
             max_execution_time = _exec_config.max_execution_time
             max_retry_limit = _exec_config.max_retry_limit
@@ -1920,6 +1851,11 @@ Your Goal: {self.goal}
         # NOTE: Lazy initialization - rules are loaded only when accessed (performance optimization)
         self._rules_manager = None
         self._rules_manager_initialized = False
+        # Resolve auto-apply rules config: None/True -> auto-discover + apply,
+        # False -> disabled, RulesConfig -> custom. Discovery-gated so zero-config
+        # runs pay no cost when no instruction file is present.
+        self._rules_config = None if isinstance(rules, bool) else rules
+        self._rules_enabled = rules is not False
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
@@ -2862,6 +2798,29 @@ Summary:"""
                 else:
                     raise e
         return self.__openai_client
+
+    @property
+    def last_stop_reason(self) -> str:
+        """Structured reason the last tool-execution loop stopped.
+
+        One of ``"completed"`` (task finished), ``"max_steps"`` (the unified
+        step budget from ``ExecutionConfig.max_steps`` was reached and the run was
+        truncated) or ``"error"``. Lets CLI/CI callers branch on truncation
+        instead of parsing a magic string. Reads from whichever backend
+        (OpenAI-native or LiteLLM) executed the last turn.
+        """
+        # Read from the already-instantiated backends only. ``__openai_client``
+        # is the raw (name-mangled) attribute, never the lazy ``_openai_client``
+        # property, so this never triggers OpenAI client creation for
+        # LiteLLM-only agents.
+        for backend in (getattr(self, 'llm_instance', None),
+                        getattr(self, '_Agent__openai_client', None)):
+            if backend is None:
+                continue
+            reason = getattr(backend, '_last_stop_reason', None)
+            if reason:
+                return reason
+        return "completed"
 
     @property
     def agent_id(self) -> str:
@@ -4473,18 +4432,29 @@ Summary:"""
             from ..memory.rules_manager import RulesManager
             import os
             
-            # Get workspace path (current working directory)
-            workspace_path = os.getcwd()
+            # Get workspace path (config override or current working directory)
+            config = self._rules_config
+            workspace_path = getattr(config, "workspace_path", None) or os.getcwd()
             
             self._rules_manager = RulesManager(
                 workspace_path=workspace_path,
                 verbose=1 if self.verbose else 0
             )
             
-            # Log discovered rules
+            # Register any extra instruction files/globs from RulesConfig.files
+            # before the discovery gate so a workspace whose only rules are
+            # explicit files is not dropped.
+            extra_files = getattr(config, "files", None) or []
+            for extra in extra_files:
+                self._rules_manager.add_rule_file(extra)
+            
+            # Discovery gate: if no rules were found, drop the manager so that
+            # zero-config runs incur no per-run injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
                 logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+            else:
+                self._rules_manager = None
         except ImportError:
             logging.debug("RulesManager not available")
             self._rules_manager = None
@@ -4506,10 +4476,12 @@ Summary:"""
         if not self.rules_manager:
             return ""
         
-        return self.rules_manager.build_rules_context(
-            file_path=file_path,
-            include_manual=include_manual
-        )
+        # Honour char budget from RulesConfig if provided
+        char_budget = getattr(self._rules_config, "char_budget", None)
+        kwargs = {"file_path": file_path, "include_manual": include_manual}
+        if char_budget is not None:
+            kwargs["max_chars"] = char_budget
+        return self.rules_manager.build_rules_context(**kwargs)
     
     def _init_memory(self, memory, user_id: Optional[str] = None):
         """

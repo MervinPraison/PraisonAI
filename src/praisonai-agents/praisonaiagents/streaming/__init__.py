@@ -29,6 +29,9 @@ __all__ = [
     "tool_progress_channel",
     "StreamLogger",
     "create_logging_callback",
+    "ProgressLine",
+    "merge_progress_line",
+    "render_progress",
 ]
 
 
@@ -69,6 +72,17 @@ def __getattr__(name: str):
             }
             return _events_exports.get(name)
         
+        # Progress compositor exports
+        if name in ("ProgressLine", "merge_progress_line", "render_progress"):
+            from .progress import ProgressLine, merge_progress_line, render_progress
+
+            _progress_exports = {
+                "ProgressLine": ProgressLine,
+                "merge_progress_line": merge_progress_line,
+                "render_progress": render_progress,
+            }
+            return _progress_exports.get(name)
+
         # Logging module exports
         if name in ("StreamLogger", "create_logging_callback"):
             from .logging import StreamLogger, create_logging_callback

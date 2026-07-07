@@ -29,6 +29,42 @@ if TYPE_CHECKING:
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
 
+    def _resolve_max_steps(self, default: int = 10) -> int:
+        """Resolve the unified multi-step tool budget shared by both loops.
+
+        Reads ``ExecutionConfig.max_steps`` when set (single knob honoured by the
+        OpenAI-native and LiteLLM tool-execution loops); otherwise falls back to
+        ``max_iter`` and finally ``default`` for backward compatibility.
+        """
+        execution = getattr(self, "execution", None)
+        if execution is not None:
+            resolver = getattr(execution, "resolved_max_steps", None)
+            if callable(resolver):
+                try:
+                    return int(resolver())
+                except Exception:
+                    pass
+            max_steps = getattr(execution, "max_steps", None)
+            if max_steps is not None:
+                return int(max_steps)
+            max_iter = getattr(execution, "max_iter", None)
+            if max_iter is not None:
+                return int(max_iter)
+        return default
+
+    def _resolve_max_tool_calls(self, default: int = 10) -> int:
+        """Resolve the per-turn tool-call guardrail (independent of ``max_steps``)."""
+        execution = getattr(self, "execution", None)
+        if execution is not None:
+            resolver = getattr(execution, "resolved_max_tool_calls", None)
+            if callable(resolver):
+                try:
+                    return int(resolver())
+                except Exception:
+                    pass
+            return int(getattr(execution, "max_tool_calls_per_turn", default))
+        return default
+
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
         
@@ -56,8 +92,11 @@ class ChatMixin:
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
         
-        # Add rules context if rules manager is enabled (lazy initialization)
-        if self._rules_manager_initialized and self._rules_manager:
+        # Add rules context when rules are enabled (default). Discovery is
+        # lazy and gated: accessing self.rules_manager triggers a cheap
+        # filesystem scan the first time; if no instruction file/dir is found
+        # the manager is dropped, so zero-config runs incur no ongoing cost.
+        if getattr(self, "_rules_enabled", True) and self.rules_manager:
             rules_context = self.get_rules_context()
             if rules_context:
                 system_prompt += f"\n\n## Rules (Guidelines you must follow)\n{rules_context}"
@@ -355,10 +394,19 @@ Your Goal: {self.goal}"""
             # Inject session history if enabled (from persistent storage)
             if self._history_enabled and self._session_store is not None:
                 try:
-                    session_history = self._session_store.get_chat_history(
-                        self._history_session_id,
-                        max_messages=self._history_limit
-                    )
+                    # Prefer compacted working history (summary + tail) on
+                    # resume when a compaction checkpoint exists (Issue #2741);
+                    # falls back to raw chat history for backward compatibility.
+                    if hasattr(self._session_store, "get_working_history"):
+                        session_history = self._session_store.get_working_history(
+                            self._history_session_id,
+                            max_messages=self._history_limit
+                        )
+                    else:
+                        session_history = self._session_store.get_chat_history(
+                            self._history_session_id,
+                            max_messages=self._history_limit
+                        )
                     if session_history:
                         messages.extend(session_history)
                 except Exception as e:
@@ -887,6 +935,12 @@ Your Goal: {self.goal}"""
             f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
+
+        # Issue #2741: Persist the compaction summary back into the bound
+        # session so `--continue`/resume reconstructs the compacted context
+        # instead of replaying the raw transcript. Guarded so it only fires
+        # when a session store + session_id are bound and a summary exists.
+        self._persist_compaction_checkpoint(result)
         
         try:
             self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
@@ -897,6 +951,39 @@ Your Goal: {self.goal}"""
         
         from ..context.policy import CompactionRoute
         return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    def _persist_compaction_checkpoint(self, result) -> None:
+        """Persist a compaction summary into the bound session (Issue #2741).
+
+        No-op unless a JSON session store and session_id are bound and the
+        compaction produced a non-empty summary. Keeps resume cheap without
+        bloating the agent flow or requiring new params.
+        """
+        import logging
+        store = getattr(self, "_session_store", None)
+        # Issue #2741: write to the same key the resume read path uses
+        # (_history_session_id), falling back to _session_id. These are usually
+        # identical, but can diverge when both session_id= and
+        # MemoryConfig(session_id=...) are supplied with different values.
+        session_id = getattr(self, "_history_session_id", None) or getattr(
+            self, "_session_id", None
+        )
+        if store is None or session_id is None:
+            return
+        summary = getattr(result, "summary", "") or ""
+        if not summary.strip():
+            return
+        if not hasattr(store, "append_compaction_checkpoint"):
+            return
+        try:
+            store.append_compaction_checkpoint(
+                session_id,
+                summary,
+                tokens_before=getattr(result, "original_tokens", 0) or 0,
+                tokens_after=getattr(result, "compacted_tokens", 0) or 0,
+            )
+        except Exception as e:
+            logging.debug(f"Failed to persist compaction checkpoint: {e}")
 
     def _apply_tool_truncation(self, messages, compactor, policy, log_tag="tool-truncation"):
         """Apply targeted tool output truncation."""
@@ -1631,7 +1718,7 @@ Your Goal: {self.goal}"""
                     stream_callback=stream_callback,
                     emit_events=emit_events,
                     verbose=self.verbose,
-                    max_iterations=10,
+                    max_iterations=self._resolve_max_steps(),
                     reasoning_steps=reasoning_steps,
                     task_name=task_name,
                     task_description=task_description,
@@ -1670,7 +1757,7 @@ Your Goal: {self.goal}"""
                 stream_callback=stream_callback,
                 emit_events=emit_events,
                 verbose=self.verbose,
-                max_iterations=10,
+                max_iterations=self._resolve_max_steps(),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -1773,7 +1860,7 @@ Your Goal: {self.goal}"""
                 stream_callback=stream_callback,
                 emit_events=emit_events,
                 verbose=self.verbose,
-                max_iterations=10,
+                max_iterations=self._resolve_max_steps(),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -2396,7 +2483,7 @@ Your Goal: {self.goal}"""
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -2415,6 +2502,11 @@ Your Goal: {self.goal}"""
                     if cancel_token is not None and getattr(cancel_token, 'is_set', lambda: False)():
                         reason = getattr(cancel_token, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
+
+                    # G2 - thread cancel token into the LLM tool loop so /stop halts
+                    # mid-flight runs between tool iterations on every provider
+                    if cancel_token is not None:
+                        llm_kwargs['cancel_token'] = cancel_token
 
                     response_text = self.llm_instance.get_response(**llm_kwargs)
 
@@ -2888,7 +2980,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'task_id': task_id,
                         'execute_tool_fn': self.execute_tool_async,
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        'max_tool_calls_per_turn': getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
+                        'max_tool_calls_per_turn': self._resolve_max_tool_calls(),
                         'reasoning_steps': reasoning_steps,
                         'stream': stream
                     }
@@ -2901,7 +2993,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
                         reason = getattr(_cancel, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
-                    
+
+                    # G2 - thread cancel token into the LLM tool loop so /stop halts
+                    # mid-flight runs between tool iterations on every provider
+                    if _cancel is not None:
+                        llm_kwargs['cancel_token'] = _cancel
+
                     response_text = await self.llm_instance.get_response_async(**llm_kwargs)
 
                     # LLM call succeeded - now it's safe to commit any compacted history
@@ -3632,7 +3729,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_id=kwargs.get('task_id'),
                         execute_tool_fn=self.execute_tool,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10)
+                        max_tool_calls_per_turn=self._resolve_max_tool_calls()
                     ):
                         response_content += chunk
                         yield chunk

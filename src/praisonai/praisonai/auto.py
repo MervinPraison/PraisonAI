@@ -854,9 +854,14 @@ class AutoGenerator(BaseAutoGenerator):
         if requires_tools_extra and not is_available("praisonai_tools"):
             logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
 
+        # Retain the resolved adapter as the canonical dispatch object (mirrors
+        # AgentsGenerator, which stores self.framework_adapter). Downstream code
+        # can consult it instead of only carrying a bare framework string.
+        self._adapter = adapter
         self.topic = topic
         self.agent_file = agent_file
-        self.framework = framework or "praisonai"
+        # Authoritative framework name comes from the adapter, not the raw arg.
+        self.framework = adapter.name or framework or "praisonai"
         self.pattern = pattern
         self.single_agent = single_agent
     
@@ -1019,14 +1024,65 @@ class AutoGenerator(BaseAutoGenerator):
         
         return merged_data
 
+    def _get_tool_resolver(self):
+        """Lazily construct the canonical ToolResolver (single source of truth).
+
+        Kept lazy so importing auto.py stays cheap and so a resolver-construction
+        failure never blocks generation — callers fall back to keyword hints.
+        """
+        resolver = getattr(self, "_tool_resolver", None)
+        if resolver is None:
+            try:
+                from .tool_resolver import ToolResolver
+                resolver = ToolResolver()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("ToolResolver unavailable (%s); using keyword hints only.", e)
+                resolver = False  # sentinel: attempted, not available
+            self._tool_resolver = resolver
+        return resolver or None
+
+    def _available_tools(self) -> List[str]:
+        """Return the real, installed tool names from the canonical ToolResolver.
+
+        This is the single source of truth shared with AgentsGenerator. Returns
+        an empty list if the resolver is unavailable so callers can fall back.
+        """
+        resolver = self._get_tool_resolver()
+        if resolver is None:
+            return []
+        try:
+            return sorted(resolver.list_available().keys())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("ToolResolver.list_available() failed (%s).", e)
+            return []
+
     def discover_tools_for_topic(self) -> List[str]:
         """
-        Discover appropriate tools for the topic using intelligent matching.
-        
-        Returns:
-            List of tool names appropriate for this topic
+        Discover appropriate tools for the topic.
+
+        Drives recommendations through the canonical ToolResolver (single source
+        of truth) so only tools that are actually installed are surfaced. Keyword
+        hints are used to prioritise, but the returned set is intersected with the
+        real registry when it is available, avoiding recommendations for tools the
+        user does not have. Falls back to keyword hints when the resolver cannot
+        be constructed.
         """
-        return get_tools_for_task(self.topic)
+        return self._discover_tools_for_topic(self._available_tools())
+
+    def _discover_tools_for_topic(self, available: List[str]) -> List[str]:
+        keyword_tools = get_tools_for_task(self.topic)
+        if not available:
+            # Resolver unavailable — preserve legacy keyword-only behaviour.
+            return keyword_tools
+
+        available_set = set(available)
+        # Prefer keyword-matched tools that actually exist, preserving order.
+        prioritized = [t for t in keyword_tools if t in available_set]
+        if prioritized:
+            return prioritized
+        # No keyword hit resolves to a real tool: surface the real registry so the
+        # LLM plans only with tools the user can actually run.
+        return available
     
     def get_user_content(self):
         """
@@ -1055,19 +1111,31 @@ class AutoGenerator(BaseAutoGenerator):
         
         workflow_guidance = pattern_guidance.get(self.pattern, pattern_guidance["sequential"])
         
+        # Resolve the installed tool registry once (single source of truth) and
+        # reuse it for both discovery and the prompt reference to avoid calling
+        # ToolResolver.list_available() twice per invocation.
+        available_tools = self._available_tools()
+
         # Get recommended tools based on task analysis
-        recommended_tools = self.discover_tools_for_topic()
+        recommended_tools = self._discover_tools_for_topic(available_tools)
         recommended_agent_count = recommend_agent_count(self.topic)
         complexity = self.analyze_complexity(self.topic)
-        
-        # Build comprehensive tool list with categories
-        all_tools_by_category = []
-        for category, tools in TOOL_CATEGORIES.items():
-            all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
-        tools_reference = "\n".join(all_tools_by_category)
-        
-        # Also include legacy tools for backward compatibility
-        legacy_tools = ", ".join(AVAILABLE_TOOLS)
+
+        # Prefer the real, installed tool registry so the LLM only plans with
+        # tools the user can actually run. Fall back to the static category
+        # reference when the resolver is unavailable.
+        if available_tools:
+            tools_header = "AVAILABLE TOOLS (installed)"
+            tools_reference = "\n".join(f"  - {t}" for t in available_tools)
+            legacy_tools = ", ".join(available_tools)
+        else:
+            tools_header = "AVAILABLE TOOLS BY CATEGORY"
+            all_tools_by_category = []
+            for category, tools in TOOL_CATEGORIES.items():
+                all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
+            tools_reference = "\n".join(all_tools_by_category)
+            # Also include legacy tools for backward compatibility
+            legacy_tools = ", ".join(AVAILABLE_TOOLS)
         
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
@@ -1100,7 +1168,7 @@ Each agent should have:
 - 1 focused task with clear description and expected output
 - Appropriate tools from the recommended list
 
-AVAILABLE TOOLS BY CATEGORY:
+{tools_header}:
 {tools_reference}
 
 LEGACY TOOLS (for backward compatibility):

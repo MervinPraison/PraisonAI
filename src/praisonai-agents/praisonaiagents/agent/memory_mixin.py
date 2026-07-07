@@ -298,8 +298,14 @@ class MemoryMixin:
                 from ..session import get_default_session_store
                 self._session_store = get_default_session_store()
             
-            # Restore chat history from previous session
-            history = self._session_store.get_chat_history(self._session_id)
+            # Restore chat history from previous session. Prefer the compacted
+            # working history (summary + retained tail) when a compaction
+            # checkpoint exists so resume is cheap and won't overflow context
+            # (Issue #2741). Falls back to raw chat history for backward compat.
+            if hasattr(self._session_store, "get_working_history"):
+                history = self._session_store.get_working_history(self._session_id)
+            else:
+                history = self._session_store.get_chat_history(self._session_id)
             if history:
                 # Only restore if chat_history is empty (avoid duplicates)
                 if not self.chat_history:

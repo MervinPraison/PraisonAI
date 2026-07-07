@@ -212,6 +212,44 @@ class PushConfig:
 
 
 @dataclass
+class ApiConfig:
+    """Configuration for additive protocol surfaces on the gateway app.
+
+    All surfaces are opt-in. When both are False (default), no extra routes
+    are mounted and the gateway behaves exactly as before.
+
+    Attributes:
+        openai: Serve OpenAI-compatible endpoints
+            (``/v1/chat/completions``, ``/v1/responses``, ``/v1/models``)
+            backed by the gateway's live agents and sessions.
+        mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing the gateway's
+            registered agents as callable tools.
+    """
+
+    openai: bool = False
+    mcp: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        """Whether any additional protocol surface is enabled."""
+        return bool(self.openai or self.mcp)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {"openai": self.openai, "mcp": self.mcp}
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "ApiConfig":
+        """Create from a parsed ``gateway.api`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            openai=bool(data.get("openai", False)),
+            mcp=bool(data.get("mcp", False)),
+        )
+
+
+@dataclass
 class GatewayConfig:
     """Configuration for the gateway server.
     
@@ -271,6 +309,9 @@ class GatewayConfig:
     max_unauthorized_frames: int = 10
     push: PushConfig = field(default_factory=PushConfig)
     auth_scopes: Optional[Dict[str, List[str]]] = None
+    # Additive protocol surfaces (OpenAI-compatible / MCP) served on the same
+    # app and auth. Opt-in; disabled by default so the gateway is unchanged.
+    api: ApiConfig = field(default_factory=ApiConfig)
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -385,6 +426,7 @@ class GatewayConfig:
             "max_unauthorized_frames": self.max_unauthorized_frames,
             "push": self.push.to_dict(),
             "scope_policy_enabled": self.has_scope_policy,
+            "api": self.api.to_dict(),
         }
     
     @property
@@ -571,6 +613,7 @@ class MultiChannelGatewayConfig:
                 gw_data.get("max_unauthorized_frames", 10)
             ),
             auth_scopes=auth_scopes,
+            api=ApiConfig.from_dict(gw_data.get("api")),
         )
         
         # Parse agents section (pass through as dicts)

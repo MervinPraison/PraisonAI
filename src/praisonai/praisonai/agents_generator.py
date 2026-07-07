@@ -596,7 +596,7 @@ class AgentsGenerator:
         assert_framework_available(adapter.name)
         
         # Validate cli_backend compatibility
-        self._validate_cli_backend_compatibility(config, adapter.name)
+        self._validate_cli_backend_compatibility(config, adapter.name, adapter=adapter)
         
         # Initialize observability hooks
         from .observability.hooks import init_observability
@@ -676,7 +676,7 @@ class AgentsGenerator:
         
         return resolved_adapter
     
-    def _validate_cli_backend_compatibility(self, config, framework):
+    def _validate_cli_backend_compatibility(self, config, framework, *, adapter=None):
         """Validate that cli_backend and runtime are only used with compatible frameworks."""
         # Check if any agent/role defines cli_backend or runtime
         all_entities = {
@@ -712,7 +712,26 @@ class AgentsGenerator:
                 for provider_config in providers_config.values()
             )
         
-        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) and framework != 'praisonai':
+        # Ask the adapter whether it supports runtime features instead of
+        # hardcoding a framework-name check. Third-party adapters can opt in by
+        # setting ``SUPPORTS_RUNTIME_FEATURES = True``. Fall back to resolving
+        # the adapter from the registry for callers that pass only a name.
+        if adapter is None:
+            try:
+                adapter = self._get_framework_adapter(framework)
+            except Exception:
+                adapter = None
+        if adapter is not None:
+            supports_runtime_features = bool(
+                getattr(adapter, "SUPPORTS_RUNTIME_FEATURES", False)
+            )
+        else:
+            # Adapter could not be resolved (e.g. minimal/mock generator without a
+            # registry): preserve the historical native-only behaviour.
+            supports_runtime_features = str(framework).lower() == "praisonai"
+
+        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) \
+                and not supports_runtime_features:
             runtime_features = []
             if has_cli_backend:
                 runtime_features.append('cli_backend')
@@ -724,12 +743,17 @@ class AgentsGenerator:
                 runtime_features.append('providers.*.runtime_default')
             
             features_str = ', '.join(runtime_features)
-            self.logger.error(
-                f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
-                f"Remove these fields from your YAML or switch to framework='praisonai'."
-            )
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.error(
+                    f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
+                    f"Remove these fields from your YAML or switch to a framework whose adapter "
+                    f"sets SUPPORTS_RUNTIME_FEATURES = True (e.g. framework='praisonai')."
+                )
             raise ValueError(
-                f"Runtime features require framework='praisonai', but framework='{framework}' was specified"
+                f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
+                f"Use a framework whose adapter sets SUPPORTS_RUNTIME_FEATURES = True "
+                f"(e.g. framework='praisonai')."
             )
 
     def _validate_agents_config(self, config):

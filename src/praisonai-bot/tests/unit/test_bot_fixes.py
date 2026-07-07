@@ -372,3 +372,60 @@ class TestPlatformLimits:
         
         whatsapp = PLATFORM_LIMITS["whatsapp"]
         assert whatsapp.messages_per_second >= 30  # ~80 per Cloud API docs
+
+
+class TestSlackInboundSTT:
+    """Issue #2721: inbound voice-note transcription for Slack.
+
+    Guards against the SSRF finding (the ``url_private_download`` fetch must be
+    vetted before download) and the audio-detection mismatch (a voice note with
+    a generic mimetype but audio ``filetype`` must still be recognised).
+    """
+
+    def _make_bot(self):
+        from praisonaiagents.bots import BotConfig
+        from praisonai_bot.bots.slack import SlackBot
+
+        config = BotConfig(token="xoxb-test")
+        config.metadata = {"max_inbound_media_bytes": 1_000_000}
+        bot = SlackBot(token="xoxb-test", config=config)
+        bot.enable_stt(True)
+        return bot
+
+    def test_is_audio_file_matches_filetype_without_audio_mimetype(self):
+        """A generic mimetype with an audio filetype is still audio."""
+        from praisonai_bot.bots.slack import SlackBot
+
+        assert SlackBot._is_audio_file(
+            {"mimetype": "application/octet-stream", "filetype": "ogg"}
+        )
+        assert SlackBot._is_audio_file({"mimetype": "audio/mp4", "filetype": ""})
+        assert not SlackBot._is_audio_file(
+            {"mimetype": "image/png", "filetype": "png"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_transcribe_audio_refuses_ssrf_url(self):
+        """A forged url_private_download to an internal host must not be fetched."""
+        bot = self._make_bot()
+        event = {
+            "files": [
+                {
+                    "mimetype": "audio/ogg",
+                    "filetype": "ogg",
+                    "url_private_download": "http://169.254.169.254/latest/meta-data/",
+                    "name": "voice.ogg",
+                }
+            ]
+        }
+        # The SSRF guard returns None (message falls back to a placeholder)
+        # rather than fetching the internal metadata endpoint.
+        assert await bot._transcribe_audio(event) is None
+
+    @pytest.mark.asyncio
+    async def test_transcribe_audio_returns_none_when_disabled(self):
+        """STT disabled short-circuits before any network access."""
+        bot = self._make_bot()
+        bot.enable_stt(False)
+        event = {"files": [{"mimetype": "audio/ogg", "filetype": "ogg"}]}
+        assert await bot._transcribe_audio(event) is None

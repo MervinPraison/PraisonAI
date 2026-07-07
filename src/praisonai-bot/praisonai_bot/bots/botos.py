@@ -573,6 +573,16 @@ class BotOS:
 
         When the UI scheduler is already running (PraisonAIUI started),
         this loop defers to it to avoid double-firing jobs.
+
+        Cross-process at-most-once: when the backing store supports an atomic
+        claim (``claim_due``), each due job is reserved under a cross-process
+        lock via ``runner.claim_due_jobs`` before running, so it fires **at most
+        once** across all tickers/processes/hosts — matching the WebSocket
+        gateway's ``ScheduledAgentExecutor``. The lease is released via
+        ``complete_run`` after each run so it does not linger until expiry, and
+        a claim not completed (crashed run) expires so the job is retried.
+        Stores without atomic support fall back to the non-atomic
+        ``get_due_jobs`` path (single-process behaviour is unchanged).
         """
         try:
             from praisonaiagents.tools.schedule_tools import _get_store
@@ -581,9 +591,21 @@ class BotOS:
             logger.debug("BotOS: schedule module not available, skipping scheduler")
             return
 
+        import os
+        import socket
+        import uuid
+
         store = _get_store()
         runner = ScheduleRunner(store)
-        logger.info("BotOS: schedule loop started (30s tick)")
+        # Stable per-process identity for atomic claims (host:pid:uuid) so a due
+        # job fires at most once across processes/hosts when the store supports
+        # ``claim_due``.
+        owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        atomic_claim = runner.supports_atomic_claim()
+        logger.info(
+            "BotOS: schedule loop started (30s tick, atomic_claim=%s)",
+            atomic_claim,
+        )
 
         while True:
             try:
@@ -598,7 +620,10 @@ class BotOS:
                     await asyncio.sleep(30)
                     continue
 
-                due = runner.get_due_jobs()
+                # Reserve due jobs atomically when supported; only jobs this
+                # process won are returned (competitors get an empty list and
+                # skip silently). Falls back to non-atomic get_due_jobs.
+                due = runner.claim_due_jobs(owner_id, lease_seconds=300)
                 for job in due:
                     import time as _time
                     _start = _time.time()
@@ -612,6 +637,23 @@ class BotOS:
                         _status = "failed"
                         _error = str(e)
                         logger.warning(f"BotOS: schedule job {job.name} failed: {e}")
+                    finally:
+                        # Release the lease so it does not linger until expiry.
+                        if atomic_claim:
+                            try:
+                                runner.complete_run(job.id, owner_id)
+                                # complete_run clears the lease on disk; also
+                                # clear it in-memory so the mark_run ->
+                                # store.update(job) below does not re-write the
+                                # stale lease and block crash-recovery for
+                                # sub-lease-interval jobs.
+                                job._lease_until = 0.0
+                                job._lease_owner = None
+                            except Exception as e:
+                                logger.warning(
+                                    f"BotOS: failed to release lease for job "
+                                    f"{job.name}: {e}"
+                                )
                     _duration = _time.time() - _start
                     runner.mark_run(
                         job,

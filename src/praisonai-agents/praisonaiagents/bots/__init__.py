@@ -30,6 +30,10 @@ from .protocols import (
     PlatformCapabilities,
     WebhookVerifierProtocol,
 )
+from .base import (
+    BasePlatformAdapter,
+    SendResult,
+)
 from .presentation import (
     MessagePresentation,
     PresentationBlock,
@@ -61,6 +65,18 @@ from .agent_reply import (
     extract_presentation,
 )
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
+from .silence import (
+    SILENT_REPLY_TOKEN,
+    is_intentional_silence_response,
+    BotLoopPolicy,
+    BotLoopGuard,
+)
+from .run_status import (
+    RunPhase,
+    RunStatusController,
+    StallState,
+    StallWatchdog,
+)
 
 __all__ = [
     "BotProtocol",
@@ -95,6 +111,8 @@ __all__ = [
     "adapt_presentation",
     "PlatformCapabilities",
     "WebhookVerifierProtocol",
+    "BasePlatformAdapter",
+    "SendResult",
     "InteractiveContext",
     "InteractiveRegistry",
     "InteractiveHandler",
@@ -109,4 +127,12 @@ __all__ = [
     "REPLY_NAMESPACE",
     "AgentReply",
     "extract_presentation",
+    "SILENT_REPLY_TOKEN",
+    "is_intentional_silence_response",
+    "BotLoopPolicy",
+    "BotLoopGuard",
+    "RunPhase",
+    "RunStatusController",
+    "StallState",
+    "StallWatchdog",
 ]

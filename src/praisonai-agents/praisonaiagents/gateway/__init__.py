@@ -100,6 +100,11 @@ from .protocols import (
     NullGatewayTraceHook,
     NULL_GATEWAY_TRACE_HOOK,
     resolve_trace_hook,
+    # Gateway self-lifecycle command guardrail (Issue #2753)
+    LifecycleCommandDecision,
+    LifecycleCommandPolicyProtocol,
+    LifecycleCommandPolicy,  # backward-compat alias
+    LifecycleCommandGuardPolicy,
 )
 from .hooks import (
     HookAction,
@@ -111,6 +116,7 @@ from .hooks import (
 from .config import (
     GatewayConfig,
     SessionConfig,
+    ApiConfig,
     ChannelRouteConfig,
     MultiChannelGatewayConfig,
     # Push config
@@ -259,6 +265,11 @@ __all__ = [
     "NullGatewayTraceHook",
     "NULL_GATEWAY_TRACE_HOOK",
     "resolve_trace_hook",
+    # Gateway self-lifecycle command guardrail (Issue #2753)
+    "LifecycleCommandDecision",
+    "LifecycleCommandPolicyProtocol",
+    "LifecycleCommandPolicy",
+    "LifecycleCommandGuardPolicy",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
@@ -268,6 +279,7 @@ __all__ = [
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
+    "ApiConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
     "PushConfig",

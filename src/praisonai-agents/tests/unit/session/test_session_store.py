@@ -21,6 +21,9 @@ from praisonaiagents.session.store import (
     SessionData,
     FileLock,
     DEFAULT_MAX_MESSAGES,
+    RETENTION_COMPACT,
+    RETENTION_TRUNCATE,
+    RETENTION_KEEP_ALL,
 )
 
 
@@ -869,3 +872,336 @@ class TestRuntimeStateMirroring:
         # Verify that loading handles null correctly
         session = temp_store.get_session(session_id)
         assert session.runtime_state == {}  # Should default to empty dict, not None
+
+
+class TestSessionArchive:
+    """Tests for archived_messages serialization (Issue #2709)."""
+
+    def test_archived_messages_default_empty(self):
+        session = SessionData(session_id="a")
+        assert session.archived_messages == []
+
+    def test_archived_messages_roundtrip(self):
+        session = SessionData(session_id="a")
+        session.archived_messages.append(SessionMessage(role="user", content="old"))
+        restored = SessionData.from_dict(session.to_dict())
+        assert len(restored.archived_messages) == 1
+        assert restored.archived_messages[0].content == "old"
+
+    def test_archived_messages_backward_compatible(self):
+        # Old files without archived_messages must load cleanly.
+        session = SessionData.from_dict({"session_id": "a", "messages": []})
+        assert session.archived_messages == []
+
+
+class TestRetentionPolicy:
+    """Tests for the non-destructive retention policy (Issue #2709)."""
+
+    def test_compact_is_default_and_non_destructive(self):
+        """Default retention summarises + archives overflow instead of dropping it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=4)
+            assert store.retention == RETENTION_COMPACT
+
+            for i in range(10):
+                store.add_user_message("s", f"Message {i}")
+
+            session = store.get_session("s")
+            # Active window: 1 summary + last 4 recent turns
+            assert session.messages[0].metadata.get("compaction") is True
+            assert session.messages[0].role == "system"
+            recent = [m.content for m in session.messages[1:]]
+            assert recent == ["Message 6", "Message 7", "Message 8", "Message 9"]
+
+            # Nothing silently dropped — early turns preserved in the archive.
+            archived = [m.content for m in session.archived_messages]
+            assert "Message 0" in archived
+            assert "Message 5" in archived
+
+    def test_compact_summary_survives_reload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=3)
+            for i in range(8):
+                store.add_user_message("s", f"m{i}")
+
+            store2 = DefaultSessionStore(session_dir=tmpdir, active_window=3)
+            history = store2.get_chat_history("s")
+            assert history[0]["role"] == "system"
+            assert "Summary" in history[0]["content"] or "summary" in history[0]["content"].lower()
+            assert history[-1]["content"] == "m7"
+
+    def test_compact_does_not_nest_summaries(self):
+        """Repeated overflow must not stack multiple summary messages."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=3)
+            for i in range(20):
+                store.add_user_message("s", f"m{i}")
+
+            session = store.get_session("s")
+            summaries = [m for m in session.messages if m.metadata.get("compaction")]
+            assert len(summaries) == 1
+            assert session.messages[0] is not None
+
+    def test_truncate_retention_is_destructive(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(
+                session_dir=tmpdir, active_window=4, retention=RETENTION_TRUNCATE
+            )
+            for i in range(10):
+                store.add_user_message("s", f"m{i}")
+
+            session = store.get_session("s")
+            assert len(session.messages) == 4
+            assert [m.content for m in session.messages] == ["m6", "m7", "m8", "m9"]
+            # Truncate does not archive.
+            assert session.archived_messages == []
+
+    def test_legacy_max_messages_stays_truncate(self):
+        """Explicit non-default max_messages keeps old truncate behaviour."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, max_messages=5)
+            assert store.retention == RETENTION_TRUNCATE
+            for i in range(10):
+                store.add_user_message("s", f"m{i}")
+            history = store.get_chat_history("s")
+            assert len(history) == 5
+            assert history[0]["content"] == "m5"
+            assert history[4]["content"] == "m9"
+
+    def test_keep_all_retention_never_trims(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(
+                session_dir=tmpdir, active_window=3, retention=RETENTION_KEEP_ALL
+            )
+            for i in range(10):
+                store.add_user_message("s", f"m{i}")
+
+            history = store.get_chat_history("s")
+            assert len(history) == 10
+            assert history[0]["content"] == "m0"
+            assert history[9]["content"] == "m9"
+
+    def test_invalid_retention_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError):
+                DefaultSessionStore(session_dir=tmpdir, retention="bogus")
+
+    def test_compact_logs_once_per_rollup(self, caplog):
+        import logging
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=2)
+            with caplog.at_level(logging.INFO):
+                for i in range(5):
+                    store.add_user_message("s", f"m{i}")
+            compaction_logs = [
+                r for r in caplog.records if "compacted" in r.getMessage()
+            ]
+            # active_window=2 with 5 adds overflows exactly once per add past the
+            # window (adds 3, 4, 5 -> 3 rollups). Each rollup logs exactly once;
+            # a "compacted 0" spam regression would break this count.
+            assert len(compaction_logs) == 3
+            assert all(
+                "compacted 0" not in r.getMessage() for r in compaction_logs
+            )
+
+    def test_compact_preserves_true_count_across_rollups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, active_window=2)
+            for i in range(10):
+                store.add_user_message("s", f"m{i}")
+            session = store.get_session("s")
+            summary = session.messages[0]
+            assert summary.metadata.get("compaction") is True
+            # 10 messages, window=2 -> 8 raw turns archived; the running
+            # compacted_count must reflect all of them, not just the last batch.
+            assert summary.metadata.get("compacted_count") == 8
+            assert len(session.archived_messages) == 8
+
+
+class TestDefaultStoreEnvConfig:
+    """Env-var driven retention config for the global default store (Issue #2709)."""
+
+    def _reset_store(self, store_module):
+        store_module._default_store = None
+
+    def test_env_sets_retention_and_window(self):
+        import praisonaiagents.session.store as store_module
+        self._reset_store(store_module)
+        with patch.dict(os.environ, {
+            "PRAISONAI_SESSION_RETENTION": "keep_all",
+            "PRAISONAI_SESSION_ACTIVE_WINDOW": "7",
+        }):
+            try:
+                store = store_module.get_default_session_store()
+                assert store.retention == RETENTION_KEEP_ALL
+                assert store.active_window == 7
+            finally:
+                self._reset_store(store_module)
+
+    def test_invalid_env_retention_falls_back(self):
+        import praisonaiagents.session.store as store_module
+        self._reset_store(store_module)
+        with patch.dict(os.environ, {"PRAISONAI_SESSION_RETENTION": "bogus"}):
+            try:
+                store = store_module.get_default_session_store()
+                assert store.retention == RETENTION_COMPACT
+            finally:
+                self._reset_store(store_module)
+
+    def test_default_store_is_compact(self):
+        import praisonaiagents.session.store as store_module
+        self._reset_store(store_module)
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("PRAISONAI_SESSION_RETENTION", "PRAISONAI_SESSION_ACTIVE_WINDOW")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            try:
+                store = store_module.get_default_session_store()
+                assert store.retention == RETENTION_COMPACT
+            finally:
+                self._reset_store(store_module)
+
+
+class TestCompactionCheckpoint:
+    """Tests for compaction checkpoint persistence (Issue #2741)."""
+
+    @pytest.fixture
+    def temp_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            yield store
+
+    def test_checkpoint_dataclass_roundtrip(self):
+        """CompactionCheckpoint serializes and deserializes losslessly."""
+        from praisonaiagents.session.store import CompactionCheckpoint
+
+        cp = CompactionCheckpoint(
+            summary="condensed history",
+            message_index=3,
+            tokens_before=1000,
+            tokens_after=200,
+        )
+        restored = CompactionCheckpoint.from_dict(cp.to_dict())
+        assert restored.summary == "condensed history"
+        assert restored.message_index == 3
+        assert restored.tokens_before == 1000
+        assert restored.tokens_after == 200
+        assert restored.as_message() == {"role": "system", "content": "condensed history"}
+
+    def test_append_checkpoint_persists(self, temp_store):
+        """append_compaction_checkpoint writes a durable checkpoint."""
+        temp_store.add_user_message("s1", "m1")
+        temp_store.add_assistant_message("s1", "m2")
+
+        ok = temp_store.append_compaction_checkpoint(
+            "s1", "SUMMARY", tokens_before=500, tokens_after=100
+        )
+        assert ok is True
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is not None
+        assert session.last_compaction.summary == "SUMMARY"
+        assert session.last_compaction.message_index == 2
+
+    def test_working_history_uses_checkpoint(self, temp_store):
+        """Resume reconstructs summary + tail, not the raw transcript."""
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.add_assistant_message("s1", "old-2")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY OF OLD")
+        # New messages after the checkpoint form the retained tail.
+        temp_store.add_user_message("s1", "new-1")
+        temp_store.add_assistant_message("s1", "new-2")
+
+        working = temp_store.get_working_history("s1")
+        assert working[0] == {"role": "system", "content": "SUMMARY OF OLD"}
+        assert [m["content"] for m in working[1:]] == ["new-1", "new-2"]
+        # Raw history is still fully available for audit/replay.
+        raw = temp_store.get_chat_history("s1")
+        assert [m["content"] for m in raw] == ["old-1", "old-2", "new-1", "new-2"]
+
+    def test_working_history_backward_compat_no_checkpoint(self, temp_store):
+        """Sessions without a checkpoint resume from raw messages unchanged."""
+        temp_store.add_user_message("s1", "a")
+        temp_store.add_assistant_message("s1", "b")
+
+        working = temp_store.get_working_history("s1")
+        assert [m["content"] for m in working] == ["a", "b"]
+
+    def test_checkpoint_persists_across_instances(self, temp_store):
+        """Checkpoint survives being reloaded by a fresh store instance."""
+        session_dir = temp_store.session_dir
+        temp_store.add_user_message("s1", "old")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+        temp_store.add_user_message("s1", "tail")
+
+        store2 = DefaultSessionStore(session_dir=session_dir)
+        working = store2.get_working_history("s1")
+        assert working[0]["content"] == "SUMMARY"
+        assert working[-1]["content"] == "tail"
+
+    def test_trim_shifts_checkpoint_index(self):
+        """Trimming the transcript head keeps the checkpoint anchor aligned."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir, max_messages=4)
+            for i in range(3):
+                store.add_user_message("s1", f"pre-{i}")
+            store.append_compaction_checkpoint("s1", "SUMMARY")  # index == 3
+            for i in range(3):
+                store.add_user_message("s1", f"post-{i}")
+
+            # Only the last 4 raw messages remain after trimming.
+            raw = store.get_chat_history("s1")
+            assert len(raw) == 4
+            # Working history = summary + whatever tail survived the trim.
+            working = store.get_working_history("s1")
+            assert working[0]["content"] == "SUMMARY"
+            # Tail should be the post-compaction messages that survived.
+            assert working[-1]["content"] == "post-2"
+
+    def test_empty_summary_not_persisted(self, temp_store):
+        """A blank/whitespace summary is a no-op and never writes a checkpoint.
+
+        This prevents replaying an empty ``{"role": "system", "content": ""}``
+        message into the LLM context on resume.
+        """
+        temp_store.add_user_message("s1", "a")
+        assert temp_store.append_compaction_checkpoint("s1", "") is False
+        assert temp_store.append_compaction_checkpoint("s1", "   ") is False
+        session = temp_store.get_session("s1")
+        # No checkpoint written; resume falls back to raw history.
+        assert session.last_compaction is None
+        working = temp_store.get_working_history("s1")
+        assert working == [{"role": "user", "content": "a"}]
+
+    def test_set_chat_history_clears_stale_checkpoint(self, temp_store):
+        """Replacing the transcript invalidates the compaction anchor.
+
+        Regression for the stale-checkpoint data-loss path: without clearing
+        ``last_compaction``, a smaller replacement transcript would clamp the
+        tail to empty and silently drop every replaced message on resume.
+        """
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.add_assistant_message("s1", "old-2")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+
+        # Simulate api.save_state(): replace with a fresh, smaller transcript.
+        temp_store.set_chat_history(
+            "s1", [{"role": "user", "content": "fresh"}]
+        )
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is None
+        # Working history returns the full new transcript, nothing dropped.
+        working = temp_store.get_working_history("s1")
+        assert working == [{"role": "user", "content": "fresh"}]
+
+    def test_clear_session_clears_checkpoint(self, temp_store):
+        """clear_session drops the compaction anchor along with messages."""
+        temp_store.add_user_message("s1", "old-1")
+        temp_store.append_compaction_checkpoint("s1", "SUMMARY")
+        temp_store.clear_session("s1")
+
+        session = temp_store.get_session("s1")
+        assert session.last_compaction is None
+        assert temp_store.get_working_history("s1") == []

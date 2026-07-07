@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, Future
 
@@ -25,6 +25,11 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Terminal state assigned during startup reconciliation to a job that was
+    # ``RUNNING`` when its process died. The work was abandoned by the crash;
+    # ``LOST`` records that fact so the job is queryable rather than silently
+    # vanishing (see :meth:`BackgroundJobManager.reconcile_on_start`).
+    LOST = "lost"
 
 
 @dataclass
@@ -42,7 +47,14 @@ class JobInfo:
     # (mirrors the scheduler's ``deliver="origin"`` grammar). Empty by default,
     # preserving the pull-only behaviour when no delivery target is set.
     origin: Dict[str, Any] = field(default_factory=dict)
-    
+    # Whether the terminal result has been delivered back to ``origin`` via the
+    # ``on_complete`` callback. Used by restart reconciliation to distinguish a
+    # job that COMPLETED-and-was-delivered from one that COMPLETED-but-whose
+    # deliver-back never fired (e.g. the process died between recording the
+    # result and running the callback). Only meaningful when a store persists
+    # ``JobInfo`` across restarts; ``False`` preserves prior behaviour.
+    delivered: bool = False
+
     @property
     def duration(self) -> Optional[float]:
         """Get job duration in seconds."""
@@ -50,6 +62,40 @@ class JobInfo:
             return None
         end_time = self.completed_at or time.time()
         return end_time - self.started_at
+
+
+@runtime_checkable
+class BackgroundJobStore(Protocol):
+    """Persistence contract for durable background jobs.
+
+    Mirrors the store-protocol pattern used elsewhere in the SDK (e.g. the
+    session/scheduler stores): the core runner stays heavy-import-free and a
+    concrete SQLite implementation lives in the wrapper/bot layer alongside the
+    other durable stores (``OutboundQueue``, DLQ, approvals). Injecting a store
+    is entirely opt-in — when none is supplied the runner behaves exactly as the
+    original pure in-memory implementation.
+
+    Implementations must be safe to call from the runner's worker threads.
+    """
+
+    def upsert(self, job: JobInfo) -> None:
+        """Insert or update the persisted record for ``job`` (keyed by id)."""
+        ...
+
+    def get(self, job_id: str) -> Optional[JobInfo]:
+        """Return the persisted :class:`JobInfo`, or ``None`` if unknown."""
+        ...
+
+    def list_unreconciled(self) -> List[JobInfo]:
+        """Return jobs needing reconciliation after a restart.
+
+        Specifically: jobs left ``PENDING`` or ``RUNNING`` at the last write
+        (their process died before or during the run — both are orphaned and
+        reconciled to ``LOST``) and jobs ``COMPLETED`` with an ``origin`` that
+        were never marked ``delivered``. Returned in a stable order for
+        deterministic replay.
+        """
+        ...
 
 
 class BackgroundJobManager:
@@ -67,6 +113,8 @@ class BackgroundJobManager:
         self,
         max_workers: int = 4,
         auto_background_threshold: float = 5.0,
+        *,
+        store: Optional[BackgroundJobStore] = None,
     ):
         """
         Initialize the background job manager.
@@ -75,13 +123,36 @@ class BackgroundJobManager:
             max_workers: Maximum number of concurrent background jobs
             auto_background_threshold: Time in seconds after which a job
                 should be automatically backgrounded
+            store: Optional durable :class:`BackgroundJobStore`. When supplied,
+                every job state transition is persisted so jobs survive a
+                process restart and can be reconciled via
+                :meth:`reconcile_on_start`. When ``None`` (the default) the
+                runner is pure in-memory exactly as before — zero overhead, no
+                behaviour change.
         """
         self.max_workers = max_workers
         self.auto_background_threshold = auto_background_threshold
+        self._store = store
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._jobs: Dict[str, JobInfo] = {}
         self._futures: Dict[str, Future] = {}
         self._lock = threading.Lock()
+
+    def _persist(self, job: JobInfo) -> None:
+        """Best-effort persist of a job's current state to the store.
+
+        A persistence failure must never crash a worker thread or lose the
+        in-memory job, so exceptions are swallowed and logged. No-op when no
+        store is configured (the default), keeping the hot path free.
+        """
+        if self._store is None:
+            return
+        try:
+            self._store.upsert(job)
+        except Exception as e:  # noqa: BLE001 — persistence must never crash worker
+            logger.debug(
+                "Persisting job %s failed (non-fatal): %s", job.job_id, e,
+            )
     
     @property
     def active_jobs(self) -> int:
@@ -131,6 +202,9 @@ class BackgroundJobManager:
         
         with self._lock:
             self._jobs[job_id] = job_info
+        # Persist the PENDING record before it starts so a crash between spawn
+        # and first run still leaves a recoverable trace (reconciled as LOST).
+        self._persist(job_info)
         
         def _fire_complete() -> None:
             if on_complete is None:
@@ -141,6 +215,11 @@ class BackgroundJobManager:
                 return
             try:
                 on_complete(info)
+                # Record successful deliver-back so restart reconciliation does
+                # not re-deliver an already-delivered result.
+                with self._lock:
+                    info.delivered = True
+                self._persist(info)
             except Exception as e:  # noqa: BLE001 — delivery must never crash worker
                 logger.debug(
                     "on_complete callback for job %s raised (non-fatal): %s",
@@ -149,22 +228,28 @@ class BackgroundJobManager:
 
         def _run_job():
             with self._lock:
-                self._jobs[job_id].status = JobStatus.RUNNING
-                self._jobs[job_id].started_at = time.time()
+                job = self._jobs[job_id]
+                job.status = JobStatus.RUNNING
+                job.started_at = time.time()
+            self._persist(job)
             
             try:
                 result = func()
                 with self._lock:
-                    self._jobs[job_id].status = JobStatus.COMPLETED
-                    self._jobs[job_id].completed_at = time.time()
-                    self._jobs[job_id].result = result
+                    job = self._jobs[job_id]
+                    job.status = JobStatus.COMPLETED
+                    job.completed_at = time.time()
+                    job.result = result
+                self._persist(job)
                 _fire_complete()
                 return result
             except Exception as e:
                 with self._lock:
-                    self._jobs[job_id].status = JobStatus.FAILED
-                    self._jobs[job_id].completed_at = time.time()
-                    self._jobs[job_id].error = str(e)
+                    job = self._jobs[job_id]
+                    job.status = JobStatus.FAILED
+                    job.completed_at = time.time()
+                    job.error = str(e)
+                self._persist(job)
                 _fire_complete()
                 raise
         
@@ -188,9 +273,12 @@ class BackgroundJobManager:
             KeyError: If job_id is not found
         """
         with self._lock:
-            if job_id not in self._jobs:
-                raise KeyError(f"Job {job_id} not found")
-            return self._jobs[job_id].status
+            if job_id in self._jobs:
+                return self._jobs[job_id].status
+        job = self._store.get(job_id) if self._store else None
+        if job is None:
+            raise KeyError(f"Job {job_id} not found")
+        return job.status
     
     def get_job_info(self, job_id: str) -> JobInfo:
         """
@@ -206,9 +294,12 @@ class BackgroundJobManager:
             KeyError: If job_id is not found
         """
         with self._lock:
-            if job_id not in self._jobs:
-                raise KeyError(f"Job {job_id} not found")
-            return self._jobs[job_id]
+            if job_id in self._jobs:
+                return self._jobs[job_id]
+        job = self._store.get(job_id) if self._store else None
+        if job is None:
+            raise KeyError(f"Job {job_id} not found")
+        return job
     
     def get_result(self, job_id: str, timeout: Optional[float] = None) -> Any:
         """
@@ -254,8 +345,108 @@ class BackgroundJobManager:
             if cancelled:
                 self._jobs[job_id].status = JobStatus.CANCELLED
                 self._jobs[job_id].completed_at = time.time()
-            return cancelled
-    
+                job = self._jobs[job_id]
+            else:
+                job = None
+        if job is not None:
+            self._persist(job)
+        return cancelled
+
+    def reconcile_on_start(
+        self,
+        redeliver: Optional[Callable[[JobInfo], Any]] = None,
+    ) -> Dict[str, int]:
+        """Reconcile persisted jobs after a process restart.
+
+        Closes the durability gap where a restart mid-job silently drops work
+        and its deferred deliver-back. For every job the store reports as
+        unreconciled:
+
+        - A job left ``RUNNING`` when its process died is marked
+          :attr:`JobStatus.LOST` (a terminal, queryable state) and persisted.
+          The abandoned work is not automatically re-run — that decision is
+          left to the caller, who can inspect ``LOST`` jobs and re-submit.
+        - A job that ``COMPLETED`` with an ``origin`` but was never
+          ``delivered`` has ``redeliver`` invoked with its :class:`JobInfo`,
+          re-firing the deliver-back-to-origin the crash interrupted. On a
+          successful redeliver the job is marked ``delivered`` and persisted so
+          it is not delivered twice on the next restart.
+
+        Every persisted job is also re-hydrated into this manager's in-memory
+        map so it remains queryable by id after the restart.
+
+        No-op (returns zero counts) when no store is configured. Safe to call
+        once at startup, mirroring ``OutboundQueue.drain`` wiring.
+
+        Args:
+            redeliver: Callable invoked with a COMPLETED-but-undelivered
+                :class:`JobInfo` to replay its deliver-back. Best-effort — an
+                exception it raises is logged and the job is left undelivered
+                for a future retry, never crashing startup. When ``None``,
+                undelivered jobs are re-hydrated but not delivered.
+
+        Returns:
+            Counts dict: ``{"lost": n, "redelivered": n, "rehydrated": n}``.
+        """
+        counts = {"lost": 0, "redelivered": 0, "rehydrated": 0}
+        if self._store is None:
+            return counts
+
+        try:
+            unreconciled = list(self._store.list_unreconciled())
+        except Exception as e:  # noqa: BLE001 — reconciliation must never crash startup
+            logger.warning("Listing unreconciled jobs failed: %s", e)
+            return counts
+
+        for job in unreconciled:
+            # A job left RUNNING (or still PENDING) when its process died was
+            # orphaned by the crash. Transition it to the terminal LOST state
+            # *before* it becomes visible in the in-memory map, so a concurrent
+            # get_status never observes the transient RUNNING/PENDING status the
+            # caller is specifically reconciling away. Stamp completed_at so the
+            # terminal record is age-evictable by cleanup_completed().
+            orphaned = job.status in (JobStatus.RUNNING, JobStatus.PENDING)
+            if orphaned:
+                prior_status = job.status.value
+                job.status = JobStatus.LOST
+                if job.completed_at is None:
+                    job.completed_at = time.time()
+
+            with self._lock:
+                self._jobs[job.job_id] = job
+            counts["rehydrated"] += 1
+
+            if orphaned:
+                self._persist(job)
+                counts["lost"] += 1
+                logger.info(
+                    "Reconciled orphaned %s job %s as LOST",
+                    prior_status, job.job_id,
+                )
+            elif (
+                job.status == JobStatus.COMPLETED
+                and job.origin
+                and not job.delivered
+            ):
+                if redeliver is None:
+                    continue
+                try:
+                    redeliver(job)
+                    job.delivered = True
+                    self._persist(job)
+                    counts["redelivered"] += 1
+                    logger.info(
+                        "Re-delivered undelivered completed job %s to origin",
+                        job.job_id,
+                    )
+                except Exception as e:  # noqa: BLE001 — redeliver is best-effort
+                    logger.warning(
+                        "Re-delivery for job %s failed (will retry next "
+                        "restart): %s", job.job_id, e,
+                    )
+
+        return counts
+
     def list_jobs(self, status: Optional[JobStatus] = None) -> Dict[str, JobInfo]:
         """
         List all jobs, optionally filtered by status.
@@ -275,12 +466,23 @@ class BackgroundJobManager:
                 if info.status == status
             }
     
+    # Terminal states whose in-memory records are age-evictable. LOST is
+    # included so reconciled orphans (see reconcile_on_start) do not accumulate
+    # unbounded across restarts — without it every restart would leak a fresh
+    # batch of LOST entries for the process lifetime.
+    _EVICTABLE_STATES = (
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+        JobStatus.LOST,
+    )
+
     def cleanup_completed(self, max_age: float = 3600.0) -> int:
         """
-        Remove completed jobs older than max_age seconds.
+        Remove terminal jobs older than max_age seconds.
         
         Args:
-            max_age: Maximum age in seconds for completed jobs
+            max_age: Maximum age in seconds for terminal jobs
             
         Returns:
             Number of jobs removed
@@ -291,7 +493,7 @@ class BackgroundJobManager:
         with self._lock:
             to_remove = []
             for job_id, info in self._jobs.items():
-                if info.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+                if info.status in self._EVICTABLE_STATES:
                     if info.completed_at and (now - info.completed_at) > max_age:
                         to_remove.append(job_id)
             

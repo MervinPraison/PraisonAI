@@ -61,6 +61,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to_async</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">is_closed</a>() -> bool</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">last_stop_reason</a>() -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">list_mcp_servers</a>() -> List[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>()</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>(value)</code>
@@ -570,9 +571,11 @@ from praisonaiagents import MCP
 
 Methods:
 
+* <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">apply_tool_filters</a>(allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None) -> 'MCP'</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">get_tools</a>() -> List[Callable]</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">shutdown</a>()</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">to_openai_tool</a>()</code>
+* <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">with_tool_prefix</a>(prefix: str) -> 'MCP'</code>
 
 # Telemetry
 
@@ -664,6 +667,8 @@ Methods:
 * <code title="class AutonomyConfig">AutonomyConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/autonomy.py">from_dict</a>(data: Dict[str, Any]) -> 'AutonomyConfig'</code>
 * <code title="class CachingConfig">CachingConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">from_dict</a>(data: Dict[str, Any]) -> 'ExecutionConfig'</code>
+* <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">resolved_max_steps</a>() -> int</code>
+* <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">resolved_max_tool_calls</a>() -> int</code>
 * <code title="class ExecutionConfig">ExecutionConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class GuardrailConfig">GuardrailConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="class HooksConfig">HooksConfig.<a href="./src/praisonai-agents/praisonaiagents/config/feature_configs.py">to_dict</a>() -> Dict[str, Any]</code>

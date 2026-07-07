@@ -5,6 +5,9 @@ Polls ScheduleRunner for due jobs and fires a callback.
 """
 
 import logging
+import os
+import socket
+import uuid
 from praisonaiagents._logging import get_logger
 import threading
 import time
@@ -56,6 +59,13 @@ class ScheduleLoop:
         self._tick = tick_seconds
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Stable per-process identity for atomic job claims (host:pid:uuid) so a
+        # due job fires at most once across tickers/processes/hosts when the
+        # backing store supports ``claim_due``.
+        self._owner_id = (
+            f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        )
+        self._atomic_claim = self._runner.supports_atomic_claim()
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -97,7 +107,11 @@ class ScheduleLoop:
         """Loop body executed on the daemon thread."""
         while not self._stop_event.is_set():
             try:
-                due = self._runner.get_due_jobs()
+                # Reserve due jobs atomically when the store supports it, so a
+                # due job fires at most once across processes/hosts; only jobs
+                # this ticker won are returned. Falls back to the non-atomic
+                # get_due_jobs path when unsupported.
+                due = self._runner.claim_due_jobs(self._owner_id, lease_seconds=300)
                 for job in due:
                     try:
                         self._on_trigger(job)
@@ -111,6 +125,17 @@ class ScheduleLoop:
                             "Error triggering schedule job %s (%s)",
                             job.name, job.id,
                         )
+                    finally:
+                        # Release the lease so it does not linger until expiry.
+                        if self._atomic_claim:
+                            try:
+                                self._runner.complete_run(job.id, self._owner_id)
+                            except Exception:
+                                logger.exception(
+                                    "Error releasing lease for schedule job "
+                                    "%s (%s)",
+                                    job.name, job.id,
+                                )
             except Exception:
                 logger.exception("ScheduleLoop tick error")
 

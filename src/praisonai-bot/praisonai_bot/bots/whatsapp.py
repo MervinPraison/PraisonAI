@@ -33,6 +33,10 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from praisonaiagents.bots.presentation import (
+        MessagePresentation,
+        PresentationLimits,
+    )
 
 from praisonai_bot.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
@@ -157,12 +161,19 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Web mode adapter (lazy initialized)
         self._web_adapter: Any = None
 
+        # Audio capabilities — inbound speech-to-text (Issue #2721).
+        self._stt_enabled: bool = False
+
         # ChatCommandMixin setup
         self._command_handlers: Dict[str, Callable] = {}
         self._command_info: Dict[str, Dict[str, Any]] = {}
 
         # Register built-in commands
         self._register_builtins()
+
+    def enable_stt(self, enabled: bool = True) -> None:
+        """Enable inbound speech-to-text transcription (Issue #2721)."""
+        self._stt_enabled = enabled
 
     def _register_builtins(self) -> None:
         """Register built-in /status, /new, /help commands."""
@@ -702,10 +713,28 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             content = ""
             bot_message_type = MessageType.AUDIO
             path = await self._cache_inbound_media(msg.get("audio", {}).get("id"), "audio")
+            # Issue #2721: transcribe inbound voice notes and feed the transcript
+            # to the agent. On failure/disable, fall back to a visible placeholder
+            # (and still forward the cached audio) rather than dropping the turn.
+            transcript = None
+            if path and self._stt_enabled:
+                from ._stt import resolve_stt_config, transcribe_media_path
+                stt_cfg = resolve_stt_config(self.config)
+                transcript = await asyncio.to_thread(
+                    transcribe_media_path,
+                    path,
+                    language=stt_cfg.language,
+                    model=stt_cfg.model,
+                )
+                if transcript and stt_cfg.echo_transcripts:
+                    transcript = f"[Voice message]: {transcript}"
+            if transcript:
+                content = transcript
             if path:
                 attachments.append(path)
-            else:
-                content = "[Audio received]"
+            if not content:
+                from ._stt import DEFAULT_VOICE_PLACEHOLDER
+                content = DEFAULT_VOICE_PLACEHOLDER
         elif msg_type == "video":
             content = msg.get("video", {}).get("caption", "")
             bot_message_type = MessageType.VIDEO
@@ -897,6 +926,92 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             )
 
         return sent_msg or BotMessage(content=text)
+
+    @property
+    def presentation_limits(self) -> "PresentationLimits":
+        """WhatsApp presentation limits (see ``SupportsPresentation``)."""
+        from praisonaiagents.bots.presentation import PresentationLimits
+        return PresentationLimits.whatsapp()
+
+    def truncate_presentation(
+        self, presentation: "MessagePresentation"
+    ) -> "MessagePresentation":
+        """Adapt a portable presentation to WhatsApp's limits."""
+        from praisonaiagents.bots.presentation import adapt_presentation
+        return adapt_presentation(presentation, self.presentation_limits)
+
+    async def render_presentation(
+        self,
+        target: str,
+        presentation: "MessagePresentation",
+    ) -> Optional[str]:
+        """Render a portable presentation as a WhatsApp interactive message.
+
+        Implements ``SupportsPresentation``: delegates to
+        ``WhatsAppPresentationRenderer`` (which runs ``adapt_presentation``
+        internally) to produce a native interactive ``button``/``list`` payload,
+        then sends it via the Cloud API. When the presentation has no
+        interactive content, falls back to a plain text send. Returns the sent
+        message id, or ``None`` if delivery failed.
+        """
+        try:
+            import aiohttp
+        except ImportError:
+            return None
+
+        from ._presentation_renderer import WhatsAppPresentationRenderer
+
+        # Rendering is pure/local: a failure here is a renderer bug, not a
+        # delivery failure, so keep it isolated and return None gracefully.
+        try:
+            rendered = WhatsAppPresentationRenderer.render(presentation)
+        except Exception as e:
+            logger.error(f"Failed to render WhatsApp presentation: {e}")
+            return None
+
+        interactive = rendered.get("interactive")
+        if not interactive:
+            # No native interactive content — send as plain text. send_message
+            # applies its own durable-delivery contract (propagating permanent
+            # failures) so we don't swallow delivery errors here.
+            msg = await self.send_message(target, rendered.get("text") or "\u200b")
+            return msg.message_id or None
+
+        url = f"{GRAPH_API_BASE}/{self._phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": target,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+
+        await self._rate_limiter.acquire(target)
+
+        async def _post() -> dict:
+            async with self._http_session.post(
+                url, headers=headers, json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                result = await resp.json()
+                if isinstance(result, dict) and "error" in result:
+                    raise RuntimeError(
+                        f"WhatsApp interactive send error: {result['error']}"
+                    )
+                return result
+
+        # Durable delivery: let permanent failures propagate (parity with
+        # send_message) so callers never treat an undelivered interactive
+        # message as successfully sent.
+        result = await self.deliver_outbound(
+            _post,
+            channel_id=target,
+            reply_text=rendered.get("text") or "",
+        )
+        return result.get("messages", [{}])[0].get("id", "") or None
 
     async def _cache_inbound_media(
         self, media_id: Optional[str], kind: str, filename: Optional[str] = None
