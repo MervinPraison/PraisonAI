@@ -82,6 +82,100 @@ class TestSetupCommand:
         env_content = env_file.read_text()
         assert "OPENAI_API_KEY=sk-test123" in env_content
 
+    def test_setup_mirrors_key_into_credential_store(self, temp_praison_home):
+        """setup should also populate the unified CredentialStore.
+
+        This closes the historic split where `setup` wrote only to
+        ~/.praisonai/.env while `auth`/injection read the CredentialStore,
+        so a key set via `setup` was invisible to those code paths. The store
+        is anchored under PRAISONAI_HOME so it stays in one base directory.
+        """
+        result = runner.invoke(app, [
+            "--non-interactive",
+            "--provider", "openai",
+            "--api-key", "sk-test1234567890abcdef",
+            "--model", "gpt-4o-mini",
+        ])
+        assert result.exit_code == 0
+
+        from praisonai.cli.configuration.credentials import CredentialStore
+
+        store = CredentialStore(temp_praison_home / "credentials.json")
+        cred = store.get_credential("openai")
+        assert cred is not None
+        assert cred.api_key == "sk-test1234567890abcdef"
+        assert cred.model == "gpt-4o-mini"
+
+    def test_setup_key_visible_to_default_store(self):
+        """A key set via `setup` (default home) must be visible to the default
+        `CredentialStore()` used by `auth list` / `inject_credentials_into_env`.
+
+        Without PRAISONAI_HOME, setup and the auth/inject read paths must
+        converge on the same ~/.praisonai/credentials.json. This guards against
+        a regression where setup wrote to an explicit path that the default
+        store (and therefore auth/inject) never reads.
+        """
+        with tempfile.TemporaryDirectory() as temp_home:
+            fake_home = Path(temp_home)
+            # No PRAISONAI_HOME override: exercise the default-home path where
+            # praison_home == ~/.praisonai and setup uses the default store.
+            env = {k: v for k, v in os.environ.items() if k != "PRAISONAI_HOME"}
+            with patch.dict(os.environ, env, clear=True), \
+                    patch("pathlib.Path.home", return_value=fake_home):
+                result = runner.invoke(app, [
+                    "--non-interactive",
+                    "--provider", "openai",
+                    "--api-key", "sk-default1234567890abcdef",
+                    "--model", "gpt-4o-mini",
+                ])
+                assert result.exit_code == 0
+
+                from praisonai.cli.configuration.credentials import CredentialStore
+
+                # The default store (what auth/inject use) must resolve the key.
+                cred = CredentialStore().get_credential("openai")
+                assert cred is not None
+                assert cred.api_key == "sk-default1234567890abcdef"
+
+    def test_setup_migrates_legacy_credentials(self):
+        """Running `setup` must migrate pre-existing legacy `auth` credentials.
+
+        Reproduces the reviewer scenario: a user configured a provider via
+        `praisonai auth` (legacy ~/.praison/credentials.json) then runs
+        `praisonai setup` for a *different* provider. The legacy entry must not
+        be silently shadowed — it should be migrated onto the canonical file so
+        both providers remain visible to the default store.
+        """
+        import json
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            fake_home = Path(temp_home)
+            legacy = fake_home / ".praison" / "credentials.json"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(json.dumps({
+                "anthropic": {"api_key": "sk-ant-legacy", "auth_method": "apikey"}
+            }))
+
+            env = {k: v for k, v in os.environ.items() if k != "PRAISONAI_HOME"}
+            with patch.dict(os.environ, env, clear=True), \
+                    patch("pathlib.Path.home", return_value=fake_home):
+                result = runner.invoke(app, [
+                    "--non-interactive",
+                    "--provider", "openai",
+                    "--api-key", "sk-new1234567890abcdef",
+                    "--model", "gpt-4o-mini",
+                ])
+                assert result.exit_code == 0
+
+                from praisonai.cli.configuration.credentials import CredentialStore
+
+                store = CredentialStore()
+                providers = set(store.list_providers())
+                # Both the newly set and the pre-existing legacy key survive.
+                assert "openai" in providers
+                assert "anthropic" in providers
+                assert store.get_credential("anthropic").api_key == "sk-ant-legacy"
+
     def test_setup_non_interactive_anthropic(self, temp_praison_home):
         """Test setup in non-interactive mode with Anthropic provider."""
         result = runner.invoke(app, [
