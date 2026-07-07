@@ -2198,6 +2198,16 @@ Now provide your final answer using this result. Summarize the information natur
         """Enhanced get_response with all OpenAI-like features"""
         logging.debug(f"Getting response from {self.model}")
         
+        # G2: Cooperative cancellation - honour InterruptController between tool iterations
+        # so /stop (and cancellation generally) halts mid-flight runs on every provider.
+        cancel_token = kwargs.pop("cancel_token", None)
+
+        def _is_cancelled() -> bool:
+            return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
+
+        def _cancel_reason() -> str:
+            return getattr(cancel_token, "reason", None) or "user"
+
         # Variable to store final response for token usage extraction
         _final_llm_response = None
 
@@ -2320,6 +2330,12 @@ Now provide your final answer using this result. Summarize the information natur
             accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
+                # G2: Check for cancellation at the top of each tool iteration so a
+                # /stop request promptly halts a mid-flight run on every provider.
+                if _is_cancelled():
+                    reason = _cancel_reason()
+                    logging.debug(f"LLM tool loop cancelled: {reason}")
+                    return _prepare_return_value(f"Task interrupted: {reason}")
                 try:
                     # Get response from LiteLLM
                     current_time = time.time()
@@ -4072,6 +4088,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         **kwargs
     ) -> str:
         """Async version of get_response with identical functionality."""
+        # G2: Cooperative cancellation - honour InterruptController between tool iterations
+        # so /stop (and cancellation generally) halts mid-flight runs on every provider.
+        cancel_token = kwargs.pop("cancel_token", None)
+
+        def _is_cancelled() -> bool:
+            return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
+
+        def _cancel_reason() -> str:
+            return getattr(cancel_token, "reason", None) or "user"
+
         try:
             import litellm
             logging.debug(f"Getting async response from {self.model}")
@@ -4152,6 +4178,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
+                # G2: Check for cancellation at the top of each tool iteration so a
+                # /stop request promptly halts a mid-flight run on every provider.
+                if _is_cancelled():
+                    reason = _cancel_reason()
+                    logging.debug(f"Async LLM tool loop cancelled: {reason}")
+                    return f"Task interrupted: {reason}"
                 response_text = ""
                 reasoning_content = None
                 tool_calls = []
