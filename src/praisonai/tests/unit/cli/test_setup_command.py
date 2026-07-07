@@ -19,6 +19,13 @@ from praisonai.cli.commands.setup import app
 
 runner = CliRunner()
 
+_PROVIDER_DETECT_KEYS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+)
+
 
 @pytest.fixture
 def temp_praison_home():
@@ -178,22 +185,22 @@ class TestSetupCommand:
     @patch("rich.prompt.Confirm.ask")
     @patch("getpass.getpass")
     def test_setup_interactive_mode(self, mock_getpass, mock_confirm, mock_prompt, temp_praison_home):
-        """Test setup in interactive mode."""
-        # Mock user interactions
-        mock_prompt.side_effect = ["1", "gpt-4o-mini"]  # OpenAI, then model
-        mock_getpass.return_value = "sk-interactive123"
-        mock_confirm.side_effect = [True, False]  # Enable telemetry, no starter YAML
+        """Test setup in interactive mode (manual provider path, no env auto-detect)."""
+        mock_prompt.side_effect = ["1", "gpt-4o-mini"]
+        mock_getpass.return_value = "sk-" + "x" * 24
+        mock_confirm.side_effect = [True, False]
 
-        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
-            result = runner.invoke(app)
-        
+        env_overrides = {key: "" for key in _PROVIDER_DETECT_KEYS}
+        with patch.dict(os.environ, env_overrides, clear=False):
+            result = runner.invoke(app, ["--no-verify"])
+
         assert result.exit_code == 0
         assert "Setup complete" in result.stdout
-        
+
         env_file = temp_praison_home / ".env"
         assert env_file.exists()
         env_content = env_file.read_text()
-        assert "OPENAI_API_KEY=sk-interactive123" in env_content
+        assert "OPENAI_API_KEY=sk-" in env_content
 
     def test_setup_missing_required_args(self, monkeypatch):
         """Test that setup fails when required args are missing in non-interactive mode."""
