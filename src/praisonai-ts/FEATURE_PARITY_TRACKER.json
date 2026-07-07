@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 395,
+    "pythonCoreFeatures": 396,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 101,
+    "gapCount": 102,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 88
+    "priorityP3": 89
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -247,6 +247,7 @@
       "RewriteStrategy",
       "Route",
       "RoutingConditionProtocol",
+      "RulesConfig",
       "RunStatus",
       "SandboxConfig",
       "SandboxProtocol",
@@ -534,6 +535,7 @@
         "PraisonConfig",
         "REFLECTION_PRESETS",
         "ReflectionConfig",
+        "RulesConfig",
         "SkillsConfig",
         "TemplateConfig",
         "ToolSearchConfig",
@@ -5453,6 +5455,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "conditions"
+      },
+      {
+        "feature": "RulesConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "config"
       },
       {
         "feature": "RunStatus",
