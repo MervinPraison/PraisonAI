@@ -180,7 +180,6 @@ class SuiteExecutor:
                         on_item_end(result, idx, total)
                     continue
             if self.dry_run:
-                
                 result = RunResult(
                     item_id=item.item_id,
                     suite=item.suite,
