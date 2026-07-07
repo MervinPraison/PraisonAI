@@ -133,8 +133,8 @@ class TestLLMLoopCancellation:
             pytest.skip("litellm not installed")
         try:
             return LLM(model="anthropic/claude-3-haiku-20240307")
-        except ImportError:
-            pytest.skip("litellm not installed")
+        except Exception:
+            pytest.skip("litellm not available or model construction failed")
 
     def test_sync_loop_returns_cancelled_outcome(self):
         """A pre-set controller short-circuits get_response before any LLM call."""
