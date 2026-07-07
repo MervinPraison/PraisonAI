@@ -110,6 +110,25 @@ assert(
   mg.findMergeGateVerdict(fallbackApprove, null, '2026-06-12T09:00:00Z') === 'APPROVE'
 );
 
+const fallbackBlockNewFormat = [
+  {
+    body: 'MERGE_GATE_VERDICT: BLOCK\n\nAutomated fallback — Opus merge gate assessment did not complete.',
+    created_at: '2026-06-12T10:00:00Z',
+  },
+];
+assert(
+  'new-format fallback BLOCK ignored when Opus required',
+  mg.findMergeGateVerdict(fallbackBlockNewFormat, null, '2026-06-12T09:00:00Z', { excludeAutomatedFallback: true }) === null
+);
+assert(
+  'new-format fallback BLOCK detected by marker helper',
+  mg.isAutomatedFallbackVerdict(fallbackBlockNewFormat[0].body)
+);
+assert(
+  'findMergeGateVerdict null-safe with explicit null options',
+  mg.findMergeGateVerdict(fallbackApprove, null, '2026-06-12T09:00:00Z', null) === 'APPROVE'
+);
+
 const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
 assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
 

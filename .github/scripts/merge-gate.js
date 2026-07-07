@@ -800,12 +800,14 @@ async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCand
   };
 }
 
+const AUTOMATED_FALLBACK_MARKER = 'Automated fallback —';
+
 function isAutomatedFallbackVerdict(body) {
-  return (body || '').includes('Automated fallback — Claude assess did not post');
+  return (body || '').includes(AUTOMATED_FALLBACK_MARKER);
 }
 
 function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null, options = {}) {
-  const { excludeAutomatedFallback = false } = options;
+  const { excludeAutomatedFallback = false } = options || {};
   const minTime = minCreatedAt ? new Date(minCreatedAt).getTime() : 0;
   const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   const gateComments = comments
@@ -882,5 +884,6 @@ module.exports = {
   listPrNumbersForMergeGateScan,
   selectMergeGateCandidates,
   isAutomatedFallbackVerdict,
+  AUTOMATED_FALLBACK_MARKER,
   findMergeGateVerdict,
 };
