@@ -1,0 +1,102 @@
+name: Auto CI Failure → Claude
+
+# Detects internal PRs with failing CI and posts @claude with extracted failure details.
+
+on:
+  workflow_run:
+    workflows: [Core Tests, Optimized Test Suite]
+    types: [completed]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Optional PR number to process (default: scan blocked PRs)'
+        required: false
+        type: string
+  schedule:
+    - cron: '15 */6 * * *'
+
+concurrency:
+  group: ci-failure-scan-${{ github.repository }}-${{ github.event.pull_request.number || github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # PAT posts as MervinPraison so issue_comment triggers claude.yml (GITHUB_TOKEN cannot chain workflows)
+  GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+
+permissions:
+  pull-requests: read
+  issues: write
+  actions: read
+
+jobs:
+  detect-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Detect CI failures and trigger Claude
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const ciFix = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/ci-failure-claude.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const baseRepo = `${owner}/${repo}`;
+
+            async function processPR(prNumber) {
+              return ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
+            }
+
+            let results = [];
+
+            if (context.eventName === 'workflow_run') {
+              const wr = context.payload.workflow_run;
+              const result = await ciFix.processWorkflowRunFailure(
+                github, owner, repo, wr, core
+              );
+              results.push({ event: 'workflow_run', workflow: wr.name, ...result });
+            } else if (context.eventName === 'pull_request') {
+              results.push({
+                pr: context.payload.pull_request.number,
+                ...(await processPR(context.payload.pull_request.number)),
+              });
+            } else {
+              let prNumbers = [];
+              if (context.eventName === 'workflow_dispatch' && context.payload.inputs?.pr_number) {
+                prNumbers = [Number(context.payload.inputs.pr_number)];
+              } else {
+                const prs = await github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100,
+                });
+                for (const pr of prs) {
+                  if (pr.draft) continue;
+                  const headRepo = pr.head?.repo?.full_name;
+                  if (headRepo && headRepo !== baseRepo) continue;
+                  const { data: issue } = await github.rest.issues.get({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                  });
+                  const labels = issue.labels.map((l) => l.name);
+                  if (labels.includes('pipeline/blocked:ci') || labels.includes(ciFix.CI_FIX_LABEL)) {
+                    prNumbers.push(pr.number);
+                  }
+                }
+              }
+
+              for (const num of prNumbers) {
+                results.push({ pr: num, ...(await processPR(num)) });
+              }
+            }
+
+            core.summary.addRaw('```json\n' + JSON.stringify(results, null, 2) + '\n```');
+            await core.summary.write();

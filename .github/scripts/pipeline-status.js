@@ -5,6 +5,7 @@
 
 const mergeGate = require('./merge-gate.js');
 const chain = require('./bot-pr-review-chain.js');
+const ciFix = require('./ci-failure-claude.js');
 
 const PIPELINE_PREFIX = 'pipeline/';
 const STAGE_LABELS = [
@@ -155,6 +156,18 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
   }
 
   core?.info?.(`PR #${prNumber}: stage=${stage} blockers=[${blockers.join(', ')}]`);
+
+  const ciNotGreen = (evalResult.reasons || []).some((r) =>
+    r.toLowerCase().includes('ci not green')
+  );
+  if (ciNotGreen || blockers.includes('pipeline/blocked:ci')) {
+    await ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
+  } else {
+    await ciFix.maybeClearCiFixLabel(
+      github, owner, repo, prNumber, ctx.labels, ctx.headSha, core
+    );
+  }
+
   return {
     synced: true,
     stage,
