@@ -12,7 +12,7 @@ on:
     - cron: '0 */6 * * *'
 
 concurrency:
-  group: merge-conflict-scan-${{ github.repository }}
+  group: merge-conflict-scan-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:

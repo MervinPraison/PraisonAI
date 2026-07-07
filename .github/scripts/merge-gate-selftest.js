@@ -27,6 +27,19 @@ const withRecovery = [
 ];
 assert('not stale when @claude after head', !mg.isStaleFinalAfterPush(withRecovery, '2026-06-12T09:00:00Z'));
 
+const withClaudeReply = [
+  ...finals,
+  {
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: "**Claude finished @MervinPraison's task** —— [View job](https://github.com/)",
+    created_at: '2026-06-12T08:30:00Z',
+  },
+];
+assert('not stale when Claude replied after FINAL', !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z'));
+assert('claude final reply detected', mg.isClaudeFinalReplyComment(withClaudeReply[1]));
+
+assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
+
 // Stale-FINAL recovery guards (PR #2560 push loop)
 const nowMs = Date.now();
 const iso = (ms) => new Date(ms).toISOString();
