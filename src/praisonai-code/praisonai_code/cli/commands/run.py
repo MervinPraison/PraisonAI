@@ -1195,6 +1195,10 @@ def _run_prompt(
                 )
             
             # Add session support to Agent if needed
+            # NOTE: build_cli_memory_config / apply_cli_session_continuity are
+            # imported above from ..state.project_sessions. Do NOT re-import them
+            # from ..utils.project here — that stale version lacks the auto_save
+            # kwarg and would shadow the correct implementation.
             memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
