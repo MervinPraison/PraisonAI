@@ -4414,6 +4414,13 @@ Summary:"""
                 verbose=1 if self.verbose else 0
             )
             
+            # Register any extra instruction files/globs from RulesConfig.files
+            # before the discovery gate so a workspace whose only rules are
+            # explicit files is not dropped.
+            extra_files = getattr(config, "files", None) or []
+            for extra in extra_files:
+                self._rules_manager.add_rule_file(extra)
+            
             # Discovery gate: if no rules were found, drop the manager so that
             # zero-config runs incur no per-run injection cost.
             stats = self._rules_manager.get_stats()
@@ -4445,7 +4452,7 @@ Summary:"""
         # Honour char budget from RulesConfig if provided
         char_budget = getattr(self._rules_config, "char_budget", None)
         kwargs = {"file_path": file_path, "include_manual": include_manual}
-        if char_budget:
+        if char_budget is not None:
             kwargs["max_chars"] = char_budget
         return self.rules_manager.build_rules_context(**kwargs)
     

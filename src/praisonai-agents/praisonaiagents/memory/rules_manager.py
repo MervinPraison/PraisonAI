@@ -509,6 +509,43 @@ class RulesManager:
         
         self._log(f"Loaded {len(self._rules)} rules total")
     
+    def add_rule_file(self, path: str) -> int:
+        """
+        Register extra instruction file(s) beyond auto-discovery.
+
+        Accepts a concrete file path or a glob pattern (relative to the
+        workspace or absolute). Each matched file is loaded through the same
+        machinery as auto-discovered root instruction files and given a high
+        priority so explicit user-supplied files take precedence.
+
+        Args:
+            path: File path or glob pattern to include.
+
+        Returns:
+            Number of rule files successfully added.
+        """
+        candidate = Path(path)
+        if candidate.is_absolute():
+            matches = [candidate] if candidate.exists() else list(
+                candidate.parent.glob(candidate.name)
+            )
+        else:
+            matches = [self.workspace_path / candidate]
+            if not matches[0].exists():
+                matches = list(self.workspace_path.glob(path))
+
+        added = 0
+        for file_path in matches:
+            if not file_path.is_file():
+                continue
+            rule = self._load_root_instruction_file(file_path)
+            if rule:
+                rule.priority = rule.priority + 200  # Explicit files win
+                self._rules[f"extra:{rule.name}"] = rule
+                added += 1
+        self._log(f"Added {added} extra rule file(s) from '{path}'")
+        return added
+
     def reload(self):
         """Reload all rules from disk."""
         self._load_all_rules()

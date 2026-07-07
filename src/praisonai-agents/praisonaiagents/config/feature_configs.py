@@ -1730,6 +1730,7 @@ __all__ = [
     "KnowledgeConfig",
     "PlanningConfig",
     "ReflectionConfig",
+    "RulesConfig",
     "GuardrailConfig",
     "WebConfig",
     "OutputConfig",
