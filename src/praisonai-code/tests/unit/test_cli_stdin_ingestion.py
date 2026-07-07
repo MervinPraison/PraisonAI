@@ -26,12 +26,10 @@ class _FakeStdin(io.StringIO):
 def _patch_stdin(monkeypatch, content, *, isatty=False, has_data=True):
     fake = _FakeStdin(content, isatty=isatty)
     monkeypatch.setattr(stdin_util.sys, "stdin", fake)
-    # Force select() to report data available (or not) deterministically.
-    import select
-
-    monkeypatch.setattr(
-        select, "select", lambda r, w, x, t: (list(r) if has_data else [], [], [])
-    )
+    # Drive the platform-agnostic data-available check deterministically instead
+    # of relying on the real select()/stat() so tests behave identically on
+    # every OS (Unix uses select, Windows uses a stat-based pipe check).
+    monkeypatch.setattr(stdin_util, "_stdin_has_data", lambda: has_data)
     return fake
 
 
@@ -56,12 +54,79 @@ def test_read_stdin_returns_none_when_no_data_available(monkeypatch):
     assert stdin_util.read_stdin_if_available() is None
 
 
-def test_read_stdin_skipped_on_windows(monkeypatch):
-    # select.select() is socket-only on Windows, so piped reads are skipped to
-    # avoid blocking on sys.stdin.read().
+def test_read_stdin_reads_piped_content_on_windows(monkeypatch):
+    # Windows can't use select() for pipes, but a stat-based pipe check lets us
+    # read redirected/piped stdin without blocking (issue #2702).
     _patch_stdin(monkeypatch, "piped data")
     monkeypatch.setattr(stdin_util.sys, "platform", "win32")
-    assert stdin_util.read_stdin_if_available() is None
+    assert stdin_util.read_stdin_if_available() == "piped data"
+
+
+def test_stdin_has_data_windows_uses_pipe_check(monkeypatch):
+    # On Windows, _stdin_has_data() must defer to the stat-based pipe check
+    # rather than select() (which is socket-only there).
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: True)
+    assert stdin_util._stdin_has_data() is True
+
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: False)
+    assert stdin_util._stdin_has_data() is False
+
+
+def test_windows_stdin_is_pipe_detects_fifo(monkeypatch):
+    # A FIFO/pipe or regular-file redirection carries piped data on Windows.
+    import stat as _stat
+
+    class _FakeStat:
+        st_mode = _stat.S_IFIFO
+
+    class _HandleStdin:
+        def fileno(self):
+            return 0
+
+    monkeypatch.setattr(stdin_util.sys, "stdin", _HandleStdin())
+    monkeypatch.setattr(stdin_util.os, "fstat", lambda fd: _FakeStat())
+    assert stdin_util._windows_stdin_is_pipe() is True
+
+
+def test_read_stdin_windows_reads_redirected_content(monkeypatch):
+    # A redirected pipe/file with real content returns immediately on Windows.
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    fake = _FakeStdin("piped windows data")
+    monkeypatch.setattr(stdin_util.sys, "stdin", fake)
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: True)
+    assert stdin_util.read_stdin_if_available() == "piped windows data"
+
+
+def test_read_stdin_windows_does_not_block_on_eofless_pipe(monkeypatch):
+    # An open pipe with no EOF must NOT hang the CLI: the time-bounded read
+    # abandons the blocking read and returns None (issue #2702 hardening).
+    import threading
+    import time
+
+    monkeypatch.setattr(stdin_util.sys, "platform", "win32")
+    monkeypatch.setattr(stdin_util, "_windows_stdin_is_pipe", lambda: True)
+    monkeypatch.setattr(stdin_util, "_WINDOWS_READ_TIMEOUT", 0.05)
+
+    release = threading.Event()
+
+    class _BlockingStdin:
+        def isatty(self):
+            return False
+
+        def read(self, *_a, **_k):
+            release.wait()  # simulate an EOF-less pipe that never returns
+            return "never delivered"
+
+    monkeypatch.setattr(stdin_util.sys, "stdin", _BlockingStdin())
+
+    start = time.monotonic()
+    result = stdin_util.read_stdin_if_available()
+    elapsed = time.monotonic() - start
+    release.set()  # let the daemon reader unblock so it can be reaped
+
+    assert result is None
+    assert elapsed < 1.0  # returned promptly instead of blocking forever
 
 
 def test_read_stdin_respects_size_cap(monkeypatch):
