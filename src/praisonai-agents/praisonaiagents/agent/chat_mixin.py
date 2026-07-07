@@ -56,11 +56,8 @@ class ChatMixin:
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
         
-        # Add rules context when rules are enabled (default). Discovery is
-        # lazy and gated: accessing self.rules_manager triggers a cheap
-        # filesystem scan the first time; if no instruction file/dir is found
-        # the manager is dropped, so zero-config runs incur no ongoing cost.
-        if getattr(self, "_rules_enabled", True) and self.rules_manager:
+        # Add rules context if rules manager is enabled (lazy initialization)
+        if self._rules_manager_initialized and self._rules_manager:
             rules_context = self.get_rules_context()
             if rules_context:
                 system_prompt += f"\n\n## Rules (Guidelines you must follow)\n{rules_context}"
