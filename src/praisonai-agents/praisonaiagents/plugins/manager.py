@@ -12,9 +12,7 @@ from praisonaiagents._logging import get_logger
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from typing import TYPE_CHECKING, Callable, Iterator, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin
 
@@ -115,9 +113,18 @@ class PluginManager:
         return False
     
     def disable(self, name: str) -> bool:
-        """Disable a plugin."""
+        """Disable a plugin.
+
+        Also removes any hooks the plugin previously wired into the runtime
+        hook registry, so disabling actually stops its lifecycle methods from
+        firing during subsequent agent execution.
+        """
         if name in self._enabled:
             self._enabled[name] = False
+            try:
+                self.unwire_from_hook_registry(name)
+            except Exception as e:
+                logger.debug(f"Failed to unwire plugin '{name}': {e}")
             return True
         return False
     
@@ -521,18 +528,53 @@ class PluginManager:
                 if getattr(plugin, "_wired_into_registry", None) is registry:
                     # Avoid double-registration on repeated enable() calls
                     continue
+                hook_ids: List[str] = []
                 for event, func in _adapt_plugin_hooks(plugin):
-                    registry.register_function(
+                    hook_id = registry.register_function(
                         event=event,
                         func=func,
                         name=f"{name}:{event.value}",
                     )
+                    hook_ids.append(hook_id)
                     count += 1
                 try:
                     plugin._wired_into_registry = registry
+                    plugin._wired_hook_ids = hook_ids
                 except Exception:
                     pass
         return count
+
+    def unwire_from_hook_registry(self, name: str) -> int:
+        """
+        Remove a plugin's previously wired hooks from its hook registry.
+
+        Complements :meth:`wire_into_hook_registry` so that ``disable()`` on a
+        plugin that was already bridged actually stops its lifecycle methods
+        from firing during subsequent agent execution.
+
+        Args:
+            name: The plugin name to unwire.
+
+        Returns:
+            Number of hook definitions removed.
+        """
+        with self._lock:
+            plugin = self._plugins.get(name)
+            if plugin is None:
+                return 0
+            registry = getattr(plugin, "_wired_into_registry", None)
+            if registry is None:
+                return 0
+            removed = 0
+            for hook_id in getattr(plugin, "_wired_hook_ids", []) or []:
+                if registry.unregister(hook_id):
+                    removed += 1
+            try:
+                plugin._wired_into_registry = None
+                plugin._wired_hook_ids = []
+            except Exception:
+                pass
+            return removed
 
 def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]]:
     """
@@ -612,7 +654,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         def before_tool_hook(data, _p=plugin):
             args = getattr(data, "tool_input", {}) or {}
             new_args = _p.before_tool(getattr(data, "tool_name", ""), args)
-            if isinstance(new_args, dict) and hasattr(data, "tool_input"):
+            if isinstance(new_args, dict) and isinstance(getattr(data, "tool_input", None), dict):
                 data.tool_input.clear()
                 data.tool_input.update(new_args)
             return HookResult.allow()
@@ -628,7 +670,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         def before_tool_definitions_hook(data, _p=plugin):
             defs = getattr(data, "tool_definitions", []) or []
             new_defs = _p.before_tool_definitions(defs)
-            if isinstance(new_defs, list) and hasattr(data, "tool_definitions"):
+            if isinstance(new_defs, list) and isinstance(getattr(data, "tool_definitions", None), list):
                 data.tool_definitions[:] = new_defs
             return HookResult.allow()
         yield HookEvent.BEFORE_TOOL_DEFINITIONS, before_tool_definitions_hook

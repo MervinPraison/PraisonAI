@@ -105,6 +105,48 @@ class TestBridge:
         assert mgr.wire_into_hook_registry(reg) == 1
         assert mgr.wire_into_hook_registry(reg) == 0
 
+    def test_disable_after_wire_removes_hooks(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(PIIPlugin())
+        assert mgr.wire_into_hook_registry(reg) == 1
+        assert reg.has_hooks(HookEvent.AFTER_LLM)
+
+        assert mgr.disable("pii") is True
+        assert not reg.has_hooks(HookEvent.AFTER_LLM)
+
+        # Disabled plugin no longer fires
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = _input()
+        runner.execute_sync(HookEvent.AFTER_LLM, data)
+        assert data.response == "SSN is 123-45-6789"
+
+    def test_reenable_after_disable_rewires(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(PIIPlugin())
+        mgr.wire_into_hook_registry(reg)
+        mgr.disable("pii")
+        assert not reg.has_hooks(HookEvent.AFTER_LLM)
+
+        mgr.enable("pii")
+        assert mgr.wire_into_hook_registry(reg) == 1
+        assert reg.has_hooks(HookEvent.AFTER_LLM)
+
+    def test_before_tool_none_tool_input_no_crash(self):
+        reg = HookRegistry()
+        mgr = PluginManager()
+        mgr.register(ToolArgPlugin())
+        mgr.wire_into_hook_registry(reg)
+
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        data = BeforeToolInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.BEFORE_TOOL,
+            timestamp=str(time.time()), agent_name="a",
+            tool_name="bash", tool_input=None,
+        )
+        runner.execute_sync(HookEvent.BEFORE_TOOL, data)
+
     def test_single_entry_point_group(self):
         import inspect
         src = inspect.getsource(PluginManager.discover_entry_points)
