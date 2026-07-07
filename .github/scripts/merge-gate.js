@@ -102,7 +102,7 @@ function isConflictRebaseCompletionComment(c) {
   );
 }
 
-function conflictRebaseQuiescent(comments, headPushedAt) {
+function conflictRebaseQuiescent(comments, headPushedAt, headAuthoredAt = null) {
   const conflictTriggers = comments.filter(isConflictRebaseTriggerComment);
   if (conflictTriggers.length === 0) return true;
 
@@ -117,10 +117,10 @@ function conflictRebaseQuiescent(comments, headPushedAt) {
   );
   if (!rebaseDone) return false;
 
-  return finalClaudeCompletedOnSha(comments, headPushedAt);
+  return finalClaudeCompletedOnSha(comments, headPushedAt, headAuthoredAt);
 }
 
-function hasRecentConflictComment(comments, headPushedAt = null) {
+function hasRecentConflictComment(comments, headPushedAt = null, headAuthoredAt = null) {
   const cutoff = Date.now() - CONFLICT_COOLDOWN_MS;
   const hasRecentTrigger = comments.some((c) => {
     if (!isConflictRebaseTriggerComment(c)) return false;
@@ -128,7 +128,7 @@ function hasRecentConflictComment(comments, headPushedAt = null) {
   });
   if (!hasRecentTrigger) return false;
 
-  if (headPushedAt && conflictRebaseQuiescent(comments, headPushedAt)) {
+  if (headPushedAt && conflictRebaseQuiescent(comments, headPushedAt, headAuthoredAt)) {
     return false;
   }
   return true;
@@ -173,7 +173,7 @@ function hasFinalClaudeReviewTrigger(comments) {
   return comments.some(isFinalClaudeTriggerComment);
 }
 
-function isStaleFinalAfterPush(comments, headPushedAt) {
+function isStaleFinalAfterPush(comments, headPushedAt, headAuthoredAt = null) {
   if (!headPushedAt) return false;
   const headTime = new Date(headPushedAt).getTime();
   const finals = comments.filter(isFinalClaudeTriggerComment);
@@ -183,11 +183,14 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
   if (headTime <= finalTime + 60000) return false;
-  const claudeRepliedAfterFinal = comments.some((c) => {
+  const authoredTime = headAuthoredAt ? new Date(headAuthoredAt).getTime() : headTime;
+  const claudeReplyAfterFinal = comments.some((c) => {
     if (!isClaudeFinalReplyComment(c)) return false;
-    return new Date(c.created_at).getTime() >= finalTime - 60000;
+    const replyTime = new Date(c.created_at).getTime();
+    if (replyTime < finalTime - 60000) return false;
+    return authoredTime <= replyTime + 60000;
   });
-  if (claudeRepliedAfterFinal) return false;
+  if (claudeReplyAfterFinal) return false;
   const claudeSinceHead = comments.some((c) => {
     if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
     if (isClaudeTriggerNoise(c)) return false;
@@ -197,15 +200,15 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   return !claudeSinceHead;
 }
 
-function needsStaleFinalRecovery(comments, headPushedAt) {
+function needsStaleFinalRecovery(comments, headPushedAt, headAuthoredAt = null) {
   return (
     hasFinalClaudeReviewTrigger(comments) &&
-    isStaleFinalAfterPush(comments, headPushedAt)
+    isStaleFinalAfterPush(comments, headPushedAt, headAuthoredAt)
   );
 }
 
-function shouldSkipFinalRecovery(comments, headPushedAt) {
-  const isStale = isStaleFinalAfterPush(comments, headPushedAt);
+function shouldSkipFinalRecovery(comments, headPushedAt, headAuthoredAt = null) {
+  const isStale = isStaleFinalAfterPush(comments, headPushedAt, headAuthoredAt);
   if (isStale) return false;
   return hasRecentClaudeTrigger(comments, 35);
 }
@@ -235,8 +238,8 @@ function isPushSoonAfterLatestFinal(comments, headPushedAt) {
 }
 
 /** Returns { skip: true, reason } when stale-FINAL recovery should not post. */
-function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = null) {
-  if (!isStaleFinalAfterPush(comments, headPushedAt)) {
+function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = null, headAuthoredAt = null) {
+  if (!isStaleFinalAfterPush(comments, headPushedAt, headAuthoredAt)) {
     return { skip: true, reason: 'not stale' };
   }
   if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin)) {
@@ -259,9 +262,9 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   return { skip: false, reason: '' };
 }
 
-function finalClaudeCompletedOnSha(comments, headPushedAt) {
+function finalClaudeCompletedOnSha(comments, headPushedAt, headAuthoredAt = null) {
   if (!hasFinalClaudeReviewTrigger(comments)) return false;
-  if (isStaleFinalAfterPush(comments, headPushedAt)) return false;
+  if (isStaleFinalAfterPush(comments, headPushedAt, headAuthoredAt)) return false;
   return true;
 }
 
@@ -612,6 +615,34 @@ async function getHeadCommitDate(github, owner, repo, prNumber) {
   }
 }
 
+async function getHeadCommitDates(github, owner, repo, prNumber) {
+  try {
+    let commits;
+    if (typeof github.paginate === 'function') {
+      commits = await github.paginate(github.rest.pulls.listCommits, {
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+    } else {
+      const { data } = await github.rest.pulls.listCommits({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+      commits = data;
+    }
+    const last = commits[commits.length - 1];
+    const committer = last?.commit?.committer?.date || null;
+    const author = last?.commit?.author?.date || null;
+    return { committer: committer || author, author: author || committer };
+  } catch {
+    return { committer: null, author: null };
+  }
+}
+
 async function loadPrContext(github, owner, repo, prNumber) {
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: prNumber });
@@ -624,8 +655,9 @@ async function loadPrContext(github, owner, repo, prNumber) {
   });
   const mergeState = await getMergeState(github, owner, repo, prNumber);
   const headSha = mergeState.headSha || pr.head.sha;
-  const headCommitDate = await getHeadCommitDate(github, owner, repo, prNumber);
-  const headPushedAt = headCommitDate || pr.updated_at;
+  const headCommitDates = await getHeadCommitDates(github, owner, repo, prNumber);
+  const headPushedAt = headCommitDates.committer || pr.updated_at;
+  const headAuthoredAt = headCommitDates.author || headPushedAt;
 
   return {
     pr,
@@ -635,6 +667,7 @@ async function loadPrContext(github, owner, repo, prNumber) {
     mergeState,
     headSha,
     headPushedAt,
+    headAuthoredAt,
     labels: issue.labels.map((l) => l.name),
     baseRepo: `${owner}/${repo}`,
   };
@@ -665,7 +698,7 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons.push('fork PR');
   }
 
-  if (hasRecentConflictComment(ctx.comments, ctx.headPushedAt)) {
+  if (hasRecentConflictComment(ctx.comments, ctx.headPushedAt, ctx.headAuthoredAt)) {
     reasons.push('recent merge-conflict @claude');
   }
   if (!skipRecentClaudeCooldown && hasRecentClaudeTrigger(ctx.comments, 35)) {
@@ -680,10 +713,10 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   const checksOk = await allChecksGreenOnSha(github, owner, repo, ctx.headSha, core);
   if (!checksOk) reasons.push('CI not green on HEAD');
 
-  if (!finalClaudeCompletedOnSha(ctx.comments, ctx.headPushedAt)) {
+  if (!finalClaudeCompletedOnSha(ctx.comments, ctx.headPushedAt, ctx.headAuthoredAt)) {
     if (!hasFinalClaudeReviewTrigger(ctx.comments)) {
       reasons.push('no FINAL Claude review trigger');
-    } else if (isStaleFinalAfterPush(ctx.comments, ctx.headPushedAt)) {
+    } else if (isStaleFinalAfterPush(ctx.comments, ctx.headPushedAt, ctx.headAuthoredAt)) {
       reasons.push('stale FINAL after new commits (needs @claude re-review)');
     } else {
       reasons.push('FINAL Claude not complete on HEAD');
@@ -802,6 +835,7 @@ module.exports = {
   sdkTestChecksReason,
   listAllComments,
   getHeadCommitDate,
+  getHeadCommitDates,
   isStaleFinalAfterPush,
   needsStaleFinalRecovery,
   shouldSkipFinalRecovery,

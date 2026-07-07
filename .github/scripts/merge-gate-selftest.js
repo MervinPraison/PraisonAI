@@ -27,16 +27,33 @@ const withRecovery = [
 ];
 assert('not stale when @claude after head', !mg.isStaleFinalAfterPush(withRecovery, '2026-06-12T09:00:00Z'));
 
-const withClaudeReply = [
-  ...finals,
-  {
-    user: { login: 'praisonai-triage-agent[bot]' },
-    body: "**Claude finished @MervinPraison's task** —— [View job](https://github.com/)",
-    created_at: '2026-06-12T08:30:00Z',
-  },
-];
-assert('not stale when Claude replied after FINAL', !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z'));
+const claudeReply = (at) => ({
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: "**Claude finished @MervinPraison's task** —— [View job](https://github.com/)",
+  created_at: at,
+});
+const withClaudeReply = [...finals, claudeReply('2026-06-12T08:30:00Z')];
 assert('claude final reply detected', mg.isClaudeFinalReplyComment(withClaudeReply[1]));
+
+// Rebase-only push: committer date is new but author date predates Claude's reply → not stale
+// FINAL 08:00, Claude reply 08:30, rebase committer date 09:00, author date 07:45 (original work)
+assert(
+  'rebase-only push not stale (author date predates reply)',
+  !mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z', '2026-06-12T07:45:00Z')
+);
+
+// Genuine code push AFTER Claude's reply must re-arm the FINAL review (Gemini/Greptile P1)
+// New commit authored 09:00, after Claude's 08:30 reply → stale, needs re-review
+assert(
+  'stale when code authored after Claude reply',
+  mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z', '2026-06-12T09:00:00Z')
+);
+
+// Backward compat: no author date → falls back to committer date (treated as new code)
+assert(
+  'stale when author date absent and reply predates head',
+  mg.isStaleFinalAfterPush(withClaudeReply, '2026-06-12T09:00:00Z')
+);
 
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 
