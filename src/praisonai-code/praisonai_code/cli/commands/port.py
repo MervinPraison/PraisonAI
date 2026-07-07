@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-app = typer.Typer(name="port", help="🔌 Manage port usage and resolve conflicts")
+app = typer.Typer(name="port", help="Manage port usage and resolve conflicts")
 console = Console()
 
 
