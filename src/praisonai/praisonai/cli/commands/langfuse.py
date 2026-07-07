@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-app = typer.Typer(name="langfuse", help="🔍 Langfuse observability platform")
+app = typer.Typer(name="langfuse", help="Langfuse observability platform")
 
 
 def _format_publishers(publishers):

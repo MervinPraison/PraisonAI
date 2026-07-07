@@ -19,7 +19,7 @@ import time
 
 import typer
 
-app = typer.Typer(help="🌟 Unified Dashboard (Flow + Claw + UI)")
+app = typer.Typer(help="Unified Dashboard (Flow + Claw + UI)")
 
 # Port mappings - centralized configuration
 SERVICE_PORTS = {
