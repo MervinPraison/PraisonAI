@@ -25,7 +25,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 989 |
 | ✅ Auto Generation | 5 | 8 | 2284 |
 | ✅ Autonomy | 3 | 6 | 2183 |
-| ✅ Bots | 7 | 24 | 9246 |
+| ✅ Bots | 7 | 25 | 9552 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 112 | 29307 |
 | ✅ Chunking | 2 | 2 | 385 |
@@ -44,15 +44,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1863 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 43 | 15343 |
+| ✅ Gateway | 7 | 43 | 15347 |
 | ✅ Guardrails | 4 | 4 | 1667 |
 | ✅ Handoffs | 11 | 6 | 2705 |
 | ✅ Hooks | 2 | 9 | 3740 |
 | ✅ Image | 1 | 11 | 1113 |
 | ✅ Knowledge | 4 | 12 | 3679 |
-| ✅ LLM | 3 | 14 | 4707 |
-| ✅ Loops | 4 | 3 | 797 |
-| ✅ MCP | 1 | 52 | 11155 |
+| ✅ LLM | 3 | 14 | 4715 |
+| ✅ Loops | 4 | 3 | 801 |
+| ✅ MCP | 1 | 52 | 11156 |
 | ✅ Memory | 6 | 17 | 6358 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
@@ -76,7 +76,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2715 |
 | ✅ Telemetry | 1 | 2 | 590 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 126 | 32328 |
+| ✅ Tools | 12 | 126 | 32346 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1139 |
 | ✅ Video | 2 | 6 | 510 |
