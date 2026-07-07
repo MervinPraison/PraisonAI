@@ -41,6 +41,7 @@ const BLOCK_LABELS = new Set([
   'no-auto-merge',
   'auto-merged-by-gate',
 ]);
+const MERGE_READY_LABEL = 'pipeline/merge-ready';
 /** Superseded concurrency runs; must not block merge when real tests passed. */
 const OPTIONAL_CANCELLED_CHECKS = new Set(['detect-and-trigger']);
 const BOT_REVIEWER_PATTERNS = [
@@ -724,10 +725,67 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   };
 }
 
+async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
+  let mergeReadyIssues;
+  if (typeof github.paginate === 'function') {
+    mergeReadyIssues = await github.paginate(github.rest.issues.listForRepo, {
+      owner,
+      repo,
+      state: 'open',
+      labels: MERGE_READY_LABEL,
+      per_page: 100,
+    });
+  } else {
+    ({ data: mergeReadyIssues } = await github.rest.issues.listForRepo({
+      owner,
+      repo,
+      state: 'open',
+      labels: MERGE_READY_LABEL,
+      per_page: 100,
+    }));
+  }
+  const mergeReady = mergeReadyIssues
+    .filter((issue) => issue.pull_request)
+    .map((issue) => issue.number)
+    .sort((a, b) => a - b);
+
+  if (mergeReady.length > 0) {
+    core?.info?.(
+      `Merge gate scan: ${mergeReady.length} ${MERGE_READY_LABEL} PR(s) (skipping unlabelled open PRs)`
+    );
+    return mergeReady;
+  }
+
+  core?.info?.(`No ${MERGE_READY_LABEL} PRs — scanning oldest open PRs`);
+  const prs =
+    typeof github.paginate === 'function'
+      ? await github.paginate(github.rest.pulls.list, {
+          owner,
+          repo,
+          state: 'open',
+          per_page: 100,
+          sort: 'created',
+          direction: 'asc',
+        })
+      : (await github.rest.pulls.list({
+          owner,
+          repo,
+          state: 'open',
+          per_page: 100,
+          sort: 'created',
+          direction: 'asc',
+        })).data;
+  return prs.map((pr) => pr.number);
+}
+
 async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCandidates, core) {
   const readyList = [];
   const skipped = [];
   for (const num of prNumbers) {
+    if (readyList.length >= maxCandidates) {
+      core?.info?.(`Found ${maxCandidates} candidate(s) — skipping remaining PR scans`);
+      break;
+    }
     const result = await evaluatePipelineQuiescent(github, owner, repo, num, core);
     if (result.ready) {
       readyList.push({ pr_number: num, head_sha: result.headSha });
@@ -814,6 +872,8 @@ module.exports = {
   FINAL_CLAUDE_REVIEW_BODY,
   loadPrContext,
   evaluatePipelineQuiescent,
+  MERGE_READY_LABEL,
+  listPrNumbersForMergeGateScan,
   selectMergeGateCandidates,
   findMergeGateVerdict,
 };

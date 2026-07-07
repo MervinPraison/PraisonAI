@@ -38,7 +38,7 @@ concurrency:
 
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
-  MAX_CANDIDATES: 1
+  MAX_CANDIDATES: 3
   DISPATCH_PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || '' }}
 
 permissions:
@@ -56,26 +56,28 @@ jobs:
       pull-requests: read
       issues: read
       actions: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Dispatch merge gate when PR pipeline is ready
         uses: actions/github-script@v7
-        env:
-          PAT: ${{ secrets.GH_TOKEN }}
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const wr = context.payload.workflow_run;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-
-            if (!process.env.PAT) {
-              core.setFailed('GH_TOKEN secret is required for merge gate auto-dispatch (needs repo + workflow scope).');
-              return;
-            }
 
             if (wr.conclusion !== 'success') {
               core.info(`Skip dispatch: ${wr.name} conclusion=${wr.conclusion}`);
@@ -121,17 +123,26 @@ jobs:
       pull-requests: read
       issues: write
       actions: read
+      id-token: write
     outputs:
       matrix: ${{ steps.scan.outputs.matrix }}
       has_candidates: ${{ steps.scan.outputs.has_candidates }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Scan open PRs for merge gate eligibility
         id: scan
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
@@ -156,10 +167,9 @@ jobs:
                 skipped.push({ pr: n, reasons: result.reasons });
               }
             } else {
-              const prs = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: 'open', per_page: 100, sort: 'created', direction: 'asc',
-              });
-              const prNumbers = prs.map((p) => p.number);
+              const prNumbers = await mergeGate.listPrNumbersForMergeGateScan(
+                github, owner, repo, core
+              );
               const selected = await mergeGate.selectMergeGateCandidates(
                 github, owner, repo, prNumbers, maxCandidates, core
               );
@@ -196,7 +206,7 @@ jobs:
               });
             }
 
-            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 20 }, core);
+            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 10 }, core);
 
   claude-assess:
     needs: scan-candidates
@@ -230,7 +240,7 @@ jobs:
         id: mark_active
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             core.setOutput('started_at', new Date().toISOString());
             await github.rest.issues.addLabels({
@@ -303,7 +313,7 @@ jobs:
         id: fallback_verdict
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const mergeGate = require('/tmp/merge-gate.js');
             const owner = context.repo.owner;
@@ -344,7 +354,7 @@ jobs:
         id: verdict
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const mergeGate = require('/tmp/merge-gate.js');
             const comments = await mergeGate.listAllComments(
@@ -362,7 +372,7 @@ jobs:
         if: always()
         uses: actions/github-script@v7
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const prNumber = ${{ matrix.pr_number }};
             try {
@@ -396,8 +406,17 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
 
       - name: Re-check gates and merge
         uses: actions/github-script@v7
@@ -405,7 +424,7 @@ jobs:
           MERGE_METHOD: ${{ github.event.inputs.merge_method || 'merge' }}
           SCAN_HEAD_SHA: ${{ matrix.head_sha }}
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
