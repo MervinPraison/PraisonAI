@@ -2335,11 +2335,6 @@ Your Goal: {self.goal}
         with self._history_lock.lock():
             self._history_lock.value.append(message)
     
-    def _truncate_chat_history(self, length: int):
-        """Thread-safe truncation of chat history using proper locking."""
-        with self._history_lock.lock():
-            self._history_lock.value[:] = self._history_lock.value[:length]
-    
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
         with self._history_lock.lock():
