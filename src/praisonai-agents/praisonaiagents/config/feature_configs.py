@@ -443,6 +443,47 @@ class ReflectionConfig:
         }
 
 
+@dataclass
+class RulesConfig:
+    """
+    Configuration for auto-applying per-project rules/instructions.
+
+    Discovers and injects per-repository instruction files (AGENTS.md,
+    CLAUDE.md, .praisonai/rules/*.md, etc.) into the agent system prompt
+    on every run, honouring the existing activation modes (always, glob,
+    manual, ai_decision), priority ordering, and a character budget.
+
+    Usage:
+        # Simple enable (auto-discover + apply)
+        Agent(rules=True)
+
+        # Opt out (reproducible/sandboxed runs)
+        Agent(rules=False)
+
+        # With config
+        Agent(rules=RulesConfig(
+            char_budget=6000,
+            files=["docs/CONVENTIONS.md"],
+        ))
+    """
+    # Character budget for injected rules context (None = manager default)
+    char_budget: Optional[int] = None
+
+    # Extra instruction file paths/globs to include beyond auto-discovery
+    files: Optional[List[str]] = None
+
+    # Optional workspace path override (defaults to current working directory)
+    workspace_path: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "char_budget": self.char_budget,
+            "files": list(self.files or []),
+            "workspace_path": self.workspace_path,
+        }
+
+
 class GuardrailAction(str, Enum):
     """Action to take when guardrail fails."""
     RETRY = "retry"
@@ -1689,6 +1730,7 @@ __all__ = [
     "KnowledgeConfig",
     "PlanningConfig",
     "ReflectionConfig",
+    "RulesConfig",
     "GuardrailConfig",
     "WebConfig",
     "OutputConfig",

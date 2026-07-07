@@ -120,7 +120,7 @@ from ..config.presets import (
 )
 from ..config.feature_configs import (
     OutputConfig, ExecutionConfig, MemoryConfig, KnowledgeConfig,
-    PlanningConfig, ReflectionConfig, GuardrailConfig, WebConfig,
+    PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
 )
@@ -503,6 +503,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         knowledge: Optional[Union[bool, str, List[str], 'KnowledgeConfig', 'Knowledge']] = None,
         planning: Optional[Union[bool, str, 'PlanningConfig']] = False,
         reflection: Optional[Union[bool, str, 'ReflectionConfig']] = None,
+        rules: Optional[Union[bool, 'RulesConfig']] = None,  # Auto-apply per-project rules (AGENTS.md, .praisonai/rules/)
         guardrails: Optional[Union[bool, str, Callable, 'GuardrailConfig']] = None,
         web: Optional[Union[bool, str, 'WebConfig']] = None,
         context: Optional[Union[bool, str, Dict[str, Any], 'ContextConfig', 'ContextManager']] = None,
@@ -562,6 +563,11 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             reflection: Self-reflection. Accepts:
                 - bool: True enables with defaults
                 - ReflectionConfig: Custom configuration
+            rules: Auto-apply per-project rules/instructions (AGENTS.md, CLAUDE.md,
+                .praisonai/rules/*.md) into the system prompt on every run. Accepts:
+                - None/True: auto-discover and apply when instruction files exist (default)
+                - False: opt out (reproducible/sandboxed runs)
+                - RulesConfig: Custom configuration (char_budget, files, workspace_path)
             self_improve: Autonomous skill self-improvement loop (off by default).
                 After each task, runs a guarded review pass restricted to the
                 ``skill_manage`` tool that asks the agent to capture a reusable
@@ -1841,6 +1847,11 @@ Your Goal: {self.goal}
         # NOTE: Lazy initialization - rules are loaded only when accessed (performance optimization)
         self._rules_manager = None
         self._rules_manager_initialized = False
+        # Resolve auto-apply rules config: None/True -> auto-discover + apply,
+        # False -> disabled, RulesConfig -> custom. Discovery-gated so zero-config
+        # runs pay no cost when no instruction file is present.
+        self._rules_config = None if isinstance(rules, bool) else rules
+        self._rules_enabled = rules is not False
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
@@ -4394,18 +4405,29 @@ Summary:"""
             from ..memory.rules_manager import RulesManager
             import os
             
-            # Get workspace path (current working directory)
-            workspace_path = os.getcwd()
+            # Get workspace path (config override or current working directory)
+            config = self._rules_config
+            workspace_path = getattr(config, "workspace_path", None) or os.getcwd()
             
             self._rules_manager = RulesManager(
                 workspace_path=workspace_path,
                 verbose=1 if self.verbose else 0
             )
             
-            # Log discovered rules
+            # Register any extra instruction files/globs from RulesConfig.files
+            # before the discovery gate so a workspace whose only rules are
+            # explicit files is not dropped.
+            extra_files = getattr(config, "files", None) or []
+            for extra in extra_files:
+                self._rules_manager.add_rule_file(extra)
+            
+            # Discovery gate: if no rules were found, drop the manager so that
+            # zero-config runs incur no per-run injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
                 logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+            else:
+                self._rules_manager = None
         except ImportError:
             logging.debug("RulesManager not available")
             self._rules_manager = None
@@ -4427,10 +4449,12 @@ Summary:"""
         if not self.rules_manager:
             return ""
         
-        return self.rules_manager.build_rules_context(
-            file_path=file_path,
-            include_manual=include_manual
-        )
+        # Honour char budget from RulesConfig if provided
+        char_budget = getattr(self._rules_config, "char_budget", None)
+        kwargs = {"file_path": file_path, "include_manual": include_manual}
+        if char_budget is not None:
+            kwargs["max_chars"] = char_budget
+        return self.rules_manager.build_rules_context(**kwargs)
     
     def _init_memory(self, memory, user_id: Optional[str] = None):
         """

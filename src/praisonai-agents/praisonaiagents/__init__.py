@@ -405,6 +405,7 @@ _LAZY_IMPORTS = {
     'KnowledgeConfig': ('praisonaiagents.config.feature_configs', 'KnowledgeConfig'),
     'PlanningConfig': ('praisonaiagents.config.feature_configs', 'PlanningConfig'),
     'ReflectionConfig': ('praisonaiagents.config.feature_configs', 'ReflectionConfig'),
+    'RulesConfig': ('praisonaiagents.config.feature_configs', 'RulesConfig'),
     'GuardrailConfig': ('praisonaiagents.config.feature_configs', 'GuardrailConfig'),
     'WebConfig': ('praisonaiagents.config.feature_configs', 'WebConfig'),
     'OutputConfig': ('praisonaiagents.config.feature_configs', 'OutputConfig'),
