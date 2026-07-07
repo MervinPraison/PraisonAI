@@ -70,6 +70,13 @@ def test_denied_when_piped():
         "systemctl stop nginx",
         "cat notes-about-how-to-stop-the-gateway.txt",
         "python train.py --restart",
+        # Unrelated services whose name merely *contains* a configured token
+        # must not be tripped (word-boundary matching, not bare substring).
+        "pkill -f api-gateway",
+        "pkill -f nginx-gateway",
+        "systemctl stop kong-gateway",
+        "systemctl restart my-gateway-proxy",
+        "killall gatewayd",
     ],
 )
 def test_benign_commands_are_allowed(command):
@@ -101,6 +108,22 @@ def test_custom_process_names_are_honoured():
     assert policy.evaluate("pkill -f mybot").allow is False
     # Default praisonai token is no longer in the deny set for kill matches.
     assert policy.evaluate("pkill -f praisonai").allow is True
+
+
+def test_custom_process_names_govern_cli_rule():
+    # Rule 1 (the ``<cli> gateway <verb>`` form) must honour process_names too,
+    # not just the kill/service rules, so a renamed/forked CLI is covered.
+    policy = LifecycleCommandGuardPolicy(process_names=["mybot"])
+    assert policy.evaluate("mybot gateway stop").allow is False
+    # praisonai remains covered by rule 1 as the project's own CLI.
+    assert policy.evaluate("praisonai gateway stop").allow is False
+
+
+def test_cli_rule_requires_adjacency():
+    # ``gateway`` and a verb appearing non-adjacently (e.g. in an unrelated
+    # argument list) must not trip rule 1 — matching is adjacency-anchored.
+    policy = LifecycleCommandGuardPolicy()
+    assert policy.evaluate("praisonai gateway status --stop-on-idle").allow is True
 
 
 def test_empty_command_is_allowed():

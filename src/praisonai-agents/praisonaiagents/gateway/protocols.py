@@ -3375,10 +3375,15 @@ class LifecycleCommandGuardPolicy:
     * ``praisonai gateway stop|restart|reload`` — the CLI self-control verbs,
       matched only when ``praisonai`` and ``gateway`` appear as adjacent
       command tokens followed by a lifecycle verb.
-    * ``pkill`` / ``kill`` / ``killall`` naming the gateway (``praisonai`` /
-      ``gateway`` in the argument list, or a ``-f`` pattern mentioning it).
+    * ``pkill`` / ``kill`` / ``killall`` naming the gateway (a configured
+      ``process_names`` token — ``praisonai`` by default — appearing as a whole
+      component in the argument list or a ``-f`` pattern).
     * ``systemctl`` / ``launchctl`` / ``sc`` ``stop`` / ``restart`` / ``kill``
-      on a unit whose name mentions the gateway.
+      on a unit whose name mentions the gateway (same whole-component match).
+
+    Matching is *whole-component*, not bare substring: unrelated services whose
+    name merely contains a token (``api-gateway``, ``kong-gateway``) are not
+    tripped, while the real ``praisonai-gateway`` unit still matches.
 
     The scan is applied to every ``;``/``&&``/``||``/pipe-separated segment of
     the command *and* to any additional script text supplied, so a command that
@@ -3402,7 +3407,7 @@ class LifecycleCommandGuardPolicy:
     _SERVICE_VERBS = frozenset(
         {"stop", "restart", "reload", "kill", "disable", "down"}
     )
-    _KILL_CMDS = frozenset({"pkill", "kill", "killall", "kill9", "kill-9"})
+    _KILL_CMDS = frozenset({"pkill", "kill", "killall"})
     _SEGMENT_SPLIT = ("&&", "||", "|", ";", "\n")
 
     def __init__(
@@ -3412,14 +3417,34 @@ class LifecycleCommandGuardPolicy:
         default_allow: bool = True,
     ):
         self.enabled = bool(enabled)
-        names = process_names if process_names else ["praisonai", "gateway"]
+        # Default to the project's own, *specific* identity token. Bare
+        # ``"gateway"`` is deliberately NOT a default deny token — it is too
+        # generic and would false-positive on unrelated services whose name
+        # contains it (``api-gateway``, ``kong-gateway``). The CLI-form rule
+        # (``praisonai gateway stop``) still catches the self-control verbs via
+        # the adjacent ``gateway`` sub-command, which needs no per-name entry.
+        names = process_names if process_names else ["praisonai"]
         # Lower-cased, de-duplicated identity tokens that name *this* gateway.
         self.process_names = [str(n).strip().lower() for n in names if str(n).strip()]
         self.default_allow = bool(default_allow)
 
     def _mentions_self(self, text: str) -> bool:
-        """Whether ``text`` names this gateway process/unit."""
-        return any(name in text for name in self.process_names)
+        """Whether ``text`` names this gateway process/unit.
+
+        Uses *whole-component* matching, not bare substring containment, so an
+        unrelated service whose name merely *contains* a configured token is
+        not tripped. The text is split into identifier components on whitespace
+        and the ``- _ . / : @``, ``'`` / ``"`` characters that delimit service
+        units, paths and quoted ``-f`` patterns; a configured name matches only
+        when it equals one of those components. Thus the default
+        ``process_names=["praisonai"]`` matches ``praisonai-gateway`` (real
+        unit) and ``pkill -f praisonai`` but NOT ``api-gateway`` /
+        ``kong-gateway`` / ``my-praisonaibot``.
+        """
+        import re
+
+        components = {c for c in re.split(r"[\s\-_./:@'\"]+", text) if c}
+        return any(name in components for name in self.process_names)
 
     @staticmethod
     def _tokenize(segment: str) -> List[str]:
@@ -3453,11 +3478,18 @@ class LifecycleCommandGuardPolicy:
         # Normalise a path-qualified executable (``/usr/bin/pkill``) to its base.
         base = cmd.rsplit("/", 1)[-1]
 
-        # 1) praisonai gateway <verb>
-        if "praisonai" in head and "gateway" in head:
-            gi = head.index("gateway")
-            after = head[gi + 1 :]
-            if any(v in self._CLI_VERBS for v in after):
+        # 1) <cli> gateway <verb> — the CLI self-control form. Enforce the
+        #    documented adjacency (``praisonai gateway stop``) rather than a
+        #    loose "words appear somewhere" match, and honour ``process_names``
+        #    so a renamed/forked CLI (``mybot gateway stop`` with
+        #    ``process_names=["mybot"]``) is covered symmetrically with rules 2/3.
+        cli_names = set(self.process_names) | {"praisonai"}
+        for gi, token in enumerate(head):
+            if token != "gateway":
+                continue
+            prev_is_cli = gi >= 1 and head[gi - 1] in cli_names
+            next_is_verb = gi + 1 < len(head) and head[gi + 1] in self._CLI_VERBS
+            if prev_is_cli and next_is_verb:
                 return segment.strip()
 
         # 2) kill / pkill / killall naming the gateway
