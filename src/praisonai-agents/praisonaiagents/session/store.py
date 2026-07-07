@@ -611,12 +611,12 @@ class DefaultSessionStore:
                 delete=False,
                 suffix=".tmp",
             ) as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
                 temp_path = f.name
+                json.dump(data, f, indent=2, ensure_ascii=False)
 
             os.replace(temp_path, filepath)
             return True
-        except (IOError, OSError) as e:
+        except (IOError, OSError, TypeError, ValueError) as e:
             logger.error(f"Atomic write failed for {filepath}: {e}")
             try:
                 if temp_path is not None:
