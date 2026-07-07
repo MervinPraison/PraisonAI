@@ -134,7 +134,7 @@ class TestCliBackendValidation:
         }
         
         # Should raise ValueError for incompatible framework
-        with pytest.raises(ValueError, match="Runtime features require framework='praisonai'"):
+        with pytest.raises(ValueError, match="not supported for framework='autogen'"):
             generator._validate_cli_backend_compatibility(config, 'autogen')
 
     def test_cli_backend_validation_accepts_praisonai_adapter_name(self):

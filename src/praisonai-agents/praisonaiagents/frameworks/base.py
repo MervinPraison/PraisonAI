@@ -28,6 +28,18 @@ class BaseFrameworkAdapter:
     # process-wide default executor used by ``asyncio.to_thread``.
     SUPPORTS_ASYNC: bool = False
 
+    # Capability flags read by the wrapper's capability call sites instead of
+    # hardcoded framework-name string checks. An adapter advertises what it can
+    # actually do; the wrapper asks the adapter, not its name. Defaults are
+    # False so existing/third-party adapters remain second-class only when they
+    # do not opt in (backward compatible).
+    #
+    # SUPPORTS_WORKFLOW: adapter can execute native workflow YAML.
+    # SUPPORTS_RUNTIME_FEATURES: adapter supports cli_backend / runtime /
+    #   models.*.runtime / providers.*.runtime_default.
+    SUPPORTS_WORKFLOW: bool = False
+    SUPPORTS_RUNTIME_FEATURES: bool = False
+
     # Bounded per-adapter offload pool. Kept small on purpose: framework runs
     # are long-lived, so a large pool provides no benefit and just hides the
     # lack of a native async path. Overridable per subclass / instance.

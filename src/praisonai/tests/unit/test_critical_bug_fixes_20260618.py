@@ -45,7 +45,7 @@ class TestCliBackendValidation:
             },
         }
 
-        with pytest.raises(ValueError, match="require framework='praisonai'"):
+        with pytest.raises(ValueError, match="not supported for framework='crewai'"):
             AgentsGenerator._validate_cli_backend_compatibility(gen, config, "crewai")
 
 
