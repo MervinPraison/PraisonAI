@@ -549,7 +549,13 @@ impl RAG {
             return context.to_string();
         }
 
-        format!("{}...", &context[..char_limit])
+        // `char_limit` is a byte count; walk back to the nearest char boundary
+        // so we never slice through a multi-byte UTF-8 character (would panic).
+        let mut end = char_limit.min(context.len());
+        while end > 0 && !context.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &context[..end])
     }
 }
 
@@ -616,7 +622,13 @@ pub fn truncate_context(context: &str, max_tokens: usize) -> String {
         return context.to_string();
     }
 
-    format!("{}...", &context[..char_limit])
+    // `char_limit` is a byte count; walk back to the nearest char boundary so
+    // we never slice through a multi-byte UTF-8 character (which would panic).
+    let mut end = char_limit.min(context.len());
+    while end > 0 && !context.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &context[..end])
 }
 
 /// Deduplicate chunks by content similarity.
@@ -758,6 +770,16 @@ mod tests {
         let truncated = truncate_context(&long_text, 100);
         assert!(truncated.len() < long_text.len());
         assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_context_multibyte_no_panic() {
+        // A byte-based char_limit can land inside a multi-byte character;
+        // truncation must not panic and must cut on a char boundary.
+        let text = "日本語テキストです".repeat(50); // multi-byte, well over the limit
+        let truncated = truncate_context(&text, 1);
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.len() < text.len());
     }
 
     #[test]
