@@ -309,19 +309,37 @@ async function getMergeState(github, owner, repo, prNumber) {
 }
 
 async function listChecksOnSha(github, owner, repo, sha) {
-  const { data } = await github.rest.checks.listForRef({
-    owner,
-    repo,
-    ref: sha,
-    per_page: 100,
-  });
-  return (data.check_runs || []).filter((r) => r.head_sha === sha);
+  let checkRuns;
+  if (typeof github.paginate === 'function') {
+    checkRuns = await github.paginate(github.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref: sha,
+      per_page: 100,
+    });
+  } else {
+    const { data } = await github.rest.checks.listForRef({
+      owner,
+      repo,
+      ref: sha,
+      per_page: 100,
+    });
+    checkRuns = data.check_runs || [];
+  }
+  return checkRuns.filter((r) => r.head_sha === sha);
+}
+
+function isGreenConclusion(run) {
+  return (
+    ['success', 'neutral', 'skipped'].includes(run.conclusion) ||
+    (run.conclusion === 'cancelled' && OPTIONAL_CANCELLED_CHECKS.has(run.name))
+  );
 }
 
 function listFailedChecksOnSha(runs) {
   return (runs || []).filter((run) => {
     if (run.status !== 'completed') return false;
-    return run.conclusion === 'failure';
+    return !isGreenConclusion(run);
   });
 }
 
@@ -336,10 +354,7 @@ async function allChecksGreenOnSha(github, owner, repo, sha, core) {
       core?.info?.(`Check pending: ${run.name} (${run.status})`);
       return false;
     }
-    const ok =
-      ['success', 'neutral', 'skipped'].includes(run.conclusion) ||
-      (run.conclusion === 'cancelled' && OPTIONAL_CANCELLED_CHECKS.has(run.name));
-    if (!ok) {
+    if (!isGreenConclusion(run)) {
       core?.info?.(`Check failed: ${run.name} (${run.conclusion})`);
       return false;
     }
@@ -856,6 +871,7 @@ module.exports = {
   getMergeState,
   OPTIONAL_CANCELLED_CHECKS,
   listChecksOnSha,
+  isGreenConclusion,
   listFailedChecksOnSha,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,

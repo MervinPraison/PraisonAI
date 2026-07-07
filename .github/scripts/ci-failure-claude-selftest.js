@@ -90,4 +90,21 @@ const failedRuns = mergeGate.listFailedChecksOnSha([
 assert('listFailedChecksOnSha finds failures only', failedRuns.length === 1);
 assert('failed check name', failedRuns[0].name === 'test-core (cli)');
 
+const blockedRuns = mergeGate.listFailedChecksOnSha([
+  { status: 'completed', conclusion: 'success', name: 'smoke' },
+  { status: 'completed', conclusion: 'timed_out', name: 'test-core (llm)' },
+  { status: 'completed', conclusion: 'action_required', name: 'test-core (mcp)' },
+  { status: 'completed', conclusion: 'cancelled', name: 'real-test' },
+  { status: 'completed', conclusion: 'cancelled', name: 'detect-and-trigger' },
+  { status: 'completed', conclusion: 'neutral', name: 'informational' },
+  { status: 'in_progress', conclusion: null, name: 'pending-job' },
+]);
+const blockedNames = blockedRuns.map((r) => r.name);
+assert('mirrors green logic: timed_out is failed', blockedNames.includes('test-core (llm)'));
+assert('mirrors green logic: action_required is failed', blockedNames.includes('test-core (mcp)'));
+assert('mirrors green logic: non-optional cancelled is failed', blockedNames.includes('real-test'));
+assert('optional cancelled (detect-and-trigger) not failed', !blockedNames.includes('detect-and-trigger'));
+assert('neutral not counted as failed', !blockedNames.includes('informational'));
+assert('pending not counted as failed', !blockedNames.includes('pending-job'));
+
 process.exit(failed ? 1 : 0);

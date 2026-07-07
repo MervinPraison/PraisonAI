@@ -160,12 +160,16 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
   const ciNotGreen = (evalResult.reasons || []).some((r) =>
     r.toLowerCase().includes('ci not green')
   );
-  if (ciNotGreen || blockers.includes('pipeline/blocked:ci')) {
-    await ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
-  } else {
-    await ciFix.maybeClearCiFixLabel(
-      github, owner, repo, prNumber, ctx.labels, ctx.headSha, core
-    );
+  try {
+    if (ciNotGreen || blockers.includes('pipeline/blocked:ci')) {
+      await ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
+    } else {
+      await ciFix.maybeClearCiFixLabel(
+        github, owner, repo, prNumber, ctx.labels, ctx.headSha, core
+      );
+    }
+  } catch (err) {
+    core?.warning?.(`ci-fix trigger/clear failed for PR #${prNumber}: ${err.message}`);
   }
 
   return {

@@ -244,17 +244,17 @@ async function maybeTriggerCiFixClaude(github, owner, repo, prNumber, core, opts
 
   const body = buildCiFixComment({ headSha, failedChecks, failureSummaries });
 
-  await github.rest.issues.addLabels({
-    owner,
-    repo,
-    issue_number: prNumber,
-    labels: [CI_FIX_LABEL],
-  });
   await github.rest.issues.createComment({
     owner,
     repo,
     issue_number: prNumber,
     body,
+  });
+  await github.rest.issues.addLabels({
+    owner,
+    repo,
+    issue_number: prNumber,
+    labels: [CI_FIX_LABEL],
   });
 
   core?.info?.(`Posted CI fix @claude on PR #${prNumber} (${shortSha(headSha)})`);
