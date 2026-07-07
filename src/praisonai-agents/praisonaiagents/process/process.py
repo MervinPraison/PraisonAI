@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error
-from ..llm import LLM
 from ..run_outcome import AgentRunOutcome, RunStatus, validate_decision_string
 import csv
 import os
@@ -76,6 +75,7 @@ class Process:
 
     def _create_llm_instance(self):
         """Create and return a configured LLM instance for manager tasks."""
+        from ..llm import LLM
         return LLM(model=self.manager_llm, temperature=0.7)
 
     def _process_validation_outcome(
