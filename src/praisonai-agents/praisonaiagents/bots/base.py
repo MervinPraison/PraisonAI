@@ -111,8 +111,10 @@ def _chunk_text(text: str, max_length: int) -> List[str]:
     dependency-free; a subclass can override :meth:`BasePlatformAdapter.chunk`
     to use a richer platform-aware splitter.
     """
+    if not text:
+        return []
     if max_length <= 0 or len(text) <= max_length:
-        return [text] if text else [""]
+        return [text]
 
     chunks: List[str] = []
     current = ""
@@ -142,7 +144,7 @@ def _chunk_text(text: str, max_length: int) -> List[str]:
             current = line
     if current:
         chunks.append(current)
-    return chunks if chunks else [""]
+    return chunks
 
 
 class BasePlatformAdapter(ABC):

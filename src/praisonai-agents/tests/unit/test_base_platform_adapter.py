@@ -57,7 +57,7 @@ class RecordingBot(BasePlatformAdapter):
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class TestContract:
@@ -111,6 +111,13 @@ class TestDeliver:
         bot = NoTyping()
         run(bot.deliver("c1", "hi"))
         assert bot.typing_calls == 0
+
+    def test_empty_string_is_noop(self):
+        bot = RecordingBot()
+        res = run(bot.deliver("c1", ""))
+        assert res.ok
+        assert bot.sends == []
+        assert res.message_ids == []
 
     def test_dict_content_passthrough(self):
         bot = RecordingBot()
