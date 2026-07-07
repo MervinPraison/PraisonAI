@@ -527,8 +527,8 @@ class ToolExecutionMixin:
                 
                 # Update arguments if modified by hooks
                 for res in tool_hook_results:
-                    if res.output and res.output.modified_data:
-                        arguments.update(res.output.modified_data)
+                    if res.output and res.output.modified_input:
+                        arguments.update(res.output.modified_input)
 
             # Loop guard check - prevent tool execution loops with graduated response
             if hasattr(self, '_ensure_loop_guard'):
