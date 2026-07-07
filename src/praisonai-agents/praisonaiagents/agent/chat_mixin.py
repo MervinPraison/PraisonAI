@@ -355,10 +355,19 @@ Your Goal: {self.goal}"""
             # Inject session history if enabled (from persistent storage)
             if self._history_enabled and self._session_store is not None:
                 try:
-                    session_history = self._session_store.get_chat_history(
-                        self._history_session_id,
-                        max_messages=self._history_limit
-                    )
+                    # Prefer compacted working history (summary + tail) on
+                    # resume when a compaction checkpoint exists (Issue #2741);
+                    # falls back to raw chat history for backward compatibility.
+                    if hasattr(self._session_store, "get_working_history"):
+                        session_history = self._session_store.get_working_history(
+                            self._history_session_id,
+                            max_messages=self._history_limit
+                        )
+                    else:
+                        session_history = self._session_store.get_chat_history(
+                            self._history_session_id,
+                            max_messages=self._history_limit
+                        )
                     if session_history:
                         messages.extend(session_history)
                 except Exception as e:
@@ -887,6 +896,12 @@ Your Goal: {self.goal}"""
             f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
+
+        # Issue #2741: Persist the compaction summary back into the bound
+        # session so `--continue`/resume reconstructs the compacted context
+        # instead of replaying the raw transcript. Guarded so it only fires
+        # when a session store + session_id are bound and a summary exists.
+        self._persist_compaction_checkpoint(result)
         
         try:
             self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
@@ -897,6 +912,39 @@ Your Goal: {self.goal}"""
         
         from ..context.policy import CompactionRoute
         return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    def _persist_compaction_checkpoint(self, result) -> None:
+        """Persist a compaction summary into the bound session (Issue #2741).
+
+        No-op unless a JSON session store and session_id are bound and the
+        compaction produced a non-empty summary. Keeps resume cheap without
+        bloating the agent flow or requiring new params.
+        """
+        import logging
+        store = getattr(self, "_session_store", None)
+        # Issue #2741: write to the same key the resume read path uses
+        # (_history_session_id), falling back to _session_id. These are usually
+        # identical, but can diverge when both session_id= and
+        # MemoryConfig(session_id=...) are supplied with different values.
+        session_id = getattr(self, "_history_session_id", None) or getattr(
+            self, "_session_id", None
+        )
+        if store is None or session_id is None:
+            return
+        summary = getattr(result, "summary", "") or ""
+        if not summary.strip():
+            return
+        if not hasattr(store, "append_compaction_checkpoint"):
+            return
+        try:
+            store.append_compaction_checkpoint(
+                session_id,
+                summary,
+                tokens_before=getattr(result, "original_tokens", 0) or 0,
+                tokens_after=getattr(result, "compacted_tokens", 0) or 0,
+            )
+        except Exception as e:
+            logging.debug(f"Failed to persist compaction checkpoint: {e}")
 
     def _apply_tool_truncation(self, messages, compactor, policy, log_tag="tool-truncation"):
         """Apply targeted tool output truncation."""

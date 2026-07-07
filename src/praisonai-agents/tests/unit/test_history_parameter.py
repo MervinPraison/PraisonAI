@@ -136,12 +136,16 @@ class TestHistoryInjection:
         # Set _using_custom_llm to bypass OpenAI client initialization
         agent._using_custom_llm = True
         
-        # Mock session store with some history
+        # Mock session store with some history. Resume prefers the compacted
+        # working history (Issue #2741), which falls back to raw when no
+        # checkpoint exists, so mock both for parity.
         mock_store = Mock()
-        mock_store.get_chat_history.return_value = [
+        history = [
             {"role": "user", "content": "Previous question"},
             {"role": "assistant", "content": "Previous answer"}
         ]
+        mock_store.get_chat_history.return_value = history
+        mock_store.get_working_history.return_value = history
         agent._session_store = mock_store
         agent._history_session_id = "test-session"
         
@@ -169,18 +173,21 @@ class TestHistoryInjection:
         
         # Mock session store
         mock_store = Mock()
-        mock_store.get_chat_history.return_value = [
+        history = [
             {"role": "user", "content": "Msg 1"},
             {"role": "assistant", "content": "Msg 2"}
         ]
+        mock_store.get_chat_history.return_value = history
+        mock_store.get_working_history.return_value = history
         agent._session_store = mock_store
         agent._history_session_id = "test-session"
         
         # Build messages
         agent._build_messages("New question")
         
-        # Should have called with limit=2
-        mock_store.get_chat_history.assert_called_with("test-session", max_messages=2)
+        # Should have called with limit=2. Resume prefers get_working_history
+        # (Issue #2741), which is the canonical compacted-resume entry point.
+        mock_store.get_working_history.assert_called_with("test-session", max_messages=2)
 
 
 class TestHistoryWithSession:

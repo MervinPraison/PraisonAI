@@ -28,7 +28,7 @@ Default storage: ~/.praisonai/sessions/{session_id}.json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .store import DefaultSessionStore, SessionMessage, SessionData
+    from .store import DefaultSessionStore, SessionMessage, SessionData, CompactionCheckpoint
     from .protocols import SessionStoreProtocol
     from .hierarchy import HierarchicalSessionStore, SessionSnapshot, ExtendedSessionData
 
@@ -60,6 +60,11 @@ def __getattr__(name: str):
         from .store import SessionData
         _module_cache[name] = SessionData
         return SessionData
+
+    if name == "CompactionCheckpoint":
+        from .store import CompactionCheckpoint
+        _module_cache[name] = CompactionCheckpoint
+        return CompactionCheckpoint
     
     if name == "get_default_session_store":
         from .store import get_default_session_store
@@ -150,6 +155,7 @@ __all__ = [
     "DefaultSessionStore",
     "SessionMessage", 
     "SessionData",
+    "CompactionCheckpoint",
     "get_default_session_store",
     "SessionStoreProtocol",
     "SearchableSessionStoreProtocol",
