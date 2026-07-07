@@ -441,15 +441,20 @@ class TestQueueSystem:
     
     def test_queue_or_execute_when_not_processing(self):
         """Test _queue_or_execute executes immediately when not processing."""
+        from unittest.mock import patch
         from praisonai.cli.interactive.async_tui import AsyncTUI
         
         tui = AsyncTUI()
         tui._processing = False
         
-        # This would normally start background execution
-        # Just test that it adds user message
-        tui._queue_or_execute("test prompt")
+        # Mock background execution so this test doesn't spawn real daemon
+        # threads (which would make live LLM calls and leak past the test,
+        # logging to a closed capture stream and breaking later tests).
+        # Just test that it adds the user message.
+        with patch.object(tui, "_execute_in_background") as mock_execute:
+            tui._queue_or_execute("test prompt")
         
+        mock_execute.assert_called_once_with("test prompt")
         assert len(tui.messages) == 1
         assert tui.messages[0].role == "user"
         assert tui.messages[0].content == "test prompt"

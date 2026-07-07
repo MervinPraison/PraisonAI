@@ -286,6 +286,19 @@ Respond with ONLY a valid JSON tool call in this format:
             # If litellm not installed, we'll handle it in __init__
             pass
 
+    def _should_log_config(self, verbose=None):
+        """Cheap predicate for whether debug config logging is enabled.
+
+        Lets callers skip building large debug-only argument dicts (including
+        ``str(kwargs)``) on the common non-debug path.
+
+        Args:
+            verbose: Optional per-call verbose value; falls back to ``self.verbose``.
+        """
+        if verbose is None:
+            verbose = self.verbose if hasattr(self, 'verbose') else False
+        return get_logger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
+
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
         
@@ -295,7 +308,7 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         # Check for debug logging - either global debug level OR explicit verbose mode
         verbose = config.get('verbose', self.verbose if hasattr(self, 'verbose') else False)
-        should_log = get_logger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
+        should_log = self._should_log_config(verbose)
         
         if should_log:
             # Mask sensitive information
@@ -2224,54 +2237,56 @@ Now provide your final answer using this result. Summarize the information natur
                 token_usage = TokenUsage()
             return text, token_usage
 
-        # Log all self values when in debug mode
-        self._log_llm_config(
-            'LLM instance',
-            model=self.model,
-            timeout=self.timeout,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            n=self.n,
-            max_tokens=self.max_tokens,
-            presence_penalty=self.presence_penalty,
-            frequency_penalty=self.frequency_penalty,
-            logit_bias=self.logit_bias,
-            response_format=self.response_format,
-            seed=self.seed,
-            logprobs=self.logprobs,
-            top_logprobs=self.top_logprobs,
-            api_version=self.api_version,
-            stop_phrases=self.stop_phrases,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            verbose=self.verbose,
-            markdown=self.markdown,
-            reflection=self.self_reflect,
-            max_reflect=self.max_reflect,
-            min_reflect=self.min_reflect,
-            reasoning_steps=self.reasoning_steps
-        )
-        
-        # Log the parameter values passed to get_response
-        self._log_llm_config(
-            'get_response parameters',
-            prompt=prompt,
-            system_prompt=system_prompt,
-            chat_history=chat_history,
-            temperature=temperature,
-            tools=tools,
-            output_json=output_json,
-            output_pydantic=output_pydantic,
-            verbose=verbose,
-            markdown=markdown,
-            reflection=self_reflect,
-            max_reflect=max_reflect,
-            min_reflect=min_reflect,
-            agent_name=agent_name,
-            agent_role=agent_role,
-            agent_tools=agent_tools,
-            kwargs=str(kwargs)
-        )
+        # Log all self values when in debug mode (skip building dicts otherwise)
+        if self._should_log_config(self.verbose):
+            self._log_llm_config(
+                'LLM instance',
+                model=self.model,
+                timeout=self.timeout,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                n=self.n,
+                max_tokens=self.max_tokens,
+                presence_penalty=self.presence_penalty,
+                frequency_penalty=self.frequency_penalty,
+                logit_bias=self.logit_bias,
+                response_format=self.response_format,
+                seed=self.seed,
+                logprobs=self.logprobs,
+                top_logprobs=self.top_logprobs,
+                api_version=self.api_version,
+                stop_phrases=self.stop_phrases,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                verbose=self.verbose,
+                markdown=self.markdown,
+                reflection=self.self_reflect,
+                max_reflect=self.max_reflect,
+                min_reflect=self.min_reflect,
+                reasoning_steps=self.reasoning_steps
+            )
+
+        # Log the parameter values passed to get_response (skip str(kwargs) otherwise)
+        if self._should_log_config(verbose):
+            self._log_llm_config(
+                'get_response parameters',
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                temperature=temperature,
+                tools=tools,
+                output_json=output_json,
+                output_pydantic=output_pydantic,
+                verbose=verbose,
+                markdown=markdown,
+                reflection=self_reflect,
+                max_reflect=max_reflect,
+                min_reflect=min_reflect,
+                agent_name=agent_name,
+                agent_role=agent_role,
+                agent_tools=agent_tools,
+                kwargs=str(kwargs)
+            )
         try:
             import litellm
             # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
@@ -4112,54 +4127,56 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         try:
             import litellm
             logging.debug(f"Getting async response from {self.model}")
-            # Log all self values when in debug mode
-            self._log_llm_config(
-                'get_response_async',
-                model=self.model,
-                timeout=self.timeout,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                n=self.n,
-                max_tokens=self.max_tokens,
-                presence_penalty=self.presence_penalty,
-                frequency_penalty=self.frequency_penalty,
-                logit_bias=self.logit_bias,
-                response_format=self.response_format,
-                seed=self.seed,
-                logprobs=self.logprobs,
-                top_logprobs=self.top_logprobs,
-                api_version=self.api_version,
-                stop_phrases=self.stop_phrases,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                verbose=self.verbose,
-                markdown=self.markdown,
-                reflection=self.self_reflect,
-                max_reflect=self.max_reflect,
-                min_reflect=self.min_reflect,
-                reasoning_steps=self.reasoning_steps
-            )
-            
-            # Log the parameter values passed to get_response_async
-            self._log_llm_config(
-                'get_response_async parameters',
-                prompt=prompt,
-                system_prompt=system_prompt,
-                chat_history=chat_history,
-                temperature=temperature,
-                tools=tools,
-                output_json=output_json,
-                output_pydantic=output_pydantic,
-                verbose=verbose,
-                markdown=markdown,
-                reflection=self_reflect,
-                max_reflect=max_reflect,
-                min_reflect=min_reflect,
-                agent_name=agent_name,
-                agent_role=agent_role,
-                agent_tools=agent_tools,
-                kwargs=str(kwargs)
-            )
+            # Log all self values when in debug mode (skip building dicts otherwise)
+            if self._should_log_config(self.verbose):
+                self._log_llm_config(
+                    'get_response_async',
+                    model=self.model,
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    top_p=self.top_p,
+                    n=self.n,
+                    max_tokens=self.max_tokens,
+                    presence_penalty=self.presence_penalty,
+                    frequency_penalty=self.frequency_penalty,
+                    logit_bias=self.logit_bias,
+                    response_format=self.response_format,
+                    seed=self.seed,
+                    logprobs=self.logprobs,
+                    top_logprobs=self.top_logprobs,
+                    api_version=self.api_version,
+                    stop_phrases=self.stop_phrases,
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    verbose=self.verbose,
+                    markdown=self.markdown,
+                    reflection=self.self_reflect,
+                    max_reflect=self.max_reflect,
+                    min_reflect=self.min_reflect,
+                    reasoning_steps=self.reasoning_steps
+                )
+
+            # Log the parameter values passed to get_response_async (skip str(kwargs) otherwise)
+            if self._should_log_config(verbose):
+                self._log_llm_config(
+                    'get_response_async parameters',
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    chat_history=chat_history,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    verbose=verbose,
+                    markdown=markdown,
+                    reflection=self_reflect,
+                    max_reflect=max_reflect,
+                    min_reflect=min_reflect,
+                    agent_name=agent_name,
+                    agent_role=agent_role,
+                    agent_tools=agent_tools,
+                    kwargs=str(kwargs)
+                )
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
