@@ -146,6 +146,64 @@ class TestCapsuleSandbox:
         sandbox = CapsuleSandbox()
         await sandbox.cleanup()
 
+    async def test_cleanup_resets_running_state(self):
+        """cleanup() must clear _is_running to avoid crash on next execute()."""
+        sandbox = CapsuleSandbox()
+        sandbox._is_running = True
+        sandbox._sandbox = Mock()
+        await sandbox.cleanup()
+        assert sandbox._sandbox is None
+        assert sandbox._is_running is False
+
+    async def test_execute_timeout_enforced(self):
+        """execute() should map a hung run to SandboxStatus.TIMEOUT."""
+        import asyncio
+
+        sandbox = CapsuleSandbox(timeout=1)
+        sandbox._is_running = True
+        sandbox._sandbox = Mock()
+
+        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+            result = await sandbox.execute("while True: pass", language="python")
+
+        assert result.status == SandboxStatus.TIMEOUT
+        assert "timeout" in result.error.lower()
+
+    async def test_execute_forwards_env(self):
+        """env should be forwarded to the underlying backend when supported."""
+        sandbox = CapsuleSandbox()
+        sandbox._is_running = True
+        sandbox._sandbox = Mock()
+        sandbox._sandbox.run.return_value = Mock(stdout="ok", stderr="", exit_code=0)
+
+        await sandbox.execute("x=1", language="python", env={"FOO": "bar"})
+        _, kwargs = sandbox._sandbox.run.call_args
+        assert kwargs.get("env") == {"FOO": "bar"}
+
+    async def test_execute_file_reads_host_file(self, tmp_path):
+        """execute_file should read source from the host and run it."""
+        script = tmp_path / "script.py"
+        script.write_text("print('hi')")
+
+        sandbox = CapsuleSandbox()
+        sandbox._is_running = True
+        sandbox._sandbox = Mock()
+        sandbox._sandbox.run.return_value = Mock(stdout="hi", stderr="", exit_code=0)
+
+        result = await sandbox.execute_file(str(script))
+        assert result.status == SandboxStatus.COMPLETED
+        assert result.stdout == "hi"
+
+    async def test_execute_file_missing(self):
+        """execute_file on a missing path returns a FAILED result."""
+        sandbox = CapsuleSandbox()
+        sandbox._is_running = True
+        sandbox._sandbox = Mock()
+
+        result = await sandbox.execute_file("/no/such/file.py")
+        assert result.status == SandboxStatus.FAILED
+        assert "Could not read file" in result.error
+
     async def test_reset(self):
         """Test reset stops and starts the sandbox."""
         sandbox = CapsuleSandbox()

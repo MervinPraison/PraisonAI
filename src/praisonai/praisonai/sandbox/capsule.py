@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
@@ -137,10 +138,17 @@ class CapsuleSandbox:
                 metadata={"platform": "capsule", "language": language},
             )
 
+        timeout = self.timeout
+        if limits is not None and getattr(limits, "timeout_seconds", None):
+            timeout = limits.timeout_seconds
+
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._run_code, code
-            )
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(None, self._run_code, code, env)
+            if timeout and timeout > 0:
+                result = await asyncio.wait_for(future, timeout=timeout)
+            else:
+                result = await future
 
             completed_at = time.time()
             status = (
@@ -161,6 +169,16 @@ class CapsuleSandbox:
                 metadata={"platform": "capsule", "language": language},
             )
 
+        except asyncio.TimeoutError:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.TIMEOUT,
+                error=f"Execution exceeded timeout of {timeout}s",
+                started_at=started_at,
+                completed_at=time.time(),
+                duration_seconds=time.time() - started_at,
+                metadata={"platform": "capsule", "language": language},
+            )
         except Exception as e:
             error_msg = str(e)
             status = (
@@ -179,9 +197,15 @@ class CapsuleSandbox:
                 metadata={"platform": "capsule", "language": language},
             )
 
-    def _run_code(self, code: str) -> Dict[str, Any]:
+    def _run_code(
+        self, code: str, env: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
         """Run code synchronously via the Capsule backend."""
-        result = self._sandbox.run(code)
+        try:
+            result = self._sandbox.run(code, env=env)
+        except TypeError:
+            # Backend does not accept an ``env`` kwarg.
+            result = self._sandbox.run(code)
 
         stdout = getattr(result, "stdout", None)
         if stdout is None:
@@ -202,13 +226,19 @@ class CapsuleSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
-        """Execute a Python file in the Capsule sandbox."""
-        content = await self.read_file(file_path)
-        if content is None:
+        """Execute a Python file in the Capsule sandbox.
+
+        The file is read from the host filesystem and its source is passed
+        into the isolated Wasm sandbox for execution.
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as fh:
+                content = fh.read()
+        except OSError as e:
             return SandboxResult(
                 execution_id=str(uuid.uuid4()),
                 status=SandboxStatus.FAILED,
-                error=f"File not found: {file_path}",
+                error=f"Could not read file {file_path!r}: {e}",
                 started_at=time.time(),
                 completed_at=time.time(),
                 metadata={"platform": "capsule", "file": file_path},
@@ -276,6 +306,7 @@ class CapsuleSandbox:
     async def cleanup(self) -> None:
         """Clean up Capsule resources."""
         self._sandbox = None
+        self._is_running = False
         logger.info("Capsule sandbox cleanup complete")
 
     async def reset(self) -> None:
