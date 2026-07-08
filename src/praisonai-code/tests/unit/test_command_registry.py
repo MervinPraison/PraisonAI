@@ -142,6 +142,35 @@ def test_default_registry_merges_builtins_and_custom(tmp_path, monkeypatch):
     assert reg.get("mydeploy").kind == CommandKind.CUSTOM
 
 
+def test_builtin_not_shadowed_by_custom_command():
+    """A custom command reusing a built-in name must not shadow the built-in.
+
+    Built-ins are dispatched by the interactive surface *before* the registry
+    is consulted, so a shadowing custom entry would never execute. The registry
+    keeps the built-in so listing matches runtime behaviour.
+    """
+    reg = CommandRegistry(
+        sources=[
+            BuiltinCommandSource({"exit": "Exit interactive mode"}),
+            _StaticSource(
+                [
+                    Command(
+                        name="exit",
+                        description="custom exit",
+                        kind=CommandKind.CUSTOM,
+                        source="project",
+                    )
+                ]
+            ),
+        ],
+        discover_entry_points=False,
+    )
+    resolved = reg.get("exit")
+    assert resolved is not None
+    assert resolved.kind is CommandKind.BUILTIN
+    assert resolved.description == "Exit interactive mode"
+
+
 def test_registry_survives_failing_source():
     reg = CommandRegistry(
         sources=[_FailingSource(), _StaticSource([Command(name="ok")])],

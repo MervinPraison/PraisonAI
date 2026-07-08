@@ -30,6 +30,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 _debug_initialized = False
 
+# Sentinel marking a failed registry build so it is not retried every command.
+_REGISTRY_FAILED = object()
+
 def _init_debug_logging():
     """Initialize debug logging to file. Only called when debug mode is enabled."""
     global _debug_initialized
@@ -528,7 +531,9 @@ class AsyncTUI:
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Command registry unavailable: %s", exc)
-                self._registry = None
+                self._registry = _REGISTRY_FAILED
+        if self._registry is _REGISTRY_FAILED:
+            return None
         return self._registry
 
     def _handle_command(self, command: str) -> bool:

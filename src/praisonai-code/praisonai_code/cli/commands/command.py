@@ -140,7 +140,13 @@ def _list_registry(output) -> None:
             create_default_registry,
         )
 
+        try:
+            from praisonai_code.cli.interactive.repl import DEFAULT_COMMANDS as builtins
+        except Exception:  # pragma: no cover - defensive
+            builtins = None
+
         registry = create_default_registry(
+            builtins,
             include_custom=True,
             include_skills=True,
         )

@@ -301,6 +301,26 @@ class CommandRegistry:
         for source in sources:
             try:
                 for command in source.discover():
+                    existing = self._commands.get(command.name)
+                    # Built-in commands are dispatched by the interactive
+                    # surface's own branches, which fire *before* the registry
+                    # is consulted. A later (custom/skill/mcp) source that
+                    # reuses a built-in name would therefore be registered but
+                    # never actually execute. Keep the built-in so listing and
+                    # runtime behaviour stay consistent, and warn about the
+                    # shadowed definition rather than silently dropping it.
+                    if (
+                        existing is not None
+                        and existing.kind is CommandKind.BUILTIN
+                        and command.kind is not CommandKind.BUILTIN
+                    ):
+                        logger.warning(
+                            "Command /%s from %s is shadowed by a built-in "
+                            "command and will not be invoked interactively.",
+                            command.name,
+                            command.source,
+                        )
+                        continue
                     self._commands[command.name] = command
                     for alias in command.aliases:
                         self._aliases[alias] = command.name

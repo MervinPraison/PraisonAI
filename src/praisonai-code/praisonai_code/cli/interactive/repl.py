@@ -13,6 +13,9 @@ from .praison_io import PraisonIO, IOConfig
 
 logger = logging.getLogger(__name__)
 
+# Sentinel marking a failed registry build so it is not retried every command.
+_REGISTRY_FAILED = object()
+
 
 @dataclass
 class REPLConfig:
@@ -87,7 +90,9 @@ class InteractiveREPL:
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Command registry unavailable: %s", exc)
-                self._registry = None
+                self._registry = _REGISTRY_FAILED
+        if self._registry is _REGISTRY_FAILED:
+            return None
         return self._registry
     
     def _get_agent(self):
