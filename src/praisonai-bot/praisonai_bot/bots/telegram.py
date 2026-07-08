@@ -162,6 +162,11 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Pairing system
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+
+        # Durable tool-approval-over-chat backend (wired via
+        # register_approval_backend); None until a PresentationApprovalBackend
+        # is attached so /approve taps resolve against the durable store.
+        self._approval_backend = None
         
         # Create adapter-specific registry and register handlers
         from praisonaiagents.bots import create_registry
@@ -255,6 +260,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             parts = command.split(maxsplit=1)
             cmd_name = parts[0] if parts else ""
             cmd_args = parts[1] if len(parts) > 1 else ""
+
+            # Durable tool-approval-over-chat: a `cmd:/approve <id> <decision>`
+            # button tap resolves against the durable, actor-authorised backend
+            # (see register_approval_backend). Actor authorisation is enforced by
+            # the backend's allowed_actors set, not the generic command policy.
+            if cmd_name == "approve" and self._approval_backend is not None:
+                handled = await self._handle_approve_callback(ctx, cmd_args, query)
+                return handled
             
             # Check permissions
             if not self._command_policy.can_run(ctx.user_id, cmd_name):
@@ -328,6 +341,144 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         # Register the pairing handler
         registry.register("pair", handle_pairing_callback)
+
+    async def _handle_approve_callback(self, ctx, cmd_args: str, query) -> Optional[str]:
+        """Resolve a `/approve <approval_id> <decision>` button tap.
+
+        Routes the tap into the durable, actor-authorised
+        :class:`PresentationApprovalBackend` so the decision binds to a specific
+        ``approval_id`` (not a message id), is single-use, actor-authorised, and
+        survives a restart. Returns a non-empty string when handled so the
+        interactive registry treats it as resolved.
+        """
+        approve_parts = cmd_args.split()
+        if len(approve_parts) < 2:
+            logger.warning("Malformed /approve callback args: %r", cmd_args)
+            return None
+
+        approval_id, decision = approve_parts[0], approve_parts[1]
+        # Fail closed on an unexpected decision rather than letting the backend
+        # silently treat it as a deny: the durable store maps only
+        # allow/deny/always, so anything else is a malformed payload.
+        if decision not in ("allow", "deny", "always"):
+            logger.warning(
+                "Unknown approval decision %r in /approve callback", decision
+            )
+            return None
+        try:
+            handled = await self._approval_backend.handle_callback(
+                approval_id, decision, actor=ctx.user_id
+            )
+        except Exception as e:  # noqa: BLE001 — never crash the callback loop
+            logger.error("Approval callback error: %s", e)
+            handled = False
+
+        try:
+            if handled:
+                verdict = "✅ Approved" if decision in ("allow", "always") else "❌ Denied"
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n{verdict}",
+                    parse_mode="Markdown",
+                )
+            else:
+                await query.edit_message_text(
+                    text=(
+                        f"{query.message.text}\n\n"
+                        "⚠️ Approval could not be processed "
+                        "(expired, already resolved, or not authorised)."
+                    ),
+                    parse_mode="Markdown",
+                )
+        except Exception as e:  # noqa: BLE001 — message edit is best-effort
+            logger.debug("Failed to update approval message: %s", e)
+
+        return f"Approval {approval_id} {'resolved' if handled else 'unresolved'}"
+
+    def register_approval_backend(self, backend, target: Optional[str] = None) -> None:
+        """Wire a durable :class:`PresentationApprovalBackend` to this channel.
+
+        Connects the otherwise-orphaned durable approval stack to the live
+        callback path:
+
+        * gives the backend a ``channel_send_func`` (:meth:`render_presentation`)
+          and default ``target`` so it can render Allow/Deny buttons onto the
+          chat; and
+        * enables the ``/approve`` interactive route so inbound taps resolve
+          against the backend's SQLite-persisted, actor-authorised store.
+
+        Call :meth:`start` (or :meth:`rehydrate_approvals`) afterwards to restore
+        any approvals left pending across a restart.
+
+        Args:
+            backend: A ``PresentationApprovalBackend`` instance.
+            target: Default chat/channel id used to render approval buttons when
+                the request does not carry its own ``target``.
+        """
+        # Keep the sender and target coupled so the backend never renders
+        # through one transport while addressing another. Only claim a backend
+        # that has no sender yet (a bare durable backend); if it already carries
+        # its own channel_send_func it belongs to a different transport and we
+        # leave both attributes untouched rather than redirecting only _target.
+        if getattr(backend, "_channel_send_func", None) is None:
+            try:
+                backend._channel_send_func = self.render_presentation
+                if target is not None:
+                    backend._target = str(target)
+            except Exception:  # noqa: BLE001
+                pass
+        elif target is not None:
+            # Backend already has its own sender: only override the default
+            # target when it has none, so we never split the transport.
+            try:
+                if getattr(backend, "_target", None) is None:
+                    backend._target = str(target)
+            except Exception:  # noqa: BLE001
+                pass
+        self._approval_backend = backend
+
+    async def rehydrate_approvals(self) -> int:
+        """Restore approvals left pending across a restart, if a backend is wired.
+
+        Returns the number of pending approvals re-hydrated (``0`` when no
+        durable backend is registered or none were outstanding).
+        """
+        if self._approval_backend is None:
+            return 0
+        try:
+            return await self._approval_backend.rehydrate()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to rehydrate pending approvals: %s", e)
+            return 0
+
+    def _autowire_agent_approval_backend(self) -> None:
+        """Auto-register a durable approval backend found on the agent.
+
+        A ``PresentationApprovalBackend`` selected via ``--approval presentation``
+        is attached to the agent (``Agent(approval=...)``), not the channel, so
+        without this it would never receive a channel sender or inbound tap.
+        Detect it here (duck-typed on ``handle_callback`` + ``rehydrate``) and
+        wire it to this channel so the durable path becomes reachable.
+        """
+        if self._approval_backend is not None:
+            return
+        agent = getattr(self, "_agent", None)
+        if agent is None:
+            return
+        backend = getattr(agent, "_approval_backend", None)
+        if backend is None:
+            return
+        if not (
+            hasattr(backend, "handle_callback") and hasattr(backend, "rehydrate")
+        ):
+            return
+        target = getattr(backend, "_target", None) or getattr(
+            self.config, "target", None
+        )
+        try:
+            self.register_approval_backend(backend, target=target)
+            logger.debug("Auto-wired durable approval backend to Telegram channel")
+        except Exception as e:  # noqa: BLE001 — best-effort auto-wiring
+            logger.debug("Failed to auto-wire approval backend: %s", e)
     
     @property
     def is_running(self) -> bool:
@@ -1002,6 +1153,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         self._is_running = True
         logger.info(f"Telegram bot started: @{self._bot_user.username}")
+
+        # Auto-wire a durable PresentationApprovalBackend configured on the agent
+        # (e.g. via `--approval presentation`) so its Allow/Deny buttons render
+        # on this chat and `/approve` taps resolve durably — even when the caller
+        # did not call register_approval_backend explicitly.
+        self._autowire_agent_approval_backend()
+
+        # Restore any tool approvals left pending across a restart so a late
+        # Allow/Deny tap still resolves against the durable store.
+        try:
+            restored = await self.rehydrate_approvals()
+            if restored:
+                logger.info("Rehydrated %d pending tool approval(s)", restored)
+        except Exception as e:  # noqa: BLE001 — never block startup
+            logger.debug(f"Approval rehydration skipped (non-fatal): {e}")
 
         # Project the shared command registry into Telegram's native command
         # menu so typing "/" surfaces the available commands with descriptions.
