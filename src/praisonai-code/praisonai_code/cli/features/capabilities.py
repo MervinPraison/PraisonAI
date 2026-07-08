@@ -1234,7 +1234,33 @@ class CapabilitiesHandler:
     
     @staticmethod
     def handle_search(args, unknown_args):
-        """Handle search operations."""
+        """Handle search operations.
+
+        By default this performs an OpenAI-style web search. If knowledge-base
+        retrieval flags (``--collection``/``-c``, ``--top-k``/``-k`` or
+        ``--hybrid``) are supplied, the command is delegated to the Typer
+        retrieval CLI (``retrieval.search_command``) so that RAG queries work
+        from the top-level ``praisonai search`` command.
+        """
+        retrieval_flags = {"--collection", "-c", "--top-k", "-k", "--hybrid"}
+        if any(arg in retrieval_flags for arg in unknown_args):
+            try:
+                from ..commands.retrieval import register_commands
+            except ImportError as e:
+                print(f"ERROR: {e}")
+                return 1
+            import typer as _typer
+
+            retrieval_app = _typer.Typer()
+            register_commands(retrieval_app)
+            try:
+                retrieval_app(["search"] + list(unknown_args), standalone_mode=False)
+            except SystemExit as e:
+                return e.code if e.code else 0
+            except _typer.Exit as e:
+                return e.exit_code if e.exit_code else 0
+            return 0
+
         parser = argparse.ArgumentParser(prog="praisonai search")
         parser.add_argument("query", help="Search query")
         parser.add_argument("--max-results", "-n", type=int, default=5, help="Max results")
