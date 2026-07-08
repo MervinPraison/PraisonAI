@@ -235,6 +235,8 @@ def query_command(
                 agent_params = inspect.signature(Agent.__init__).parameters
             except (TypeError, ValueError):
                 agent_params = {}
+                if verbose:
+                    console.print("[dim]Warning: could not inspect Agent signature; verbose flag may be ignored.[/dim]")
             if "verbose" in agent_params:
                 agent_kwargs["verbose"] = verbose
             elif "output" in agent_params:
@@ -246,7 +248,9 @@ def query_command(
             from praisonaiagents.knowledge import Knowledge
             try:
                 agent.knowledge = Knowledge(config=retrieval_config.to_knowledge_config(), verbose=verbose)
-            except TypeError:
+            except TypeError as e:
+                if "verbose" not in str(e):
+                    raise
                 agent.knowledge = Knowledge(config=retrieval_config.to_knowledge_config())
             agent._retrieval_config = retrieval_config
             agent._knowledge_processed = True
