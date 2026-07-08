@@ -16,6 +16,7 @@ these helpers on the overflow branch.
 """
 
 import os
+import atexit
 import logging
 import tempfile
 from pathlib import Path
@@ -24,6 +25,22 @@ from typing import Optional
 __all__ = ["get_spill_dir", "spill", "bounded_with_pointer"]
 
 _SPILL_SUBDIR = "praisonai_tool_output"
+
+# Artifacts created by *this* process, pruned on interpreter exit so a
+# long-running agent that repeatedly overflows does not exhaust temp space.
+# Callers that set ``PRAISONAI_TOOL_OUTPUT_DIR`` for cross-session retrieval
+# remain responsible for their own retention policy.
+_PROCESS_SPILL_FILES: "set[Path]" = set()
+_ATEXIT_REGISTERED = False
+
+
+def _cleanup_process_spills() -> None:
+    for artifact in list(_PROCESS_SPILL_FILES):
+        try:
+            artifact.unlink()
+        except OSError:
+            pass
+        _PROCESS_SPILL_FILES.discard(artifact)
 
 
 def get_spill_dir(spill_dir: Optional[str] = None) -> Path:
@@ -35,7 +52,9 @@ def get_spill_dir(spill_dir: Optional[str] = None) -> Path:
        scoped by the caller).
     3. A stable subdirectory under the system temp dir.
 
-    The directory is created if it does not already exist.
+    The directory is created if it does not already exist. If the resolved
+    directory cannot be created, a fresh unique temp directory is used so the
+    fallback never retries the same failing path.
     """
     base = spill_dir or os.environ.get("PRAISONAI_TOOL_OUTPUT_DIR")
     if base:
@@ -45,9 +64,13 @@ def get_spill_dir(spill_dir: Optional[str] = None) -> Path:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        logging.debug("Falling back to system temp for spill dir: %s", exc)
-        path = Path(tempfile.gettempdir()) / _SPILL_SUBDIR
-        path.mkdir(parents=True, exist_ok=True)
+        # Target a genuinely different location instead of retrying the same
+        # path (which would fail identically, e.g. a file already occupies it).
+        logging.warning(
+            "Spill dir %s unavailable (%s); using a fresh temp directory.",
+            path, exc,
+        )
+        path = Path(tempfile.mkdtemp(prefix=f"{_SPILL_SUBDIR}_"))
     return path
 
 
@@ -74,7 +97,13 @@ def spill(output: str, kind: str = "output", spill_dir: Optional[str] = None) ->
         )
         with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as f:
             f.write(output)
-        return Path(name)
+        artifact = Path(name)
+        global _ATEXIT_REGISTERED
+        if not _ATEXIT_REGISTERED:
+            atexit.register(_cleanup_process_spills)
+            _ATEXIT_REGISTERED = True
+        _PROCESS_SPILL_FILES.add(artifact)
+        return artifact
     except OSError as exc:
         logging.warning("Failed to spill tool output to artifact: %s", exc)
         return None
@@ -101,12 +130,6 @@ def bounded_with_pointer(
     Returns:
         A preview string small enough to keep the context window bounded.
     """
-    if tail_size is None:
-        tail_size = min(max_output_size // 5, 500)
-    tail_size = max(0, min(tail_size, max_output_size))
-
-    head = output[: max_output_size - tail_size]
-    tail = output[-tail_size:] if tail_size else ""
     total_chars = len(output)
     total_lines = output.count("\n") + 1
 
@@ -119,5 +142,17 @@ def bounded_with_pointer(
         )
     else:
         pointer = f"\n...[{total_chars:,} chars, showing first/last portions]...\n"
+
+    # Reserve room for the pointer so head + pointer + tail stays within
+    # ``max_output_size``. If the pointer alone would blow the budget (very
+    # small ``max_output_size``), fall back to showing only the pointer.
+    budget = max(0, max_output_size - len(pointer))
+
+    if tail_size is None:
+        tail_size = min(budget // 5, 500)
+    tail_size = max(0, min(tail_size, budget))
+
+    head = output[: budget - tail_size]
+    tail = output[-tail_size:] if tail_size else ""
 
     return head + pointer + tail

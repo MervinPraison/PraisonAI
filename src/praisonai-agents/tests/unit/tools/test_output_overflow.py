@@ -75,3 +75,28 @@ def test_handle_overflow_spill_disabled_backward_compat(tmp_path):
     )
     assert path is None
     assert "showing first/last portions" in preview
+
+
+def test_handle_overflow_spill_write_failure_degrades_gracefully(monkeypatch):
+    tools = ShellTools()
+    text = "w" * 40000
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("tempfile.mkstemp", _boom)
+    preview, path = tools._handle_overflow(text, "stdout", 10000, True, None)
+    # No artifact, no exception, still a bounded legacy preview.
+    assert path is None
+    assert "showing first/last portions" in preview
+    assert len(preview) < len(text)
+
+
+def test_bounded_with_pointer_stays_within_budget(tmp_path):
+    output = "q" * 50000
+    path = tmp_path / "artifact.txt"
+    path.write_text(output, encoding="utf-8")
+    max_output_size = 10000
+    preview = bounded_with_pointer(output, max_output_size, path)
+    # Including the injected pointer, the preview must not exceed the budget.
+    assert len(preview) <= max_output_size
