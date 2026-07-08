@@ -121,6 +121,12 @@ def test_config_invalid_values_raise():
         LivenessConfig(missed_beats_before_reap=0)
 
 
+def test_config_enabled_with_zero_interval_raises():
+    # Contradictory: enabled=True but interval_ms=0 would silently no-op.
+    with pytest.raises(ValueError):
+        LivenessConfig(enabled=True, interval_ms=0)
+
+
 def test_config_round_trip_dict():
     cfg = LivenessConfig(enabled=True, interval_ms=20_000, missed_beats_before_reap=4)
     data = cfg.to_dict()
@@ -161,3 +167,4 @@ def test_gateway_config_from_yaml_parses_liveness():
     )
     assert cfg.gateway.liveness.enabled is True
     assert cfg.gateway.liveness.interval_ms == 15_000
+    assert cfg.gateway.liveness.missed_beats_before_reap == 2

@@ -3706,11 +3706,12 @@ class LivenessPolicy:
         return self.interval_ms / 1000.0
 
     def reap_deadline(self, last_activity: float) -> float:
-        """Return the absolute time after which ``last_activity`` is stale.
+        """Return the absolute time after which the connection is stale.
 
-        A connection whose ``last_activity`` is at or before this deadline at
-        evaluation time is reaped. Exposed so the server reaper and the client
-        watchdog derive the same window from one advertised interval.
+        A connection is reaped when the evaluation-time ``now`` is strictly
+        above this deadline (``now > reap_deadline(last_activity)``). Exposed
+        so the server reaper and the client watchdog derive the same window
+        from one advertised interval.
         """
         return last_activity + self.interval_seconds * self.missed_beats_before_reap
 

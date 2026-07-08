@@ -246,6 +246,11 @@ class LivenessConfig:
             )
         if self.missed_beats_before_reap < 1:
             raise ValueError("missed_beats_before_reap must be >= 1")
+        if self.enabled and self.interval_ms == 0:
+            raise ValueError(
+                "interval_ms must be > 0 when enabled=True "
+                "(use enabled=False to disable liveness)"
+            )
 
     def to_policy(self):
         """Build the pure core ``LivenessPolicy`` this config describes.
