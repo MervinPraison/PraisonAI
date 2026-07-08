@@ -30,6 +30,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 _debug_initialized = False
 
+# Sentinel marking a failed registry build so it is not retried every command.
+_REGISTRY_FAILED = object()
+
 def _init_debug_logging():
     """Initialize debug logging to file. Only called when debug mode is enabled."""
     global _debug_initialized
@@ -208,6 +211,7 @@ class AsyncTUI:
         self._workspace_files: List[str] = []  # Files in workspace for @ completion
         self._runtime = None  # InteractiveRuntime for ACP/LSP
         self._runtime_started = False
+        self._registry = None  # Unified command registry (lazy)
         
         # Terminal size
         self.term_width, self.term_height = shutil.get_terminal_size((80, 24))
@@ -482,6 +486,56 @@ class AsyncTUI:
         if self._app:
             self._app.invalidate()
     
+    # Built-in slash commands registered into the unified registry so /help
+    # and autocomplete stay in lock-step with the dispatch branches below.
+    _BUILTIN_COMMANDS = {
+        "help": "Show this help",
+        "exit": "Exit Praison AI",
+        "quit": "Exit Praison AI",
+        "clear": "Clear conversation",
+        "new": "Start new conversation",
+        "model": "Show or change model",
+        "session": "Show current session info",
+        "sessions": "List all saved sessions",
+        "continue": "Continue most recent session",
+        "history": "Show conversation history",
+        "export": "Export conversation to file",
+        "import": "Import conversation from file",
+        "cost": "Show token usage and cost",
+        "status": "Show ACP/LSP runtime status",
+        "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
+        "debug": "Toggle debug logging",
+        "plan": "Create a step-by-step plan for a task",
+        "handoff": "Delegate to specialized agent (code/research/review/docs)",
+        "compact": "Toggle compact output mode",
+        "multiline": "Toggle multiline input mode",
+        "files": "List workspace files for @ mentions",
+        "queue": "Show pending prompts in queue",
+    }
+
+    def _get_registry(self):
+        """Lazily build the unified command registry (built-ins + custom).
+
+        Custom ``.praisonai/commands/*.md`` commands become first-class
+        ``/name`` entries here, driven from the same discovery that powers
+        ``praisonai run --command``. Failures degrade to built-ins only.
+        """
+        if self._registry is None:
+            try:
+                from praisonai_code.cli.interactive.command_registry import (
+                    create_default_registry,
+                )
+
+                self._registry = create_default_registry(
+                    self._BUILTIN_COMMANDS, include_custom=True
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Command registry unavailable: %s", exc)
+                self._registry = _REGISTRY_FAILED
+        if self._registry is _REGISTRY_FAILED:
+            return None
+        return self._registry
+
     def _handle_command(self, command: str) -> bool:
         """Handle slash commands. Returns True if handled."""
         parts = command.split(maxsplit=1)
@@ -529,6 +583,17 @@ Tips:
   Use @filename to include file contents in your prompt
   Type multiple prompts while AI is thinking (queued)
   Use --debug flag or /debug command to enable debug logging"""
+            registry = self._get_registry()
+            if registry:
+                custom = [
+                    c for c in registry.list_commands()
+                    if c.name not in self._BUILTIN_COMMANDS and c.kind.value != "builtin"
+                ]
+                if custom:
+                    lines = ["", "Custom Commands:"]
+                    for c in custom:
+                        lines.append(f"  /{c.name:<14} {c.description}")
+                    help_text += "\n" + "\n".join(lines)
             self.messages.append(ChatMessage(role="system", content=help_text))
             return True
         
@@ -807,6 +872,31 @@ Example: /handoff code "refactor the auth module" """
             return True
         
         else:
+            # Not a built-in: consult the unified command registry so custom
+            # .praisonai/commands/*.md commands are first-class /name commands.
+            registry = self._get_registry()
+            resolved = registry.get(cmd) if registry else None
+            if resolved is not None and resolved.handler is not None:
+                try:
+                    prompt = resolved.handler(args)
+                except Exception as exc:
+                    self.messages.append(ChatMessage(
+                        role="system",
+                        content=f"Command /{cmd} failed: {exc}",
+                    ))
+                    return True
+                if prompt:
+                    self.messages.append(ChatMessage(
+                        role="system", content=f"Running /{cmd}..."
+                    ))
+                    self._update_output()
+                    self._queue_or_execute(prompt)
+                else:
+                    self.messages.append(ChatMessage(
+                        role="system",
+                        content=f"Command /{cmd} produced no output.",
+                    ))
+                return True
             self.messages.append(ChatMessage(role="system", content=f"Unknown command: /{cmd}. Use /help for available commands."))
             return True
     
