@@ -112,10 +112,42 @@ class SandboxManager:
         elif sandbox_type == "daytona":
             return await self._create_daytona_sandbox()
         else:
+            return await self._create_registry_sandbox(sandbox_type)
+    
+    async def _create_registry_sandbox(self, sandbox_type: str) -> SandboxProtocol:
+        """Create a sandbox registered via praisonai.sandbox entry points."""
+        try:
+            from praisonai.sandbox._registry import SandboxRegistry
+        except ImportError as e:
             raise ValueError(
                 f"Unknown sandbox type: {sandbox_type!r}. "
-                f"Supported: 'docker', 'subprocess', 'e2b', 'sandlock', 'ssh', 'modal', 'daytona'"
+                f"Supported built-ins: 'docker', 'subprocess', 'e2b', 'sandlock', "
+                f"'ssh', 'modal', 'daytona'. "
+                f"Install a plugin package that registers '{sandbox_type}' "
+                f"under the 'praisonai.sandbox' entry-point group."
+            ) from e
+
+        registry = SandboxRegistry.default()
+        try:
+            sandbox_cls = registry.resolve(sandbox_type)
+        except ValueError as e:
+            raise ValueError(
+                f"Unknown sandbox type: {sandbox_type!r}. "
+                f"Available: {registry.list_names()}"
+            ) from e
+
+        sandbox = sandbox_cls(config=self.config)
+        is_available = getattr(sandbox, "is_available", True)
+        if callable(is_available):
+            is_available = is_available()
+        if not is_available:
+            raise RuntimeError(
+                f"Sandbox {sandbox_type!r} is not available. "
+                f"Install the plugin package that provides this backend."
             )
+
+        await sandbox.start()
+        return sandbox
     
     async def _create_docker_sandbox(self) -> SandboxProtocol:
         """Create Docker sandbox."""

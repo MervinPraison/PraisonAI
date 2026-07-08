@@ -153,6 +153,18 @@ class SandboxConfig:
         return cls(
             sandbox_type="e2b",
         )
+
+    @classmethod
+    def capsule(cls) -> "SandboxConfig":
+        """Create a Capsule sandbox configuration.
+
+        Requires a plugin that registers ``capsule`` under the
+        ``praisonai.sandbox`` entry-point group (e.g. praisonai-plugins[capsule]).
+        """
+        return cls(
+            sandbox_type="capsule",
+            security_policy=SecurityPolicy.strict(),
+        )
     
     @classmethod
     def native(
