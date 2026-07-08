@@ -124,7 +124,8 @@ class SandboxManager:
                 f"Supported built-ins: 'docker', 'subprocess', 'e2b', 'sandlock', "
                 f"'ssh', 'modal', 'daytona'. "
                 f"Install a plugin package that registers '{sandbox_type}' "
-                f"under the 'praisonai.sandbox' entry-point group."
+                f"under the 'praisonai.sandbox' entry-point group "
+                f"(e.g. pip install praisonai-plugins[capsule])."
             ) from e
 
         registry = SandboxRegistry.default()

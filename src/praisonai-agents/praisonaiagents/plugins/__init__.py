@@ -40,6 +40,7 @@ __all__ = [
     # Easy enable API
     "enable",
     "disable",
+    "maybe_enable_from_config",
     "list_plugins",
     "is_enabled",
     # Core
@@ -83,6 +84,27 @@ import threading
 _plugins_lock = threading.Lock()
 _plugins_enabled: bool = False
 _enabled_plugin_names: list = None  # None = all, list = specific
+_auto_enable_attempted: bool = False
+
+
+def maybe_enable_from_config() -> None:
+    """Enable plugins once per process when config or env requests it."""
+    global _auto_enable_attempted
+
+    with _plugins_lock:
+        if _auto_enable_attempted or _plugins_enabled:
+            return
+        _auto_enable_attempted = True
+
+    try:
+        from praisonaiagents.config.loader import get_enabled_plugins, is_plugins_enabled
+
+        if is_plugins_enabled():
+            enable(get_enabled_plugins())
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("Plugin auto-enable skipped: %s", exc)
 
 
 def enable(plugins: list = None) -> None:

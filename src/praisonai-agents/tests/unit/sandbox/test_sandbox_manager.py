@@ -182,6 +182,12 @@ class TestSandboxManager:
             with pytest.raises(ValueError, match="Unknown sandbox type"):
                 await manager._create_sandbox()
 
+    def test_config_capsule_factory(self):
+        """Test Capsule config factory."""
+        config = SandboxConfig.capsule()
+        assert config.sandbox_type == "capsule"
+        assert config.security_policy.allow_network is False
+
     async def test_create_sandbox_unavailable(self):
         """Test creating sandbox when not available."""
         config = SandboxConfig.docker("python:3.11")

@@ -185,6 +185,49 @@ backend = "file"
                 os.unlink(f.name)
 
 
+class TestMaybeEnableFromConfig:
+    """Test automatic plugin enablement from env/config."""
+
+    def setup_method(self):
+        import praisonaiagents.plugins as plugins_mod
+
+        with plugins_mod._plugins_lock:
+            plugins_mod._plugins_enabled = False
+            plugins_mod._enabled_plugin_names = None
+            plugins_mod._auto_enable_attempted = False
+
+    def teardown_method(self):
+        import praisonaiagents.plugins as plugins_mod
+
+        with plugins_mod._plugins_lock:
+            plugins_mod._plugins_enabled = False
+            plugins_mod._enabled_plugin_names = None
+            plugins_mod._auto_enable_attempted = False
+
+    def test_auto_enables_when_env_set(self):
+        import praisonaiagents.plugins as plugins_mod
+
+        with patch.dict(os.environ, {"PRAISONAI_PLUGINS": "true"}, clear=False):
+            plugins_mod.maybe_enable_from_config()
+            assert plugins_mod.is_enabled() is True
+
+    def test_skips_when_env_disabled(self):
+        import praisonaiagents.plugins as plugins_mod
+
+        with patch.dict(os.environ, {"PRAISONAI_PLUGINS": "false"}, clear=False):
+            plugins_mod.maybe_enable_from_config()
+            assert plugins_mod.is_enabled() is False
+
+    def test_runs_once_per_process(self):
+        import praisonaiagents.plugins as plugins_mod
+
+        with patch.object(plugins_mod, "enable") as mock_enable:
+            with patch.dict(os.environ, {"PRAISONAI_PLUGINS": "true"}, clear=False):
+                plugins_mod.maybe_enable_from_config()
+                plugins_mod.maybe_enable_from_config()
+        mock_enable.assert_called_once()
+
+
 class TestConfigDrivenDefaults:
     """Test config-driven defaults for Agent parameters."""
     
