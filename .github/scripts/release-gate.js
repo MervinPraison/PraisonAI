@@ -86,9 +86,10 @@ async function hasSuccessfulReleaseToday(github, owner, repo, now = new Date()) 
     repo,
     workflow_id: 'pypi-release.yml',
     status: 'completed',
+    created: `>=${dayStart.toISOString()}`,
     per_page: 30,
   });
-  return runs.data.workflow_runs.some(
+  return (runs?.data?.workflow_runs || []).some(
     (r) => r.conclusion === 'success' && new Date(r.created_at) >= dayStart
   );
 }
@@ -134,7 +135,7 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
     return out;
   }
 
-  const referenceTime = options.now instanceof Date ? options.now : new Date();
+  const referenceTime = (options.now instanceof Date && !isNaN(options.now)) ? options.now : new Date();
   if (await hasSuccessfulReleaseToday(github, owner, repo, referenceTime)) {
     const day = referenceTime.toISOString().slice(0, 10);
     reasons.push(`already released today (UTC ${day}); max one patch release per day`);
