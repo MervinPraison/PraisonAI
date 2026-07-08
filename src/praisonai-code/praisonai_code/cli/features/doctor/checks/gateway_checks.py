@@ -12,7 +12,11 @@ from typing import List, Optional
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
-from ._wrapper_checks import skip_if_no_wrapper, bots_config_schema as _bots_config_schema
+from ._wrapper_checks import (
+    skip_if_no_wrapper,
+    skip_if_no_bot_package,
+    bots_config_schema as _bots_config_schema,
+)
 
 
 @register_check(
@@ -26,6 +30,9 @@ def check_gateway_config_validation(config: DoctorConfig) -> CheckResult:
     """Validate gateway/bot configuration using canonical schema."""
     start = time.time()
     skipped = skip_if_no_wrapper("gateway_config_validation", "Gateway Config Validation", start=start)
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package("gateway_config_validation", "Gateway Config Validation", start=start)
     if skipped:
         return skipped
     
@@ -112,6 +119,9 @@ def check_gateway_security(config: DoctorConfig) -> CheckResult:
     """Check gateway security settings for safe defaults."""
     start = time.time()
     skipped = skip_if_no_wrapper("gateway_security", "Gateway Security Settings", start=start)
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package("gateway_security", "Gateway Security Settings", start=start)
     if skipped:
         return skipped
     
@@ -218,6 +228,9 @@ def check_gateway_config_migration(config: DoctorConfig) -> CheckResult:
     """Check if configuration needs migration to canonical format."""
     start = time.time()
     skipped = skip_if_no_wrapper("gateway_config_migration", "Gateway Config Migration", start=start)
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package("gateway_config_migration", "Gateway Config Migration", start=start)
     if skipped:
         return skipped
     

@@ -12,7 +12,11 @@ from typing import List
 
 from ..models import CheckResult, CheckStatus, CheckCategory, CheckSeverity, DoctorConfig
 from ..registry import register_check
-from ._wrapper_checks import skip_if_no_wrapper, bots_config_schema as _bots_config_schema
+from ._wrapper_checks import (
+    skip_if_no_wrapper,
+    skip_if_no_bot_package,
+    bots_config_schema as _bots_config_schema,
+)
 
 
 @register_check(
@@ -68,6 +72,9 @@ def check_bot_config(config: DoctorConfig) -> CheckResult:
     skipped = skip_if_no_wrapper("bot_config", "Bot Config", start=start)
     if skipped:
         return skipped
+    skipped = skip_if_no_bot_package("bot_config", "Bot Config", start=start)
+    if skipped:
+        return skipped
     from praisonai_code.cli._paths import resolve_bot_config_path
     config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
     if not os.path.exists(config_path):
@@ -114,6 +121,9 @@ def check_bot_security(config: DoctorConfig) -> CheckResult:
     """Check bot security configuration for safe defaults."""
     start = time.time()
     skipped = skip_if_no_wrapper("bot_security", "Bot Security Config", start=start)
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package("bot_security", "Bot Security Config", start=start)
     if skipped:
         return skipped
     from praisonai_code.cli._paths import resolve_bot_config_path
@@ -217,6 +227,9 @@ def check_multi_channel_tokens(config: DoctorConfig) -> CheckResult:
     """Check multi-channel token configuration for duplicates and naming conventions."""
     start = time.time()
     skipped = skip_if_no_wrapper("multi_channel_tokens", "Multi-Channel Token Configuration", start=start)
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package("multi_channel_tokens", "Multi-Channel Token Configuration", start=start)
     if skipped:
         return skipped
     from praisonai_code.cli._paths import resolve_bot_config_path
