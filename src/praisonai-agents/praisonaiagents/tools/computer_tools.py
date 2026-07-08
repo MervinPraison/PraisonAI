@@ -94,7 +94,12 @@ def _get_backend():
 # ── tools ────────────────────────────────────────────────────────────────────
 
 def computer_screenshot(path: str = "") -> str:
-    """Take a screenshot of the current screen (read-only, no approval needed).
+    """Take a screenshot of the current screen.
+
+    Capturing the screen is read-only and never gated.  Saving to disk is a
+    write operation: when ``path`` is provided it goes through the approval
+    gate so an agent cannot overwrite arbitrary files without an explicit
+    human opt-in.
 
     Args:
         path: Optional file path to save the screenshot to. When empty, the
@@ -102,8 +107,12 @@ def computer_screenshot(path: str = "") -> str:
 
     Returns:
         A message describing the screenshot size and save path, or an error
-        message when the backend is unavailable.
+        message when the backend is unavailable or the write is denied.
     """
+    if path:
+        action = f"screenshot_save({path!r})"
+        if not _approve(action):
+            return f"Action denied: {action}"
     backend = _get_backend()
     if backend is None:
         return _MISSING_BACKEND_MSG
@@ -185,7 +194,12 @@ def computer_type(text: str) -> str:
         return _MISSING_BACKEND_MSG
     try:
         backend.typewrite(text)
-        return f"Typed {len(text)} characters"
+        # typewrite silently skips characters outside the ASCII printable set
+        # (unicode, emoji, accented letters). Report only what was delivered.
+        typed = sum(1 for c in text if c.isascii() and c.isprintable())
+        if typed == len(text):
+            return f"Typed {typed} characters"
+        return f"Typed {typed} of {len(text)} characters (non-ASCII skipped)"
     except Exception as exc:
         return f"Type failed: {exc}"
 
@@ -205,9 +219,11 @@ def computer_key(key: str) -> str:
         return _MISSING_BACKEND_MSG
     try:
         keys = [k.strip() for k in key.split("+") if k.strip()]
+        if not keys:
+            return f"Key press failed: empty or invalid key string {key!r}"
         if len(keys) > 1:
             backend.hotkey(*keys)
-        elif keys:
+        else:
             backend.press(keys[0])
         return f"Pressed {key}"
     except Exception as exc:
@@ -228,6 +244,11 @@ def computer_scroll(direction: str = "down", amount: int = 3) -> str:
     if backend is None:
         return _MISSING_BACKEND_MSG
     try:
+        if direction not in ("up", "down"):
+            return (
+                f"Scroll failed: invalid direction {direction!r} "
+                "(expected 'up' or 'down')"
+            )
         clicks = abs(int(amount))
         backend.scroll(clicks if direction == "up" else -clicks)
         return f"Scrolled {direction} by {clicks}"

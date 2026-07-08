@@ -130,5 +130,90 @@ class TestControlBackendInvoked:
         fake.hotkey.assert_called_once_with("ctrl", "c")
 
 
+class TestScreenshotSaveGated:
+    """Saving a screenshot to disk is a write and must go through approval."""
+
+    def setup_method(self):
+        _reset_approval()
+
+    def teardown_method(self):
+        _reset_approval()
+
+    def test_screenshot_save_denied_without_approval(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import computer_screenshot, computer_tools
+        fake = MagicMock()
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        result = computer_screenshot(path="/tmp/should_not_write.png")
+        assert "denied" in result.lower()
+        fake.screenshot.assert_not_called()
+
+    def test_screenshot_save_allowed_with_approval(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import (
+            computer_screenshot, computer_tools, set_computer_approval,
+        )
+        fake = MagicMock()
+        fake.screenshot.return_value.size = (100, 50)
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        set_computer_approval(lambda action: True)
+        result = computer_screenshot(path="/tmp/ok.png")
+        assert "denied" not in result.lower()
+        fake.screenshot.return_value.save.assert_called_once_with("/tmp/ok.png")
+
+    def test_screenshot_no_path_never_gated(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import computer_screenshot, computer_tools
+        fake = MagicMock()
+        fake.screenshot.return_value.size = (100, 50)
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        result = computer_screenshot()
+        assert "denied" not in result.lower()
+
+
+class TestInputValidation:
+    def setup_method(self):
+        _reset_approval()
+
+    def teardown_method(self):
+        _reset_approval()
+
+    def test_type_reports_non_ascii_skipped(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import (
+            computer_type, computer_tools, set_computer_approval,
+        )
+        fake = MagicMock()
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        set_computer_approval(lambda action: True)
+        result = computer_type("héllo")
+        assert "4 of 5" in result
+
+    def test_empty_key_reports_failure(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import (
+            computer_key, computer_tools, set_computer_approval,
+        )
+        fake = MagicMock()
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        set_computer_approval(lambda action: True)
+        result = computer_key("")
+        assert "failed" in result.lower()
+        fake.press.assert_not_called()
+        fake.hotkey.assert_not_called()
+
+    def test_invalid_scroll_direction_reports_failure(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from praisonaiagents.tools import (
+            computer_scroll, computer_tools, set_computer_approval,
+        )
+        fake = MagicMock()
+        monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
+        set_computer_approval(lambda action: True)
+        result = computer_scroll(direction="sideways")
+        assert "failed" in result.lower()
+        fake.scroll.assert_not_called()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
