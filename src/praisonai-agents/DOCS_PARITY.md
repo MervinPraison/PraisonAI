@@ -18,23 +18,23 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 43 | 12143 |
+| ✅ Agent | 21 | 43 | 12283 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2951 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
-| ✅ Approval | 1 | 5 | 2148 |
+| ✅ Approval | 1 | 5 | 2187 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 8 | 2301 |
 | ✅ Autonomy | 3 | 6 | 2192 |
-| ✅ Bots | 7 | 27 | 10304 |
+| ✅ Bots | 7 | 27 | 10307 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 112 | 29407 |
+| ✅ CLI | 5 | 112 | 29563 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3799 |
 | ✅ Conditions | 1 | 3 | 1175 |
 | ✅ Configuration | 3 | 7 | 2330 |
 | ✅ Context Management | 16 | 33 | 11782 |
-| ✅ Database | 1 | 40 | 5746 |
+| ✅ Database | 1 | 40 | 5854 |
 | ✅ Deep Research | 8 | 2 | 497 |
 | ✅ Display | 6 | 3 | 648 |
 | ✅ Embeddings | 6 | 23 | 1990 |
@@ -44,10 +44,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1863 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 45 | 15940 |
+| ✅ Gateway | 7 | 45 | 15943 |
 | ✅ Guardrails | 4 | 4 | 1667 |
 | ✅ Handoffs | 11 | 6 | 2705 |
-| ✅ Hooks | 2 | 9 | 3739 |
+| ✅ Hooks | 2 | 9 | 3743 |
 | ✅ Image | 1 | 11 | 1113 |
 | ✅ Knowledge | 4 | 12 | 3662 |
 | ✅ LLM | 3 | 14 | 4715 |
@@ -60,26 +60,26 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1130 |
 | ✅ Parallel Execution | 3 | 2 | 419 |
 | ✅ Planning | 6 | 6 | 1441 |
-| ✅ Plugins | 8 | 3 | 1025 |
+| ✅ Plugins | 8 | 3 | 1115 |
 | ✅ Prompts | 2 | 7 | 1235 |
-| ✅ Providers | 1 | 55 | 7263 |
+| ✅ Providers | 1 | 55 | 7425 |
 | ✅ Query | 1 | 2 | 657 |
 | ✅ RAG | 5 | 15 | 2908 |
 | ✅ Realtime | 2 | 5 | 584 |
 | ✅ Reflection | 3 | 3 | 680 |
-| ✅ Retrieval | 2 | 5 | 935 |
+| ✅ Retrieval | 2 | 5 | 953 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2488 |
-| ✅ Security | 1 | 3 | 2787 |
+| ✅ Security | 1 | 3 | 2843 |
 | ✅ Sessions | 4 | 13 | 4746 |
-| ✅ Skills | 6 | 13 | 4824 |
+| ✅ Skills | 6 | 13 | 4825 |
 | ✅ Tasks | 2 | 6 | 2715 |
 | ✅ Telemetry | 1 | 2 | 590 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 126 | 32345 |
+| ✅ Tools | 12 | 126 | 33596 |
 | ✅ Tracing | 3 | 2 | 139 |
-| ✅ Vector Store | 1 | 12 | 1139 |
-| ✅ Video | 2 | 6 | 510 |
+| ✅ Vector Store | 1 | 12 | 1193 |
+| ✅ Video | 2 | 6 | 521 |
 | ✅ Vision | 2 | 1 | 283 |
 | ✅ Web | 3 | 8 | 1926 |
 | ✅ Workflows | 5 | 16 | 6397 |
