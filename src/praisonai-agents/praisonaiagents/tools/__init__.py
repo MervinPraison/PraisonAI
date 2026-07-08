@@ -185,6 +185,17 @@ TOOL_MAPPINGS = {
     'schedule_remove': ('.schedule_tools', None),
     'schedule_tools': ('.schedule_tools', None),
 
+    # Computer Use Tools (agent-centric screen control - Issue #516)
+    'computer_screenshot': ('.computer_tools', None),
+    'computer_screen_size': ('.computer_tools', None),
+    'computer_move': ('.computer_tools', None),
+    'computer_click': ('.computer_tools', None),
+    'computer_type': ('.computer_tools', None),
+    'computer_key': ('.computer_tools', None),
+    'computer_scroll': ('.computer_tools', None),
+    'set_computer_approval': ('.computer_tools', None),
+    'computer_tools': ('.computer_tools', None),
+
     # Proactive messaging (agent-facing gateway delivery)
     'send_message': ('.messaging_tools', None),
     'messaging_tools': ('.messaging_tools', None),
@@ -374,7 +385,7 @@ def __getattr__(name: str) -> Any:
     if class_name is None:
         # Direct function import
         module = import_module(module_path, __package__)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'messaging_tools', 'search_tools', 'ast_grep_tools', 'edit_tools', 'todo_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'computer_tools', 'messaging_tools', 'search_tools', 'ast_grep_tools', 'edit_tools', 'todo_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
