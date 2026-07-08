@@ -90,6 +90,18 @@ class Plugin(ABC):
         """Called when plugin is shutting down."""
         pass
     
+    def session_start(self, context: Dict[str, Any]) -> None:
+        """Called when a session starts. Observe-only (source, session_name, etc.)."""
+        pass
+
+    def session_end(self, context: Dict[str, Any]) -> None:
+        """Called when a session ends. Observe-only (reason, total_turns, etc.)."""
+        pass
+
+    def on_error(self, error_type: str, error_message: str, context: Dict[str, Any]) -> None:
+        """Called when an error occurs during agent execution. Observe-only."""
+        pass
+
     def before_agent(self, prompt: str, context: Dict[str, Any]) -> str:
         """Called before agent execution. Can modify prompt."""
         return prompt

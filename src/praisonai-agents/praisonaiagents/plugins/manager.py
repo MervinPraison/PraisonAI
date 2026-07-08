@@ -576,6 +576,25 @@ class PluginManager:
                 pass
             return removed
 
+def _write_back(data, attr: str, new_value: dict) -> None:
+    """Write a plugin's returned dict back onto the hook payload.
+
+    Mutates the existing dict in place when present (preserving object
+    identity for callers that hold a reference), otherwise assigns the value
+    directly so first-time injection (e.g. ``credentials`` starting as
+    ``None``) is not silently dropped.
+    """
+    current = getattr(data, attr, None)
+    if isinstance(current, dict):
+        current.clear()
+        current.update(new_value)
+        return
+    try:
+        setattr(data, attr, new_value)
+    except Exception:
+        pass
+
+
 def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]]:
     """
     Adapt a plugin's overridden lifecycle methods into hook functions.
@@ -699,6 +718,62 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             reason = getattr(data, "reason", "") or "Permission requested"
             return _permission_result(_p.on_permission_ask(target, reason), reason)
         yield HookEvent.ON_PERMISSION_ASK, on_permission_ask_hook
+
+    if _overrides("on_config"):
+        def on_config_hook(data, _p=plugin):
+            config = getattr(data, "config", None)
+            if not isinstance(config, dict):
+                config = getattr(data, "extra", {}) or {}
+            new_config = _p.on_config(config)
+            if isinstance(new_config, dict):
+                _write_back(data, "config", new_config)
+            return HookResult.allow()
+        yield HookEvent.ON_CONFIG, on_config_hook
+
+    if _overrides("on_auth"):
+        def on_auth_hook(data, _p=plugin):
+            auth_type = getattr(data, "auth_type", "") or ""
+            credentials = getattr(data, "credentials", None) or {}
+            new_creds = _p.on_auth(auth_type, credentials)
+            if isinstance(new_creds, dict):
+                _write_back(data, "credentials", new_creds)
+            return HookResult.allow()
+        yield HookEvent.ON_AUTH, on_auth_hook
+
+    if _overrides("session_start"):
+        def session_start_hook(data, _p=plugin):
+            _p.session_start({
+                "source": getattr(data, "source", None),
+                "session_name": getattr(data, "session_name", None),
+                "session_id": getattr(data, "session_id", None),
+            })
+            return HookResult.allow()
+        yield HookEvent.SESSION_START, session_start_hook
+
+    if _overrides("session_end"):
+        def session_end_hook(data, _p=plugin):
+            _p.session_end({
+                "reason": getattr(data, "reason", None),
+                "total_turns": getattr(data, "total_turns", None),
+                "total_tokens": getattr(data, "total_tokens", None),
+                "session_id": getattr(data, "session_id", None),
+            })
+            return HookResult.allow()
+        yield HookEvent.SESSION_END, session_end_hook
+
+    if _overrides("on_error"):
+        def on_error_hook(data, _p=plugin):
+            _p.on_error(
+                getattr(data, "error_type", "") or "",
+                getattr(data, "error_message", "") or "",
+                {
+                    "stack_trace": getattr(data, "stack_trace", None),
+                    "context": getattr(data, "context", {}) or {},
+                    "session_id": getattr(data, "session_id", None),
+                },
+            )
+            return HookResult.allow()
+        yield HookEvent.ON_ERROR, on_error_hook
 
 
 # Global plugin manager instance
