@@ -178,10 +178,17 @@ class SessionCheckpointManager:
             return
         try:
             if message_count <= 0:
-                # Nothing to keep: clear history where the store supports it.
-                revert = getattr(store, "revert_to_message", None)
-                if callable(revert):
-                    revert(self.session_id, 0)
+                # Keep nothing. The core ``revert_to_message`` contract keeps
+                # ``messages[:index + 1]`` and rejects out-of-range indices, so
+                # there is no index that clears to empty (index 0 would leave a
+                # stale first message). Clear explicitly where the store exposes
+                # a primitive; otherwise no-op safely rather than leaving a ghost
+                # message behind.
+                for name in ("clear_messages", "clear_history", "clear"):
+                    clear = getattr(store, name, None)
+                    if callable(clear):
+                        clear(self.session_id)
+                        return
                 return
             revert = getattr(store, "revert_to_message", None)
             if callable(revert):

@@ -159,16 +159,15 @@ class _FakeConversationStore:
         return list(self.messages)
 
     def revert_to_message(self, session_id, message_index):
-        # Mirror core semantics: keep messages[:index + 1].
+        # Mirror core HierarchicalSessionStore semantics exactly: keep
+        # messages[:index + 1], and reject out-of-range indices (return False).
         if message_index < 0 or message_index >= len(self.messages):
-            if message_index == 0 and not self.messages:
-                return True
-            # message_index == 0 clears when no messages; otherwise truncate 0.
-            if message_index <= 0:
-                self.messages = self.messages[:1] if self.messages else []
-                return True
             return False
         self.messages = self.messages[: message_index + 1]
+        return True
+
+    def clear_messages(self, session_id):
+        self.messages = []
         return True
 
 
@@ -218,6 +217,86 @@ def test_dropped_message_count_reports_pending_rollback(monkeypatch):
         assert mgr.checkpoint_turn("turn 1") is not None
         store.messages.extend(["a1", "a1_tool"])
         assert mgr.dropped_message_count(1) == 2
+
+
+def test_revert_to_zero_message_boundary_clears_history(monkeypatch):
+    """Undoing a turn checkpointed before any messages clears history to empty.
+
+    Guards the off-by-one where targeting index 0 via revert_to_message would
+    keep the first message: at a 0-message boundary we must clear, not truncate.
+    """
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+    with tempfile.TemporaryDirectory() as workspace:
+        target = os.path.join(workspace, "module.py")
+        _write(target, "v0\n")
+
+        # Empty conversation at checkpoint time -> message_count captured as 0.
+        store = _FakeConversationStore([])
+        mgr = SessionCheckpointManager.from_config(
+            workspace_dir=workspace,
+            config={"checkpoints": {"auto": True}},
+            session_store=store,
+            session_id="sid",
+        )
+
+        assert mgr.checkpoint_turn("first turn") is not None
+        _write(target, "v1\n")
+        # The turn produced the very first conversation messages.
+        store.messages.extend(["u1", "a1", "a1_tool"])
+
+        restored = mgr.revert(1)
+        assert restored is not None
+        with open(target) as f:
+            assert f.read() == "v0\n"
+        # History rolls back to the empty boundary — no ghost first message.
+        assert store.messages == []
+
+
+def test_revert_to_zero_boundary_without_clear_is_noop(monkeypatch):
+    """A store lacking a clear primitive must not leave a stale first message.
+
+    The old code called revert_to_message(session_id, 0) which, under real core
+    semantics, keeps messages[:1]. Absent an explicit clear method we now no-op
+    rather than corrupt history with a ghost message.
+    """
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+
+    class _NoClearStore:
+        def __init__(self, messages):
+            self.messages = list(messages)
+
+        def get_messages(self, session_id):
+            return list(self.messages)
+
+        def revert_to_message(self, session_id, message_index):
+            if message_index < 0 or message_index >= len(self.messages):
+                return False
+            self.messages = self.messages[: message_index + 1]
+            return True
+
+    with tempfile.TemporaryDirectory() as workspace:
+        target = os.path.join(workspace, "module.py")
+        _write(target, "v0\n")
+
+        store = _NoClearStore([])
+        mgr = SessionCheckpointManager.from_config(
+            workspace_dir=workspace,
+            config={"checkpoints": {"auto": True}},
+            session_store=store,
+            session_id="sid",
+        )
+
+        assert mgr.checkpoint_turn("first turn") is not None
+        _write(target, "v1\n")
+        store.messages.extend(["u1", "a1"])
+
+        restored = mgr.revert(1)
+        assert restored is not None
+        with open(target) as f:
+            assert f.read() == "v0\n"
+        # No ghost message: without a clear primitive we leave history untouched
+        # rather than truncating to messages[:1] via the buggy index-0 path.
+        assert store.messages == ["u1", "a1"]
 
 
 def test_no_session_store_is_file_only(monkeypatch):
