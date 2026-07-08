@@ -11,21 +11,27 @@ This module requires:
 
 Usage:
     from praisonaiagents import Agent
-    from praisonaiagents.tools import composio_tools
+    from praisonaiagents.tools import composio
 
     # Load a set of app tools (auto-resolved from Composio)
-    tools = composio_tools(apps=["github"])
+    tools = composio(apps=["github"])
 
     agent = Agent(name="dev", tools=tools)
     agent.start("Star the praisonai/PraisonAI repository")
 
     # Or fetch by explicit tool/action names
-    tools = composio_tools(actions=["GITHUB_STAR_A_REPOSITORY"])
+    tools = composio(actions=["GITHUB_STAR_A_REPOSITORY"])
 
     # Class style for more control
     from praisonaiagents.tools import ComposioTools
-    composio = ComposioTools()
-    tools = composio.get_tools(apps=["slack"])
+    client = ComposioTools()
+    tools = client.get_tools(apps=["slack"])
+
+Note:
+    ``from praisonaiagents.tools import composio_tools`` returns this module
+    (the submodule name shadows the function, matching the ``exa_tools`` /
+    ``jira_tools`` convention). Use the ``composio`` callable above, or call
+    ``composio_tools.composio_tools(...)`` when importing the module.
 """
 
 from typing import List, Dict, Any, Optional, Callable
@@ -41,7 +47,7 @@ def _check_composio_available() -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_available, error_message).
     """
-    if util.find_spec("composio") is None and util.find_spec("composio_openai") is None:
+    if util.find_spec("composio") is None:
         return False, (
             "composio package is not installed. Install it with: pip install composio"
         )
@@ -82,10 +88,6 @@ class ComposioTools:
     def _get_client(self):
         """Get or create the Composio client (lazy import)."""
         if self._client is None:
-            is_available, error = _check_composio_available()
-            if not is_available:
-                raise ImportError(error)
-
             try:
                 from composio import Composio
 
