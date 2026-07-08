@@ -75,6 +75,24 @@ async function hasActiveReleaseRun(github, owner, repo) {
   );
 }
 
+function utcDayStart(now = new Date()) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+async function hasSuccessfulReleaseToday(github, owner, repo, now = new Date()) {
+  const dayStart = utcDayStart(now);
+  const runs = await github.rest.actions.listWorkflowRuns({
+    owner,
+    repo,
+    workflow_id: 'pypi-release.yml',
+    status: 'completed',
+    per_page: 30,
+  });
+  return runs.data.workflow_runs.some(
+    (r) => r.conclusion === 'success' && new Date(r.created_at) >= dayStart
+  );
+}
+
 async function lastGreenCoreTestsSha(github, owner, repo) {
   const runs = await github.rest.actions.listWorkflowRuns({
     owner,
@@ -113,6 +131,13 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
 
   if (await hasActiveReleaseRun(github, owner, repo)) {
     reasons.push('PyPI Release already in progress or awaiting approval');
+    return out;
+  }
+
+  const referenceTime = options.now instanceof Date ? options.now : new Date();
+  if (await hasSuccessfulReleaseToday(github, owner, repo, referenceTime)) {
+    const day = referenceTime.toISOString().slice(0, 10);
+    reasons.push(`already released today (UTC ${day}); max one patch release per day`);
     return out;
   }
 
@@ -197,6 +222,8 @@ module.exports = {
   bumpPatch,
   readVersionsFromTree,
   pypiVersionExists,
+  hasSuccessfulReleaseToday,
+  utcDayStart,
   evaluateReleasePreflight,
   ACTIVE_RELEASE_STATUSES,
   PACKAGE_PATHS,
