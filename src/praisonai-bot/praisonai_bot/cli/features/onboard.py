@@ -178,6 +178,9 @@ def _plugin_platforms() -> Dict[str, Dict[str, Any]]:
         if extra_env:
             info["extra_env"] = extra_env
         info["config_fields"] = list(fields)
+        # Keep the descriptor so the wizard can invoke an optional ``setup(io)``
+        # hook for bespoke multi-step flows (Issue #2801).
+        info["descriptor"] = descriptor
         result[name] = info
     return result
 
@@ -334,7 +337,14 @@ def _generate_bot_yaml_multi_channel(channels: Dict[str, Dict], agent_name: str 
         
         if platform == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
-            
+
+        # Plugin config-only fields collected during onboarding (Issue #2801):
+        # a channel's own keys (e.g. IRC's ``server``) written verbatim so they
+        # reach the adapter via ChannelConfigSchema(extra="allow").
+        for cfg_key, cfg_val in (channel.get("config") or {}).items():
+            safe_val = str(cfg_val).replace('\\', '\\\\').replace('"', '\\"')
+            lines.append(f'    {cfg_key}: "{safe_val}"')
+
         # Routing to specific agent
         lines.append("    routes:")
         lines.append(f"      default: {role}")
@@ -729,13 +739,17 @@ class OnboardWizard:
             # Use standard name for single channel
             env_var = info["token_env"]
             
-        # Store channel configuration
+        # Store channel configuration. ``config`` collects plugin-declared
+        # config-only fields (a ``ChannelField`` with no ``env`` fallback, e.g.
+        # IRC's ``server``) so they land in bot.yaml under this channel instead
+        # of being silently skipped by the wizard (Issue #2801).
         self.channels[channel_key] = {
             "platform": platform,
             "role": role or "assistant",
             "env_var": env_var,
             "token": "",
-            "info": info
+            "info": info,
+            "config": {},
         }
         
         console.print(f"  [green]✓[/green] Configured channel '[cyan]{channel_key}[/cyan]' (env: [cyan]{env_var}[/cyan])")
@@ -831,6 +845,62 @@ class OnboardWizard:
                     if extra_val:
                         os.environ[extra_env] = extra_val
                         env_to_save[extra_env] = extra_val
+
+            # Plugin config-only fields (Issue #2801): a ``ChannelField`` with
+            # no ``env`` fallback (e.g. IRC's ``server``) is written into
+            # bot.yaml under this channel, not to the .env file. Without this,
+            # required config-only fields were never surfaced and the user hit a
+            # runtime error at gateway start. ``extra_env`` above already covers
+            # env-backed fields, so we prompt only the rest here.
+            env_backed = set((info.get("extra_env") or {}).keys())
+            for spec in info.get("config_fields", []):
+                field_name = getattr(spec, "name", None)
+                field_env = getattr(spec, "env", None)
+                if not field_name or (field_env and field_env in env_backed):
+                    continue
+                field_prompt = getattr(spec, "prompt", "") or field_name
+                required = getattr(spec, "required", False)
+                secret = getattr(spec, "secret", False)
+                label = f"  {field_prompt} ({field_name})"
+                if required:
+                    label += " [required]"
+                value = _prompt_ask(
+                    prompt_cls,
+                    label,
+                    password=secret,
+                    default="",
+                    show_default=False,
+                ).strip()
+                if value:
+                    channel.setdefault("config", {})[field_name] = value
+                elif required:
+                    console.print(
+                        f"  [yellow]⚠[/yellow] Required field '{field_name}' left "
+                        f"blank — set it in bot.yaml before starting."
+                    )
+
+            # Optional bespoke setup hook (Issue #2801): a descriptor MAY expose
+            # ``setup(io)`` for multi-step flows the declarative field list can't
+            # express. Best-effort; returned values are merged into the channel
+            # config (or the .env file when the key names an env var).
+            descriptor = info.get("descriptor")
+            setup_hook = getattr(descriptor, "setup", None) if descriptor else None
+            if callable(setup_hook):
+                try:
+                    collected = setup_hook(self) or {}
+                except Exception as exc:  # never let a plugin break onboarding
+                    console.print(
+                        f"  [yellow]⚠[/yellow] Channel setup hook failed: {str(exc)[:100]}"
+                    )
+                    collected = {}
+                for k, v in (collected or {}).items():
+                    if not v:
+                        continue
+                    if k.isupper() and "_" in k:
+                        os.environ[k] = v
+                        env_to_save[k] = v
+                    else:
+                        channel.setdefault("config", {})[k] = v
 
             # Configure allowlist for this channel
             allowed_env = info.get("allowed_users_env")
