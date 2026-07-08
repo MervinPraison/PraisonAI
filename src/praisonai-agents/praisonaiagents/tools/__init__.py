@@ -137,12 +137,6 @@ TOOL_MAPPINGS = {
     'exa_answer_async': ('.exa_tools', None),
     'ExaTools': ('.exa_tools', 'ExaTools'),
     'exa_tools': ('.exa_tools', None),
-    
-    # Composio Tools (requires COMPOSIO_API_KEY + `pip install composio`)
-    'composio': ('.composio_tools', None),
-    'composio_list_apps': ('.composio_tools', None),
-    'ComposioTools': ('.composio_tools', 'ComposioTools'),
-    'composio_tools': ('.composio_tools', None),
 
     # Crawl4AI Tools (async web crawling)
     'crawl4ai': ('.crawl4ai_tools', None),
@@ -382,7 +376,7 @@ def __getattr__(name: str) -> Any:
     module_path, class_name = TOOL_MAPPINGS[name]
     
     # Return class itself (not instance) for TavilyTools, YouTools, ExaTools, Crawl4AITools
-    if name in ('TavilyTools', 'YouTools', 'ExaTools', 'Crawl4AITools', 'SessionTools', 'ComposioTools'):
+    if name in ('TavilyTools', 'YouTools', 'ExaTools', 'Crawl4AITools', 'SessionTools'):
         module = import_module(module_path, __package__)
         return getattr(module, class_name)
     
@@ -391,7 +385,7 @@ def __getattr__(name: str) -> Any:
     if class_name is None:
         # Direct function import
         module = import_module(module_path, __package__)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'composio_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'computer_tools', 'messaging_tools', 'search_tools', 'ast_grep_tools', 'edit_tools', 'todo_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'computer_tools', 'messaging_tools', 'search_tools', 'ast_grep_tools', 'edit_tools', 'todo_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
