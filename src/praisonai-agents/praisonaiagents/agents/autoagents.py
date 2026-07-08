@@ -14,7 +14,6 @@ from praisonaiagents._logging import get_logger
 import os
 from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction
-from ..llm import get_openai_client, LLM, OpenAIClient
 import json
 
 # Define Pydantic models for structured output
@@ -355,7 +354,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             
             try:
                 # Check if we have OpenAI API and the model supports structured output
-                from ..llm import supports_structured_outputs
+                from ..llm import supports_structured_outputs, get_openai_client, LLM
                 if self.llm and supports_structured_outputs(self.llm):
                     client = get_openai_client()
                     use_openai_structured = True
