@@ -83,6 +83,21 @@ class PersistenceOrchestrator:
         self._current_session: Optional[ConversationSession] = None
         self._session_cache: Dict[str, ConversationSession] = {}
         self._cache_lock = threading.RLock()  # RLock allows re-entrant access
+
+    def _sync(self, value: Any) -> Any:
+        """Drive a store call to completion from a sync context.
+
+        Async backends (``mode="async"`` → ``AsyncConversationStore`` and friends)
+        return a coroutine from every method. Sync hooks that call them directly
+        would otherwise discard the coroutine unawaited — a silent no-op that loses
+        the write. When we detect a coroutine we run it via the shared async bridge
+        (single source of truth) so sync callers still get their result; otherwise
+        we pass the value through unchanged for genuinely sync stores.
+        """
+        if inspect.iscoroutine(value):
+            from .._async_bridge import run_sync
+            return run_sync(value)
+        return value
     
     @classmethod
     def from_config(cls, config: PersistenceConfig) -> "PersistenceOrchestrator":
@@ -153,7 +168,7 @@ class PersistenceOrchestrator:
         # Try to load existing session
         session = None
         if resume:
-            session = self.conversation.get_session(session_id)
+            session = self._sync(self.conversation.get_session(session_id))
         
         if session:
             logger.info(f"Resuming session: {session_id}")
@@ -161,7 +176,7 @@ class PersistenceOrchestrator:
             self._cache_put(session)
             
             # Load previous messages
-            messages = self.conversation.get_messages(session_id)
+            messages = self._sync(self.conversation.get_messages(session_id))
             return messages
         else:
             # Create new session
@@ -173,7 +188,7 @@ class PersistenceOrchestrator:
                 name=f"Session {session_id[:8]}",
                 metadata={"agent_type": type(agent).__name__},
             )
-            self.conversation.create_session(session)
+            self._sync(self.conversation.create_session(session))
             logger.info(f"Created new session: {session_id}")
             self._current_session = session
             self._cache_put(session)
@@ -215,7 +230,7 @@ class PersistenceOrchestrator:
             metadata=metadata,
         )
         
-        self.conversation.add_message(session_id, message)
+        self._sync(self.conversation.add_message(session_id, message))
         logger.debug(f"Persisted {role} message to session {session_id}")
         return message
     
@@ -236,12 +251,12 @@ class PersistenceOrchestrator:
         if not self.conversation:
             return
         
-        session = self._cache_get(session_id) or self.conversation.get_session(session_id)
+        session = self._cache_get(session_id) or self._sync(self.conversation.get_session(session_id))
         if session:
             session.updated_at = time.time()
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
-            self.conversation.update_session(session)
+            self._sync(self.conversation.update_session(session))
             # Update cache with the modified session
             self._cache_put(session)
             logger.debug(f"Updated session metadata: {session_id}")
@@ -426,12 +441,12 @@ class PersistenceOrchestrator:
             logger.debug("No knowledge store configured")
             return []
         
-        return self.knowledge.search(
+        return self._sync(self.knowledge.search(
             collection=collection,
             query_embedding=query_embedding,
             limit=limit,
             filters=filters,
-        )
+        ))
     
     def add_knowledge(
         self,
@@ -451,7 +466,7 @@ class PersistenceOrchestrator:
         if not self.knowledge:
             raise ValueError("No knowledge store configured")
         
-        return self.knowledge.upsert(collection, documents)
+        return self._sync(self.knowledge.upsert(collection, documents))
     
     # =========================================================================
     # State Management
@@ -461,19 +476,19 @@ class PersistenceOrchestrator:
         """Get state value."""
         if not self.state:
             return None
-        return self.state.get(key)
+        return self._sync(self.state.get(key))
     
     def set_state(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """Set state value with optional TTL."""
         if not self.state:
             return
-        self.state.set(key, value, ttl)
+        self._sync(self.state.set(key, value, ttl))
     
     def delete_state(self, key: str) -> bool:
         """Delete state value."""
         if not self.state:
             return False
-        return self.state.delete(key)
+        return self._sync(self.state.delete(key))
     
     # =========================================================================
     # Session Management
@@ -483,7 +498,7 @@ class PersistenceOrchestrator:
         """Get a session by ID."""
         if not self.conversation:
             return None
-        return self.conversation.get_session(session_id)
+        return self._sync(self.conversation.get_session(session_id))
     
     def list_sessions(
         self,
@@ -493,7 +508,7 @@ class PersistenceOrchestrator:
         """List sessions for a user."""
         if not self.conversation:
             return []
-        return self.conversation.list_sessions(user_id=user_id, limit=limit)
+        return self._sync(self.conversation.list_sessions(user_id=user_id, limit=limit))
     
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and all its messages."""
@@ -503,7 +518,7 @@ class PersistenceOrchestrator:
         # Remove from cache using thread-safe method
         self._cache_delete(session_id)
         
-        return self.conversation.delete_session(session_id)
+        return self._sync(self.conversation.delete_session(session_id))
     
     def get_messages(
         self,
@@ -513,7 +528,7 @@ class PersistenceOrchestrator:
         """Get messages from a session."""
         if not self.conversation:
             return []
-        return self.conversation.get_messages(session_id, limit=limit)
+        return self._sync(self.conversation.get_messages(session_id, limit=limit))
     
     # =========================================================================
     # Context Building
@@ -547,7 +562,7 @@ class PersistenceOrchestrator:
         
         # Get conversation history
         if self.conversation:
-            messages = self.conversation.get_messages(session_id, limit=history_limit)
+            messages = self._sync(self.conversation.get_messages(session_id, limit=history_limit))
             context["history"] = [
                 {"role": m.role, "content": m.content}
                 for m in messages
@@ -555,11 +570,11 @@ class PersistenceOrchestrator:
         
         # Get relevant knowledge
         if self.knowledge and query_embedding:
-            docs = self.knowledge.search(
+            docs = self._sync(self.knowledge.search(
                 collection=knowledge_collection,
                 query_embedding=query_embedding,
                 limit=knowledge_limit,
-            )
+            ))
             context["knowledge"] = [
                 {"content": d.content, "metadata": d.metadata}
                 for d in docs
@@ -574,11 +589,11 @@ class PersistenceOrchestrator:
     def close(self) -> None:
         """Close all stores and release resources."""
         if self.conversation:
-            self.conversation.close()
+            self._sync(self.conversation.close())
         if self.knowledge:
-            self.knowledge.close()
+            self._sync(self.knowledge.close())
         if self.state:
-            self.state.close()
+            self._sync(self.state.close())
         
         # Clear cache using thread-safe method
         self._cache_clear()

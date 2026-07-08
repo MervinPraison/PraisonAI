@@ -9,6 +9,7 @@ Zero overhead when not enabled — all imports are local.
 """
 import re
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, List, Optional, Any
@@ -99,6 +100,50 @@ _SELF_HARM_PATTERNS: List[str] = [
 ]
 
 _LONG_B64_RE = re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$")
+
+# Zero-width / invisible characters commonly injected between letters to break
+# token matches (e.g. "ig\u200bnore"). Stripped BEFORE pattern search.
+_ZERO_WIDTH_RE = re.compile(
+    "[\u200b\u200c\u200d\u200e\u200f\u2060\ufeff\u00ad\u180e]"
+)
+
+# Cross-script homoglyph map. NFKC folds full-width / small-form / ligature
+# glyphs into ASCII, but it does NOT fold Cyrillic/Greek look-alikes onto Latin
+# (they are distinct code points in distinct scripts). This small confusables
+# table catches the common one-liner bypass "іgnore …" (Cyrillic і) etc.
+_CONFUSABLES = {
+    "\u0430": "a",  # Cyrillic а
+    "\u0435": "e",  # Cyrillic е
+    "\u043e": "o",  # Cyrillic о
+    "\u0440": "p",  # Cyrillic р
+    "\u0441": "c",  # Cyrillic с
+    "\u0443": "y",  # Cyrillic у
+    "\u0445": "x",  # Cyrillic х
+    "\u0456": "i",  # Cyrillic і
+    "\u0455": "s",  # Cyrillic ѕ
+    "\u0501": "d",  # Cyrillic ԁ
+    "\u04bb": "h",  # Cyrillic һ
+    "\u0391": "A",  "\u0392": "B",  "\u0395": "E",  "\u0396": "Z",
+    "\u0397": "H",  "\u0399": "I",  "\u039a": "K",  "\u039c": "M",
+    "\u039d": "N",  "\u039f": "O",  "\u03a1": "P",  "\u03a4": "T",
+    "\u03a5": "Y",  "\u03a7": "X",
+    "\u03b1": "a",  "\u03bf": "o",  "\u03c1": "p",  "\u03c5": "u",
+}
+_CONFUSABLES_TABLE = str.maketrans(_CONFUSABLES)
+
+
+def _normalize_for_scan(text: str) -> str:
+    """Fold obfuscation into canonical ASCII so pattern matching sees intent.
+
+    - NFKC collapses full-width, small-form, ligature and superscript glyphs
+      into their ASCII-equivalent forms.
+    - Zero-width joiners/spaces are stripped so they can't break word tokens.
+    - A small confusables table maps common Cyrillic/Greek homoglyphs onto
+      their Latin look-alikes (NFKC alone does not fold across scripts).
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = _ZERO_WIDTH_RE.sub("", text)
+    return text.translate(_CONFUSABLES_TABLE)
 
 # Trust sources that bypass injection scanning
 _TRUSTED_SOURCES = frozenset([
@@ -203,21 +248,25 @@ def scan_text(text: str, source: str = "external") -> ScanResult:
     if not text or not isinstance(text, str):
         return ScanResult(ThreatLevel.LOW, blocked=False, source=source)
 
+    # Fold full-width / zero-width / homoglyph obfuscation to canonical ASCII
+    # before matching so attackers can't slip past ASCII-anchored patterns.
+    normalized = _normalize_for_scan(text)
+
     # Trusted sources: scan but never block
     is_trusted = source in _TRUSTED_SOURCES
 
     triggered = []
-    if detect_instruction_patterns(text):
+    if detect_instruction_patterns(normalized):
         triggered.append("instruction_override")
-    if detect_authority_claims(text):
+    if detect_authority_claims(normalized):
         triggered.append("authority_claim")
-    if detect_boundary_manipulation(text):
+    if detect_boundary_manipulation(normalized):
         triggered.append("boundary_manipulation")
-    if detect_obfuscation(text):
+    if detect_obfuscation(normalized):
         triggered.append("obfuscation")
-    if detect_financial_manipulation(text):
+    if detect_financial_manipulation(normalized):
         triggered.append("financial_manipulation")
-    if detect_self_harm_instructions(text):
+    if detect_self_harm_instructions(normalized):
         triggered.append("self_harm_instruction")
 
     count = len(triggered)
@@ -297,10 +346,12 @@ class InjectionDefense:
         """
         result = scan_text(text, source=source)
 
-        # Apply extra patterns as Check 1 extension
+        # Apply extra patterns as Check 1 extension (against normalized text so
+        # obfuscated payloads can't bypass custom patterns either).
         if self._extra_patterns and text:
+            normalized = _normalize_for_scan(text)
             for pat in self._extra_patterns:
-                if re.search(pat, text, re.IGNORECASE):
+                if re.search(pat, normalized, re.IGNORECASE):
                     if "extra_pattern" not in result.checks_triggered:
                         result.checks_triggered.append("extra_pattern")
                     # Escalate if extra pattern fires
