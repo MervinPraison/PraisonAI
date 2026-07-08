@@ -117,12 +117,39 @@ class TestSandboxManager:
             assert sandbox == mock_instance
 
     async def test_create_sandbox_unknown_type(self):
-        """Test creating sandbox with unknown type."""
-        config = SandboxConfig(sandbox_type="unknown")
+        """Test creating sandbox with unknown type fails via registry."""
+        config = SandboxConfig(sandbox_type="totally_unknown_backend")
         manager = SandboxManager(config)
-        
-        with pytest.raises(ValueError, match="Unknown sandbox type"):
-            await manager._create_sandbox()
+
+        mock_registry = Mock()
+        mock_registry.resolve.side_effect = ValueError(
+            "Unknown praisonai.sandbox plugin: 'totally_unknown_backend'"
+        )
+        mock_registry.list_names.return_value = ["docker", "subprocess"]
+
+        with patch("praisonai.sandbox._registry.SandboxRegistry.default", return_value=mock_registry):
+            with pytest.raises(ValueError, match="Unknown sandbox type"):
+                await manager._create_sandbox()
+
+    async def test_create_sandbox_registry_plugin(self):
+        """Test plugin sandbox types resolve via praisonai.sandbox registry."""
+        config = SandboxConfig.capsule()
+        manager = SandboxManager(config)
+
+        mock_instance = AsyncMock()
+        mock_instance.is_available = True
+        mock_cls = Mock(return_value=mock_instance)
+
+        mock_registry = Mock()
+        mock_registry.resolve.return_value = mock_cls
+
+        with patch("praisonai.sandbox._registry.SandboxRegistry.default", return_value=mock_registry):
+            sandbox = await manager._create_sandbox()
+
+        mock_registry.resolve.assert_called_once_with("capsule")
+        mock_cls.assert_called_once_with(config=config)
+        mock_instance.start.assert_called_once()
+        assert sandbox is mock_instance
 
     async def test_create_sandbox_unavailable(self):
         """Test creating sandbox when not available."""
