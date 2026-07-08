@@ -66,9 +66,29 @@ class InteractiveREPL:
         self._session_id: Optional[str] = None
         self._total_tokens = 0
         self._total_cost = 0.0
+        self._registry = None  # Unified command registry (lazy)
         
         # Setup commands
         self.io.add_commands(DEFAULT_COMMANDS)
+
+    def _get_registry(self):
+        """Lazily build the unified command registry (built-ins + custom).
+
+        Makes ``.praisonai/commands/*.md`` custom commands first-class ``/name``
+        commands in the REPL, resolved via the same discovery that powers
+        ``praisonai run --command``. Degrades to built-ins only on failure.
+        """
+        if self._registry is None:
+            try:
+                from .command_registry import create_default_registry
+
+                self._registry = create_default_registry(
+                    DEFAULT_COMMANDS, include_custom=True
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Command registry unavailable: %s", exc)
+                self._registry = None
+        return self._registry
     
     def _get_agent(self):
         """Lazy-load the agent."""
@@ -116,7 +136,13 @@ class InteractiveREPL:
             return True
         
         elif cmd == "help":
-            self.io.print_help(DEFAULT_COMMANDS)
+            commands = dict(DEFAULT_COMMANDS)
+            registry = self._get_registry()
+            if registry:
+                for c in registry.list_commands():
+                    if c.name not in commands and c.kind.value != "builtin":
+                        commands[c.name] = c.description
+            self.io.print_help(commands)
             return True
         
         elif cmd == "clear":
@@ -180,6 +206,24 @@ class InteractiveREPL:
             return True
         
         else:
+            # Not a built-in: consult the unified command registry so custom
+            # .praisonai/commands/*.md commands are first-class /name commands.
+            registry = self._get_registry()
+            resolved = registry.get(cmd) if registry else None
+            if resolved is not None and resolved.handler is not None:
+                try:
+                    prompt = resolved.handler(args)
+                except Exception as exc:
+                    self.io.tool_error(f"Command /{cmd} failed: {exc}")
+                    return True
+                if prompt:
+                    self.io.print_assistant_start()
+                    response = self._execute_prompt(prompt)
+                    if response:
+                        self.io.print_assistant_response(response)
+                else:
+                    self.io.info(f"Command /{cmd} produced no output.")
+                return True
             self.io.tool_warning(f"Unknown command: /{cmd}")
             self.io.info("Type /help for available commands")
             return True

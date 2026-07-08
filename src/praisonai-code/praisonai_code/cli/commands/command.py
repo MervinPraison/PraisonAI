@@ -16,10 +16,24 @@ app = typer.Typer(help="Manage custom commands")
 @app.command(name="list")
 def list_commands(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
+    all_sources: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="List the full interactive command namespace (built-ins, custom, skills, MCP)",
+    ),
 ):
-    """List all discovered custom commands."""
+    """List all discovered custom commands.
+
+    By default only custom ``.praisonai/commands/*.md`` commands are shown.
+    Pass ``--all`` to list the same unified namespace the interactive session
+    resolves ``/name`` from, so listing and invocation cannot drift.
+    """
     output = get_output_controller()
-    
+
+    if all_sources:
+        return _list_registry(output)
+
     try:
         from praisonai_code.cli.features.custom_definitions import CustomDefinitionsDiscovery
         
@@ -109,6 +123,53 @@ def show(
             syntax = Syntax(preview_text, "markdown", theme="monokai", line_numbers=False)
             console.print(Panel(syntax, title=f"Preview with args: '{sample_args}'", border_style="yellow"))
     
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+def _list_registry(output) -> None:
+    """List the full unified command namespace via ``CommandRegistry``.
+
+    This is the same registry every interactive surface drives ``/name``
+    resolution and ``/help`` from, so what is listed here is exactly what can
+    be invoked interactively.
+    """
+    try:
+        from praisonai_code.cli.interactive.command_registry import (
+            create_default_registry,
+        )
+
+        registry = create_default_registry(
+            include_custom=True,
+            include_skills=True,
+        )
+        commands = registry.list_commands()
+
+        if not commands:
+            output.print_info("No commands found.")
+            return
+
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title="Commands", show_header=True)
+        table.add_column("Name", style="cyan")
+        table.add_column("Kind", style="magenta")
+        table.add_column("Source", style="yellow")
+        table.add_column("Description", style="green")
+
+        for cmd in commands:
+            table.add_row(
+                cmd.name,
+                cmd.kind.value,
+                cmd.source,
+                cmd.description or "No description",
+            )
+
+        console.print(table)
+
     except Exception as e:
         output.print_error(str(e))
         raise typer.Exit(1)
