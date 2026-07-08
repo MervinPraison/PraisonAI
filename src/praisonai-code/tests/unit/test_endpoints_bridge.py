@@ -46,4 +46,22 @@ def test_endpoints_list_command_exit_zero_or_int():
     result = runner.invoke(cmd.app, ["list"])
 
     assert "Traceback" not in result.output
-    assert result.exit_code is not None
+    assert isinstance(result.exit_code, int)
+
+
+def test_endpoints_test_command_dispatches_to_invoke():
+    """Typer `endpoints test` maps to the handler's `invoke` command.
+
+    ``test`` is not a command in ``EndpointsHandler``; it must dispatch to
+    ``invoke`` so the subcommand is functional (no "Unknown command" error).
+    """
+    pytest.importorskip("praisonai")
+    typer_testing = pytest.importorskip("typer.testing")
+    from praisonai_code.cli.commands import endpoints as cmd
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(cmd.app, ["test", "my-endpoint"])
+
+    assert "Traceback" not in result.output
+    assert "Unknown command" not in result.output
+    assert isinstance(result.exit_code, int)

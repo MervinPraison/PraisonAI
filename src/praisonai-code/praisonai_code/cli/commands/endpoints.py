@@ -28,5 +28,5 @@ def endpoints_list():
 def endpoints_test(
     endpoint: str = typer.Argument(..., help="Endpoint to test"),
 ):
-    """Test an endpoint."""
-    _run(["test", endpoint])
+    """Test an endpoint by invoking it."""
+    _run(["invoke", endpoint])
