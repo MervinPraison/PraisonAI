@@ -111,10 +111,12 @@ class SandboxManager:
             return await self._create_modal_sandbox()
         elif sandbox_type == "daytona":
             return await self._create_daytona_sandbox()
+        elif sandbox_type == "capsule":
+            return await self._create_capsule_sandbox()
         else:
             raise ValueError(
                 f"Unknown sandbox type: {sandbox_type!r}. "
-                f"Supported: 'docker', 'subprocess', 'e2b', 'sandlock', 'ssh', 'modal', 'daytona'"
+                f"Supported: 'docker', 'subprocess', 'e2b', 'sandlock', 'ssh', 'modal', 'daytona', 'capsule'"
             )
     
     async def _create_docker_sandbox(self) -> SandboxProtocol:
@@ -229,6 +231,26 @@ class SandboxManager:
         await sandbox.start()
         return sandbox
 
+    async def _create_capsule_sandbox(self) -> SandboxProtocol:
+        """Create Capsule sandbox."""
+        try:
+            from praisonai.sandbox import CapsuleSandbox
+        except ImportError as e:
+            raise ImportError(
+                "Capsule sandbox not available. Install with: "
+                "pip install praisonai[capsule]"
+            ) from e
+
+        sandbox = CapsuleSandbox(config=self.config)
+
+        if not sandbox.is_available:
+            raise RuntimeError(
+                "Capsule is not available. Install with: pip install praisonai[capsule]"
+            )
+
+        await sandbox.start()
+        return sandbox
+
     def get_available_types(self) -> Dict[str, Dict[str, Any]]:
         """Get available sandbox types and their status.
         
@@ -282,6 +304,7 @@ class SandboxManager:
             ("ssh", "SSHSandbox", "Remote SSH execution", ["paramiko"]),
             ("modal", "ModalSandbox", "Modal cloud compute", ["modal"]),
             ("daytona", "DaytonaSandbox", "Daytona workspaces", ["daytona"]),
+            ("capsule", "CapsuleSandbox", "Lightweight WebAssembly isolation", ["capsule"]),
         ]:
             try:
                 from praisonai import sandbox

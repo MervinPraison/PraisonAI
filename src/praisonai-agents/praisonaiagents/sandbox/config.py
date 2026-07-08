@@ -153,6 +153,19 @@ class SandboxConfig:
         return cls(
             sandbox_type="e2b",
         )
+
+    @classmethod
+    def capsule(cls) -> "SandboxConfig":
+        """Create a Capsule sandbox configuration.
+
+        Capsule provides lightweight WebAssembly-based isolation for running
+        untrusted code locally, without Docker. Uses a strict security policy
+        by default since it is intended for untrusted code.
+        """
+        return cls(
+            sandbox_type="capsule",
+            security_policy=SecurityPolicy.strict(),
+        )
     
     @classmethod
     def native(
