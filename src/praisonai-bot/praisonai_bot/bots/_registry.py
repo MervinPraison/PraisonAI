@@ -11,7 +11,7 @@ import threading
 from typing import Any, Dict, List, Type, Optional
 
 from .._registry import PluginRegistry
-from praisonaiagents.bots.protocols import PlatformCapabilities
+from praisonaiagents.bots.protocols import ChannelDescriptor, PlatformCapabilities
 
 
 def _load_bot_class(module: str, class_name: str):
@@ -73,6 +73,11 @@ class BotPlatformRegistry(PluginRegistry):
         # discovery so any future capability-aware discovery is safe).
         self._capabilities: Dict[str, PlatformCapabilities] = {}
         self._capabilities_lock = threading.Lock()
+        # Store optional self-description descriptors (config fields, setup hook,
+        # system-prompt hint) so config/onboarding/prompt can wire a channel
+        # with zero core edits.
+        self._descriptors: Dict[str, ChannelDescriptor] = {}
+        self._descriptors_lock = threading.Lock()
         # Discover third-party channel connectors without shadowing builtins.
         self._discover_channel_entry_points()
 
@@ -113,7 +118,8 @@ class BotPlatformRegistry(PluginRegistry):
         self, 
         name: str, 
         adapter_class: Type,
-        capabilities: Optional[PlatformCapabilities] = None
+        capabilities: Optional[PlatformCapabilities] = None,
+        descriptor: Optional[ChannelDescriptor] = None,
     ) -> None:
         """Register a platform adapter with its capabilities.
         
@@ -121,11 +127,50 @@ class BotPlatformRegistry(PluginRegistry):
             name: Platform identifier (lowercase)
             adapter_class: The bot adapter class
             capabilities: Optional platform capabilities descriptor
+            descriptor: Optional channel self-description (config fields, setup
+                hook, system-prompt hint) so config/onboarding/prompt can wire
+                the channel with zero core edits.
         """
         self.register(name.lower(), adapter_class)
         if capabilities:
             with self._capabilities_lock:
                 self._capabilities[name.lower()] = capabilities
+        if descriptor is not None:
+            with self._descriptors_lock:
+                self._descriptors[name.lower()] = descriptor
+    
+    def get_descriptor(self, name: str) -> Optional[ChannelDescriptor]:
+        """Get the self-description descriptor for a platform, if any.
+        
+        Checks explicitly-registered descriptors first, then falls back to a
+        ``channel_descriptor`` class attribute/method on the adapter class so a
+        plugin can self-describe purely by declaring it on the adapter.
+        
+        Args:
+            name: Platform identifier
+            
+        Returns:
+            The channel descriptor, or None if the platform does not self-describe.
+        """
+        name = name.lower()
+        with self._descriptors_lock:
+            if name in self._descriptors:
+                return self._descriptors[name]
+        try:
+            adapter_class = self.resolve(name)
+        except (ValueError, AttributeError):
+            return None
+        candidate = getattr(adapter_class, "channel_descriptor", None)
+        if candidate is None:
+            return None
+        try:
+            descriptor = candidate() if callable(candidate) else candidate
+        except Exception:
+            return None
+        if descriptor is not None:
+            with self._descriptors_lock:
+                self._descriptors[name] = descriptor
+        return descriptor
     
     def get_capabilities(self, name: str) -> PlatformCapabilities:
         """Get capabilities for a platform.
@@ -207,7 +252,8 @@ def get_platform_registry() -> Dict[str, Any]:
 def register_platform(
     name: str, 
     adapter_class: Type,
-    capabilities: Optional[PlatformCapabilities] = None
+    capabilities: Optional[PlatformCapabilities] = None,
+    descriptor: Optional[ChannelDescriptor] = None,
 ) -> None:
     """Register a custom platform adapter with optional capabilities.
 
@@ -215,10 +261,17 @@ def register_platform(
         name: Platform identifier (lowercase).
         adapter_class: The bot adapter class.
         capabilities: Optional platform capabilities descriptor.
+        descriptor: Optional channel self-description (config fields, setup
+            hook, system-prompt hint). When provided, the channel's own config
+            keys validate and reach the adapter, the onboarding wizard prompts
+            for them, and the agent prompt gains the channel hint — with zero
+            edits to the config schema, onboarding, or prompt builder.
     """
     registry = _get_lazy_registry()
     if isinstance(registry, BotPlatformRegistry):
-        registry.register_with_capabilities(name.lower(), adapter_class, capabilities)
+        registry.register_with_capabilities(
+            name.lower(), adapter_class, capabilities, descriptor
+        )
     else:
         # Fallback for compatibility
         registry.register(name.lower(), adapter_class)
@@ -258,3 +311,39 @@ def get_platform_capabilities(name: str) -> PlatformCapabilities:
         return registry.get_capabilities(name.lower())
     # Fallback to defaults
     return PlatformCapabilities()
+
+
+def get_platform_descriptor(name: str) -> Optional[ChannelDescriptor]:
+    """Get the self-description descriptor for a platform, if any.
+
+    Args:
+        name: Platform identifier.
+
+    Returns:
+        The channel descriptor (config fields, setup hook, system-prompt hint),
+        or None if the platform does not self-describe.
+    """
+    registry = _get_lazy_registry()
+    if isinstance(registry, BotPlatformRegistry):
+        return registry.get_descriptor(name.lower())
+    return None
+
+
+def get_channel_system_prompt_hint(name: str) -> str:
+    """Return the system-prompt hint a channel declares, or an empty string.
+
+    The gateway prompt assembly injects this whenever the channel is active so
+    the agent knows which platform it is replying on and its constraints (e.g.
+    "You are replying on IRC: plain text only, one short line."). Built-in
+    platforms without a descriptor return "" and are unaffected.
+
+    Args:
+        name: Platform identifier.
+
+    Returns:
+        The channel's ``system_prompt_hint``, or "" when not declared.
+    """
+    descriptor = get_platform_descriptor(name)
+    if descriptor is None:
+        return ""
+    return getattr(descriptor, "system_prompt_hint", "") or ""

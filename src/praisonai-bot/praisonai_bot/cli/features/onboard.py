@@ -131,6 +131,64 @@ PLATFORMS = {
 }
 
 
+def _plugin_platforms() -> Dict[str, Dict[str, Any]]:
+    """Return onboarding info for discovered plugin channels (Issue #2801).
+
+    Enumerates the channel registry (``list_platforms()`` — the single source of
+    truth, incl. ``praisonai.channels`` entry points) and, for any platform not
+    already covered by the built-in ``PLATFORMS`` dict, synthesises a wizard
+    entry from its ``ChannelDescriptor`` so a ``pip install``-ed channel shows
+    up in ``praisonai gateway onboard`` with zero core edits. Best-effort: any
+    failure yields an empty dict and the wizard falls back to built-ins only.
+    """
+    result: Dict[str, Dict[str, Any]] = {}
+    try:
+        from praisonai_bot.bots._registry import (
+            get_platform_descriptor,
+            list_platforms,
+        )
+    except Exception:
+        return result
+    try:
+        names = list_platforms()
+    except Exception:
+        return result
+    for name in names:
+        if name in PLATFORMS:
+            continue
+        try:
+            descriptor = get_platform_descriptor(name)
+        except Exception:
+            descriptor = None
+        if descriptor is None:
+            continue
+        info: Dict[str, Any] = {
+            "name": name.capitalize(),
+            "token_env": f"{name.upper()}_TOKEN",
+            "token_help": getattr(descriptor, "system_prompt_hint", "") or "",
+            "install_hint": f"pip install praisonai-{name}",
+            "plugin": True,
+        }
+        fields = getattr(descriptor, "config_fields", None) or []
+        extra_env: Dict[str, str] = {}
+        for spec in fields:
+            env_key = getattr(spec, "env", None)
+            if env_key:
+                extra_env[env_key] = getattr(spec, "prompt", "") or getattr(spec, "name", "")
+        if extra_env:
+            info["extra_env"] = extra_env
+        info["config_fields"] = list(fields)
+        result[name] = info
+    return result
+
+
+def _available_platforms() -> Dict[str, Dict[str, Any]]:
+    """Built-in ``PLATFORMS`` merged with discovered plugin channels."""
+    merged = dict(PLATFORMS)
+    merged.update(_plugin_platforms())
+    return merged
+
+
 def _praison_home() -> Path:
     """Return ``$PRAISONAI_HOME`` or ``~/.praisonai``."""
     override = os.environ.get("PRAISONAI_HOME")
@@ -411,8 +469,10 @@ class OnboardWizard:
             "You can create multiple bots on the same platform for different roles.\n"
             "For example: @company_cfo_bot, @company_ops_bot, @company_content_bot\n"
         )
-        for key, info in PLATFORMS.items():
-            console.print(f"  [cyan]{key}[/cyan] — {info['name']}")
+        available = _available_platforms()
+        for key, info in available.items():
+            suffix = " [dim](plugin)[/dim]" if info.get("plugin") else ""
+            console.print(f"  [cyan]{key}[/cyan] — {info['name']}{suffix}")
 
         # Start with first platform
         first_platform = _prompt_ask(
@@ -421,7 +481,7 @@ class OnboardWizard:
             default="telegram",
         ).strip().lower()
         
-        if first_platform not in PLATFORMS:
+        if first_platform not in available:
             console.print(f"[red]Unknown platform: {first_platform}[/red]")
             return
             
@@ -443,11 +503,11 @@ class OnboardWizard:
             # Ask for platform
             platform = _prompt_ask(
                 Prompt,
-                "Platform (telegram, discord, slack, whatsapp)",
+                f"Platform ({', '.join(available)})",
                 default=first_platform,
             ).strip().lower()
             
-            if platform not in PLATFORMS:
+            if platform not in available:
                 console.print(f"[red]Unknown platform: {platform}[/red]")
                 continue
                 
@@ -635,7 +695,7 @@ class OnboardWizard:
 
     def _configure_channel(self, console, prompt_cls, platform: str, is_first: bool = False) -> None:
         """Configure a single channel for a platform."""
-        info = PLATFORMS[platform]
+        info = _available_platforms().get(platform, PLATFORMS.get(platform, {}))
         
         if is_first:
             # For first channel, use default channel name
@@ -873,8 +933,9 @@ class OnboardWizard:
         allowlist prompt, and persistence to
         ``~/.praisonai/.env``.
         """
+        available = _available_platforms()
         print("\n=== PraisonAI Bot Setup ===\n")
-        print("Available platforms: telegram, discord, slack, whatsapp")
+        print(f"Available platforms: {', '.join(available)}")
         platforms_input = _plain_input(
             "Platform(s) [comma-separated, default=telegram]: ",
             default="telegram",
@@ -883,7 +944,7 @@ class OnboardWizard:
 
         env_to_save: Dict[str, str] = {}
         for plat in self.selected_platforms:
-            info = PLATFORMS.get(plat, {})
+            info = available.get(plat, {})
             env_var = info.get("token_env", f"{plat.upper()}_BOT_TOKEN")
             existing = os.environ.get(env_var)
             if existing:

@@ -46,3 +46,102 @@ def test_channels_discovery_failure_is_non_fatal():
 
     # Built-ins are still available despite the discovery failure.
     assert "telegram" in reg.list_names()
+
+
+# ---------------------------------------------------------------------------
+# Channel self-description descriptor (Issue #2801)
+# ---------------------------------------------------------------------------
+
+from praisonaiagents.bots import ChannelField  # noqa: E402
+
+
+class _IRCBot:
+    pass
+
+
+class _IRCDescriptor:
+    config_fields = [
+        ChannelField("server", required=True, prompt="IRC server host"),
+        ChannelField("nickserv_password", secret=True, env="IRC_NICKSERV_PASSWORD"),
+    ]
+    system_prompt_hint = "You are replying on IRC: plain text only."
+
+    def setup(self, io):
+        return {}
+
+
+def test_register_platform_stores_descriptor():
+    """A descriptor passed to register_platform is retrievable."""
+    reg = R.BotPlatformRegistry()
+    reg.register_with_capabilities("irc", _IRCBot, descriptor=_IRCDescriptor())
+
+    desc = reg.get_descriptor("irc")
+    assert desc is not None
+    assert desc.system_prompt_hint == "You are replying on IRC: plain text only."
+    assert [f.name for f in desc.config_fields] == ["server", "nickserv_password"]
+
+
+def test_get_descriptor_from_adapter_attribute():
+    """A channel may self-describe via a ``channel_descriptor`` attribute."""
+    class SelfDescribingBot:
+        channel_descriptor = _IRCDescriptor()
+
+    reg = R.BotPlatformRegistry()
+    reg.register("irc2", SelfDescribingBot)
+
+    desc = reg.get_descriptor("irc2")
+    assert desc is not None
+    assert desc.system_prompt_hint.startswith("You are replying on IRC")
+
+
+def test_get_descriptor_none_for_builtin_without_descriptor():
+    """Built-in platforms without a descriptor return None."""
+    reg = R.BotPlatformRegistry()
+    assert reg.get_descriptor("telegram") is None
+
+
+def test_module_level_descriptor_helpers(monkeypatch):
+    """Module-level helpers expose descriptor + system-prompt hint."""
+    R.register_platform("irc3", _IRCBot, descriptor=_IRCDescriptor())
+    assert "irc3" in R.list_platforms()
+    assert R.get_platform_descriptor("irc3") is not None
+    assert R.get_channel_system_prompt_hint("irc3").startswith("You are replying on IRC")
+    # Unknown / undescribed channels yield an empty hint, never an error.
+    assert R.get_channel_system_prompt_hint("telegram") == ""
+
+
+def test_config_schema_preserves_plugin_fields(monkeypatch):
+    """Plugin-declared config keys reach the adapter instead of being dropped."""
+    from praisonai_bot.bots._config_schema import validate_gateway_config
+
+    R.register_platform("irc4", _IRCBot, descriptor=_IRCDescriptor())
+    monkeypatch.setenv("IRC_NICKSERV_PASSWORD", "s3cret")
+
+    cfg = validate_gateway_config(
+        {
+            "agent": {"name": "a"},
+            "channels": {"irc4": {"server": "irc.libera.chat"}},
+        },
+        apply_env_substitution=False,
+    )
+    ch = cfg.channels["irc4"]
+    # Unknown key preserved (extra="allow") rather than silently dropped.
+    assert ch.server == "irc.libera.chat"
+    # Secret resolved from the declared env fallback.
+    assert ch.nickserv_password == "s3cret"
+
+
+def test_config_schema_enforces_required_plugin_field(monkeypatch):
+    """A required plugin field that is missing raises a clear error."""
+    import pytest
+
+    from praisonai_bot.bots._config_schema import validate_gateway_config
+
+    R.register_platform("irc5", _IRCBot, descriptor=_IRCDescriptor())
+    monkeypatch.delenv("IRC_NICKSERV_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError, match="server"):
+        validate_gateway_config(
+            {"agent": {"name": "a"}, "channels": {"irc5": {}}},
+            apply_env_substitution=False,
+        )

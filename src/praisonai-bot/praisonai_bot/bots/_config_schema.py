@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,17 @@ class SttConfigSchema(BaseModel):
 
 
 class ChannelConfigSchema(BaseModel):
-    """Schema for a single channel configuration."""
+    """Schema for a single channel configuration.
+
+    Accepts plugin-declared config keys: a channel registered via
+    ``register_platform(..., descriptor=...)`` (Issue #2801) can declare its
+    own config fields (e.g. IRC's ``server``/``nickserv_password``) which are
+    preserved here instead of being silently dropped. ``extra="allow"`` keeps
+    unknown keys so they reach the adapter, and ``apply_channel_descriptor``
+    resolves env fallbacks and enforces required plugin fields.
+    """
+    model_config = ConfigDict(extra="allow")
+
     platform: Optional[str] = None
     token: str = ""
     app_token: Optional[str] = None  # For Slack Socket Mode
@@ -347,6 +357,43 @@ class ChannelConfigSchema(BaseModel):
                 "Channel uses 'respond_all' group_policy. "
                 "Consider 'mention_only' for better security."
             )
+        return self
+
+    def apply_channel_descriptor(self, descriptor: Any) -> "ChannelConfigSchema":
+        """Wire plugin-declared config fields from a channel descriptor.
+
+        For each ``ChannelField`` the descriptor declares (Issue #2801):
+        - if the value is missing but an ``env`` fallback is set and present in
+          the environment, populate it (so a plugin's secret can come from the
+          environment just like the built-in ``token`` field);
+        - if the field is ``required`` and still missing, raise a clear error
+          instead of the value being silently dropped.
+
+        No-op when the descriptor is None or declares no fields, so built-in
+        platforms are unaffected.
+        """
+        fields = getattr(descriptor, "config_fields", None)
+        if not fields:
+            return self
+        for spec in fields:
+            name = getattr(spec, "name", None)
+            if not name:
+                continue
+            current = getattr(self, name, None)
+            if current in (None, ""):
+                env_key = getattr(spec, "env", None)
+                if env_key:
+                    resolved = os.environ.get(env_key)
+                    if resolved:
+                        setattr(self, name, resolved)
+                        current = resolved
+            if getattr(spec, "required", False) and current in (None, ""):
+                raise ValueError(
+                    f"Missing required config field '{name}' for this channel. "
+                    + (f"Set it in the config or via the '{getattr(spec, 'env', '')}' "
+                       "environment variable." if getattr(spec, "env", None)
+                       else "Set it in the channel config.")
+                )
         return self
 
 
@@ -467,7 +514,25 @@ class GatewayConfigSchema(BaseModel):
         for name, channel in self.channels.items():
             if not channel.platform:
                 channel.platform = name
-                
+
+        # Wire plugin-declared config fields (Issue #2801): a channel registered
+        # with a descriptor can resolve env fallbacks and enforce its required
+        # fields. Descriptor lookup is best-effort — built-in platforms without
+        # a descriptor are unaffected.
+        try:
+            from ._registry import get_platform_descriptor
+        except Exception:
+            get_platform_descriptor = None
+        if get_platform_descriptor is not None:
+            for name, channel in self.channels.items():
+                platform = (channel.platform or name).lower()
+                try:
+                    descriptor = get_platform_descriptor(platform)
+                except Exception:
+                    descriptor = None
+                if descriptor is not None:
+                    channel.apply_channel_descriptor(descriptor)
+
         return self
 
 

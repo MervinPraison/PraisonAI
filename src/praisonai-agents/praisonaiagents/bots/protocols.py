@@ -169,6 +169,91 @@ class PlatformCapabilities:
         )
 
 
+@dataclass(frozen=True)
+class ChannelField:
+    """A single configuration field a channel plugin declares about itself.
+
+    A channel adapter attaches a list of these (via ``ChannelDescriptor``) so
+    the gateway can wire its config schema, onboarding wizard, and env-var
+    fallbacks with zero core edits. Without this, a plugin channel's own keys
+    (e.g. IRC's ``server`` / ``nickserv_password``) are silently dropped by the
+    fixed ``ChannelConfigSchema`` under Pydantic's ``extra="ignore"`` default.
+
+    Attributes:
+        name: Config key name (as it appears under ``channels.<platform>``).
+        required: Whether the field must be provided.
+        secret: Whether the value is sensitive (masked in prompts/logs).
+        prompt: Human-friendly prompt shown by the onboarding wizard.
+        env: Optional environment-variable name used as a fallback source.
+    """
+
+    name: str
+    required: bool = False
+    secret: bool = False
+    prompt: str = ""
+    env: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "name": self.name,
+            "required": self.required,
+            "secret": self.secret,
+            "prompt": self.prompt,
+            "env": self.env,
+        }
+
+
+@runtime_checkable
+class ChannelDescriptor(Protocol):
+    """Optional self-description a channel adapter may expose.
+
+    A channel plugin declares — in one place, at registration — everything the
+    gateway needs to treat it as first-class:
+
+    - ``config_fields``: its config keys, merged into ``ChannelConfigSchema`` at
+      runtime instead of being dropped;
+    - ``system_prompt_hint``: a hint injected whenever that channel is active so
+      the agent knows which platform it is replying on and its constraints;
+    - ``setup``: an optional interactive setup hook so ``praisonai gateway
+      onboard`` can walk the user through configuration.
+
+    The YAML schema, the onboarding wizard, and the agent prompt all read this
+    single contract. Protocol-only (no heavy imports) so it stays in core; the
+    wrapper subsystems (``_config_schema.py``, ``onboard.py``, prompt assembly)
+    are the consumers.
+
+    Example (implementation ships in a ``praisonai.channels`` plugin)::
+
+        class IRCDescriptor:
+            config_fields = [
+                ChannelField("server", required=True, prompt="IRC server host"),
+                ChannelField("nickserv_password", secret=True,
+                             env="IRC_NICKSERV_PASSWORD"),
+            ]
+            system_prompt_hint = (
+                "You are replying on IRC: plain text only, one short line."
+            )
+
+        register_platform("irc", IRCBot, descriptor=IRCDescriptor())
+    """
+
+    config_fields: List[ChannelField]
+    system_prompt_hint: str
+
+    def setup(self, io: Any) -> Dict[str, Any]:
+        """Optional interactive setup returning env/config values.
+
+        Args:
+            io: An onboarding IO helper (prompt/confirm/getpass) supplied by the
+                wrapper's wizard.
+
+        Returns:
+            A mapping of collected config/env values.
+        """
+        ...
+
+
 @runtime_checkable
 class WebhookVerifierProtocol(Protocol):
     """Protocol for verifying inbound webhook authenticity.
