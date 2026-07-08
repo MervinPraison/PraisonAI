@@ -1243,22 +1243,25 @@ class CapabilitiesHandler:
         from the top-level ``praisonai search`` command.
         """
         retrieval_flags = {"--collection", "-c", "--top-k", "-k", "--hybrid"}
-        if any(arg in retrieval_flags for arg in unknown_args):
+        if any(arg.split("=", 1)[0] in retrieval_flags for arg in unknown_args):
             try:
                 from ..commands.retrieval import register_commands
+                import typer as _typer
             except ImportError as e:
                 print(f"ERROR: {e}")
                 return 1
-            import typer as _typer
 
             retrieval_app = _typer.Typer()
             register_commands(retrieval_app)
             try:
-                retrieval_app(["search"] + list(unknown_args), standalone_mode=False)
+                retrieval_app(["search", *list(unknown_args)], standalone_mode=False)
             except SystemExit as e:
                 return e.code if e.code else 0
             except _typer.Exit as e:
                 return e.exit_code if e.exit_code else 0
+            except Exception as e:
+                print(f"Error: {e}")
+                return 1
             return 0
 
         parser = argparse.ArgumentParser(prog="praisonai search")

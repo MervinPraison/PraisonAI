@@ -77,6 +77,42 @@ def test_search_top_k_and_hybrid_flags_delegate(monkeypatch):
         assert recorder["invoked_args"] == ["search", "q", *flag]
 
 
+def test_search_collection_equals_syntax_delegates(monkeypatch):
+    """``--collection=value`` syntax must also route to the retrieval CLI."""
+    recorder = {}
+    _install_fake_retrieval(monkeypatch, recorder)
+
+    rc = CapabilitiesHandler.handle_search(
+        args=None,
+        unknown_args=["test", "--collection=default"],
+    )
+
+    assert rc == 0
+    assert recorder["invoked_args"] == ["search", "test", "--collection=default"]
+
+
+def test_search_delegation_propagates_exit_code(monkeypatch):
+    """Non-zero ``typer.Exit`` from the retrieval CLI is returned to the caller."""
+    recorder = {}
+    _install_fake_retrieval(monkeypatch, recorder)
+
+    fake_typer = sys.modules["typer"]
+
+    class _FailingApp:
+        def __call__(self, args, standalone_mode=True):
+            recorder["invoked_args"] = list(args)
+            raise fake_typer.Exit(exit_code=2)
+
+    fake_typer.Typer = lambda *a, **k: _FailingApp()
+
+    rc = CapabilitiesHandler.handle_search(
+        args=None,
+        unknown_args=["q", "--collection", "default"],
+    )
+
+    assert rc == 2
+
+
 def test_plain_query_does_not_delegate(monkeypatch):
     """Without retrieval flags, delegation must NOT happen (web-search path)."""
     recorder = {}
