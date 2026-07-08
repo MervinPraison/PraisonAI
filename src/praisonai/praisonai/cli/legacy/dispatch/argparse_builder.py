@@ -9,6 +9,60 @@ import sys
 from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registry_module
 
 
+# Bare verbs that look like a top-level command but do not exist as one.
+# Typing them (e.g. `praisonai show`) must NOT silently become a paid one-shot
+# LLM prompt; instead we point users at the real command surfaces.
+RESERVED_UNKNOWN_VERBS = {
+    "show": (
+        "There is no top-level 'show' command. Did you mean one of:\n"
+        "  praisonai paths           # storage paths\n"
+        "  praisonai version show    # version details\n"
+        "  praisonai memory show     # memory contents\n"
+        "  praisonai config show     # configuration"
+    ),
+}
+
+
+def classify_unknown_command(command: str, special_commands):
+    """Classify a bare positional that is not a known command or file.
+
+    Returns an error/hint message string when the token looks like a mistyped
+    or reserved command that should NOT be run as a one-shot LLM prompt.
+    Returns None when the token should be treated as a direct prompt
+    (backward-compatible behaviour, e.g. ``praisonai "write a poem"``).
+    """
+    if not command:
+        return None
+
+    token = command.strip()
+    # Genuine natural-language prompts contain spaces; only guard single tokens
+    # that look like a command a user might have mistyped.
+    if not token or " " in token:
+        return None
+
+    lowered = token.lower()
+
+    reserved_hint = RESERVED_UNKNOWN_VERBS.get(lowered)
+    if reserved_hint is not None:
+        return f"Unknown command: {token!r}\n{reserved_hint}"
+
+    # Fuzzy-match a lone word against known commands to catch typos like
+    # ``praisonai memoyr`` without hijacking real single-word prompts.
+    import difflib
+
+    matches = difflib.get_close_matches(lowered, special_commands, n=3, cutoff=0.8)
+    if matches:
+        suggestion = ", ".join(matches)
+        return (
+            f"Unknown command: {token!r}\n"
+            f"Did you mean: {suggestion}?\n"
+            "Run 'praisonai --help' to see available commands, or use "
+            "'praisonai run \"<prompt>\"' to send a prompt to the model."
+        )
+
+    return None
+
+
 def build_argument_parser(in_test_env: bool):
     """Build ArgumentParser and parse argv. Returns (args, unknown_args, special_commands)."""
     special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
