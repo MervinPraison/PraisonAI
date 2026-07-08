@@ -221,17 +221,34 @@ def query_command(
                             if hasattr(retrieval_config, key):
                                 setattr(retrieval_config, key, value)
             
-            agent = Agent(
-                name="QueryAgent",
-                instructions="You are a helpful assistant that answers questions based on the provided knowledge.",
-                knowledge=[],  # Empty - we'll use existing indexed knowledge
-                retrieval_config=retrieval_config,
-                verbose=verbose,
-            )
-            
+            # Build Agent using only constructor params the installed
+            # praisonaiagents version actually supports. The Agent-first API
+            # consolidates RAG under knowledge=/_retrieval_config; it does not
+            # accept a retrieval_config= kwarg (see issue #2774).
+            import inspect
+            agent_kwargs = {
+                "name": "QueryAgent",
+                "instructions": "You are a helpful assistant that answers questions based on the provided knowledge.",
+                "knowledge": [],  # Empty - we'll use existing indexed knowledge
+            }
+            try:
+                agent_params = inspect.signature(Agent.__init__).parameters
+            except (TypeError, ValueError):
+                agent_params = {}
+            if "verbose" in agent_params:
+                agent_kwargs["verbose"] = verbose
+            elif "output" in agent_params:
+                agent_kwargs["output"] = "verbose" if verbose else None
+
+            agent = Agent(**agent_kwargs)
+
             agent._ensure_knowledge_processed = lambda: None
             from praisonaiagents.knowledge import Knowledge
-            agent.knowledge = Knowledge(config=retrieval_config.to_knowledge_config(), verbose=verbose)
+            try:
+                agent.knowledge = Knowledge(config=retrieval_config.to_knowledge_config(), verbose=verbose)
+            except TypeError:
+                agent.knowledge = Knowledge(config=retrieval_config.to_knowledge_config())
+            agent._retrieval_config = retrieval_config
             agent._knowledge_processed = True
             
             if verbose:
