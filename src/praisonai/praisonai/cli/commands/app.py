@@ -137,3 +137,10 @@ def _load_agents_from_config(config_path: str, console) -> list:
             console.print(f"[yellow]Warning: Could not load agents from config: {e}[/yellow]")
     
     return agents
+
+
+# Expose the command under the name the praisonai-code lazy loader looks up
+# via getattr(module, "app"), so the wrapper owns the `app` command when
+# installed (C8.2). Without this alias the loader raises AttributeError and
+# silently falls back to the inline duplicate in praisonai-code.
+app = app_command
