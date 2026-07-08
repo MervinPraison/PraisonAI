@@ -18,7 +18,20 @@ def get_package_version() -> str:
 
 
 def get_wrapper_version() -> Optional[str]:
-    """Return the installed ``praisonai`` wrapper version, if present."""
+    """Return the installed ``praisonai`` wrapper version, if present.
+
+    Prefer the source ``praisonai.version.__version__`` so that editable
+    installs report the same version as ``praisonai --version`` even when the
+    installed package metadata is stale. Fall back to package metadata and the
+    wrapper bridge when the source module is unavailable.
+    """
+    try:
+        from praisonai.version import __version__ as wrapper_version
+
+        return str(wrapper_version)
+    except Exception:
+        pass
+
     try:
         from importlib.metadata import version
 
