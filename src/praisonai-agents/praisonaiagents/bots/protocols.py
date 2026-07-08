@@ -169,6 +169,106 @@ class PlatformCapabilities:
         )
 
 
+@dataclass(frozen=True)
+class ChannelField:
+    """A single configuration field a channel plugin declares about itself.
+
+    A channel adapter attaches a list of these (via ``ChannelDescriptor``) so
+    the gateway can wire its config schema, onboarding wizard, and env-var
+    fallbacks with zero core edits. Without this, a plugin channel's own keys
+    (e.g. IRC's ``server`` / ``nickserv_password``) are silently dropped by the
+    fixed ``ChannelConfigSchema`` under Pydantic's ``extra="ignore"`` default.
+
+    Attributes:
+        name: Config key name (as it appears under ``channels.<platform>``).
+        required: Whether the field must be provided.
+        secret: Whether the value is sensitive (masked in prompts/logs).
+        prompt: Human-friendly prompt shown by the onboarding wizard.
+        env: Optional environment-variable name used as a fallback source.
+    """
+
+    name: str
+    required: bool = False
+    secret: bool = False
+    prompt: str = ""
+    env: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "name": self.name,
+            "required": self.required,
+            "secret": self.secret,
+            "prompt": self.prompt,
+            "env": self.env,
+        }
+
+
+@runtime_checkable
+class ChannelDescriptor(Protocol):
+    """Optional self-description a channel adapter may expose.
+
+    A channel plugin declares — in one place, at registration — everything the
+    gateway needs to treat it as first-class:
+
+    - ``config_fields``: its config keys, merged into ``ChannelConfigSchema`` at
+      runtime instead of being dropped;
+    - ``system_prompt_hint``: a hint injected whenever that channel is active so
+      the agent knows which platform it is replying on and its constraints.
+
+    The YAML schema, the onboarding wizard, and the agent prompt all read this
+    single contract. Protocol-only (no heavy imports) so it stays in core; the
+    wrapper subsystems (``_config_schema.py``, ``onboard.py``, prompt assembly)
+    are the consumers.
+
+    The two required members above are enough to be first-class: the onboarding
+    wizard derives its prompts directly from ``config_fields`` (both env-backed
+    secrets and plain config keys). A descriptor MAY additionally expose an
+    optional ``setup(io)`` hook for bespoke, multi-step flows the field list
+    cannot express; the wizard calls it when present and merges the returned
+    values. Because it is optional, a minimal descriptor (like the example
+    below) omits it — so this Protocol is intentionally *not* used as an
+    ``isinstance`` type guard; consumers read attributes with ``getattr``
+    fallbacks instead.
+
+    Example (implementation ships in a ``praisonai.channels`` plugin)::
+
+        class IRCDescriptor:
+            config_fields = [
+                ChannelField("server", required=True, prompt="IRC server host"),
+                ChannelField("nickserv_password", secret=True,
+                             env="IRC_NICKSERV_PASSWORD"),
+            ]
+            system_prompt_hint = (
+                "You are replying on IRC: plain text only, one short line."
+            )
+
+        register_platform("irc", IRCBot, descriptor=IRCDescriptor())
+    """
+
+    config_fields: List[ChannelField]
+    system_prompt_hint: str
+
+    # ``setup`` is an OPTIONAL member: descriptors that only need declarative
+    # ``config_fields`` omit it entirely. Declared here (with a default body so
+    # it is non-abstract) purely to document the contract for descriptors that
+    # DO want a bespoke interactive flow. Consumers must probe with
+    # ``getattr(descriptor, "setup", None)`` rather than relying on the Protocol
+    # for structural typing, since ``@runtime_checkable`` cannot verify the
+    # data members ``config_fields``/``system_prompt_hint`` anyway.
+    def setup(self, io: Any) -> Dict[str, Any]:  # noqa: D401 - optional hook
+        """Optional interactive setup returning collected config/env values.
+
+        Args:
+            io: An onboarding IO helper (prompt/confirm/getpass) supplied by the
+                wrapper's wizard.
+
+        Returns:
+            A mapping of collected config/env values, merged by the wizard.
+        """
+        return {}
+
+
 @runtime_checkable
 class WebhookVerifierProtocol(Protocol):
     """Protocol for verifying inbound webhook authenticity.

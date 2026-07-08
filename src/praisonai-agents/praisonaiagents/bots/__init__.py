@@ -28,6 +28,8 @@ from .protocols import (
     EmailInbox,
     SupportsPresentation,
     PlatformCapabilities,
+    ChannelField,
+    ChannelDescriptor,
     WebhookVerifierProtocol,
 )
 from .base import (
@@ -110,6 +112,8 @@ __all__ = [
     "BlockType",
     "adapt_presentation",
     "PlatformCapabilities",
+    "ChannelField",
+    "ChannelDescriptor",
     "WebhookVerifierProtocol",
     "BasePlatformAdapter",
     "SendResult",

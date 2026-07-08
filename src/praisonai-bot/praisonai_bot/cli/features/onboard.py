@@ -131,6 +131,67 @@ PLATFORMS = {
 }
 
 
+def _plugin_platforms() -> Dict[str, Dict[str, Any]]:
+    """Return onboarding info for discovered plugin channels (Issue #2801).
+
+    Enumerates the channel registry (``list_platforms()`` — the single source of
+    truth, incl. ``praisonai.channels`` entry points) and, for any platform not
+    already covered by the built-in ``PLATFORMS`` dict, synthesises a wizard
+    entry from its ``ChannelDescriptor`` so a ``pip install``-ed channel shows
+    up in ``praisonai gateway onboard`` with zero core edits. Best-effort: any
+    failure yields an empty dict and the wizard falls back to built-ins only.
+    """
+    result: Dict[str, Dict[str, Any]] = {}
+    try:
+        from praisonai_bot.bots._registry import (
+            get_platform_descriptor,
+            list_platforms,
+        )
+    except Exception:
+        return result
+    try:
+        names = list_platforms()
+    except Exception:
+        return result
+    for name in names:
+        if name in PLATFORMS:
+            continue
+        try:
+            descriptor = get_platform_descriptor(name)
+        except Exception:
+            descriptor = None
+        if descriptor is None:
+            continue
+        info: Dict[str, Any] = {
+            "name": name.capitalize(),
+            "token_env": f"{name.upper()}_TOKEN",
+            "token_help": getattr(descriptor, "system_prompt_hint", "") or "",
+            "install_hint": f"pip install praisonai-{name}",
+            "plugin": True,
+        }
+        fields = getattr(descriptor, "config_fields", None) or []
+        extra_env: Dict[str, str] = {}
+        for spec in fields:
+            env_key = getattr(spec, "env", None)
+            if env_key:
+                extra_env[env_key] = getattr(spec, "prompt", "") or getattr(spec, "name", "")
+        if extra_env:
+            info["extra_env"] = extra_env
+        info["config_fields"] = list(fields)
+        # Keep the descriptor so the wizard can invoke an optional ``setup(io)``
+        # hook for bespoke multi-step flows (Issue #2801).
+        info["descriptor"] = descriptor
+        result[name] = info
+    return result
+
+
+def _available_platforms() -> Dict[str, Dict[str, Any]]:
+    """Built-in ``PLATFORMS`` merged with discovered plugin channels."""
+    merged = dict(PLATFORMS)
+    merged.update(_plugin_platforms())
+    return merged
+
+
 def _praison_home() -> Path:
     """Return ``$PRAISONAI_HOME`` or ``~/.praisonai``."""
     override = os.environ.get("PRAISONAI_HOME")
@@ -276,7 +337,14 @@ def _generate_bot_yaml_multi_channel(channels: Dict[str, Dict], agent_name: str 
         
         if platform == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
-            
+
+        # Plugin config-only fields collected during onboarding (Issue #2801):
+        # a channel's own keys (e.g. IRC's ``server``) written verbatim so they
+        # reach the adapter via ChannelConfigSchema(extra="allow").
+        for cfg_key, cfg_val in (channel.get("config") or {}).items():
+            safe_val = str(cfg_val).replace('\\', '\\\\').replace('"', '\\"')
+            lines.append(f'    {cfg_key}: "{safe_val}"')
+
         # Routing to specific agent
         lines.append("    routes:")
         lines.append(f"      default: {role}")
@@ -411,8 +479,10 @@ class OnboardWizard:
             "You can create multiple bots on the same platform for different roles.\n"
             "For example: @company_cfo_bot, @company_ops_bot, @company_content_bot\n"
         )
-        for key, info in PLATFORMS.items():
-            console.print(f"  [cyan]{key}[/cyan] — {info['name']}")
+        available = _available_platforms()
+        for key, info in available.items():
+            suffix = " [dim](plugin)[/dim]" if info.get("plugin") else ""
+            console.print(f"  [cyan]{key}[/cyan] — {info['name']}{suffix}")
 
         # Start with first platform
         first_platform = _prompt_ask(
@@ -421,7 +491,7 @@ class OnboardWizard:
             default="telegram",
         ).strip().lower()
         
-        if first_platform not in PLATFORMS:
+        if first_platform not in available:
             console.print(f"[red]Unknown platform: {first_platform}[/red]")
             return
             
@@ -443,11 +513,11 @@ class OnboardWizard:
             # Ask for platform
             platform = _prompt_ask(
                 Prompt,
-                "Platform (telegram, discord, slack, whatsapp)",
+                f"Platform ({', '.join(available)})",
                 default=first_platform,
             ).strip().lower()
             
-            if platform not in PLATFORMS:
+            if platform not in available:
                 console.print(f"[red]Unknown platform: {platform}[/red]")
                 continue
                 
@@ -635,7 +705,7 @@ class OnboardWizard:
 
     def _configure_channel(self, console, prompt_cls, platform: str, is_first: bool = False) -> None:
         """Configure a single channel for a platform."""
-        info = PLATFORMS[platform]
+        info = _available_platforms().get(platform, PLATFORMS.get(platform, {}))
         
         if is_first:
             # For first channel, use default channel name
@@ -669,13 +739,17 @@ class OnboardWizard:
             # Use standard name for single channel
             env_var = info["token_env"]
             
-        # Store channel configuration
+        # Store channel configuration. ``config`` collects plugin-declared
+        # config-only fields (a ``ChannelField`` with no ``env`` fallback, e.g.
+        # IRC's ``server``) so they land in bot.yaml under this channel instead
+        # of being silently skipped by the wizard (Issue #2801).
         self.channels[channel_key] = {
             "platform": platform,
             "role": role or "assistant",
             "env_var": env_var,
             "token": "",
-            "info": info
+            "info": info,
+            "config": {},
         }
         
         console.print(f"  [green]✓[/green] Configured channel '[cyan]{channel_key}[/cyan]' (env: [cyan]{env_var}[/cyan])")
@@ -771,6 +845,62 @@ class OnboardWizard:
                     if extra_val:
                         os.environ[extra_env] = extra_val
                         env_to_save[extra_env] = extra_val
+
+            # Plugin config-only fields (Issue #2801): a ``ChannelField`` with
+            # no ``env`` fallback (e.g. IRC's ``server``) is written into
+            # bot.yaml under this channel, not to the .env file. Without this,
+            # required config-only fields were never surfaced and the user hit a
+            # runtime error at gateway start. ``extra_env`` above already covers
+            # env-backed fields, so we prompt only the rest here.
+            env_backed = set((info.get("extra_env") or {}).keys())
+            for spec in info.get("config_fields", []):
+                field_name = getattr(spec, "name", None)
+                field_env = getattr(spec, "env", None)
+                if not field_name or (field_env and field_env in env_backed):
+                    continue
+                field_prompt = getattr(spec, "prompt", "") or field_name
+                required = getattr(spec, "required", False)
+                secret = getattr(spec, "secret", False)
+                label = f"  {field_prompt} ({field_name})"
+                if required:
+                    label += " [required]"
+                value = _prompt_ask(
+                    prompt_cls,
+                    label,
+                    password=secret,
+                    default="",
+                    show_default=False,
+                ).strip()
+                if value:
+                    channel.setdefault("config", {})[field_name] = value
+                elif required:
+                    console.print(
+                        f"  [yellow]⚠[/yellow] Required field '{field_name}' left "
+                        f"blank — set it in bot.yaml before starting."
+                    )
+
+            # Optional bespoke setup hook (Issue #2801): a descriptor MAY expose
+            # ``setup(io)`` for multi-step flows the declarative field list can't
+            # express. Best-effort; returned values are merged into the channel
+            # config (or the .env file when the key names an env var).
+            descriptor = info.get("descriptor")
+            setup_hook = getattr(descriptor, "setup", None) if descriptor else None
+            if callable(setup_hook):
+                try:
+                    collected = setup_hook(self) or {}
+                except Exception as exc:  # never let a plugin break onboarding
+                    console.print(
+                        f"  [yellow]⚠[/yellow] Channel setup hook failed: {str(exc)[:100]}"
+                    )
+                    collected = {}
+                for k, v in (collected or {}).items():
+                    if not v:
+                        continue
+                    if k.isupper() and "_" in k:
+                        os.environ[k] = v
+                        env_to_save[k] = v
+                    else:
+                        channel.setdefault("config", {})[k] = v
 
             # Configure allowlist for this channel
             allowed_env = info.get("allowed_users_env")
@@ -873,8 +1003,9 @@ class OnboardWizard:
         allowlist prompt, and persistence to
         ``~/.praisonai/.env``.
         """
+        available = _available_platforms()
         print("\n=== PraisonAI Bot Setup ===\n")
-        print("Available platforms: telegram, discord, slack, whatsapp")
+        print(f"Available platforms: {', '.join(available)}")
         platforms_input = _plain_input(
             "Platform(s) [comma-separated, default=telegram]: ",
             default="telegram",
@@ -883,7 +1014,7 @@ class OnboardWizard:
 
         env_to_save: Dict[str, str] = {}
         for plat in self.selected_platforms:
-            info = PLATFORMS.get(plat, {})
+            info = available.get(plat, {})
             env_var = info.get("token_env", f"{plat.upper()}_BOT_TOKEN")
             existing = os.environ.get(env_var)
             if existing:
