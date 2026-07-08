@@ -175,3 +175,91 @@ class TestKnowledgeCLIIntegration:
         output = result.stdout + (result.output if hasattr(result, "output") else "")
         assert "not subscriptable" not in output
         assert "No results found" in output
+
+
+class TestRetrievalSearchCommand:
+    """Tests for the top-level `praisonai search` command (retrieval.py).
+
+    Mirrors the knowledge_cli regression coverage so a future refactor of the
+    parallel normalization block in retrieval.search_command cannot silently
+    reintroduce the #2775 crash.
+    """
+
+    @pytest.fixture
+    def cli_runner(self):
+        try:
+            from typer.testing import CliRunner
+            return CliRunner()
+        except ImportError:
+            pytest.skip("typer not installed")
+
+    @pytest.fixture
+    def retrieval_app(self):
+        try:
+            from praisonai.cli.commands.retrieval import app
+        except ImportError:
+            pytest.skip("retrieval CLI not installed")
+        return app
+
+    def test_search_handles_search_result_dataclass(self, cli_runner, retrieval_app, monkeypatch):
+        """`praisonai search` should not crash on a SearchResult dataclass.
+
+        Regression test for #2775 covering the parallel code path in
+        retrieval.search_command.
+        """
+        try:
+            from praisonaiagents.knowledge.models import (
+                SearchResult, SearchResultItem,
+            )
+            import praisonaiagents.knowledge as knowledge_mod
+        except ImportError:
+            pytest.skip("praisonaiagents.knowledge not installed")
+
+        search_result = SearchResult(
+            results=[
+                SearchResultItem(
+                    id="1",
+                    text="Paris is the capital of France.",
+                    score=0.9,
+                    metadata={"path": "kb-audit.txt"},
+                )
+            ]
+        )
+
+        class _FakeKnowledge:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def search(self, *args, **kwargs):
+                return search_result
+
+        monkeypatch.setattr(knowledge_mod, "Knowledge", _FakeKnowledge)
+
+        result = cli_runner.invoke(retrieval_app, ["search", "Paris"])
+        assert result.exit_code == 0
+        output = result.stdout + (result.output if hasattr(result, "output") else "")
+        assert "not subscriptable" not in output
+        assert "Paris is the capital of France." in output
+
+    def test_search_handles_empty_search_result(self, cli_runner, retrieval_app, monkeypatch):
+        """`praisonai search` should report no results for an empty SearchResult."""
+        try:
+            from praisonaiagents.knowledge.models import SearchResult
+            import praisonaiagents.knowledge as knowledge_mod
+        except ImportError:
+            pytest.skip("praisonaiagents.knowledge not installed")
+
+        class _FakeKnowledge:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def search(self, *args, **kwargs):
+                return SearchResult(results=[])
+
+        monkeypatch.setattr(knowledge_mod, "Knowledge", _FakeKnowledge)
+
+        result = cli_runner.invoke(retrieval_app, ["search", "Paris"])
+        assert result.exit_code == 0
+        output = result.stdout + (result.output if hasattr(result, "output") else "")
+        assert "not subscriptable" not in output
+        assert "No results found" in output
