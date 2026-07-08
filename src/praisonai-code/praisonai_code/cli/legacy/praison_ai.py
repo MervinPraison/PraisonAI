@@ -1646,7 +1646,7 @@ class PraisonAI:
             # one-shot LLM prompt. Fail fast with a hint instead.
             hint = _ab.classify_unknown_command(args.command, special_commands)
             if hint is not None:
-                print(hint)
+                print(hint, file=sys.stderr)
                 sys.exit(2)
             args.direct_prompt = args.command
             args.command = None

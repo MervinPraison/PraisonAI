@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import sys
+from typing import Optional, Sequence
 
 from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registry_module
 
@@ -23,7 +25,7 @@ RESERVED_UNKNOWN_VERBS = {
 }
 
 
-def classify_unknown_command(command: str, special_commands):
+def classify_unknown_command(command: Optional[str], special_commands: Sequence[str]) -> Optional[str]:
     """Classify a bare positional that is not a known command or file.
 
     Returns an error/hint message string when the token looks like a mistyped
@@ -48,8 +50,6 @@ def classify_unknown_command(command: str, special_commands):
 
     # Fuzzy-match a lone word against known commands to catch typos like
     # ``praisonai memoyr`` without hijacking real single-word prompts.
-    import difflib
-
     matches = difflib.get_close_matches(lowered, special_commands, n=3, cutoff=0.8)
     if matches:
         suggestion = ", ".join(matches)
