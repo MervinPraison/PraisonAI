@@ -34,11 +34,16 @@ steps:
 
       Third, read architecture guidelines: execute_command 'cat src/praisonai-agents/AGENTS.md'.
 
-      Fourth, decide if this issue requires code changes:
+      Fourth, decide routing before planning:
+      - Tools → PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs).
+      - Plugins → PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails).
+      Core SDK/wrapper only for protocols and CLI — external repos for Tools/Plugins.
+
+      Fifth, decide if this issue requires code changes:
       - If YES: identify the exact files and lines that must change. Output a concrete file-level plan.
       - If NO (question, discussion, duplicate, invalid): say so clearly. No code changes needed.
 
-      Output: routing decision (Core SDK / Wrapper / Tools / No-change), validation result, and exact files/lines to change.
+      Output: routing decision (Core / Wrapper / Tools-external / Plugins-external / No-change), validation result, and exact files/lines to change.
     expected_output: A decision on whether code changes are needed, and if so a concrete file-level plan.
 
   - name: Implement Fix

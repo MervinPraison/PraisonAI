@@ -289,11 +289,12 @@ jobs:
             1. Read AGENTS.md and the PR diff on the current branch.
             2. Read all PR comments and reviews (FINAL architecture reviewer / Lead Engineer must have run).
             3. Confirm SDK value gate: change strengthens praisonaiagents (no scope creep).
-            4. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
-            5. If agent.py adds >100 lines or new Agent __init__ params, respond MERGE_GATE_VERDICT: BLOCK (manual review required).
-            6. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests. Label `merge-gate-ci-only` exempts CI-only changes under `.github/workflows/`, `.github/actions/`, or merge-gate scripts.
-            7. Confirm no CHANGES_REQUESTED reviews and CI green on HEAD ${{ matrix.head_sha }}.
-            8. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
+            4. Repo routing: BLOCK if agent-callable tools (→ PraisonAI-Tools) or lifecycle plugins (→ PraisonAI-Plugins) were added to praisonaiagents/ instead of the external repo.
+            5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
+            6. If agent.py adds >100 lines or new Agent __init__ params, respond MERGE_GATE_VERDICT: BLOCK (manual review required).
+            7. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests. Label `merge-gate-ci-only` exempts CI-only changes under `.github/workflows/`, `.github/actions/`, or merge-gate scripts.
+            8. Confirm no CHANGES_REQUESTED reviews and CI green on HEAD ${{ matrix.head_sha }}.
+            9. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
 
             Do not approve or merge via GitHub UI/API — only post the verdict comment.
           disallowed_tools: |
