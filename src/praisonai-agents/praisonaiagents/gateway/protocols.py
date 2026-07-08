@@ -78,10 +78,20 @@ class GatewayCloseCode(str, Enum):
             re-authenticate (see :attr:`ConnectRecoveryStep.REAUTHENTICATE`)
             and reconnect with fresh credentials rather than backing off as if
             the server were down.
+        LIVENESS_TIMEOUT: The connection missed too many application-level
+            heartbeats (see :class:`LivenessPolicy`): its ``last_activity``
+            exceeded ``interval_ms × missed_beats_before_reap``, so the server
+            treats it as a dead/half-open peer and reaps it, releasing the
+            session/presence/queue state deterministically. Half-open sockets
+            behind NAT/proxies/mobile networks — where the peer has vanished
+            but no FIN/RST ever arrives — are the motivating case. Clients
+            should reconnect (their own watchdog typically force-reconnects
+            first) rather than treating this as a fatal error.
     """
 
     SLOW_CONSUMER = "slow_consumer"
     CREDENTIALS_ROTATED = "credentials_rotated"
+    LIVENESS_TIMEOUT = "liveness_timeout"
 
 
 class ConnectRecoveryStep(str, Enum):
@@ -140,6 +150,10 @@ class EventType(str, Enum):
     HEALTH = "health"
     ERROR = "error"
     BROADCAST = "broadcast"
+
+    # Liveness events (application-level heartbeat, transport-agnostic)
+    PING = "ping"
+    PONG = "pong"
     
     # Push channel events
     CHANNEL_SUBSCRIBE = "channel_subscribe"
@@ -3572,3 +3586,150 @@ class LifecycleCommandGuardPolicy:
 
 # Backward-compatible alias following the repo's ``*Protocol`` convention.
 LifecycleCommandPolicy = LifecycleCommandPolicyProtocol
+
+
+# ---------------------------------------------------------------------------
+# Application-level connection liveness (Issue #2798)
+#
+# The gateway advertises a ``heartbeat_ms`` policy and stamps every session's
+# ``last_activity``, but nothing enforces it: there is no protocol-level
+# ping/pong frame and no server-side sweep, so a *half-open* connection (peer
+# vanished, no FIN/RST — routine behind NAT/proxies/load-balancers/mobile) can
+# linger forever, keeping presence "online" and silently queuing/dropping
+# messages routed to it.
+#
+# This closes the loop with one transport-agnostic contract: a ``PING``/``PONG``
+# event pair (see :class:`EventType`) plus a pure, import-free
+# :class:`LivenessPolicy` — symmetric with the other gateway policy protocols
+# above (``SendPolicy``, ``DrainTimeoutPolicy``, ``ConcurrencyLimitPolicy``, …).
+# The policy owns only the *decision* (``KEEP`` vs ``REAP``) over a stamped
+# ``last_activity`` and a ``now`` timestamp; the wrapper server owns the
+# heartbeat-emit + reaper task and the reference client owns the heartbeat-send
+# + silence watchdog, each consuming this decision. A ``REAP`` maps onto
+# :attr:`GatewayCloseCode.LIVENESS_TIMEOUT`.
+# ---------------------------------------------------------------------------
+
+
+class LivenessDecision(str, Enum):
+    """Outcome of a connection-liveness evaluation.
+
+    * ``KEEP`` — the connection has shown activity recently enough; leave it.
+    * ``REAP`` — the connection missed too many heartbeats and is presumed
+      dead/half-open; the server should close it with
+      :attr:`GatewayCloseCode.LIVENESS_TIMEOUT` and release its
+      session/presence/queue state.
+    """
+
+    KEEP = "keep"
+    REAP = "reap"
+
+
+@runtime_checkable
+class LivenessPolicyProtocol(Protocol):
+    """Protocol for application-level connection-liveness decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's gateway
+    (heartbeat-emit + reaper task) and the reference client (heartbeat-send +
+    silence watchdog). The caller supplies the connection's last-activity
+    timestamp and the current time; the policy returns a
+    :class:`LivenessDecision`. Concrete transport machinery (sending the
+    ``PING`` frame, closing the socket, forcing a reconnect) lives in the
+    implementations, since it needs the running event loop and live sockets;
+    this contract keeps the *decision* testable in isolation, symmetric with
+    :class:`GatewayDrainPolicyProtocol` / :class:`RateLimitPolicyProtocol`.
+
+    A config-driven default (:class:`LivenessPolicy`) is provided for the
+    common "heartbeat every ``interval_ms``, reap after N missed beats" case.
+    """
+
+    interval_ms: int
+    missed_beats_before_reap: int
+
+    def evaluate(self, last_activity: float, now: float) -> LivenessDecision:
+        """Return a :class:`LivenessDecision` for the supplied timestamps."""
+        ...
+
+
+@dataclass(frozen=True)
+class LivenessPolicy:
+    """Config-driven, pure liveness policy for half-open connection reaping.
+
+    The default referenced by ``gateway.liveness`` blocks in ``gateway.yaml``
+    and the ``WebSocketGateway(..., liveness_policy=...)`` Python surface. It is
+    intentionally minimal and dependency-free so the decision lives in core and
+    is provable in isolation; the wrapper owns the side effects (emit the
+    ``PING`` heartbeat, close the socket, force the client reconnect).
+
+    A connection is reaped once its ``last_activity`` is older than
+    ``interval_ms × missed_beats_before_reap`` — i.e. it has silently missed
+    that many heartbeat intervals. Any activity (an inbound frame, an inbound
+    ``PONG``, or the peer's own ``PING``) refreshes ``last_activity`` and keeps
+    the connection alive. The reference client typically force-reconnects after
+    ``~2×`` the interval of silence, so it heals before the server reaps it.
+
+    The window derivation is shared with the client watchdog via
+    :meth:`reap_deadline` / :attr:`interval_seconds` so both sides agree on the
+    same arithmetic from one advertised ``interval_ms``.
+
+    ``interval_ms`` of ``0`` disables liveness reaping entirely (today's
+    behaviour: ``last_activity`` is stamped but never acted upon), so the
+    feature is fully backward-compatible and opt-in.
+
+    Example::
+
+        LivenessPolicy(interval_ms=30_000, missed_beats_before_reap=2)
+    """
+
+    interval_ms: int = 30_000
+    missed_beats_before_reap: int = 2
+
+    def __post_init__(self) -> None:
+        if self.interval_ms < 0:
+            raise ValueError(
+                f"interval_ms must be >= 0 (use 0 to disable liveness reaping), "
+                f"got {self.interval_ms!r}"
+            )
+        if self.missed_beats_before_reap < 1:
+            raise ValueError(
+                f"missed_beats_before_reap must be >= 1, "
+                f"got {self.missed_beats_before_reap!r}"
+            )
+
+    @property
+    def enabled(self) -> bool:
+        """Whether liveness reaping is active (a positive interval is set)."""
+        return self.interval_ms > 0
+
+    @property
+    def interval_seconds(self) -> float:
+        """The heartbeat interval expressed in seconds."""
+        return self.interval_ms / 1000.0
+
+    def reap_deadline(self, last_activity: float) -> float:
+        """Return the absolute time after which the connection is stale.
+
+        A connection is reaped when the evaluation-time ``now`` is strictly
+        above this deadline (``now > reap_deadline(last_activity)``). Exposed
+        so the server reaper and the client watchdog derive the same window
+        from one advertised interval.
+        """
+        return last_activity + self.interval_seconds * self.missed_beats_before_reap
+
+    def evaluate(self, last_activity: float, now: float) -> LivenessDecision:
+        """Return :attr:`LivenessDecision.REAP` iff the connection is stale.
+
+        Args:
+            last_activity: The connection's last-activity timestamp (same clock
+                as ``now`` — the wrapper uses a monotonic clock).
+            now: The current timestamp.
+
+        Returns:
+            :attr:`LivenessDecision.KEEP` while reaping is disabled or the
+            connection is within its liveness window; otherwise
+            :attr:`LivenessDecision.REAP`.
+        """
+        if not self.enabled:
+            return LivenessDecision.KEEP
+        if now > self.reap_deadline(last_activity):
+            return LivenessDecision.REAP
+        return LivenessDecision.KEEP

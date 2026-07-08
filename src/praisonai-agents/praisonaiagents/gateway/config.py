@@ -212,6 +212,81 @@ class PushConfig:
 
 
 @dataclass
+class LivenessConfig:
+    """Configuration for application-level connection liveness (Issue #2798).
+
+    Drives the transport-agnostic ping/pong heartbeat contract: the gateway
+    emits a ``PING`` every ``interval_ms`` and reaps any connection whose
+    last activity is older than ``interval_ms × missed_beats_before_reap``
+    (closing it with ``GatewayCloseCode.LIVENESS_TIMEOUT``), while the
+    reference client sends heartbeats on the same cadence and force-reconnects
+    after a silence watchdog fires.
+
+    This maps directly onto the pure core :class:`~praisonaiagents.gateway.
+    protocols.LivenessPolicy`; :meth:`to_policy` builds one.
+
+    Attributes:
+        enabled: Toggle liveness heartbeat/reaping. When False (default),
+            behaviour is unchanged — ``last_activity`` is stamped but never
+            acted upon, so upgrading is fully backward-compatible.
+        interval_ms: Heartbeat interval in milliseconds (advertised to clients
+            as ``heartbeat_ms``).
+        missed_beats_before_reap: How many consecutive missed heartbeat
+            intervals of silence before a connection is reaped (>= 1).
+    """
+
+    enabled: bool = False
+    interval_ms: int = 30_000
+    missed_beats_before_reap: int = 2
+
+    def __post_init__(self) -> None:
+        if self.interval_ms < 0:
+            raise ValueError(
+                "interval_ms must be >= 0 (use enabled=False to disable liveness)"
+            )
+        if self.missed_beats_before_reap < 1:
+            raise ValueError("missed_beats_before_reap must be >= 1")
+        if self.enabled and self.interval_ms == 0:
+            raise ValueError(
+                "interval_ms must be > 0 when enabled=True "
+                "(use enabled=False to disable liveness)"
+            )
+
+    def to_policy(self):
+        """Build the pure core ``LivenessPolicy`` this config describes.
+
+        When ``enabled`` is False the policy is constructed with
+        ``interval_ms=0`` so its ``evaluate`` always returns ``KEEP`` —
+        reaping is a no-op, preserving today's behaviour.
+        """
+        from .protocols import LivenessPolicy
+
+        return LivenessPolicy(
+            interval_ms=self.interval_ms if self.enabled else 0,
+            missed_beats_before_reap=self.missed_beats_before_reap,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "interval_ms": self.interval_ms,
+            "missed_beats_before_reap": self.missed_beats_before_reap,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "LivenessConfig":
+        """Create from a parsed ``gateway.liveness`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            interval_ms=int(data.get("interval_ms", 30_000)),
+            missed_beats_before_reap=int(data.get("missed_beats_before_reap", 2)),
+        )
+
+
+@dataclass
 class ApiConfig:
     """Configuration for additive protocol surfaces on the gateway app.
 
@@ -312,6 +387,9 @@ class GatewayConfig:
     # Additive protocol surfaces (OpenAI-compatible / MCP) served on the same
     # app and auth. Opt-in; disabled by default so the gateway is unchanged.
     api: ApiConfig = field(default_factory=ApiConfig)
+    # Issue #2798: application-level connection liveness (ping/pong heartbeat +
+    # half-open reaper). Opt-in; disabled by default so behaviour is unchanged.
+    liveness: LivenessConfig = field(default_factory=LivenessConfig)
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -427,6 +505,7 @@ class GatewayConfig:
             "push": self.push.to_dict(),
             "scope_policy_enabled": self.has_scope_policy,
             "api": self.api.to_dict(),
+            "liveness": self.liveness.to_dict(),
         }
     
     @property
@@ -614,6 +693,7 @@ class MultiChannelGatewayConfig:
             ),
             auth_scopes=auth_scopes,
             api=ApiConfig.from_dict(gw_data.get("api")),
+            liveness=LivenessConfig.from_dict(gw_data.get("liveness")),
         )
         
         # Parse agents section (pass through as dicts)
