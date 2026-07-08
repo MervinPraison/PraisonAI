@@ -37,6 +37,7 @@ steps:
       Fourth, decide routing before planning:
       - Tools → PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs).
       - Plugins → PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails).
+      - Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point.
       Core SDK/wrapper only for protocols and CLI — external repos for Tools/Plugins.
 
       Fifth, decide if this issue requires code changes:

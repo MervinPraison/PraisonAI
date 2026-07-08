@@ -282,6 +282,7 @@ jobs:
               3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, API/DB connectors). Do NOT implement in praisonaiagents/ — use STEP 3-ALT.
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
               5. Plugins → MervinPraison/PraisonAI-Plugins: framework lifecycle extensions (tracing, logging, metrics, hooks, guardrails). Not agent tools — use STEP 3-ALT.
+              6. Sandbox backends (optional/niche, e.g. Capsule) → PraisonAI-Plugins via `praisonai.sandbox` entry point; core keeps protocol/config/manager only.
               For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
