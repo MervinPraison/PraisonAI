@@ -165,7 +165,7 @@ class SandboxConfig:
             sandbox_type="capsule",
             security_policy=SecurityPolicy.strict(),
         )
-    
+
     @classmethod
     def native(
         cls,

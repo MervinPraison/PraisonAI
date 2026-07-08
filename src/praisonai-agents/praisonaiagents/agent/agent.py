@@ -705,6 +705,14 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             Agent._configure_logging()
             Agent._logging_configured = True
 
+        # Auto-enable entry-point plugins when PRAISONAI_PLUGINS / config.toml requests it
+        try:
+            from ..plugins import maybe_enable_from_config
+            maybe_enable_from_config()
+        except Exception as _plugin_exc:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("Plugin auto-enable failed: %s", _plugin_exc)
+
         # ============================================================
         # CONFIG-DRIVEN DEFAULTS (apply before parameter resolution)
         # Precedence: Explicit params > Config file > Built-in defaults

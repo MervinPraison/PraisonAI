@@ -331,29 +331,10 @@ class ToolExecutionMixin:
         return None
 
     def _resolve_tool_names(self, tool_names):
-        """Resolve tool names to actual tool instances from registry.
-        
-        Args:
-            tool_names: List of tool name strings
-            
-        Returns:
-            List of resolved tool instances
-        """
-        resolved = []
-        try:
-            from ..tools.registry import get_registry
-            registry = get_registry()
-            
-            for name in tool_names:
-                tool = registry.get(name)
-                if tool is not None:
-                    resolved.append(tool)
-                else:
-                    logging.warning(f"Tool '{name}' not found in registry")
-        except ImportError:
-            logging.warning("Tool registry not available, cannot resolve tool names")
-        
-        return resolved
+        """Resolve tool names via the canonical resolver chain."""
+        from ..tools.resolver import resolve_tool_names
+
+        return resolve_tool_names(tool_names)
 
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
