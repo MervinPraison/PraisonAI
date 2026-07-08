@@ -357,9 +357,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             return None
 
         approval_id, decision = approve_parts[0], approve_parts[1]
+        # Fail closed on an unexpected decision rather than letting the backend
+        # silently treat it as a deny: the durable store maps only
+        # allow/deny/always, so anything else is a malformed payload.
+        if decision not in ("allow", "deny", "always"):
+            logger.warning(
+                "Unknown approval decision %r in /approve callback", decision
+            )
+            return None
         try:
             handled = await self._approval_backend.handle_callback(
-                approval_id, decision, actor=ctx.user_id, approver=ctx.user_id
+                approval_id, decision, actor=ctx.user_id
             )
         except Exception as e:  # noqa: BLE001 — never crash the callback loop
             logger.error("Approval callback error: %s", e)
@@ -406,14 +414,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             target: Default chat/channel id used to render approval buttons when
                 the request does not carry its own ``target``.
         """
-        if target is not None:
-            try:
-                backend._target = str(target)
-            except Exception:  # noqa: BLE001
-                pass
+        # Keep the sender and target coupled so the backend never renders
+        # through one transport while addressing another. Only claim a backend
+        # that has no sender yet (a bare durable backend); if it already carries
+        # its own channel_send_func it belongs to a different transport and we
+        # leave both attributes untouched rather than redirecting only _target.
         if getattr(backend, "_channel_send_func", None) is None:
             try:
                 backend._channel_send_func = self.render_presentation
+                if target is not None:
+                    backend._target = str(target)
+            except Exception:  # noqa: BLE001
+                pass
+        elif target is not None:
+            # Backend already has its own sender: only override the default
+            # target when it has none, so we never split the transport.
+            try:
+                if getattr(backend, "_target", None) is None:
+                    backend._target = str(target)
             except Exception:  # noqa: BLE001
                 pass
         self._approval_backend = backend

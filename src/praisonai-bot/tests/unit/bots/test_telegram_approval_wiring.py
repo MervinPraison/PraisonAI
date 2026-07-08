@@ -66,6 +66,56 @@ def test_register_approval_backend_wires_sender_and_target():
     assert backend._channel_send_func == bot.render_presentation
 
 
+def test_register_preserves_existing_sender_and_couples_target():
+    """A backend that already carries its own sender belongs to a different
+    transport: registering must not split it (redirect only the target) — both
+    the sender and target are left untouched so buttons never render through
+    one channel while addressed to another."""
+    bot = _make_bot()
+    other_sender = AsyncMock()
+    backend = PresentationApprovalBackend(
+        allowed_actors={"owner"},
+        channel_send_func=other_sender,
+        target="other-chat",
+    )
+
+    bot.register_approval_backend(backend, target="chat-1")
+
+    # Sender and target stay coupled to the original transport.
+    assert backend._channel_send_func is other_sender
+    assert backend._target == "other-chat"
+
+
+def test_register_sets_default_target_only_when_absent():
+    """A bare backend (no sender, no target) adopts this channel's sender and
+    the supplied default target together."""
+    bot = _make_bot()
+    backend = PresentationApprovalBackend(allowed_actors={"owner"})
+
+    bot.register_approval_backend(backend, target="chat-1")
+
+    assert backend._channel_send_func == bot.render_presentation
+    assert backend._target == "chat-1"
+
+
+def test_approve_callback_rejects_unknown_decision():
+    """A malformed decision value fails closed (not silently treated as deny)."""
+
+    async def run():
+        bot = _make_bot()
+        backend = MagicMock()
+        backend.handle_callback = AsyncMock(return_value=True)
+        bot._approval_backend = backend
+        query = _make_query()
+        ctx = _make_ctx(bot, "cmd:/approve some-id sabotage", "owner", query)
+        handled = await bot._interactive_registry.dispatch(ctx)
+        return handled, backend
+
+    handled, backend = asyncio.run(run())
+    assert handled is False
+    backend.handle_callback.assert_not_called()
+
+
 def test_approve_callback_resolves_via_durable_backend():
     """An authorized /approve tap dispatched through the live registry resolves
     the durable backend's pending approval."""
