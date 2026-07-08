@@ -53,10 +53,20 @@ class _FanoutSink:
 
 
 def _factory_wants_tag(factory: Callable) -> bool:
-    """Whether a sink factory accepts the framework tag as its first argument."""
+    """Whether a sink factory accepts the framework tag as its first argument.
+
+    Only positional-capable parameters count. A ``**kwargs``-only factory would
+    otherwise be mis-detected and called as ``factory(framework_tag)``, raising
+    ``TypeError`` and silently dropping the sink.
+    """
     try:
         sig = inspect.signature(factory)
-        return len(sig.parameters) >= 1
+        positional_kinds = {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+        }
+        return any(p.kind in positional_kinds for p in sig.parameters.values())
     except (ValueError, TypeError):
         return False
 
@@ -119,13 +129,18 @@ def finalize_observability(_framework_tag: str, *, status: str = "Success") -> N
     """
     _end_agentops(status)
 
-    # Flush + close any entry-point sinks installed for this run.
+    # Flush + close any entry-point sinks installed for this run. Each call is
+    # guarded independently so a failing flush() still lets close() release the
+    # sink's resources.
     for sink in _installed_sinks:
         try:
             sink.flush()
-            sink.close()
         except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
-            logger.debug("sink teardown failed", exc_info=True)
+            logger.debug("sink flush failed", exc_info=True)
+        try:
+            sink.close()
+        except Exception:  # noqa: BLE001
+            logger.debug("sink close failed", exc_info=True)
     _installed_sinks.clear()
 
     # Future: Add other observability providers here

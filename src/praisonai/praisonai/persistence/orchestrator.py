@@ -589,11 +589,11 @@ class PersistenceOrchestrator:
     def close(self) -> None:
         """Close all stores and release resources."""
         if self.conversation:
-            self.conversation.close()
+            self._sync(self.conversation.close())
         if self.knowledge:
-            self.knowledge.close()
+            self._sync(self.knowledge.close())
         if self.state:
-            self.state.close()
+            self._sync(self.state.close())
         
         # Clear cache using thread-safe method
         self._cache_clear()
