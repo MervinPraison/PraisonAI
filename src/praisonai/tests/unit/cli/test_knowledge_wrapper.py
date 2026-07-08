@@ -64,7 +64,7 @@ def test_wrapper_search_handles_search_result_dataclass(
         knowledge_wrapper_app, ["search", "Paris", "--user-id", "u"]
     )
     assert result.exit_code == 0
-    output = result.stdout + (result.output if hasattr(result, "output") else "")
+    output = result.output
     assert "not subscriptable" not in output
     assert "Paris is the capital of France." in output
 
@@ -96,7 +96,7 @@ def test_wrapper_search_handles_empty_search_result(
         knowledge_wrapper_app, ["search", "anything", "--user-id", "u"]
     )
     assert result.exit_code == 0
-    output = result.stdout + (result.output if hasattr(result, "output") else "")
+    output = result.output
     assert "not subscriptable" not in output
     assert "No results found" in output
 
@@ -131,6 +131,6 @@ def test_wrapper_search_handles_legacy_dict(
         knowledge_wrapper_app, ["search", "Paris", "--user-id", "u"]
     )
     assert result.exit_code == 0
-    output = result.stdout + (result.output if hasattr(result, "output") else "")
+    output = result.output
     assert "not subscriptable" not in output
     assert "Paris is the capital of France." in output
