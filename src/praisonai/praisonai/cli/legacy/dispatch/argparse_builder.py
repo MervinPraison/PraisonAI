@@ -3,10 +3,64 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import sys
+from typing import Optional, Sequence
 
 from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registry_module
+
+
+# Bare verbs that look like a top-level command but do not exist as one.
+# Typing them (e.g. `praisonai show`) must NOT silently become a paid one-shot
+# LLM prompt; instead we point users at the real command surfaces.
+RESERVED_UNKNOWN_VERBS = {
+    "show": (
+        "There is no top-level 'show' command. Did you mean one of:\n"
+        "  praisonai paths           # storage paths\n"
+        "  praisonai version show    # version details\n"
+        "  praisonai memory show     # memory contents\n"
+        "  praisonai config show     # configuration"
+    ),
+}
+
+
+def classify_unknown_command(command: Optional[str], special_commands: Sequence[str]) -> Optional[str]:
+    """Classify a bare positional that is not a known command or file.
+
+    Returns an error/hint message string when the token looks like a mistyped
+    or reserved command that should NOT be run as a one-shot LLM prompt.
+    Returns None when the token should be treated as a direct prompt
+    (backward-compatible behaviour, e.g. ``praisonai "write a poem"``).
+    """
+    if not command:
+        return None
+
+    token = command.strip()
+    # Genuine natural-language prompts contain spaces; only guard single tokens
+    # that look like a command a user might have mistyped.
+    if not token or " " in token:
+        return None
+
+    lowered = token.lower()
+
+    reserved_hint = RESERVED_UNKNOWN_VERBS.get(lowered)
+    if reserved_hint is not None:
+        return f"Unknown command: {token!r}\n{reserved_hint}"
+
+    # Fuzzy-match a lone word against known commands to catch typos like
+    # ``praisonai memoyr`` without hijacking real single-word prompts.
+    matches = difflib.get_close_matches(lowered, special_commands, n=3, cutoff=0.8)
+    if matches:
+        suggestion = ", ".join(matches)
+        return (
+            f"Unknown command: {token!r}\n"
+            f"Did you mean: {suggestion}?\n"
+            "Run 'praisonai --help' to see available commands, or use "
+            "'praisonai run \"<prompt>\"' to send a prompt to the model."
+        )
+
+    return None
 
 
 def build_argument_parser(in_test_env: bool):
