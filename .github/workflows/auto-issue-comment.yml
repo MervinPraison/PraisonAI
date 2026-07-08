@@ -42,5 +42,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '🤖 Auto-triaging with Claude. Analyzing issue and implementing a fix...\n\nClaude will:\n1. Classify this issue\n2. Search codebase for root cause\n3. Implement a minimal fix following AGENTS.md\n4. Create a PR with the changes'
+              body: '🤖 Auto-triaging with Claude. Analyzing issue and implementing a fix...\n\nClaude will:\n1. Route correctly: agent tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins\n2. Search codebase for root cause\n3. Implement a minimal fix following AGENTS.md\n4. Create a PR with the changes'
             });

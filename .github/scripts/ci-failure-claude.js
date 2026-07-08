@@ -157,6 +157,7 @@ function buildCiFixComment({ headSha, failedChecks, failureSummaries }) {
     '3. **Pre-existing flake or unrelated failure** — say so explicitly; prefer fixing the root cause over masking it.',
     '',
     '**SDK guardrails (AGENTS.md):**',
+    '- Agent-callable tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins; sandbox backends → PraisonAI-Plugins (`praisonai.sandbox`) — not praisonaiagents/.',
     '- Do not disturb core SDK contracts to accommodate a wrapper/feature change.',
     '- Tests must continue to guard backward compatibility and hot-path behaviour — passing CI by lowering test standards is not acceptable.',
     '- If the feature does not genuinely add SDK value, recommend reverting or narrowing scope instead of patching around failures.',

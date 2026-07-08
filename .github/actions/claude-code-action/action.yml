@@ -222,10 +222,12 @@ runs:
 
         STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
         Before implementing anything, answer these questions:
-        - CORE vs WRAPPER vs TOOLS ROUTING:
+        - CORE vs WRAPPER vs TOOLS vs PLUGINS ROUTING:
           1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
           2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-          3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions MUST go to the `MervinPraison/PraisonAI-Tools` repository. If the feature is a tool, clone `https://github.com/MervinPraison/PraisonAI-Tools`, implement it there, and create the PR using `gh pr create -R MervinPraison/PraisonAI-Tools`.
+          3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, APIs). Do NOT add to praisonaiagents/.
+          4. Plugins → MervinPraison/PraisonAI-Plugins: lifecycle extensions (tracing, logging, hooks, guardrails). Not agent tools.
+          5. Sandbox backends → PraisonAI-Plugins via `praisonai.sandbox` entry point (core protocol only).
         - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
         - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
         - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.

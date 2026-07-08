@@ -96,7 +96,9 @@ jobs:
                   '- Check [existing issues](https://github.com/MervinPraison/PraisonAI/issues) for duplicates',
                   '- Review the [documentation](https://docs.praison.ai) for related guides',
                   '',
-                  '_A maintainer can trigger deeper analysis by commenting `@claude` on this issue._'
+                  '_A maintainer can trigger deeper analysis by commenting `@claude` on this issue._',
+                  '',
+                  '**Routing:** Agent-callable tools → [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools); lifecycle plugins (tracing/hooks/guardrails) → [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins).'
                 ].join('\n')
               });
             }
@@ -277,9 +279,10 @@ jobs:
             - CORE vs WRAPPER vs TOOLS vs DOCS vs PLUGINS ROUTING:
               1. Core SDK (praisonaiagents/): Only core protocols, base classes, decorators. No heavy implementations.
               2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
-              3. Tools (PraisonAI-Tools): Capabilities Agents actively call during execution (e.g. SurrealDB tool, Slack tool).
+              3. Tools → MervinPraison/PraisonAI-Tools: agent-callable integrations at runtime (Composio, Slack, API/DB connectors). Do NOT implement in praisonaiagents/ — use STEP 3-ALT.
               4. Documentation (PraisonAIDocs): Documentation pages, guides, API references.
-              5. Plugins (PraisonAI-Plugins): Framework lifecycle extensions replacing systemic behavior (e.g. tracing, logging, metrics, hooks, guardrails).
+              5. Plugins → MervinPraison/PraisonAI-Plugins: framework lifecycle extensions (tracing, logging, metrics, hooks, guardrails). Not agent tools — use STEP 3-ALT.
+              6. Sandbox backends (optional/niche, e.g. Capsule) → PraisonAI-Plugins via `praisonai.sandbox` entry point; core keeps protocol/config/manager only.
               For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
             - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
             - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
