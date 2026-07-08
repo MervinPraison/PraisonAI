@@ -51,7 +51,9 @@ class ShellTools:
         cwd: Optional[str] = None,
         timeout: int = 30,
         env: Optional[Dict[str, str]] = None,
-        max_output_size: int = 10000
+        max_output_size: int = 10000,
+        spill: bool = True,
+        spill_dir: Optional[str] = None
     ) -> Dict[str, Union[str, int, bool]]:
         """Execute a shell command safely.
         
@@ -61,6 +63,15 @@ class ShellTools:
             timeout: Maximum execution time in seconds
             env: Environment variables
             max_output_size: Maximum output size in bytes
+            spill: When True (default), output that exceeds ``max_output_size``
+                is written in full to a retrievable artifact and the result
+                keeps a bounded head/tail preview plus a pointer to that file,
+                so the omitted middle (often where the real error lives) can be
+                inspected via read_file/grep. Set False to keep the legacy
+                middle-truncation behaviour with no persistence.
+            spill_dir: Optional directory for overflow artifacts (defaults to a
+                session/workspace dir via ``PRAISONAI_TOOL_OUTPUT_DIR`` or the
+                system temp dir).
             
         Returns:
             Dictionary with execution results
@@ -120,21 +131,28 @@ class ShellTools:
                 # back to fully-buffered behaviour when no sink is listening.
                 stdout, stderr = self._communicate_streaming(process, timeout)
 
-                # Truncate output if too large (use smart format)
-                if len(stdout) > max_output_size:
-                    tail_size = min(max_output_size // 5, 500)
-                    stdout = stdout[:max_output_size - tail_size] + f"\n...[{len(stdout):,} chars, showing first/last portions]...\n" + stdout[-tail_size:]
-                if len(stderr) > max_output_size:
-                    tail_size = min(max_output_size // 5, 500)
-                    stderr = stderr[:max_output_size - tail_size] + f"\n...[{len(stderr):,} chars, showing first/last portions]...\n" + stderr[-tail_size:]
-                
-                return {
-                    'stdout': stdout,
-                    'stderr': stderr,
+                # Handle over-budget output. Rather than permanently discarding
+                # the middle (often where the real error lives), spill the full
+                # buffer to a retrievable artifact and keep a bounded preview
+                # plus a pointer. Zero overhead when within budget.
+                result: Dict[str, Union[str, int, bool]] = {
                     'exit_code': process.returncode,
                     'success': process.returncode == 0,
-                    'execution_time': time.time() - start_time
+                    'execution_time': time.time() - start_time,
                 }
+                stdout, stdout_path = self._handle_overflow(
+                    stdout, "stdout", max_output_size, spill, spill_dir
+                )
+                stderr, stderr_path = self._handle_overflow(
+                    stderr, "stderr", max_output_size, spill, spill_dir
+                )
+                result['stdout'] = stdout
+                result['stderr'] = stderr
+                if stdout_path:
+                    result['stdout_artifact'] = stdout_path
+                if stderr_path:
+                    result['stderr_artifact'] = stderr_path
+                return result
             
             except _StreamDrainTimeout:
                 # The direct child already exited; only an inherited pipe kept a
@@ -294,6 +312,24 @@ class ShellTools:
             raise read_errors[0]
 
         return "".join(stdout_chunks), "".join(stderr_chunks)
+
+    def _handle_overflow(self, text, kind, max_output_size, spill, spill_dir):
+        """Bound over-budget output, spilling the full buffer to an artifact.
+
+        Returns ``(preview, artifact_path_str)``. When ``text`` fits inside
+        ``max_output_size`` this is a no-op returning ``(text, None)`` with zero
+        overhead. On overflow with ``spill=True`` the full output is persisted
+        and a head/tail preview plus pointer is returned; with ``spill=False``
+        the legacy middle-truncated preview is returned and nothing is saved.
+        """
+        if len(text) <= max_output_size:
+            return text, None
+
+        from ._output_overflow import spill as _spill, bounded_with_pointer
+
+        path = _spill(text, kind, spill_dir) if spill else None
+        preview = bounded_with_pointer(text, max_output_size, path)
+        return preview, (str(path) if path else None)
 
     def list_processes(self) -> List[Dict[str, Union[int, str, float]]]:
         """List running processes with their details.
