@@ -331,16 +331,23 @@ def search_command(
         
         results = knowledge.search(query)
         
-        if not results:
-            console.print("[yellow]No results found.[/yellow]")
-            return
-        
-        if isinstance(results, dict) and 'results' in results:
+        # Normalize search results to a list of dicts.
+        # Knowledge.search() may return a typed SearchResult dataclass,
+        # a legacy dict with a "results" key, or a plain list.
+        if hasattr(results, "to_legacy_format"):
+            result_list = results.to_legacy_format().get("results", [])
+        elif isinstance(results, dict) and 'results' in results:
             result_list = results['results']
         elif isinstance(results, list):
             result_list = results
-        else:
+        elif results:
             result_list = [results]
+        else:
+            result_list = []
+        
+        if not result_list:
+            console.print("[yellow]No results found.[/yellow]")
+            return
         
         table = Table(title=f"Search Results ({len(result_list[:top_k])} of {len(result_list)})")
         table.add_column("#", style="dim", width=3)

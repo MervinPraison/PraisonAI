@@ -179,7 +179,17 @@ def create_knowledge_app():
             limit=top_k * 3 if rerank or compress else top_k,  # Fetch more for reranking
         )
         
-        items = results.get("results", []) if isinstance(results, dict) else results
+        # Normalize search results to a list of dicts.
+        # Knowledge.search() may return a typed SearchResult dataclass,
+        # a legacy dict with a "results" key, or a plain list.
+        if hasattr(results, "to_legacy_format"):
+            items = results.to_legacy_format().get("results", [])
+        elif isinstance(results, dict):
+            items = results.get("results", [])
+        elif isinstance(results, list):
+            items = results
+        else:
+            items = []
         
         # Apply path filter
         if path_filter and items:
