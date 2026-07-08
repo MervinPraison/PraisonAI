@@ -55,7 +55,9 @@ def resolve_tool_name(name: str) -> Optional[Any]:
             tool = getattr(praisonai_tools, name, None)
             if tool is not None:
                 return tool
-        except ImportError:
+        except Exception:
+            # A partially installed / broken praisonai_tools can raise more than
+            # ImportError (AttributeError, SyntaxError, ...). Never crash resolution.
             _praisonai_tools_available = False
 
     return None

@@ -85,26 +85,33 @@ _plugins_lock = threading.Lock()
 _plugins_enabled: bool = False
 _enabled_plugin_names: list = None  # None = all, list = specific
 _auto_enable_attempted: bool = False
+_auto_enable_lock = threading.Lock()
 
 
 def maybe_enable_from_config() -> None:
     """Enable plugins once per process when config or env requests it."""
     global _auto_enable_attempted
 
-    with _plugins_lock:
+    # Fast path: avoid taking the lock once initialization has been attempted.
+    if _auto_enable_attempted or _plugins_enabled:
+        return
+
+    # Hold a dedicated lock across the whole init so concurrent callers block
+    # until enable() has finished (rather than returning early on the flag).
+    with _auto_enable_lock:
         if _auto_enable_attempted or _plugins_enabled:
             return
         _auto_enable_attempted = True
 
-    try:
-        from praisonaiagents.config.loader import get_enabled_plugins, is_plugins_enabled
+        try:
+            from praisonaiagents.config.loader import get_enabled_plugins, is_plugins_enabled
 
-        if is_plugins_enabled():
-            enable(get_enabled_plugins())
-    except Exception as exc:
-        import logging
+            if is_plugins_enabled():
+                enable(get_enabled_plugins())
+        except Exception as exc:
+            import logging
 
-        logging.getLogger(__name__).debug("Plugin auto-enable skipped: %s", exc)
+            logging.getLogger(__name__).debug("Plugin auto-enable skipped: %s", exc)
 
 
 def enable(plugins: list = None) -> None:

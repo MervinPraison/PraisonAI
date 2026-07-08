@@ -709,8 +709,9 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         try:
             from ..plugins import maybe_enable_from_config
             maybe_enable_from_config()
-        except Exception:
-            pass
+        except Exception as _plugin_exc:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("Plugin auto-enable failed: %s", _plugin_exc)
 
         # ============================================================
         # CONFIG-DRIVEN DEFAULTS (apply before parameter resolution)
