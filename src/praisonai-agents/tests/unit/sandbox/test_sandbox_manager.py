@@ -2,11 +2,26 @@
 Unit tests for SandboxManager.
 """
 
+import sys
+import types
+from contextlib import contextmanager
+
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from praisonaiagents.sandbox.manager import SandboxManager
 from praisonaiagents.sandbox.config import SandboxConfig
 from praisonaiagents.sandbox.protocols import SandboxResult, SandboxStatus
+
+
+@contextmanager
+def _patch_registry(mock_registry):
+    """Inject a fake praisonai.sandbox._registry so tests run without praisonai."""
+    module = types.ModuleType("praisonai.sandbox._registry")
+    registry_cls = Mock()
+    registry_cls.default.return_value = mock_registry
+    module.SandboxRegistry = registry_cls
+    with patch.dict(sys.modules, {"praisonai.sandbox._registry": module}):
+        yield
 
 
 class TestSandboxManager:
@@ -127,7 +142,7 @@ class TestSandboxManager:
         )
         mock_registry.list_names.return_value = ["docker", "subprocess"]
 
-        with patch("praisonai.sandbox._registry.SandboxRegistry.default", return_value=mock_registry):
+        with _patch_registry(mock_registry):
             with pytest.raises(ValueError, match="Unknown sandbox type"):
                 await manager._create_sandbox()
 
@@ -143,13 +158,29 @@ class TestSandboxManager:
         mock_registry = Mock()
         mock_registry.resolve.return_value = mock_cls
 
-        with patch("praisonai.sandbox._registry.SandboxRegistry.default", return_value=mock_registry):
+        with _patch_registry(mock_registry):
             sandbox = await manager._create_sandbox()
 
         mock_registry.resolve.assert_called_once_with("capsule")
         mock_cls.assert_called_once_with(config=config)
         mock_instance.start.assert_called_once()
         assert sandbox is mock_instance
+
+    async def test_create_sandbox_registry_import_error(self):
+        """Test unknown type fails clearly when praisonai wrapper is absent."""
+        config = SandboxConfig(sandbox_type="totally_unknown_backend")
+        manager = SandboxManager(config)
+
+        real_import = __import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "praisonai.sandbox._registry":
+                raise ImportError("No module named 'praisonai'")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with pytest.raises(ValueError, match="Unknown sandbox type"):
+                await manager._create_sandbox()
 
     async def test_create_sandbox_unavailable(self):
         """Test creating sandbox when not available."""

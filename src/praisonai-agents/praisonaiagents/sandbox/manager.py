@@ -123,21 +123,24 @@ class SandboxManager:
                 f"Unknown sandbox type: {sandbox_type!r}. "
                 f"Supported built-ins: 'docker', 'subprocess', 'e2b', 'sandlock', "
                 f"'ssh', 'modal', 'daytona'. "
-                f"Install praisonai-plugins[capsule] or another plugin package "
-                f"that registers '{sandbox_type}'."
+                f"Install a plugin package that registers '{sandbox_type}' "
+                f"under the 'praisonai.sandbox' entry-point group."
             ) from e
 
+        registry = SandboxRegistry.default()
         try:
-            sandbox_cls = SandboxRegistry.default().resolve(sandbox_type)
+            sandbox_cls = registry.resolve(sandbox_type)
         except ValueError as e:
             raise ValueError(
                 f"Unknown sandbox type: {sandbox_type!r}. "
-                f"Available: {SandboxRegistry.default().list_names()}"
+                f"Available: {registry.list_names()}"
             ) from e
 
         sandbox = sandbox_cls(config=self.config)
         is_available = getattr(sandbox, "is_available", True)
-        if is_available is False:
+        if callable(is_available):
+            is_available = is_available()
+        if not is_available:
             raise RuntimeError(
                 f"Sandbox {sandbox_type!r} is not available. "
                 f"Install the plugin package that provides this backend."
