@@ -105,6 +105,10 @@ from .protocols import (
     LifecycleCommandPolicyProtocol,
     LifecycleCommandPolicy,  # backward-compat alias
     LifecycleCommandGuardPolicy,
+    # Application-level connection liveness (Issue #2798)
+    LivenessDecision,
+    LivenessPolicyProtocol,
+    LivenessPolicy,
 )
 from .hooks import (
     HookAction,
@@ -125,6 +129,7 @@ from .config import (
     PresenceConfig,
     DeliveryConfig,
     PollingConfig,
+    LivenessConfig,
 )
 
 # Lazy loading cache
@@ -270,6 +275,10 @@ __all__ = [
     "LifecycleCommandPolicyProtocol",
     "LifecycleCommandPolicy",
     "LifecycleCommandGuardPolicy",
+    # Application-level connection liveness (Issue #2798)
+    "LivenessDecision",
+    "LivenessPolicyProtocol",
+    "LivenessPolicy",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
@@ -287,6 +296,7 @@ __all__ = [
     "PresenceConfig",
     "DeliveryConfig",
     "PollingConfig",
+    "LivenessConfig",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",
