@@ -96,7 +96,7 @@ def enable_injection_defense(
     Args:
         extra_patterns: Additional regex patterns to detect (appended to defaults).
         block_threshold: Override the threat level that triggers blocking.
-                         3 = CRITICAL (default), 2 = HIGH, 1 = MEDIUM.
+                         3 = CRITICAL, 2 = HIGH (default), 1 = MEDIUM.
         trusted_sources: Source names that bypass blocking (in addition to defaults).
 
     Returns:
@@ -109,7 +109,12 @@ def enable_injection_defense(
     from .injection import InjectionDefense, ThreatLevel
     from praisonaiagents.hooks import add_hook
 
-    threshold = ThreatLevel(block_threshold) if block_threshold is not None else ThreatLevel.CRITICAL
+    # HIGH matches InjectionDefense()'s class default and scan_text()'s own
+    # blocking policy. It blocks any single dangerous-category hit (instruction
+    # override, financial manipulation, self-harm) or any two categories total,
+    # so the documented one-liner is genuinely "safe by default" rather than
+    # requiring 3+ distinct vectors that CRITICAL demanded.
+    threshold = ThreatLevel(block_threshold) if block_threshold is not None else ThreatLevel.HIGH
 
     defense = InjectionDefense(
         extra_patterns=extra_patterns,

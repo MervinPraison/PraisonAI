@@ -7,11 +7,82 @@ used consistently across all entry points without duplicating logic.
 
 import os
 import sys
+import inspect
 import logging
 from contextlib import contextmanager
-from typing import Callable, Iterator, List, Optional
+from typing import Any, Callable, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Sinks installed via entry-point discovery for the current run. Torn down in
+# finalize_observability so flush()/close() always runs.
+_installed_sinks: List[Any] = []
+
+
+class _FanoutSink:
+    """TraceSinkProtocol implementation that forwards to every registered sink.
+
+    Lets multiple third-party sinks (e.g. Langfuse + Arize + a custom sink) all
+    receive the same trace stream instead of the last-registered one replacing
+    the rest. Every per-sink call is guarded so a broken sink can't break a run.
+    """
+
+    def __init__(self, sinks: List[Any]):
+        self._sinks = list(sinks)
+
+    def emit(self, event: Any) -> None:
+        for s in self._sinks:
+            try:
+                s.emit(event)
+            except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
+                logger.debug("sink emit failed", exc_info=True)
+
+    def flush(self) -> None:
+        for s in self._sinks:
+            try:
+                s.flush()
+            except Exception:  # noqa: BLE001
+                logger.debug("sink flush failed", exc_info=True)
+
+    def close(self) -> None:
+        for s in self._sinks:
+            try:
+                s.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("sink close failed", exc_info=True)
+
+
+def _factory_wants_tag(factory: Callable) -> bool:
+    """Whether a sink factory accepts the framework tag as its first argument."""
+    try:
+        sig = inspect.signature(factory)
+        return len(sig.parameters) >= 1
+    except (ValueError, TypeError):
+        return False
+
+
+def _install_discovered_sinks(framework_tag: str) -> None:
+    """Discover, instantiate and wire third-party trace sinks (best-effort)."""
+    sinks: List[Any] = []
+    for factory in discover_observability_sinks():
+        try:
+            sink = factory(framework_tag) if _factory_wants_tag(factory) else factory()
+            if sink is not None:
+                sinks.append(sink)
+        except Exception:  # noqa: BLE001 -- a broken plugin must not break a run
+            logger.debug("observability sink factory %r failed", factory, exc_info=True)
+
+    if not sinks:
+        return
+
+    try:
+        from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
+    except Exception:  # noqa: BLE001 -- core trace API unavailable; skip silently
+        logger.debug("trace protocol unavailable; skipping sink wiring", exc_info=True)
+        return
+
+    _installed_sinks.extend(sinks)
+    set_default_emitter(TraceEmitter(sink=_FanoutSink(sinks), enabled=True))
 
 
 def init_observability(framework_tag: str, *, tags: Optional[List[str]] = None) -> None:
@@ -24,7 +95,11 @@ def init_observability(framework_tag: str, *, tags: Optional[List[str]] = None) 
     """
     # Try to initialize AgentOps if available
     _init_agentops(framework_tag, tags or [])
-    
+
+    # Honour the documented "praisonai.observability_sinks" entry-point group so
+    # third-party TraceSinkProtocol implementations are actually loaded.
+    _install_discovered_sinks(framework_tag)
+
     # Future: Add other observability providers here
     # _init_langfuse(framework_tag, tags)
     # _init_wandb(framework_tag, tags)
@@ -43,7 +118,16 @@ def finalize_observability(_framework_tag: str, *, status: str = "Success") -> N
         status: Session status ("Success", "Failure", etc.)
     """
     _end_agentops(status)
-    
+
+    # Flush + close any entry-point sinks installed for this run.
+    for sink in _installed_sinks:
+        try:
+            sink.flush()
+            sink.close()
+        except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
+            logger.debug("sink teardown failed", exc_info=True)
+    _installed_sinks.clear()
+
     # Future: Add other observability providers here
     # _end_langfuse(status)
     # _end_wandb(status)
