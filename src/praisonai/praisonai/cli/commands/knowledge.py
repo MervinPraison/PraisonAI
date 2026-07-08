@@ -326,7 +326,19 @@ def knowledge_search(
                     user_id=user_id, agent_id=agent_id, run_id=run_id,
                 )
             
-            if not results:
+            # Normalize search results to a list of dicts.
+            # Knowledge.search() may return a typed SearchResult dataclass,
+            # a legacy dict with a "results" key, or a plain list.
+            if hasattr(results, "to_legacy_format"):
+                result_list = results.to_legacy_format().get("results", [])
+            elif isinstance(results, dict):
+                result_list = results.get("results", [])
+            elif isinstance(results, list):
+                result_list = results
+            else:
+                result_list = []
+            
+            if not result_list:
                 console.print("[yellow]No results found.[/yellow]")
                 return
             
@@ -337,7 +349,6 @@ def knowledge_search(
             table.add_column("Source", width=20)
             table.add_column("Content", width=60)
             
-            result_list = results.get('results', results) if isinstance(results, dict) else results
             for i, result in enumerate(result_list[:top_k], 1):
                 if isinstance(result, dict):
                     score = f"{result.get('score', 0):.3f}" if result.get('score') else "-"
