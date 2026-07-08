@@ -228,6 +228,32 @@ class TestBridge:
         events[HookEvent.ON_AUTH](data)
         assert data.credentials.get("token") == "resolved"
 
+    def test_on_auth_injects_when_credentials_none(self):
+        # First-time auth: no credentials exist yet (credentials is None).
+        events = dict(_adapt_plugin_hooks(AuthPlugin()))
+
+        class _Auth:
+            def __init__(self):
+                self.auth_type = "oauth"
+                self.credentials = None
+        data = _Auth()
+        events[HookEvent.ON_AUTH](data)
+        assert isinstance(data.credentials, dict)
+        assert data.credentials.get("token") == "resolved"
+
+    def test_on_config_patches_when_config_none(self):
+        # Config starts as None and lives in extra; plugin edits still apply.
+        events = dict(_adapt_plugin_hooks(ConfigPlugin()))
+
+        class _Cfg:
+            def __init__(self):
+                self.config = None
+                self.extra = {"a": 1}
+        data = _Cfg()
+        events[HookEvent.ON_CONFIG](data)
+        assert isinstance(data.config, dict)
+        assert data.config.get("patched") is True
+
     def test_session_start_end_fire(self):
         reg = HookRegistry()
         mgr = PluginManager()

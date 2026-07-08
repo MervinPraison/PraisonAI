@@ -576,6 +576,25 @@ class PluginManager:
                 pass
             return removed
 
+def _write_back(data, attr: str, new_value: dict) -> None:
+    """Write a plugin's returned dict back onto the hook payload.
+
+    Mutates the existing dict in place when present (preserving object
+    identity for callers that hold a reference), otherwise assigns the value
+    directly so first-time injection (e.g. ``credentials`` starting as
+    ``None``) is not silently dropped.
+    """
+    current = getattr(data, attr, None)
+    if isinstance(current, dict):
+        current.clear()
+        current.update(new_value)
+        return
+    try:
+        setattr(data, attr, new_value)
+    except Exception:
+        pass
+
+
 def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]]:
     """
     Adapt a plugin's overridden lifecycle methods into hook functions.
@@ -706,9 +725,8 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             if not isinstance(config, dict):
                 config = getattr(data, "extra", {}) or {}
             new_config = _p.on_config(config)
-            if isinstance(new_config, dict) and isinstance(getattr(data, "config", None), dict):
-                data.config.clear()
-                data.config.update(new_config)
+            if isinstance(new_config, dict):
+                _write_back(data, "config", new_config)
             return HookResult.allow()
         yield HookEvent.ON_CONFIG, on_config_hook
 
@@ -717,9 +735,8 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             auth_type = getattr(data, "auth_type", "") or ""
             credentials = getattr(data, "credentials", None) or {}
             new_creds = _p.on_auth(auth_type, credentials)
-            if isinstance(new_creds, dict) and isinstance(getattr(data, "credentials", None), dict):
-                data.credentials.clear()
-                data.credentials.update(new_creds)
+            if isinstance(new_creds, dict):
+                _write_back(data, "credentials", new_creds)
             return HookResult.allow()
         yield HookEvent.ON_AUTH, on_auth_hook
 
