@@ -1,8 +1,8 @@
 name: Nightly Release Gate
 
 # Preflight before PyPI Release (patch bump).
-# Primary: Core Tests success on main (workflow_run).
-# Backstop: nightly cron at 00:00 UTC.
+# Triggers: Core Tests success on main (workflow_run) or nightly cron at 00:00 UTC.
+# Dedupe: max one successful patch release per UTC day (see release-gate.js).
 
 on:
   schedule:
@@ -39,7 +39,9 @@ jobs:
         github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.head_branch == 'main' &&
-        github.event.workflow_run.event == 'push'
+        github.event.workflow_run.event == 'push' &&
+        !startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
+        !startsWith(github.event.workflow_run.head_commit.message, 'Bump praisonai')
       )
     runs-on: ubuntu-latest
     env:
