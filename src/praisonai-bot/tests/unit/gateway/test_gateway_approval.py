@@ -251,6 +251,40 @@ async def test_insecure_file_remediated_across_instances():
 
 
 @pytest.mark.asyncio
+async def test_chmod_failure_fails_closed_without_rotating_secret():
+    """A chmod failure must raise (fail closed), not swallow and regenerate.
+
+    Silently regenerating would rotate the HMAC key and invalidate all
+    outstanding pairing codes, so the OSError must propagate instead of
+    being caught by the file-read handler.
+    """
+    import tempfile
+    import os
+    from unittest import mock
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        original = b"z" * 64
+        with open(secret_path, "wb") as f:
+            f.write(original)
+        os.chmod(secret_path, 0o666)
+
+        with mock.patch(
+            "praisonai_bot.gateway.pairing.os.chmod",
+            side_effect=OSError("chmod denied"),
+        ):
+            with pytest.raises(OSError):
+                PairingStore(store_dir=tmpdir)
+
+        # The secret file was NOT rewritten/rotated.
+        with open(secret_path, "rb") as f:
+            assert f.read() == original
+
+
+@pytest.mark.asyncio
 async def test_cli_approve_e2e():
     """Test CLI pairing approve command end-to-end."""
     import tempfile

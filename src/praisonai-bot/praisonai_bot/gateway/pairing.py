@@ -101,13 +101,22 @@ def _restrict_windows_acl(secret_path: str) -> bool:
         import subprocess
 
         user = os.environ.get("USERNAME") or getpass.getuser()
+        # Resolve icacls from the trusted system directory rather than PATH
+        # to avoid invoking a hijacked binary while hardening the secret.
+        icacls = os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"),
+            "System32",
+            "icacls.exe",
+        )
+        # Quote the username so principals containing spaces (e.g. "John Doe")
+        # are parsed as a single principal by icacls.
         result = subprocess.run(
             [
-                "icacls",
+                icacls,
                 secret_path,
                 "/inheritance:r",
                 "/grant:r",
-                f"{user}:F",
+                f'"{user}":F',
             ],
             capture_output=True,
             check=False,
@@ -137,11 +146,16 @@ def _load_or_create_secret(store_dir: str) -> bytes:
         try:
             with open(secret_path, "rb") as f:
                 secret = f.read().strip()
-            # Remediate insecure permissions instead of warn-and-load.
-            _secure_secret_permissions(secret_path)
-            return secret
         except (OSError, IOError) as e:
             logger.warning(f"Failed to read gateway secret from {secret_path}: {e}")
+        else:
+            # Remediate insecure permissions instead of warn-and-load.
+            # A chmod failure here propagates (fail closed) rather than
+            # being swallowed as a read error and silently regenerating
+            # the secret (which would rotate the HMAC key and invalidate
+            # all outstanding pairing codes).
+            _secure_secret_permissions(secret_path)
+            return secret
 
     # Generate new secret
     secret = secrets.token_hex(32).encode()
