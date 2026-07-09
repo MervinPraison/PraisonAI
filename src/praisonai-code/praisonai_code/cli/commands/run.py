@@ -33,6 +33,11 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
+# Structured output modes always run in-process via the Agent path, so they
+# never need the wrapper's handle_direct_prompt.
+_IN_PROCESS_OUTPUT_MODES = ("actions", "json", "stream", "stream-json")
+
+
 def _direct_prompt_needs_wrapper(
     target: Optional[str],
     *,
@@ -40,10 +45,18 @@ def _direct_prompt_needs_wrapper(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> bool:
-    """True when a text prompt run uses wrapper-only handle_direct_prompt path."""
+    """True when a text prompt run uses the wrapper-only handle_direct_prompt path.
+
+    Structured modes (``_IN_PROCESS_OUTPUT_MODES``) always run in-process via the
+    Agent path, so they never need the wrapper. Human-readable text modes
+    (``plain``/``verbose``/``silent``/default) delegate to the wrapper's
+    ``handle_direct_prompt``; on a standalone install this gates with an install
+    hint (see ``_require_wrapper_for_default_run``) to keep the C7 hot path free
+    of the heavy Agent import for default runs.
+    """
     if agent or command or not target or _is_yaml_file(target):
         return False
-    return output_mode not in ("actions", "json", "stream", "stream-json")
+    return output_mode not in _IN_PROCESS_OUTPUT_MODES
 
 
 def _require_wrapper_for_default_run(
@@ -53,7 +66,13 @@ def _require_wrapper_for_default_run(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> None:
-    """Fail fast with install hint before credential/setup checks."""
+    """Fail fast with an install hint before credential/setup checks.
+
+    Human-readable text runs (default/plain/verbose/silent) delegate to the
+    wrapper's ``handle_direct_prompt``. On a standalone install the wrapper is
+    absent, so gate here with an install hint that points standalone users to
+    the in-process ``--output actions`` alternative.
+    """
     if not _direct_prompt_needs_wrapper(
         target, agent=agent, command=command, output_mode=output_mode
     ):
@@ -66,7 +85,7 @@ def _require_wrapper_for_default_run(
     output.print_error(
         "Default run mode requires the praisonai wrapper. "
         "Install with: pip install praisonai\n"
-        "Standalone alternative: praisonai run --output actions \"your prompt\""
+        "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
     raise typer.Exit(1)
 
@@ -1176,7 +1195,7 @@ def _run_prompt(
         if output_mode == "actions":
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
-            
+
             agent_config = {
                 "name": "RunAgent",
                 "role": "Assistant", 
@@ -1247,7 +1266,7 @@ def _run_prompt(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
             )
-            
+
             # Don't print result again - actions mode already shows output
             return
         
