@@ -480,8 +480,11 @@ class ConfigResolver:
             if key == "_source":
                 continue
             dotted = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict) and value:
-                flat.update(self._flatten(value, dotted))
+            if isinstance(value, dict):
+                # Recurse into non-empty dicts; skip empty dicts entirely so the
+                # flattened map only ever contains scalar/list leaves (no {}).
+                if value:
+                    flat.update(self._flatten(value, dotted))
             else:
                 flat[dotted] = value
         return flat
