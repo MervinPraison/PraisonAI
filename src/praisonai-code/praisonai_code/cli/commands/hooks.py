@@ -12,21 +12,11 @@ app = typer.Typer(help="Hook management")
 @app.command("list")
 def hooks_list():
     """List available hooks."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['hooks', 'list']
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="hooks")
 
 
 @app.command("add")
@@ -35,21 +25,11 @@ def hooks_add(
     event: str = typer.Option(..., "--event", "-e", help="Event to hook into"),
 ):
     """Add a hook."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['hooks', 'add', name, '--event', event]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="hooks")
 
 
 @app.command("remove")
@@ -57,18 +37,8 @@ def hooks_remove(
     name: str = typer.Argument(..., help="Hook name to remove"),
 ):
     """Remove a hook."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['hooks', 'remove', name]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="hooks")

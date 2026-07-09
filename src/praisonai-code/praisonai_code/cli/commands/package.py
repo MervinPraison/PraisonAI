@@ -15,23 +15,13 @@ def package_install(
     upgrade: bool = typer.Option(False, "--upgrade", "-U", help="Upgrade if already installed"),
 ):
     """Install a package."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['package', 'install', package]
     if upgrade:
         argv.append('--upgrade')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="package")
 
 
 @app.command("uninstall")
@@ -39,38 +29,18 @@ def package_uninstall(
     package: str = typer.Argument(..., help="Package to uninstall"),
 ):
     """Uninstall a package."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['package', 'uninstall', package]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="package")
 
 
 @app.command("list")
 def package_list():
     """List installed packages."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['package', 'list']
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="package")

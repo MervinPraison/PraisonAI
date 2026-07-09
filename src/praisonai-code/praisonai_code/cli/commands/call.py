@@ -24,8 +24,7 @@ def call_main(
         praisonai call
         praisonai call --model gpt-4o
     """
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['call']
     if model:
@@ -33,13 +32,4 @@ def call_main(
     if verbose:
         argv.append('--verbose')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="call")

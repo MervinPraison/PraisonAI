@@ -12,21 +12,11 @@ app = typer.Typer(help="Todo/task management")
 @app.command("list")
 def todo_list():
     """List todos."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['todo', 'list']
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="todo")
 
 
 @app.command("add")
@@ -35,21 +25,11 @@ def todo_add(
     priority: str = typer.Option("medium", "--priority", "-p", help="Priority (low, medium, high)"),
 ):
     """Add a todo."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['todo', 'add', task]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="todo")
 
 
 @app.command("done")
@@ -57,18 +37,8 @@ def todo_done(
     task_id: str = typer.Argument(..., help="Task ID to mark as done"),
 ):
     """Mark a todo as done."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['todo', 'done', task_id]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="todo")

@@ -24,8 +24,7 @@ def research_main(
         praisonai research "What are the latest AI trends?"
         praisonai research --model gpt-4o "Analyze market data"
     """
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['research']
     if query:
@@ -37,13 +36,4 @@ def research_main(
     if output:
         argv.extend(['--output', output])
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="research")

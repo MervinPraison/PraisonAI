@@ -12,21 +12,11 @@ app = typer.Typer(help="Template management")
 @app.command("list")
 def templates_list():
     """List available templates."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['templates', 'list']
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="templates")
 
 
 @app.command("create")
@@ -35,20 +25,10 @@ def templates_create(
     source: str = typer.Option(None, "--source", "-s", help="Source file to create template from"),
 ):
     """Create a new template."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['templates', 'create', name]
     if source:
         argv.extend(['--source', source])
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="templates")
