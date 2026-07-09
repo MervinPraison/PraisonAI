@@ -167,7 +167,9 @@ class GatewayPIDLock:
             # Send signal 0 to check if process exists
             os.kill(pid, 0)
             return True
-        except (OSError, ProcessLookupError):
+        except (OSError, ProcessLookupError, SystemError, ValueError):
+            # On Windows, os.kill(pid, 0) can raise SystemError; treat any
+            # failure as "not running" so status checks never propagate.
             return False
     
     def _remove_stale_lock(self) -> None:
