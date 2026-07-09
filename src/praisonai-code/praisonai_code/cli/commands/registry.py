@@ -28,7 +28,7 @@ def registry_list():
 
 @app.command("serve")
 def registry_serve(
-    port: int = typer.Option(8080, "--port", "-p", help="Port to serve on"),
+    port: int = typer.Option(7777, "--port", "-p", help="Port to serve on"),
 ):
     """Start registry server.
 
