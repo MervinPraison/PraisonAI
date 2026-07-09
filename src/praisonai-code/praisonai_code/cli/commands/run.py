@@ -33,6 +33,11 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
+# Structured output modes always run in-process via the Agent path, so they
+# never need the wrapper's handle_direct_prompt.
+_IN_PROCESS_OUTPUT_MODES = ("actions", "json", "stream", "stream-json")
+
+
 def _direct_prompt_needs_wrapper(
     target: Optional[str],
     *,
@@ -40,10 +45,22 @@ def _direct_prompt_needs_wrapper(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> bool:
-    """True when a text prompt run uses wrapper-only handle_direct_prompt path."""
+    """True when a text prompt run uses wrapper-only handle_direct_prompt path.
+
+    Human-readable modes (plain/verbose/silent/default) historically delegated
+    to the wrapper's ``handle_direct_prompt``. On a standalone install (no
+    ``praisonai`` wrapper) they now route through the in-process Agent path
+    instead, so they no longer require the wrapper.
+    """
     if agent or command or not target or _is_yaml_file(target):
         return False
-    return output_mode not in ("actions", "json", "stream", "stream-json")
+    if output_mode in _IN_PROCESS_OUTPUT_MODES:
+        return False
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    # Standalone: no wrapper to delegate to, so run in-process instead of
+    # blocking. Only when the wrapper is installed do text modes prefer it.
+    return wrapper_available()
 
 
 def _require_wrapper_for_default_run(
@@ -53,7 +70,13 @@ def _require_wrapper_for_default_run(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> None:
-    """Fail fast with install hint before credential/setup checks."""
+    """Fail fast with install hint before credential/setup checks.
+
+    Retained as a defensive guard. With standalone text modes now routed
+    in-process, this only trips when the wrapper is genuinely required, so it
+    rarely fires; the message references ``praisonai-code`` for standalone
+    users.
+    """
     if not _direct_prompt_needs_wrapper(
         target, agent=agent, command=command, output_mode=output_mode
     ):
@@ -66,7 +89,7 @@ def _require_wrapper_for_default_run(
     output.print_error(
         "Default run mode requires the praisonai wrapper. "
         "Install with: pip install praisonai\n"
-        "Standalone alternative: praisonai run --output actions \"your prompt\""
+        "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
     raise typer.Exit(1)
 
@@ -1173,15 +1196,34 @@ def _run_prompt(
         ):
             return
 
-        if output_mode == "actions":
+        # Structured modes (actions/json/stream) always run in-process. On a
+        # standalone install (no praisonai wrapper) human-readable text modes
+        # (plain/verbose/silent/default) also run in-process, since the wrapper's
+        # handle_direct_prompt is unavailable. Map CLI output modes onto the
+        # Agent output presets the SDK understands.
+        from praisonai_code._wrapper_bridge import wrapper_available
+
+        _text_in_process = (
+            output_mode not in _IN_PROCESS_OUTPUT_MODES and not wrapper_available()
+        )
+        if output_mode == "actions" or _text_in_process:
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
-            
+
+            _preset_by_mode = {
+                "actions": "actions",
+                "verbose": "verbose",
+                "plain": "silent",
+                "silent": "silent",
+                None: "silent",
+            }
+            output_preset = _preset_by_mode.get(output_mode, "silent")
+
             agent_config = {
                 "name": "RunAgent",
                 "role": "Assistant", 
                 "goal": "Complete the task",
-                "output": "actions",  # Use actions preset
+                "output": output_preset,
             }
             if model:
                 agent_config["llm"] = model
@@ -1247,8 +1289,16 @@ def _run_prompt(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
             )
-            
-            # Don't print result again - actions mode already shows output
+
+            # actions/verbose presets already surface output; silent/plain
+            # presets do not, so print the final text for those modes.
+            if (
+                _text_in_process
+                and output_mode in (None, "silent", "plain")
+                and result
+                and not output.is_json_mode
+            ):
+                print(result)
             return
         
         # Use handle_direct_prompt for other modes
