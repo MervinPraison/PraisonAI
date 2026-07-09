@@ -21,6 +21,8 @@ def memory_show(
     argv = ['memory', 'show']
     if user_id:
         argv.extend(['--user-id', user_id])
+    if limit is not None:
+        argv.extend(['--limit', str(limit)])
     
     original_argv = sys.argv
     sys.argv = ['praisonai'] + argv
