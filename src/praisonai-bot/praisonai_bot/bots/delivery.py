@@ -24,6 +24,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ChannelRef:
+    """Lightweight descriptor of a reachable channel enumerated by an adapter.
+
+    Returned from an adapter's optional ``list_channels()`` method and consumed
+    by :meth:`ChannelDirectory.refresh_from_adapters`, which only requires an
+    ``id``. ``name`` and ``type`` are carried for richer directory listings.
+    """
+
+    id: str
+    name: Optional[str] = None
+    type: str = "channel"
+
+
 class DeliveryNotAccepted(Exception):
     """Raised internally when an adapter reports a send failure without raising.
 
