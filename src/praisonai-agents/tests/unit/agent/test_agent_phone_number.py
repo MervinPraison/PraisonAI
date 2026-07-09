@@ -49,10 +49,10 @@ def test_agent_with_phone_number_runs_real_llm():
     """
     import os
 
-    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("PRAISONAI_ALLOW_NETWORK")):
+    if not os.environ.get("OPENAI_API_KEY"):
         import pytest
 
-        pytest.skip("No LLM credentials configured; skipping real agentic test")
+        pytest.skip("OPENAI_API_KEY not set; skipping real agentic test")
 
     agent = Agent(
         name="support",
