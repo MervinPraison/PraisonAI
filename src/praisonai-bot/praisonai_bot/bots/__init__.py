@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .botos import BotOS
     from ._session import BotSessionManager
     from ._identity import StoreBackedIdentityResolver
+    from ._agent_registry import AgentRegistry, normalize_number
     from ._dlq import InboundDLQ, DLQEntry
     from ._dead_targets import DeadTargetRegistry, DeadTarget
     from ._ingress import InboundJournal, JournalEntry
@@ -101,6 +102,13 @@ def __getattr__(name: str):
     if name == "StoreBackedIdentityResolver":
         from ._identity import StoreBackedIdentityResolver
         return StoreBackedIdentityResolver
+    # Phone-number -> agent routing registry (issue #2859)
+    if name == "AgentRegistry":
+        from ._agent_registry import AgentRegistry
+        return AgentRegistry
+    if name == "normalize_number":
+        from ._agent_registry import normalize_number
+        return normalize_number
     # N4 — inbound dead-letter queue
     if name == "InboundDLQ":
         from ._dlq import InboundDLQ
@@ -187,6 +195,7 @@ __all__ = [
     "Bot", "BotOS",
     "BotSessionManager",
     "StoreBackedIdentityResolver",
+    "AgentRegistry", "normalize_number",
     "InboundDLQ", "DLQEntry",
     "DeadTargetRegistry", "DeadTarget",
     "InboundJournal", "JournalEntry",
