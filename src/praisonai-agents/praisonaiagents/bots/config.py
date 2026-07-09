@@ -19,7 +19,10 @@ class BotConfig:
         webhook_url: URL for webhook mode (optional)
         webhook_path: Path for webhook endpoint
         polling_interval: Interval for polling mode (seconds)
-        allowed_users: List of allowed user IDs (empty = all allowed)
+        allowed_users: List of explicitly-allowed user IDs. When empty,
+            inbound access is not automatically granted — it defers to
+            ``unknown_user_policy`` (default ``deny``). To open the bot to
+            everyone, set ``unknown_user_policy="allow"``.
         allowed_channels: List of allowed channel IDs (empty = all allowed)
         command_prefix: Prefix for commands (default: "/")
         mention_required: Whether bot mention is required in groups
@@ -186,10 +189,28 @@ class BotConfig:
         return self.mode == "hybrid"
     
     def is_user_allowed(self, user_id: str) -> bool:
-        """Check if a user is allowed to interact with the bot."""
+        """Check if a user is allowed to interact with the bot.
+
+        Note: an empty ``allowed_users`` returns ``True`` here for
+        backward compatibility, but the inbound security pipeline gates on
+        :meth:`is_explicitly_allowed` — an empty allowlist is NOT treated as
+        "allow everyone" and instead defers to ``unknown_user_policy``
+        (default ``deny``). Set ``unknown_user_policy="allow"`` to open the
+        bot to all users.
+        """
         if not self.allowed_users:
             return True
         return user_id in self.allowed_users
+
+    def is_explicitly_allowed(self, user_id: str) -> bool:
+        """Whether a user is explicitly allow-listed.
+
+        Unlike :meth:`is_user_allowed`, an empty ``allowed_users`` returns
+        ``False`` here — the inbound pipeline then defers to
+        ``unknown_user_policy``. This is the check the security pipeline
+        should use to decide whether to bypass the unknown-user handler.
+        """
+        return bool(self.allowed_users) and user_id in self.allowed_users
     
     def is_channel_allowed(self, channel_id: str) -> bool:
         """Check if a channel is allowed for bot interaction."""

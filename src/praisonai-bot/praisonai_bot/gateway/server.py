@@ -4239,7 +4239,18 @@ class WebSocketGateway:
                 group_policy=group_policy,
                 auto_approve_tools=auto_approve_tools,
             )
-            
+
+            # Issue #2855: wire the inbound admission policy from gateway.yaml so
+            # operators can open DMs (``allow``), enable pairing (``pair``), or
+            # keep the secure default (``deny``). Without this, an empty
+            # allowlist silently drops unknown users regardless of YAML.
+            _raw_uup = ch_cfg.get("unknown_user_policy")
+            if isinstance(_raw_uup, str) and _raw_uup.strip():
+                config_kwargs["unknown_user_policy"] = _raw_uup.strip().lower()
+            _raw_owner = ch_cfg.get("owner_user_id")
+            if _raw_owner is not None and str(_raw_owner).strip():
+                config_kwargs["owner_user_id"] = str(_raw_owner).strip()
+
             # Only pass default_tools when the channel explicitly overrides it,
             # so BotConfig's own default_factory stays the single source of truth.
             _raw_yaml_tools = ch_cfg.get("default_tools")
@@ -4260,13 +4271,12 @@ class WebSocketGateway:
                 except Exception:  # pragma: no cover — defensive
                     pass
 
-            # Warn if no allowlist is configured
+            # Warn if no allowlist is configured. Issue #2855: the message must
+            # reflect the effective ``unknown_user_policy`` — an empty allowlist
+            # with the default ``deny`` policy SILENTLY DROPS unknown DMs, so the
+            # old "accepts messages from everyone" text was misleading.
             if not config.allowed_users:
-                logger.warning(
-                    "Channel %r has no allowed_users — bot accepts messages from everyone. "
-                    "Re-run `praisonai onboard` to configure.",
-                    channel_name,
-                )
+                self._warn_empty_allowlist(channel_name, config.unknown_user_policy)
 
             try:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
@@ -4297,6 +4307,38 @@ class WebSocketGateway:
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    @staticmethod
+    def _warn_empty_allowlist(channel_name: str, unknown_user_policy: str) -> None:
+        """Emit an accurate startup warning for an empty ``allowed_users``.
+
+        Issue #2855: the previous "accepts messages from everyone" text was
+        misleading because the default ``unknown_user_policy=deny`` SILENTLY
+        DROPS inbound DMs from unpaired/unknown users. The warning now reflects
+        the effective policy so operators aren't left debugging a "broken" bot.
+        """
+        policy = (unknown_user_policy or "deny").lower()
+        if policy == "allow":
+            logger.warning(
+                "Channel %r has no allowed_users and unknown_user_policy=allow "
+                "— bot accepts messages from everyone.",
+                channel_name,
+            )
+        elif policy == "pair":
+            logger.warning(
+                "Channel %r has no allowed_users and unknown_user_policy=pair "
+                "— unknown users will be routed through the pairing flow.",
+                channel_name,
+            )
+        else:  # deny (default)
+            logger.warning(
+                "Channel %r has no allowed_users and unknown_user_policy=deny "
+                "— inbound messages from unpaired users will be SILENTLY DROPPED. "
+                "Set allowed_users, configure pairing (unknown_user_policy: pair), "
+                "or open DMs (unknown_user_policy: allow). "
+                "Re-run `praisonai onboard` to configure.",
+                channel_name,
+            )
 
     def _enable_stt(self, bot: Any, config: Any) -> None:
         """Enable inbound speech-to-text on a channel bot (Issue #2721).
@@ -5006,7 +5048,16 @@ class WebSocketGateway:
             group_policy=group_policy,
             auto_approve_tools=auto_approve_tools,
         )
-        
+
+        # Issue #2855: wire the inbound admission policy on hot-reload too, so a
+        # reloaded channel honours the same YAML knobs as start_channels().
+        _raw_uup = ch_cfg.get("unknown_user_policy")
+        if isinstance(_raw_uup, str) and _raw_uup.strip():
+            config_kwargs["unknown_user_policy"] = _raw_uup.strip().lower()
+        _raw_owner = ch_cfg.get("owner_user_id")
+        if _raw_owner is not None and str(_raw_owner).strip():
+            config_kwargs["owner_user_id"] = str(_raw_owner).strip()
+
         # Only pass default_tools when the channel explicitly overrides it
         _raw_yaml_tools = ch_cfg.get("default_tools")
         if isinstance(_raw_yaml_tools, list):
@@ -5023,13 +5074,9 @@ class WebSocketGateway:
             except Exception:  # pragma: no cover — defensive
                 pass
 
-        # Warn if no allowlist is configured
+        # Warn if no allowlist is configured (Issue #2855: deny-aware message).
         if not config.allowed_users:
-            logger.warning(
-                "Channel %r has no allowed_users — bot accepts messages from everyone. "
-                "Re-run `praisonai onboard` to configure.",
-                channel_name,
-            )
+            self._warn_empty_allowlist(channel_name, config.unknown_user_policy)
         
         # Create the bot using the same pattern as start_channels
         try:
