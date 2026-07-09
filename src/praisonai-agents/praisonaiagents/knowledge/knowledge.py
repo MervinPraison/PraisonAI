@@ -540,6 +540,10 @@ class Knowledge:
                             else:
                                 from .models import AddResult
                                 if isinstance(memory_result, AddResult):
+                                    if not memory_result.success:
+                                        raise RuntimeError(
+                                            memory_result.message or "Failed to store chunk"
+                                        )
                                     all_results.append(memory_result.id)
                                 elif hasattr(memory_result, 'results'):
                                     all_results.extend(memory_result.results)
