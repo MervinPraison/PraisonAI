@@ -145,7 +145,9 @@ class ChromaKnowledgeAdapter:
             from praisonaiagents.embedding import embedding
             result = embedding(query, model="text-embedding-3-small")
             query_embedding = result.embeddings[0] if result.embeddings else None
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Embedding failed for search: %s", e)
             query_embedding = None
         
         if query_embedding is None:
@@ -224,7 +226,9 @@ class ChromaKnowledgeAdapter:
             from praisonaiagents.embedding import embedding
             result = embedding(content_str, model="text-embedding-3-small")
             content_embedding = result.embeddings[0] if result.embeddings else None
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Embedding failed for add: %s", e)
             content_embedding = None
         
         if content_embedding is None:

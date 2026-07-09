@@ -540,7 +540,10 @@ class Knowledge:
                             else:
                                 from .models import AddResult
                                 if isinstance(memory_result, AddResult):
-                                    all_results.append(memory_result.id)
+                                    if memory_result.success:
+                                        all_results.append(memory_result.id)
+                                    else:
+                                        logger.warning(f"Failed to store chunk: {memory_result.message}")
                                 elif hasattr(memory_result, 'results'):
                                     all_results.extend(memory_result.results)
                                 else:
