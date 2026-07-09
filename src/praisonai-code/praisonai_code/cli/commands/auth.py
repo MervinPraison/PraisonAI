@@ -102,7 +102,7 @@ def _run_oauth_login(
     try:
         config, tokens = run_oauth_login(
             provider,
-            overrides=overrides or None,
+            overrides=overrides,
             open_browser=not no_browser,
             on_prompt=_on_prompt,
         )
@@ -205,6 +205,14 @@ def auth_login(
                 if not provider_requires_client_id(provider, oauth_overrides):
                     _run_oauth_login(provider, output, base_url, model, no_browser, oauth_overrides)
                     return
+                # Known OAuth provider but no client id yet: surface the OAuth
+                # path so the user isn't left wondering why they're being asked
+                # for an API key, then continue to the API-key fallback below.
+                output.print_info(
+                    f"{provider} supports OAuth sign-in. To use it, re-run with: "
+                    f"praisonai auth login {provider} --method oauth "
+                    f"--client-id <your-oauth-app-client-id>"
+                )
         except Exception:
             # Fall through to API-key login on any OAuth detection error.
             pass

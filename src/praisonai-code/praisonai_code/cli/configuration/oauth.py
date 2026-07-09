@@ -208,13 +208,19 @@ def run_device_code_flow(
     if not config.device_authorization_url:
         raise RuntimeError("Provider does not define a device authorization endpoint")
 
+    # Some providers (notably GitHub) return application/x-www-form-urlencoded
+    # by default; request JSON explicitly so ``resp.json()`` is always valid.
+    json_headers = {"Accept": "application/json"}
+
     data = {"client_id": config.client_id}
     if config.scope:
         data["scope"] = config.scope
     if config.audience:
         data["audience"] = config.audience
 
-    resp = requests.post(config.device_authorization_url, data=data, timeout=30)
+    resp = requests.post(
+        config.device_authorization_url, data=data, headers=json_headers, timeout=30
+    )
     resp.raise_for_status()
     dev = resp.json()
 
@@ -242,7 +248,9 @@ def run_device_code_flow(
 
     while time.time() < deadline:
         time.sleep(interval)
-        tok = requests.post(config.token_url, data=token_data, timeout=30)
+        tok = requests.post(
+            config.token_url, data=token_data, headers=json_headers, timeout=30
+        )
         payload = tok.json()
         if tok.status_code == 200 and payload.get("access_token"):
             return _tokens_to_credential_kwargs(payload)
@@ -351,7 +359,12 @@ def run_authcode_flow(
         "client_id": config.client_id,
         "code_verifier": verifier,
     }
-    tok = requests.post(config.token_url, data=token_data, timeout=30)
+    tok = requests.post(
+        config.token_url,
+        data=token_data,
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
     tok.raise_for_status()
     payload = tok.json()
     if not payload.get("access_token"):
