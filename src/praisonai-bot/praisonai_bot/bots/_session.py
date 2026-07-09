@@ -21,7 +21,7 @@ import re
 import time
 import weakref
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .._lockmap import LockMap
@@ -34,13 +34,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Matches one or more leading arrival-time prefixes of the form
-# ``[<weekday> <date> <time> <tz>]`` (Issue #2834). Kept deliberately narrow —
-# it only strips bracketed groups that start with a 3-letter weekday and contain
-# a YYYY-MM-DD date — so a user's own bracketed text (e.g. "[TODO] ...") is never
-# eaten. Used to de-duplicate the prefix on history replay so stamps never
-# accumulate as ``[ts] [ts] … text``.
+# ``[… YYYY-MM-DD HH:MM …]`` (Issue #2834). Kept deliberately narrow — it only
+# strips bracketed groups that contain a ``YYYY-MM-DD HH:MM`` date-time — so a
+# user's own bracketed text (e.g. "[TODO] ...") is never eaten. Anchoring on the
+# date-time (rather than an English weekday) keeps de-duplication working under
+# non-English server locales (``%a`` renders ``lun.``/``Mo`` etc.) and for custom
+# ``timestamp_template`` values that omit ``%a``. Used to de-duplicate the prefix
+# on history replay so stamps never accumulate as ``[ts] [ts] … text``.
 _TIMESTAMP_PREFIX_RE = re.compile(
-    r"^(?:\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b[^\]]*\d{4}-\d{2}-\d{2}[^\]]*\]\s*)+"
+    r"^(?:\[[^\]]*?\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}[^\]]*\]\s*)+"
 )
 
 
@@ -354,13 +356,19 @@ class BotSessionManager:
         if not self._timestamps or not content:
             return content
         base = strip_leading_timestamps(content)
+        # Default to a timezone-aware UTC "now" so ``%Z`` in the template renders
+        # a real label (``UTC``) instead of an empty string (which would leave a
+        # stray space before ``]``). A caller-supplied ``received_at`` is used as-is.
+        stamp_at = received_at or datetime.now(timezone.utc)
         try:
-            prefix = (received_at or datetime.now()).strftime(self._timestamp_template)
+            prefix = stamp_at.strftime(self._timestamp_template)
         except (ValueError, TypeError) as e:  # pragma: no cover — defensive
             logger.warning(
                 "Invalid timestamp_template %r: %s", self._timestamp_template, e
             )
-            return content
+            # Return the de-duplicated base (not the original content) so a
+            # malformed template never re-preserves a stale prefix on replay.
+            return base
         return f"{prefix}{base}"
 
     def _scope_for(self, chat_type: str = "") -> str:
@@ -1266,6 +1274,7 @@ class BotSessionManager:
         chat_id: str = "",
         thread_id: str = "",
         user_name: str = "",
+        received_at: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Run agent.chat() with run control for better UX during long operations.
         
@@ -1281,7 +1290,10 @@ class BotSessionManager:
         """
         if self._run_control is None:
             # Fall back to regular chat if no run control
-            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            response = await self.chat(
+                agent, user_id, prompt, chat_id, thread_id, user_name,
+                received_at=received_at,
+            )
             return {"response": response, "metadata": {"run_control": False}}
         
         try:
@@ -1289,7 +1301,10 @@ class BotSessionManager:
             from ._run_control import RunDecision
         except ImportError:
             # Fall back if run control not available
-            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            response = await self.chat(
+                agent, user_id, prompt, chat_id, thread_id, user_name,
+                received_at=received_at,
+            )
             return {"response": response, "metadata": {"run_control": False, "error": "run_control_unavailable"}}
         
         # Submit message to run control
@@ -1322,6 +1337,9 @@ class BotSessionManager:
 
         # We're running now (RUN_NOW or INTERRUPTED)
         current_prompt = prompt
+        # Only the original turn carries the platform's true arrival time; pending
+        # follow-ups picked up below are later messages, so they fall back to now().
+        current_received_at = received_at
         last_response = ""
         last_decision = decision
         pending_processed: List[str] = []
@@ -1354,7 +1372,8 @@ class BotSessionManager:
                     agent.interrupt_controller = interrupt_controller
 
                 last_response = await self.chat(
-                    agent, user_id, current_prompt, chat_id, thread_id, user_name
+                    agent, user_id, current_prompt, chat_id, thread_id, user_name,
+                    received_at=current_received_at,
                 )
 
             except Exception as e:
@@ -1390,6 +1409,9 @@ class BotSessionManager:
                 pending[:100] + "..." if len(pending) > 100 else pending
             )
             current_prompt = pending
+            # A pending follow-up is a distinct, later message — drop the original
+            # arrival time so it is stamped with its own (now()) receive time.
+            current_received_at = None
             last_decision = await self._run_control.submit(user_id, pending)
 
         metadata: Dict[str, Any] = {

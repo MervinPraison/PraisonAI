@@ -133,7 +133,11 @@ class SessionConfigSchema(BaseModel):
     # ("in 2 hours"). Applied to both per_user (DM) and per_chat (group)
     # scopes. De-duplicated on history replay so prefixes never accumulate.
     timestamps: bool = False
-    # strftime template for the per-message arrival-time prefix.
+    # strftime template for the per-message arrival-time prefix. To keep replay
+    # de-duplication working (see ``strip_leading_timestamps`` in ``_session.py``),
+    # a custom template should render a ``YYYY-MM-DD HH:MM`` date-time inside the
+    # bracket (i.e. include ``%Y-%m-%d %H:%M``); the leading ``%a`` weekday and
+    # ``%Z`` timezone are optional and locale-independent for de-duplication.
     timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] "
 
     @field_validator("session_scope")

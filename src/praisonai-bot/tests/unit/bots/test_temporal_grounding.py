@@ -50,6 +50,20 @@ class TestStripLeadingTimestamps:
     def test_empty(self):
         assert strip_leading_timestamps("") == ""
 
+    def test_strips_non_english_weekday(self):
+        # Locale-independent: a French/German ``%a`` must still be stripped
+        # because de-duplication anchors on the date-time, not the weekday.
+        assert strip_leading_timestamps("[lun. 2026-07-09 14:32 UTC] hi") == "hi"
+        assert strip_leading_timestamps("[Mo 2026-07-09 14:32 CET] hi") == "hi"
+
+    def test_strips_template_without_weekday(self):
+        # A custom template that omits ``%a`` must still de-duplicate.
+        assert strip_leading_timestamps("[2026-07-09 14:32] hi") == "hi"
+
+    def test_preserves_bracket_with_date_only(self):
+        # No HH:MM => not a timestamp prefix; user text is preserved.
+        assert strip_leading_timestamps("[2026-07-09] note") == "[2026-07-09] note"
+
 
 class TestTimestampsDisabledByDefault:
     @pytest.mark.asyncio
@@ -80,6 +94,17 @@ class TestTimestampsInDM:
         forwarded = agent.calls[0][1]
         assert forwarded.endswith("what time is it")
         assert forwarded != "what time is it"
+
+    @pytest.mark.asyncio
+    async def test_now_fallback_has_no_trailing_space_before_bracket(self):
+        # The now() fallback is timezone-aware UTC so ``%Z`` renders "UTC"
+        # rather than an empty string (which would leave "[... 14:32 ] ").
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", timestamps=True)
+        await mgr.chat(agent, "alice", "hi")
+        forwarded = agent.calls[0][1]
+        assert " ]" not in forwarded
+        assert "UTC" in forwarded
 
 
 class TestTimestampsInGroup:
@@ -116,5 +141,21 @@ class TestNoAccumulationOnReplay:
         await mgr.chat(agent, "alice", already, received_at=received)
         forwarded = agent.calls[0][1]
         # Exactly one bracketed timestamp prefix, not two.
+        assert forwarded.count("2026-07-09") == 1
+        assert forwarded.endswith("hello again")
+
+    @pytest.mark.asyncio
+    async def test_custom_template_without_weekday_not_duplicated(self):
+        # A custom template that omits %a must still de-duplicate on replay.
+        agent = FakeAgent()
+        mgr = BotSessionManager(
+            platform="telegram",
+            timestamps=True,
+            timestamp_template="[%Y-%m-%d %H:%M] ",
+        )
+        received = datetime(2026, 7, 9, 14, 32)
+        already = "[2026-07-09 14:32] hello again"
+        await mgr.chat(agent, "alice", already, received_at=received)
+        forwarded = agent.calls[0][1]
         assert forwarded.count("2026-07-09") == 1
         assert forwarded.endswith("hello again")
