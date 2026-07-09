@@ -1307,6 +1307,28 @@ class ToolExecutionMixin:
                     getattr(self, 'name', None), tool_name, tool_args,
                 )
 
+    def _check_permission_manager_deny(self, function_name):
+        """Return an error dict if the PermissionManager hard-denies the tool.
+
+        Ensures the pattern-based ``PermissionManager`` (rules from
+        ``.praisonai/permissions/``, YAML or Python) gates every tool-call path
+        uniformly — native functions **and** MCP tools — since both flow through
+        ``_execute_tool_impl``. Returns ``None`` when no manager is attached or
+        the tool is not denied, preserving backward compatibility.
+        """
+        manager = getattr(self, "_permission_manager", None)
+        if manager is None:
+            return None
+        try:
+            if manager.is_denied(function_name, getattr(self, "name", None)):
+                return {
+                    "error": f"Tool '{function_name}' blocked by permission policy",
+                    "permission_denied": True,
+                }
+        except Exception as e:
+            logging.debug("permission manager is_denied failed for %s: %s", function_name, e)
+        return None
+
     def _check_tool_approval_sync(self, function_name, arguments):
         """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
         # Permission tier fast-path (O(1) frozenset lookup, resolved at __init__)
@@ -1314,6 +1336,11 @@ class ToolExecutionMixin:
             return {"error": f"Tool '{function_name}' blocked by permission policy", "permission_denied": True}
         if self._perm_allow is not None and function_name not in self._perm_allow:
             return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
+
+        # Pattern-based PermissionManager deny gate (native + MCP, uniform).
+        manager_denial = self._check_permission_manager_deny(function_name)
+        if manager_denial is not None:
+            return manager_denial
 
         decision = self._resolve_approval_decision(function_name, arguments, is_async=False)
         
@@ -1337,6 +1364,11 @@ class ToolExecutionMixin:
             return {"error": f"Tool '{function_name}' blocked by permission policy", "permission_denied": True}
         if self._perm_allow is not None and function_name not in self._perm_allow:
             return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
+
+        # Pattern-based PermissionManager deny gate (native + MCP, uniform).
+        manager_denial = self._check_permission_manager_deny(function_name)
+        if manager_denial is not None:
+            return manager_denial
 
         decision_coro = self._resolve_approval_decision(function_name, arguments, is_async=True)
         decision = await decision_coro

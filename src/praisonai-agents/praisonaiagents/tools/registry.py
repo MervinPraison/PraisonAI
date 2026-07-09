@@ -218,11 +218,22 @@ class ToolRegistry:
                     base_tools.append(entry.tool)
             return base_tools
     
-    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def get_tool_definitions(
+        self,
+        permission_resolver: Optional[Callable[[str], bool]] = None,
+    ) -> List[Dict[str, Any]]:
         """Get OpenAI-compatible tool definitions with dynamic schema overrides applied.
         
         This is the main entry point for getting tool schemas that respects
         dynamic overrides. Called every time tools need to be passed to the LLM.
+        
+        Args:
+            permission_resolver: Optional callable ``(tool_name) -> bool`` that
+                returns ``False`` when a tool is denied for the current
+                agent/session. Denied tools are dropped from the advertised
+                schema, mirroring the existing ``check_availability()`` filter
+                (deny = hide). ``None`` (default) advertises every available
+                tool, preserving backward compatibility.
         
         Returns:
             List of OpenAI-compatible tool definition dictionaries
@@ -244,6 +255,18 @@ class ToolRegistry:
                     except Exception as e:
                         logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
                         continue
+                
+                # Deny = hide: drop tools the permission resolver rejects so the
+                # model is never offered a tool it cannot call. Same filtering
+                # seam as check_availability() above. Fail-open on resolver error
+                # (keep the tool; call-time gate still enforces).
+                if permission_resolver is not None:
+                    try:
+                        if not permission_resolver(entry.name):
+                            logging.debug(f"Tool '{entry.name}' hidden by permission policy")
+                            continue
+                    except Exception as e:
+                        logging.warning(f"Permission resolver failed for tool '{entry.name}': {e}")
                 
                 # Get schema with dynamic overrides applied
                 try:
@@ -545,16 +568,22 @@ def list_tools() -> List[str]:
     return get_registry().list_tools()
 
 
-def get_tool_definitions() -> List[Dict[str, Any]]:
+def get_tool_definitions(
+    permission_resolver: Optional[Callable[[str], bool]] = None,
+) -> List[Dict[str, Any]]:
     """Get OpenAI-compatible tool definitions with dynamic schema overrides applied.
     
     This is the main entry point for getting tool schemas that respects
     dynamic overrides. Called every time tools need to be passed to the LLM.
     
+    Args:
+        permission_resolver: Optional ``(tool_name) -> bool`` filter; denied
+            tools are dropped from the advertised schema (deny = hide).
+    
     Returns:
         List of OpenAI-compatible tool definition dictionaries
     """
-    return get_registry().get_tool_definitions()
+    return get_registry().get_tool_definitions(permission_resolver=permission_resolver)
 
 
 def discover_plugins() -> int:

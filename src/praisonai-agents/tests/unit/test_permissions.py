@@ -316,3 +316,155 @@ class TestAdvertisedToolPruning:
         agent._perm_deny = frozenset()
         agent._perm_allow = None
         assert agent._tool_name_allowed("anything") is True
+
+
+class TestPermissionManagerIsDenied:
+    """Test PermissionManager.is_denied() exposure helper."""
+
+    def _manager(self, tmp_path, rules):
+        from praisonaiagents.permissions import PermissionManager
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config(rules)
+        return mgr
+
+    def test_deny_rule_hides_tool(self, tmp_path):
+        mgr = self._manager(tmp_path, {"write_file": "deny"})
+        assert mgr.is_denied("write_file") is True
+
+    def test_allow_rule_does_not_hide(self, tmp_path):
+        mgr = self._manager(tmp_path, {"read_file": "allow"})
+        assert mgr.is_denied("read_file") is False
+
+    def test_ask_rule_does_not_hide(self, tmp_path):
+        mgr = self._manager(tmp_path, {"edit_file": "ask"})
+        assert mgr.is_denied("edit_file") is False
+
+    def test_no_matching_rule_does_not_hide(self, tmp_path):
+        # Default decision is ASK, not DENY -> tool stays visible.
+        mgr = self._manager(tmp_path, {"read_file": "allow"})
+        assert mgr.is_denied("unknown_tool") is False
+
+    def test_namespaced_tool_prefix_matched(self, tmp_path):
+        # A rule against the ``tool:<name>`` form also hides the bare name.
+        mgr = self._manager(tmp_path, {"tool:mcp_dangerous": "deny"})
+        assert mgr.is_denied("mcp_dangerous") is True
+
+    def test_glob_deny_pattern(self, tmp_path):
+        mgr = self._manager(tmp_path, {"delete_*": "deny"})
+        assert mgr.is_denied("delete_file") is True
+        assert mgr.is_denied("read_file") is False
+
+    def test_empty_name_not_denied(self, tmp_path):
+        mgr = self._manager(tmp_path, {"*": "deny"})
+        assert mgr.is_denied("") is False
+
+
+class TestPermissionManagerWiring:
+    """Test that an attached PermissionManager hides + enforces uniformly."""
+
+    def test_manager_prunes_denied_tool_from_schema(self, tmp_path):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({"write_file": "deny"})
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+
+        payload = [
+            {"type": "function", "function": {"name": "read_file"}},
+            {"type": "function", "function": {"name": "write_file"}},
+        ]
+        names = _tool_names(agent._prune_denied_tools(payload))
+        assert names == {"read_file"}
+
+    def test_manager_blocks_denied_tool_at_call_time(self, tmp_path):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({"write_file": "deny"})
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+
+        result = agent._check_tool_approval_sync("write_file", {})
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
+
+    def test_manager_blocks_denied_tool_at_call_time_async(self, tmp_path):
+        import asyncio
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({"write_file": "deny"})
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+
+        result = asyncio.run(agent._check_tool_approval_async("write_file", {}))
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
+
+    def test_manager_allows_non_denied_tool(self, tmp_path):
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({"write_file": "deny", "read_file": "allow"})
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+
+        assert agent._tool_name_allowed("read_file") is True
+        assert agent._tool_name_allowed("write_file") is False
+
+
+class TestRegistryPermissionResolver:
+    """Test get_tool_definitions(permission_resolver=...) deny=hide filter."""
+
+    def test_resolver_hides_denied_tool(self):
+        from praisonaiagents.tools.registry import ToolRegistry
+
+        def read_file(path: str) -> str:
+            """Read a file."""
+            return "ok"
+
+        def write_file(path: str, content: str) -> str:
+            """Write a file."""
+            return "ok"
+
+        reg = ToolRegistry()
+        reg.register(read_file)
+        reg.register(write_file)
+
+        def resolver(name):
+            return name != "write_file"
+
+        defs = reg.get_tool_definitions(permission_resolver=resolver)
+        names = {d.get("function", {}).get("name") for d in defs}
+        assert "read_file" in names
+        assert "write_file" not in names
+
+    def test_no_resolver_advertises_all(self):
+        from praisonaiagents.tools.registry import ToolRegistry
+
+        def read_file(path: str) -> str:
+            """Read a file."""
+            return "ok"
+
+        reg = ToolRegistry()
+        reg.register(read_file)
+        defs = reg.get_tool_definitions()
+        names = {d.get("function", {}).get("name") for d in defs}
+        assert "read_file" in names

@@ -1904,6 +1904,11 @@ Your Goal: {self.goal}
         from ..approval.protocols import ApprovalConfig
         self._perm_deny = frozenset()  # Permission tier deny set (empty = no denials)
         self._perm_allow = None        # Permission tier allow set (None = allow all)
+        # Optional pattern-based PermissionManager (rules from
+        # .praisonai/permissions/, YAML or Python). When attached, its ``deny``
+        # rules both hide tools from the advertised schema and block them at
+        # call time (native + MCP, uniformly). None = no pattern rules consulted.
+        self._permission_manager = None
         if isinstance(approval, str) and approval not in ('True', 'False'):
             # Permission preset: "safe", "read_only", "full"
             from ..approval.registry import PERMISSION_PRESETS
@@ -2004,6 +2009,32 @@ Your Goal: {self.goal}
         if autonomy_level == "full_auto" and (approval is False or approval is None):
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
+
+        # Wire the pattern-based PermissionManager when a declarative
+        # ``permissions:`` block was supplied (ApprovalConfig/dict). Its
+        # ``deny`` rules then both hide tools from the advertised schema and
+        # block them at call time (native + MCP, uniformly). Failures here are
+        # non-fatal — the frozenset tier and call-time gate remain in effect.
+        if self._approval_permissions:
+            try:
+                from ..permissions import PermissionManager, PermissionRule
+                if isinstance(self._approval_permissions, PermissionManager):
+                    # Reuse the caller's manager as-is (no disk I/O side-effect).
+                    _mgr = self._approval_permissions
+                else:
+                    _mgr = PermissionManager(agent_name=self.name)
+                    if isinstance(self._approval_permissions, dict):
+                        _mgr.load_rules_from_config(self._approval_permissions)
+                    elif isinstance(self._approval_permissions, (list, tuple)):
+                        for _rule in self._approval_permissions:
+                            if isinstance(_rule, PermissionRule):
+                                _mgr.add_rule(_rule)
+                self._permission_manager = _mgr
+            except Exception as _e:
+                logging.getLogger(__name__).debug(
+                    "Could not initialize PermissionManager from permissions config: %s", _e
+                )
+
         # Pending approvals for async (non-blocking) mode
         self._pending_approvals = {}
         self._approvals_lock = asyncio.Lock()
