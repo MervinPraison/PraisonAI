@@ -129,3 +129,9 @@ def list_judges_cmd():
     typer.echo("Registered Judge Types:")
     for name in judges:
         typer.echo(f"  - {name}")
+
+
+@app.command("list")
+def eval_list():
+    """List registered judge types (alias for list-judges)."""
+    list_judges_cmd()
