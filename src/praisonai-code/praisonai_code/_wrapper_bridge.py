@@ -67,6 +67,9 @@ def run_wrapper_command(argv: list[str], *, feature: str) -> None:
     installed it fails fast with a single-line install hint (exit code 1) instead
     of a traceback. When the wrapper is present it performs the ``sys.argv``
     mutation + ``main()`` call exactly as before, restoring ``sys.argv`` after.
+    A clean ``SystemExit`` (code ``0``/``None``) is swallowed so the calling
+    Typer command returns normally, while any non-zero exit code is re-raised so
+    the shell sees the wrapper's failure.
 
     Args:
         argv: Legacy argv tokens (e.g. ``["agents", "list"]``) without the
@@ -88,7 +91,8 @@ def run_wrapper_command(argv: list[str], *, feature: str) -> None:
     sys.argv = ["praisonai"] + argv
     try:
         PraisonAI().main()
-    except SystemExit:
-        pass
+    except SystemExit as exc:
+        if exc.code:
+            raise
     finally:
         sys.argv = original_argv

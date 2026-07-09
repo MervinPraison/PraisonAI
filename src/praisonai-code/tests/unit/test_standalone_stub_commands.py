@@ -61,6 +61,17 @@ def test_run_wrapper_command_exits_one_without_traceback(monkeypatch):
         ("registry", ["list"]),
         ("memory", ["show"]),
         ("skills", ["list"]),
+        ("hooks", ["list"]),
+        ("rules", ["list"]),
+        ("eval", ["accuracy", "agent", "--input", "x", "--expected", "y"]),
+        ("package", ["list"]),
+        ("templates", ["list"]),
+        ("todo", ["list"]),
+        # research/commit/call use an invoke_without_command callback, so the
+        # migrated stub runs with an empty argv.
+        ("research", []),
+        ("commit", []),
+        ("call", []),
     ],
 )
 def test_stub_command_no_traceback_standalone(monkeypatch, module_name, argv):
@@ -86,9 +97,13 @@ def test_no_legacy_main_reentry_in_stub_modules():
     base = pathlib.Path(__file__).resolve().parents[2] / (
         "praisonai_code/cli/commands"
     )
+    # Catch both the two-line form (``praison = PraisonAI(); praison.main()``)
+    # and the direct one-liner (``PraisonAI().main()``) so a regression using
+    # either style is detected.
+    legacy_patterns = ("praison.main()", "PraisonAI().main()")
     offenders = []
     for name in STUB_MODULES:
         text = (base / f"{name}.py").read_text()
-        if "praison.main()" in text:
+        if any(pattern in text for pattern in legacy_patterns):
             offenders.append(name)
     assert offenders == [], f"legacy re-entry still present in: {offenders}"
