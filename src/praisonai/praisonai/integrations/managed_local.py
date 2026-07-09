@@ -24,6 +24,8 @@ Usage::
 import asyncio
 import logging
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -617,7 +619,17 @@ class LocalManagedAgent:
             from .._async_bridge import run_sync
             run_sync(self.provision_compute())
         
-        pip_cmd = "python -m pip install -q " + " ".join(f'"{pkg}"' for pkg in pip_pkgs)
+        # Validate package names against a strict allowlist (valid pip
+        # requirement specifiers) so malformed/malicious names fail fast, then
+        # shell-quote each token to prevent shell injection inside the sandbox.
+        _pip_name_re = re.compile(r'^[A-Za-z0-9._\-\[\]<>=,~!+ ]+$')
+        for pkg in pip_pkgs:
+            if not isinstance(pkg, str) or not _pip_name_re.match(pkg):
+                raise ValueError(
+                    f"Invalid pip package specifier: {pkg!r}. Only pip "
+                    "requirement specifiers are allowed."
+                )
+        pip_cmd = "python -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
         logger.info("[local_managed] installing pip packages in compute: %s", pip_pkgs)
         
         try:

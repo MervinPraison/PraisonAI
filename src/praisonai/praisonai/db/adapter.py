@@ -655,32 +655,87 @@ class PraisonAIDB:
     # ========================================================================
     # Async Surface for async-safe agents
     # ========================================================================
-    
+
+    @staticmethod
+    async def _dispatch_async(store, sync_name, async_name, *args, **kwargs):
+        """Dispatch a store call in an async-safe way.
+
+        Prefers a dedicated async method (``async_name``). Falls back to the
+        sync method (``sync_name``): if it is actually a coroutine function it
+        is awaited directly, otherwise it is off-loaded to a thread so the event
+        loop is never blocked. Returns ``None`` when neither method exists.
+        """
+        import inspect
+
+        fn = getattr(store, async_name, None) or getattr(store, sync_name, None)
+        if fn is None:
+            return None
+        if inspect.iscoroutinefunction(fn):
+            return await fn(*args, **kwargs)
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
     async def aon_agent_start(
         self, 
         session_id: str, 
         name: str, 
         agent_id: str = "", 
         metadata: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Async version of on_agent_start."""
+    ) -> List:
+        """Async version of on_agent_start - returns previous messages for resume."""
         await self._ainit_stores()
-        
-        if self._state_store:
-            if hasattr(self._state_store, "async_set_agent_state"):
-                await self._state_store.async_set_agent_state(
-                    session_id, 
-                    agent_id or name,
-                    {"status": "started", "metadata": metadata or {}}
+
+        messages: List = []
+
+        if self._conversation_store:
+            from ..persistence.conversation.base import ConversationSession
+
+            session = await self._dispatch_async(
+                self._conversation_store, "get_session", "async_get_session", session_id
+            )
+
+            if session is None:
+                new_session = ConversationSession(
+                    session_id=session_id,
+                    agent_id=agent_id or name,
+                    name=f"Session {session_id}",
+                    metadata=metadata or {},
+                )
+                await self._dispatch_async(
+                    self._conversation_store,
+                    "create_session",
+                    "async_create_session",
+                    new_session,
                 )
             else:
-                import asyncio
-                await asyncio.to_thread(
-                    self._state_store.set_agent_state,
-                    session_id, 
-                    agent_id or name,
-                    {"status": "started", "metadata": metadata or {}}
+                raw = await self._dispatch_async(
+                    self._conversation_store,
+                    "get_messages",
+                    "async_get_messages",
+                    session_id,
                 )
+                from praisonaiagents.db.protocol import DbMessage
+
+                messages = [
+                    DbMessage(
+                        role=m.role,
+                        content=m.content,
+                        metadata=m.metadata or {},
+                        timestamp=m.created_at or time.time(),
+                        id=m.id,
+                    )
+                    for m in (raw or [])
+                ]
+
+        if self._state_store:
+            await self._dispatch_async(
+                self._state_store,
+                "set",
+                "aset",
+                f"agent:{session_id}:{agent_id or name}",
+                {"status": "started", "metadata": metadata or {}},
+            )
+
+        return messages
 
     async def aon_user_message(
         self,
@@ -692,18 +747,24 @@ class PraisonAIDB:
         await self._ainit_stores()
         
         if self._conversation_store:
-            from ..persistence.conversation.models import ConversationMessage
+            from ..persistence.conversation.base import ConversationMessage
+            import uuid
             msg = ConversationMessage(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
                 role="user",
                 content=content,
-                metadata=metadata or {}
+                metadata=metadata or {},
+                created_at=time.time(),
             )
-            
-            if hasattr(self._conversation_store, "async_add_message"):
-                await self._conversation_store.async_add_message(session_id, msg)
-            else:
-                import asyncio
-                await asyncio.to_thread(self._conversation_store.add_message, session_id, msg)
+
+            await self._dispatch_async(
+                self._conversation_store,
+                "add_message",
+                "async_add_message",
+                session_id,
+                msg,
+            )
 
     async def aon_agent_message(
         self,
@@ -715,18 +776,24 @@ class PraisonAIDB:
         await self._ainit_stores()
         
         if self._conversation_store:
-            from ..persistence.conversation.models import ConversationMessage
+            from ..persistence.conversation.base import ConversationMessage
+            import uuid
             msg = ConversationMessage(
-                role="assistant", 
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                role="assistant",
                 content=content,
-                metadata=metadata or {}
+                metadata=metadata or {},
+                created_at=time.time(),
             )
-            
-            if hasattr(self._conversation_store, "async_add_message"):
-                await self._conversation_store.async_add_message(session_id, msg)
-            else:
-                import asyncio
-                await asyncio.to_thread(self._conversation_store.add_message, session_id, msg)
+
+            await self._dispatch_async(
+                self._conversation_store,
+                "add_message",
+                "async_add_message",
+                session_id,
+                msg,
+            )
 
     async def aon_tool_call(
         self,
@@ -740,15 +807,45 @@ class PraisonAIDB:
         await self._ainit_stores()
         
         if self._conversation_store:
-            if hasattr(self._conversation_store, "async_add_tool_call"):
-                await self._conversation_store.async_add_tool_call(
-                    session_id, tool_name, arguments, result, metadata
+            if hasattr(self._conversation_store, "async_add_tool_call") or hasattr(
+                self._conversation_store, "add_tool_call"
+            ):
+                await self._dispatch_async(
+                    self._conversation_store,
+                    "add_tool_call",
+                    "async_add_tool_call",
+                    session_id,
+                    tool_name,
+                    arguments,
+                    result,
+                    metadata,
                 )
-            elif hasattr(self._conversation_store, "add_tool_call"):
-                import asyncio
-                await asyncio.to_thread(
-                    self._conversation_store.add_tool_call,
-                    session_id, tool_name, arguments, result, metadata
+            else:
+                # Fall back to persisting the tool call as a message so the
+                # async path matches the sync on_tool_call behaviour.
+                from ..persistence.conversation.base import ConversationMessage
+                import uuid
+                import json
+
+                tool_content = json.dumps({
+                    "tool": tool_name,
+                    "args": arguments,
+                    "result": str(result)[:1000],
+                })
+                msg = ConversationMessage(
+                    id=f"tool-{uuid.uuid4().hex[:12]}",
+                    session_id=session_id,
+                    role="tool",
+                    content=tool_content,
+                    metadata={"tool_name": tool_name, **(metadata or {})},
+                    created_at=time.time(),
+                )
+                await self._dispatch_async(
+                    self._conversation_store,
+                    "add_message",
+                    "async_add_message",
+                    session_id,
+                    msg,
                 )
 
     async def aon_agent_end(
@@ -762,20 +859,68 @@ class PraisonAIDB:
         await self._ainit_stores()
         
         if self._state_store:
-            if hasattr(self._state_store, "async_set_agent_state"):
-                await self._state_store.async_set_agent_state(
-                    session_id,
-                    agent_id or name,
-                    {"status": "ended", "metadata": metadata or {}}
-                )
-            else:
-                import asyncio
-                await asyncio.to_thread(
-                    self._state_store.set_agent_state,
-                    session_id,
-                    agent_id or name,
-                    {"status": "ended", "metadata": metadata or {}}
-                )
+            await self._dispatch_async(
+                self._state_store,
+                "set",
+                "aset",
+                f"agent:{session_id}:{agent_id or name}",
+                {"status": "ended", "metadata": metadata or {}},
+            )
+
+    async def aon_run_start(
+        self,
+        session_id: str,
+        run_id: str,
+        input_content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Async version of on_run_start - persists run/turn tracking."""
+        await self._ainit_stores()
+
+        if self._state_store:
+            run_key = f"run:{session_id}:{run_id}"
+            await self._dispatch_async(
+                self._state_store,
+                "set",
+                "aset",
+                run_key,
+                {
+                    "run_id": run_id,
+                    "session_id": session_id,
+                    "started_at": time.time(),
+                    "input_content": input_content,
+                    "status": "running",
+                    "metadata": metadata or {},
+                },
+            )
+
+    async def aon_run_end(
+        self,
+        session_id: str,
+        run_id: str,
+        output_content: Optional[str] = None,
+        status: str = "completed",
+        metrics: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Async version of on_run_end - persists run/turn tracking."""
+        await self._ainit_stores()
+
+        if self._state_store:
+            run_key = f"run:{session_id}:{run_id}"
+            run_data = await self._dispatch_async(
+                self._state_store, "get", "aget", run_key
+            ) or {}
+            run_data.update({
+                "ended_at": time.time(),
+                "output_content": output_content,
+                "status": status,
+                "metrics": metrics or {},
+                "metadata": {**run_data.get("metadata", {}), **(metadata or {})},
+            })
+            await self._dispatch_async(
+                self._state_store, "set", "aset", run_key, run_data
+            )
 
     async def aclose(self) -> None:
         """Async version of close; idempotent and lock-safe.
