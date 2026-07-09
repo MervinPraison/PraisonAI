@@ -11,7 +11,7 @@ from praisonai_code.cli.commands.eval import app
 
 def test_eval_list_not_unknown_subcommand():
     result = CliRunner().invoke(app, ["list"])
-    assert result.exit_code != 2
+    assert result.exit_code == 0
     assert "Registered Judge Types" in result.output
 
 
@@ -24,4 +24,6 @@ def test_eval_list_judges_unchanged():
 def test_eval_help_documents_list():
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "list" in result.output
+    # "list" must appear as a standalone command entry, not only within "list-judges".
+    output_without_list_judges = result.output.replace("list-judges", "")
+    assert "list" in output_without_list_judges
