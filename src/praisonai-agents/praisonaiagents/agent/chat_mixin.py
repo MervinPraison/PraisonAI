@@ -2787,7 +2787,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return None
 
     def clean_json_output(self, output: str) -> str:
-        """Clean and extract JSON from response text."""
+        """Clean and extract JSON from response text.
+        
+        NOTE: This method is duplicated in agents.Agents.clean_json_output.
+        Keep both implementations in sync when modifying either.
+        """
         cleaned = output.strip()
         # Remove markdown code blocks if present
         if cleaned.startswith("```json"):

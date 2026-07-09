@@ -475,6 +475,7 @@ class ToolExecutionMixin:
                 _event.agent_id = self.name
                 _stream_emitter.emit(_event)
         
+        blocked_result = None
         try:
             # Check for steering messages before tool execution
             if hasattr(self, '_check_steering_messages'):
@@ -550,7 +551,6 @@ class ToolExecutionMixin:
                     logging.debug(f"Tool validator raised; skipping validation: {_ve}")
 
             # Check if loop guard blocked execution
-            blocked_result = locals().get('blocked_result')
             if blocked_result is not None:
                 result = blocked_result
             else:
@@ -812,7 +812,7 @@ class ToolExecutionMixin:
                     
                     if self.context_manager and hasattr(self, '_truncate_tool_output'):
                         # Use context-aware truncation if available, but preserve artifact reference
-                        if 'artifact_ref' in locals() and artifact_ref:
+                        if artifact_ref:
                             # Extract the artifact reference from the truncated string
                             artifact_inline = artifact_ref.to_inline()
                             # Remove the artifact reference before context truncation
@@ -831,7 +831,7 @@ class ToolExecutionMixin:
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                             # Add artifact reference to dict result if available
-                            if 'artifact_ref' in locals() and artifact_ref:
+                            if artifact_ref:
                                 result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated
