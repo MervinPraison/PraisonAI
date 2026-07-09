@@ -46,6 +46,101 @@ def substitute_env_vars(value: Any) -> Any:
     return value
 
 
+# Single combined pattern: legacy ${VAR} plus {env:VAR} / {env:VAR:-default}
+# and {file:./path} include directives. Resolving all directives in ONE pass
+# is a security requirement: it prevents an expanded ${VAR} value from itself
+# being re-interpreted as a {file:...} directive (chained-injection).
+_INTERPOLATION_PATTERN = re.compile(r'\$\{([^}]+)\}|\{(env|file):([^}]+)\}')
+
+
+def _resolve_directive(kind: str, arg: str, base_dir: Optional[Path]) -> str:
+    """Resolve a single {env:...} or {file:...} directive to its string value."""
+    if kind == "env":
+        # Support {env:VAR} and {env:VAR:-default} (shell-style fallback).
+        if ":-" in arg:
+            name, default = arg.split(":-", 1)
+            return os.environ.get(name.strip(), default)
+        name = arg.strip()
+        # No default supplied: preserve the directive (like ${VAR}) so a missing
+        # var stays visible for debugging rather than silently becoming "".
+        return os.environ.get(name, "{env:" + arg + "}")
+
+    # kind == "file": read the referenced file's contents (trailing newline
+    # stripped), resolved relative to base_dir when the path is not absolute.
+    #
+    # SECURITY: file reads are confined to base_dir. Absolute paths,
+    # home-relative (~) paths and traversal (../) that escape base_dir are
+    # refused so a discovered/untrusted config cannot exfiltrate arbitrary
+    # local files (e.g. ~/.ssh/id_rsa, /etc/passwd) into config values.
+    raw_path = arg.strip()
+    original = "{file:" + arg + "}"
+    if base_dir is None:
+        # Without a trusted root we cannot bound the read; refuse.
+        return original
+    expanded = os.path.expanduser(raw_path)
+    candidate = Path(expanded)
+    if candidate.is_absolute():
+        # Absolute paths bypass base_dir confinement; refuse.
+        return original
+    try:
+        root = base_dir.resolve()
+        resolved = (root / candidate).resolve()
+        # Confinement check: resolved path must live within base_dir.
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return original
+    try:
+        return resolved.read_text().rstrip("\n")
+    except OSError:
+        # Leave the directive untouched when the file cannot be read so the
+        # failure is visible rather than silently blanking a value.
+        return original
+
+
+def _resolve_match(match: "re.Match[str]", base_dir: Optional[Path]) -> str:
+    """Resolve one regex match for either ${VAR} or {env:}/{file:} directives."""
+    if match.group(1) is not None:
+        # Legacy ${VAR}: preserve original placeholder when unset.
+        name = match.group(1)
+        return os.environ.get(name, match.group(0))
+    return _resolve_directive(match.group(2), match.group(3), base_dir)
+
+
+def interpolate(value: Any, base_dir: Optional[Path] = None) -> Any:
+    """Interpolate ``${VAR}``, ``{env:VAR}`` and ``{file:./path}`` in a value.
+
+    Applied uniformly across config/YAML surfaces so secrets and reused prompt
+    text can live outside tracked config files. Recurses into dicts and lists.
+
+    Args:
+        value: Value to interpolate (string, dict, list, or any type).
+        base_dir: Directory that ``{file:...}`` relative paths resolve against
+            (typically the directory of the config file being loaded).
+
+    Returns:
+        Value with all supported directives resolved.
+
+    Examples:
+        >>> os.environ['TOKEN'] = 'secret123'
+        >>> interpolate('{env:TOKEN}')
+        'secret123'
+        >>> interpolate('${TOKEN}')
+        'secret123'
+    """
+    if isinstance(value, str):
+        # Single pass over ${VAR}, {env:}, {file:} — an expanded value is never
+        # re-scanned, preventing chained {file:}/{env:} directive injection.
+        return _INTERPOLATION_PATTERN.sub(
+            lambda m: _resolve_match(m, base_dir),
+            value,
+        )
+    elif isinstance(value, dict):
+        return {k: interpolate(v, base_dir) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [interpolate(item, base_dir) for item in value]
+    return value
+
+
 def load_env_file(env_path: Optional[Path] = None, override: bool = False) -> Dict[str, str]:
     """Load environment variables from a .env file.
     

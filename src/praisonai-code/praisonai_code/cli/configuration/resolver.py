@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ..utils.project import get_git_root
+from ..utils.env_utils import interpolate
 
 
 # Known top-level sections the resolver consumes.
@@ -426,6 +427,68 @@ class ConfigResolver:
         
         return None
     
+    def resolve_with_provenance(
+        self, cli_args: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Resolve config and record, per dotted key, which layer/file set it.
+
+        Returns a mapping of ``"agent.model" -> {"value", "layer", "source"}``
+        reflecting the deep-merged winner for each key. This is the reconciled
+        provenance view: for any value a CLI-first developer can see exactly
+        which file (and layer) supplied it.
+        """
+        provenance: Dict[str, Dict[str, Any]] = {}
+
+        def _record(layer: str, source: Optional[str], data: Dict[str, Any]) -> None:
+            for dotted, value in self._flatten(data).items():
+                provenance[dotted] = {
+                    "value": value,
+                    "layer": layer,
+                    "source": source,
+                }
+
+        # Layer 1: built-in defaults (from an empty ResolvedConfig).
+        _record("defaults", None, ResolvedConfig().to_dict())
+
+        # Layer 2: global user config.
+        global_config = self._load_global_config()
+        if global_config:
+            source = global_config.get("_source")
+            _record("global", source, {k: v for k, v in global_config.items() if k != "_source"})
+
+        # Layer 3: project config (walk-up discovery).
+        project_config = self._load_project_config()
+        if project_config:
+            source = project_config.get("_source")
+            _record("project", source, {k: v for k, v in project_config.items() if k != "_source"})
+
+        # Layer 4: environment variables.
+        env_config = self._load_env_config()
+        if env_config:
+            _record("environment", None, env_config)
+
+        # Layer 5: CLI arguments.
+        if cli_args:
+            _record("cli", None, self._process_cli_args(cli_args))
+
+        return provenance
+
+    def _flatten(self, data: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+        """Flatten a nested config dict into dotted keys (leaves only)."""
+        flat: Dict[str, Any] = {}
+        for key, value in data.items():
+            if key == "_source":
+                continue
+            dotted = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                # Recurse into non-empty dicts; skip empty dicts entirely so the
+                # flattened map only ever contains scalar/list leaves (no {}).
+                if value:
+                    flat.update(self._flatten(value, dotted))
+            else:
+                flat[dotted] = value
+        return flat
+
     def discover_raw_configs(self) -> List[Dict[str, Any]]:
         """
         Return the raw discovered config dicts (global then project), without
@@ -521,25 +584,35 @@ class ConfigResolver:
         return config
     
     def _read_config_file(self, path: Path) -> Optional[Dict[str, Any]]:
-        """Read a configuration file (YAML or TOML)."""
+        """Read a configuration file (YAML or TOML) with value interpolation.
+
+        ``${VAR}``, ``{env:VAR}`` and ``{file:./path}`` directives are resolved
+        at load time so secrets and reused prompt bodies can live outside the
+        tracked config file. Relative ``{file:...}`` paths resolve against the
+        directory containing this config file.
+        """
         try:
             content = path.read_text()
-            
+
             if path.suffix in (".yaml", ".yml"):
-                return yaml.safe_load(content) or {}
+                data = yaml.safe_load(content) or {}
             elif path.suffix == ".toml":
-                return toml.loads(content)
+                data = toml.loads(content)
             elif path.suffix == ".json":
-                return json.loads(content)
+                data = json.loads(content)
             else:
                 # Try to detect format
                 try:
-                    return yaml.safe_load(content) or {}
+                    data = yaml.safe_load(content) or {}
                 except yaml.YAMLError:
                     try:
-                        return toml.loads(content)
+                        data = toml.loads(content)
                     except toml.TomlDecodeError:
                         return None
+
+            if isinstance(data, dict):
+                data = interpolate(data, base_dir=path.parent)
+            return data
         except (OSError, json.JSONDecodeError, toml.TomlDecodeError, yaml.YAMLError):
             return None
     
