@@ -21,13 +21,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 21 | 43 | 13351 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
-| ✅ Approval | 1 | 5 | 2231 |
+| ✅ Approval | 1 | 5 | 2258 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 8 | 2301 |
 | ✅ Autonomy | 3 | 6 | 2209 |
-| ✅ Bots | 7 | 28 | 10627 |
+| ✅ Bots | 7 | 28 | 10784 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 112 | 30054 |
+| ✅ CLI | 5 | 112 | 30100 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3893 |
@@ -44,7 +44,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1932 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 15829 |
+| ✅ Gateway | 7 | 48 | 15982 |
 | ✅ Guardrails | 4 | 4 | 1667 |
 | ✅ Handoffs | 11 | 6 | 2454 |
 | ✅ Hooks | 2 | 9 | 3819 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2559 |
-| ✅ Security | 1 | 3 | 2843 |
+| ✅ Security | 1 | 3 | 2855 |
 | ✅ Sessions | 4 | 13 | 4854 |
 | ✅ Skills | 6 | 13 | 4830 |
 | ✅ Tasks | 2 | 6 | 2743 |
