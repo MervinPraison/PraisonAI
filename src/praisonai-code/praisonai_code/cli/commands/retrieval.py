@@ -143,7 +143,7 @@ def index_command(
                             failures += 1
                             console.print(
                                 f"[red]✗[/red] Failed to index {source}: no chunks stored "
-                                "(check embedding API/model)"
+                                "(no supported files found, or content could not be extracted)"
                             )
                         else:
                             console.print(f"[green]✓[/green] Indexed {source}: {len(ids)} chunks")

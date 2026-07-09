@@ -9,6 +9,8 @@ chunk, leaving Chroma empty while the CLI reported success.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
 from praisonaiagents.knowledge.models import AddResult, SearchResult
 
@@ -82,11 +84,5 @@ def test_process_single_input_raises_on_failed_addresult():
     knowledge._log = MagicMock()
     knowledge.normalize_content = lambda x: x
 
-    try:
+    with pytest.raises(RuntimeError, match="Failed to generate embedding"):
         knowledge._process_single_input("Paris is the capital of France")
-        raised = False
-    except RuntimeError as e:
-        raised = True
-        assert "Failed to generate embedding" in str(e)
-
-    assert raised, "_process_single_input should raise on failed AddResult"

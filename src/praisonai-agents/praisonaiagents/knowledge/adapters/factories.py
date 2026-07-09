@@ -15,8 +15,11 @@ out of the core Knowledge class while preserving backward compatibility.
 """
 
 import os
+import logging
 from typing import Any, Dict, List, Optional
 from ..protocols import KnowledgeStoreProtocol
+
+logger = logging.getLogger(__name__)
 
 
 def create_mem0_knowledge_adapter(**kwargs) -> KnowledgeStoreProtocol:
@@ -147,8 +150,7 @@ class ChromaKnowledgeAdapter:
             result = embedding(query, model=embedding_model)
             query_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Embedding failed for search query (model=%s): %s", embedding_model, e
             )
             query_embedding = None
@@ -210,8 +212,6 @@ class ChromaKnowledgeAdapter:
             
         except Exception as e:
             # Log ChromaDB query errors for better debugging
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"ChromaDB search failed: {e}")
             return SearchResult(results=[])
     
@@ -232,8 +232,7 @@ class ChromaKnowledgeAdapter:
             result = embedding(content_str, model=embedding_model)
             content_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Embedding failed for add (model=%s): %s", embedding_model, e
             )
             embedding_error = e
