@@ -632,6 +632,50 @@ def config_validate(
         raise typer.Exit(1) from e
 
 
+@app.command("provenance")
+def config_provenance(
+    key: Optional[str] = typer.Argument(
+        None,
+        help="Optional dotted key to inspect (e.g. agent.model). Omit for all keys.",
+    ),
+):
+    """Show the resolved value of each key and which file/layer supplied it."""
+    output = get_output_controller()
+
+    try:
+        resolver = get_resolver()
+        provenance = resolver.resolve_with_provenance()
+
+        if key:
+            entry = provenance.get(key)
+            if entry is None:
+                output.print_error(f"Key not found: {key}")
+                raise typer.Exit(1)
+            if output.is_json_mode:
+                output.print_json({"key": key, **entry})
+            else:
+                source = entry["source"] or "(runtime)"
+                output.print(f"{key} = {entry['value']}")
+                output.print(f"  [dim]layer:[/dim] {entry['layer']}  [dim]source:[/dim] {source}")
+            return
+
+        if output.is_json_mode:
+            output.print_json(provenance)
+            return
+
+        output.print("[bold]Resolved configuration (per-key provenance):[/bold]\n")
+        for dotted in sorted(provenance):
+            entry = provenance[dotted]
+            source = entry["source"] or f"({entry['layer']})"
+            output.print(f"  {dotted} = {entry['value']}")
+            output.print(f"      [dim]{entry['layer']} · {source}[/dim]")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(f"Failed to resolve provenance: {e}")
+        raise typer.Exit(1) from e
+
+
 @app.command("sources")
 def config_sources():
     """List all configuration sources in precedence order."""

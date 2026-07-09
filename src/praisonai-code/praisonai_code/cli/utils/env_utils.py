@@ -46,6 +46,69 @@ def substitute_env_vars(value: Any) -> Any:
     return value
 
 
+# Matches {env:VAR} / {env:VAR:-default} and {file:./path} include directives.
+_INTERPOLATION_PATTERN = re.compile(r'\{(env|file):([^}]+)\}')
+
+
+def _resolve_directive(kind: str, arg: str, base_dir: Optional[Path]) -> str:
+    """Resolve a single {env:...} or {file:...} directive to its string value."""
+    if kind == "env":
+        # Support {env:VAR} and {env:VAR:-default} (shell-style fallback).
+        if ":-" in arg:
+            name, default = arg.split(":-", 1)
+        else:
+            name, default = arg, ""
+        return os.environ.get(name.strip(), default)
+
+    # kind == "file": read the referenced file's contents (trailing newline
+    # stripped), resolved relative to base_dir when the path is not absolute.
+    raw_path = arg.strip()
+    path = Path(os.path.expanduser(raw_path))
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    try:
+        return path.read_text().rstrip("\n")
+    except OSError:
+        # Leave the directive untouched when the file cannot be read so the
+        # failure is visible rather than silently blanking a value.
+        return "{file:" + arg + "}"
+
+
+def interpolate(value: Any, base_dir: Optional[Path] = None) -> Any:
+    """Interpolate ``${VAR}``, ``{env:VAR}`` and ``{file:./path}`` in a value.
+
+    Applied uniformly across config/YAML surfaces so secrets and reused prompt
+    text can live outside tracked config files. Recurses into dicts and lists.
+
+    Args:
+        value: Value to interpolate (string, dict, list, or any type).
+        base_dir: Directory that ``{file:...}`` relative paths resolve against
+            (typically the directory of the config file being loaded).
+
+    Returns:
+        Value with all supported directives resolved.
+
+    Examples:
+        >>> os.environ['TOKEN'] = 'secret123'
+        >>> interpolate('{env:TOKEN}')
+        'secret123'
+        >>> interpolate('${TOKEN}')
+        'secret123'
+    """
+    if isinstance(value, str):
+        # First apply legacy ${VAR} substitution, then {env:}/{file:} directives.
+        substituted = substitute_env_vars(value)
+        return _INTERPOLATION_PATTERN.sub(
+            lambda m: _resolve_directive(m.group(1), m.group(2), base_dir),
+            substituted,
+        )
+    elif isinstance(value, dict):
+        return {k: interpolate(v, base_dir) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [interpolate(item, base_dir) for item in value]
+    return value
+
+
 def load_env_file(env_path: Optional[Path] = None, override: bool = False) -> Dict[str, str]:
     """Load environment variables from a .env file.
     
