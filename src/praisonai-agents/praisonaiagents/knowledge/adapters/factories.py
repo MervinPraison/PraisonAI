@@ -151,7 +151,8 @@ class ChromaKnowledgeAdapter:
             query_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
             logger.warning(
-                "Embedding failed for search query (model=%s): %s", embedding_model, e
+                "Embedding failed for search query (model=%s): %s", embedding_model, e,
+                exc_info=True
             )
             query_embedding = None
         
@@ -233,7 +234,8 @@ class ChromaKnowledgeAdapter:
             content_embedding = result.embeddings[0] if result.embeddings else None
         except Exception as e:
             logger.warning(
-                "Embedding failed for add (model=%s): %s", embedding_model, e
+                "Embedding failed for add (model=%s): %s", embedding_model, e,
+                exc_info=True
             )
             embedding_error = e
             content_embedding = None
