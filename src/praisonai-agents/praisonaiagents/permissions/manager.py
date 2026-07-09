@@ -459,6 +459,43 @@ class PermissionManager:
             )
             return fail_closed
 
+    def is_denied(self, tool_name: str, agent_name: Optional[str] = None) -> bool:
+        """Return ``True`` if *tool_name* resolves to a hard ``deny``.
+
+        Cheap exposure-time helper used to shape the advertised tool surface:
+        a tool whose effective decision is ``deny`` should be *hidden* from the
+        model (not merely refused at call time). Only a rule/approval that
+        explicitly resolves to ``DENY`` hides the tool — ``ask`` and ``allow``
+        (and the "no matching rule" default of ``ask``) keep the tool visible
+        so approval can still happen at execution time (defence in depth).
+
+        Both the bare tool name (``"write_file"``) and the namespaced
+        ``"tool:<name>"`` form are checked so a rule written against either
+        convention takes effect. This never consults the interactive approval
+        callback, so it is safe to call while assembling the schema.
+
+        Args:
+            tool_name: The tool name to evaluate (native or MCP-namespaced).
+            agent_name: Optional agent name for per-agent rule filtering.
+
+        Returns:
+            ``True`` only when a matching rule/approval yields ``DENY``.
+        """
+        if not tool_name:
+            return False
+        for target in (tool_name, f"tool:{tool_name}"):
+            try:
+                result = self.check(target, agent_name)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Permission check failed for tool '%s' (target '%s'): %s. "
+                    "Not hiding the tool.", tool_name, target, e,
+                )
+                continue
+            if result.action == PermissionAction.DENY:
+                return True
+        return False
+
     def check_path_boundary(
         self, path: str, agent_name: Optional[str] = None
     ) -> Optional[PermissionResult]:

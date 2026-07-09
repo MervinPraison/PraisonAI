@@ -664,9 +664,10 @@ Your Goal: {self.goal}"""
 
         perm_deny = getattr(self, "_perm_deny", None)
         perm_allow = getattr(self, "_perm_allow", None)
+        manager = getattr(self, "_permission_manager", None)
 
         # Fast path: no permission shaping configured -> advertise everything.
-        if not perm_deny and perm_allow is None:
+        if not perm_deny and perm_allow is None and manager is None:
             return formatted_tools
 
         def _tool_id(tool):
@@ -704,6 +705,18 @@ Your Goal: {self.goal}"""
             return False
         if perm_allow is not None and name not in perm_allow:
             return False
+        # Consult the pattern-based PermissionManager (rules loaded from
+        # .praisonai/permissions/, YAML or Python). A tool whose effective
+        # decision is a hard ``deny`` is hidden from the schema; ``ask``/
+        # ``allow`` stay visible (approval still happens at execution time).
+        # No-op when no manager is attached, preserving backward compatibility.
+        manager = getattr(self, "_permission_manager", None)
+        if manager is not None:
+            try:
+                if manager.is_denied(name, getattr(self, "name", None)):
+                    return False
+            except Exception as e:  # noqa: BLE001
+                logging.debug("permission manager is_denied failed for %s: %s", name, e)
         return True
 
     def _build_multimodal_prompt(
