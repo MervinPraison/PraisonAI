@@ -463,8 +463,12 @@ def _process_task_result(agents_instance, context, agent_output):
             if token_metrics:
                 task_output.token_metrics = token_metrics
 
+        cleaned = agent_output
         if task.output_json or task.output_pydantic:
-            cleaned = agents_instance.clean_json_output(agent_output)
+            try:
+                cleaned = agents_instance.clean_json_output(agent_output)
+            except Exception as e:
+                logger.warning(f"Warning: Could not clean output of task {task_id}: {e}")
 
         if task.output_json:
             try:
