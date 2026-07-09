@@ -463,8 +463,14 @@ def _process_task_result(agents_instance, context, agent_output):
             if token_metrics:
                 task_output.token_metrics = token_metrics
 
+        cleaned = agent_output
+        if task.output_json or task.output_pydantic:
+            try:
+                cleaned = agents_instance.clean_json_output(agent_output)
+            except Exception as e:
+                logger.warning(f"Warning: Could not clean output of task {task_id}: {e}")
+
         if task.output_json:
-            cleaned = agents_instance.clean_json_output(agent_output)
             try:
                 parsed = json.loads(cleaned)
                 task_output.json_dict = parsed
@@ -474,7 +480,6 @@ def _process_task_result(agents_instance, context, agent_output):
                 logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
         if task.output_pydantic:
-            cleaned = agents_instance.clean_json_output(agent_output)
             try:
                 parsed = json.loads(cleaned)
                 pyd_obj = task.output_pydantic(**parsed)
@@ -960,6 +965,8 @@ class AgentTeam(SpawnAnnounceProtocol):
             return task_id
 
     def clean_json_output(self, output: str) -> str:
+        # NOTE: This method is duplicated in chat_mixin.ChatMixin.clean_json_output.
+        # Keep both implementations in sync when modifying either.
         cleaned = output.strip()
         if cleaned.startswith("```json"):
             cleaned = cleaned[len("```json"):].strip()
@@ -1290,7 +1297,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.output_file:
             try:
                 if task.create_directory:
-                    os.makedirs(os.path.dirname(task.output_file), exist_ok=True)
+                    dir_name = os.path.dirname(task.output_file)
+                    if dir_name:
+                        os.makedirs(dir_name, exist_ok=True)
                 with open(task.output_file, "w") as f:
                     f.write(str(task_output))
                 if self.verbose >= 1:
