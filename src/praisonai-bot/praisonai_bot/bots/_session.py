@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import weakref
 from contextlib import asynccontextmanager
@@ -31,6 +32,28 @@ if TYPE_CHECKING:
     from praisonaiagents import Agent
 
 logger = logging.getLogger(__name__)
+
+# Matches one or more leading arrival-time prefixes of the form
+# ``[<weekday> <date> <time> <tz>]`` (Issue #2834). Kept deliberately narrow —
+# it only strips bracketed groups that start with a 3-letter weekday and contain
+# a YYYY-MM-DD date — so a user's own bracketed text (e.g. "[TODO] ...") is never
+# eaten. Used to de-duplicate the prefix on history replay so stamps never
+# accumulate as ``[ts] [ts] … text``.
+_TIMESTAMP_PREFIX_RE = re.compile(
+    r"^(?:\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b[^\]]*\d{4}-\d{2}-\d{2}[^\]]*\]\s*)+"
+)
+
+
+def strip_leading_timestamps(content: str) -> str:
+    """Remove any leading arrival-time prefixes rendered by :func:`_with_timestamp`.
+
+    Idempotent and safe on un-stamped content. Ensures a message re-sent through
+    the turn builder on history replay is stamped exactly once rather than
+    accumulating ``[ts] [ts] … text``.
+    """
+    if not content:
+        return content
+    return _TIMESTAMP_PREFIX_RE.sub("", content, count=1)
 
 
 class BotRunTimeout(Exception):
@@ -92,6 +115,8 @@ class BotSessionManager:
         delivery_router: Optional[Any] = None,
         session_scope: str = "per_user",
         attribution: str = "[{sender}] ",
+        timestamps: bool = False,
+        timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] ",
         admission_gate: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
@@ -184,6 +209,15 @@ class BotSessionManager:
         # Attribution template applied to each turn's content in per_chat mode.
         # Supports ``{sender}`` and ``{time}`` placeholders. Empty disables it.
         self._attribution = attribution if attribution is not None else "[{sender}] "
+        # Temporal grounding (Issue #2834): when enabled, each inbound turn is
+        # prefixed with its real arrival time so the always-on gateway agent can
+        # reason about "now", conversation gaps and relative-time requests.
+        # Applied to both per_user (DM) and per_chat (group) scopes; the prefix
+        # is stripped-then-re-rendered so replayed history never accumulates it.
+        self._timestamps = bool(timestamps)
+        self._timestamp_template = (
+            timestamp_template if timestamp_template else "[%a %Y-%m-%d %H:%M %Z] "
+        )
         # Optional history compaction. When configured, older turns are
         # summarised (instead of hard-truncated) once history exceeds the
         # configured budget, so long-lived conversations retain context.
@@ -301,6 +335,33 @@ class BotSessionManager:
             logger.warning("Invalid attribution template %r: %s", self._attribution, e)
             return prompt
         return f"{prefix}{prompt}"
+
+    def _with_timestamp(
+        self, content: str, received_at: Optional[datetime] = None
+    ) -> str:
+        """Prefix *content* with its real arrival time (Issue #2834).
+
+        Grounds the always-on gateway agent in "now": the model sees each turn's
+        true arrival time so it can compute relative-time requests ("in 2 hours")
+        and reason about conversation gaps. ``received_at`` is the platform's
+        real receive time when the caller has it, else ``datetime.now()``.
+
+        The prefix is de-duplicated (``strip_leading_timestamps`` first) so a
+        replayed message is stamped exactly once instead of accumulating. Any
+        formatting error falls back to the un-stamped content so a malformed
+        template never breaks chat.
+        """
+        if not self._timestamps or not content:
+            return content
+        base = strip_leading_timestamps(content)
+        try:
+            prefix = (received_at or datetime.now()).strftime(self._timestamp_template)
+        except (ValueError, TypeError) as e:  # pragma: no cover — defensive
+            logger.warning(
+                "Invalid timestamp_template %r: %s", self._timestamp_template, e
+            )
+            return content
+        return f"{prefix}{base}"
 
     def _scope_for(self, chat_type: str = "") -> str:
         """Resolve the effective session scope for a given chat type.
@@ -641,6 +702,7 @@ class BotSessionManager:
         tool_policy: Optional[Any] = None,
         correlation_id: str = "",
         attachments: Optional[List[str]] = None,
+        received_at: Optional[datetime] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -761,6 +823,13 @@ class BotSessionManager:
                 # multi-party thread ("who said what"). Only applied in the
                 # shared per_chat session; per_user content is untouched.
                 prompt = self._attribute(prompt, user_name or user_id)
+
+        # Temporal grounding (Issue #2834): stamp each inbound turn with its real
+        # arrival time so the always-on agent has a clock. Applied to both DM
+        # (per_user) and group (per_chat) turns, after any sender attribution so
+        # the time sits outermost; de-duplicated on replay. No-op when disabled.
+        if self._timestamps:
+            prompt = self._with_timestamp(prompt, received_at)
 
         user_lock = self._get_lock(user_id, **route)
         agent_lock = self._get_agent_lock(agent)
@@ -1747,11 +1816,18 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     # Defaults preserve per_user isolation when unset.
     session_scope = "per_user"
     attribution = "[{sender}] "
+    # Temporal grounding (Issue #2834): off by default for prompt-cache stability.
+    timestamps = False
+    timestamp_template = "[%a %Y-%m-%d %H:%M %Z] "
     if getattr(config, "session", None):
         session_scope = getattr(config.session, "session_scope", None) or session_scope
         _attr = getattr(config.session, "attribution", None)
         if _attr is not None:
             attribution = _attr
+        timestamps = bool(getattr(config.session, "timestamps", False))
+        _tmpl = getattr(config.session, "timestamp_template", None)
+        if _tmpl:
+            timestamp_template = _tmpl
     
     # Support backward compatibility with max_history at channel level
     max_history = 100
@@ -1777,4 +1853,6 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
         dlq=dlq,
         session_scope=session_scope,
         attribution=attribution,
+        timestamps=timestamps,
+        timestamp_template=timestamp_template,
     )
