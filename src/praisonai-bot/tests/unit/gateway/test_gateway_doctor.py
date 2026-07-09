@@ -164,6 +164,135 @@ def test_start_preflight_fails_fast_on_bad_token(monkeypatch, tmp_path):
     assert "slack" in result.stdout
 
 
+def test_is_ssl_error_classification():
+    """SSL certificate-verify failures must be distinguished from bad tokens (#2845)."""
+    from praisonai_bot.cli.commands.gateway import _is_ssl_error
+
+    ssl_err = ProbeResult(
+        ok=False,
+        platform="telegram",
+        error=(
+            "Cannot connect to host api.telegram.org:443 ssl:True "
+            "[SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] "
+            "certificate verify failed: self-signed certificate in certificate chain')]"
+        ),
+    )
+    assert _is_ssl_error(ssl_err) is True
+
+    token_err = ProbeResult(ok=False, platform="slack", error="invalid_auth")
+    assert _is_ssl_error(token_err) is False
+
+    ok_result = ProbeResult(ok=True, platform="discord", bot_username="bot")
+    assert _is_ssl_error(ok_result) is False
+
+
+def test_render_ssl_error_mentions_ssl_not_credentials(capsys):
+    """Render output for an SSL failure must point at SSL/proxy, not bad token (#2845)."""
+    from praisonai_bot.cli.commands.gateway import _render_probe_results
+
+    results = {
+        "telegram": ProbeResult(
+            ok=False,
+            platform="telegram",
+            error="[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed",
+        ),
+    }
+    all_ok = _render_probe_results(results)
+    out = capsys.readouterr().out
+    assert all_ok is False
+    assert "SSL certificate verify failed" in out
+    assert "--no-preflight" in out
+
+
+def test_apply_probe_ca_bundle_honors_env(monkeypatch, tmp_path):
+    """Custom CA bundle env vars must be propagated to the probe SSL stack (#2845)."""
+    import os
+    from praisonai_bot.cli.commands.gateway import _apply_probe_ca_bundle
+
+    ca = tmp_path / "corp-ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n")
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+    monkeypatch.setenv("PRAISONAI_SSL_CA_BUNDLE", str(ca))
+
+    _apply_probe_ca_bundle()
+
+    assert os.environ["SSL_CERT_FILE"] == str(ca)
+    assert os.environ["REQUESTS_CA_BUNDLE"] == str(ca)
+
+
+def test_start_preflight_soft_fails_on_ssl_only(monkeypatch, tmp_path):
+    """SSL-only preflight failures must warn but still start (#2845)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def ssl_probe(self):
+        return ProbeResult(
+            ok=False,
+            platform=self._platform,
+            error="[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed",
+        )
+
+    monkeypatch.setattr(Bot, "probe", ssl_probe)
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  telegram:\n    platform: telegram\n    token: t\n")
+
+    import praisonai.cli.features.gateway as gw_feature
+
+    started = {}
+
+    def _record_start(self, *a, **k):
+        started["called"] = True
+
+    monkeypatch.setattr(gw_feature.GatewayHandler, "start", _record_start)
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["start", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert started.get("called") is True
+    assert "SSL" in result.stdout
+
+
+def test_start_preflight_still_aborts_when_token_and_ssl_fail(monkeypatch, tmp_path):
+    """A real bad-token failure must still abort even if another channel is SSL-only (#2845)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def mixed_probe(self):
+        if self._platform == "slack":
+            return ProbeResult(ok=False, platform="slack", error="invalid_auth")
+        return ProbeResult(
+            ok=False,
+            platform=self._platform,
+            error="[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed",
+        )
+
+    monkeypatch.setattr(Bot, "probe", mixed_probe)
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  telegram:\n    platform: telegram\n    token: t\n"
+        "  slack:\n    platform: slack\n    token: s\n"
+    )
+
+    import praisonai.cli.features.gateway as gw_feature
+
+    def _fail_if_called(self, *a, **k):  # pragma: no cover - must not run
+        raise AssertionError("handler.start() must not run when a token fails")
+
+    monkeypatch.setattr(gw_feature.GatewayHandler, "start", _fail_if_called)
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["start", "--config", str(cfg)])
+    assert result.exit_code == 1
+    assert "slack" in result.stdout
+
+
 def test_start_no_preflight_skips_probe(monkeypatch, tmp_path):
     typer_testing = pytest.importorskip("typer.testing")
 
