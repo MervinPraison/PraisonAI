@@ -54,6 +54,12 @@ from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
+# Bounds for best-effort channel enumeration (list_channels). Caps worst-case
+# pagination (50 pages x 200 = 10k channels) and prevents the sync refresh loop
+# from blocking indefinitely on an unresponsive Slack API.
+_MAX_LIST_CHANNELS_PAGES = 50
+_LIST_CHANNELS_TIMEOUT = 30.0
+
 
 class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Slack bot runtime for PraisonAI agents.
@@ -1002,7 +1008,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             return out
 
         cursor: Optional[str] = None
-        while True:
+        for _ in range(_MAX_LIST_CHANNELS_PAGES):
             resp = await self._client.conversations_list(
                 cursor=cursor,
                 limit=200,
@@ -1018,7 +1024,8 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 )
             cursor = (resp.get("response_metadata") or {}).get("next_cursor")
             if not cursor:
-                return out
+                break
+        return out
 
     def list_channels(self) -> List["ChannelRef"]:
         """Enumerate reachable Slack channels for the channel directory.
@@ -1049,7 +1056,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 future = pool.submit(
                     lambda: asyncio.run(self._list_channels_async())
                 )
-                return future.result()
+                return future.result(timeout=_LIST_CHANNELS_TIMEOUT)
         except Exception as e:  # noqa: BLE001 — enumeration is best-effort
             logger.warning("Slack list_channels failed: %s", e)
             return []

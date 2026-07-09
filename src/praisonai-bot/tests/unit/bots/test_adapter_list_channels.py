@@ -113,6 +113,31 @@ def test_slack_list_channels_no_client_returns_empty():
     assert SlackBot.list_channels(self) == []
 
 
+def test_slack_list_channels_pagination_is_bounded():
+    from praisonai_bot.bots import slack as slack_mod
+
+    class _NeverEndingClient:
+        """Emulates a misbehaving API that always returns a next_cursor."""
+
+        def __init__(self):
+            self.calls = 0
+
+        async def conversations_list(self, **kwargs):
+            self.calls += 1
+            return {
+                "channels": [{"id": f"C{self.calls}", "name": "loop"}],
+                "response_metadata": {"next_cursor": "always"},
+            }
+
+    client = _NeverEndingClient()
+    self = _slack_stub(client)
+
+    channels = SlackBot.list_channels(self)
+
+    assert client.calls == slack_mod._MAX_LIST_CHANNELS_PAGES
+    assert len(channels) == slack_mod._MAX_LIST_CHANNELS_PAGES
+
+
 def test_slack_list_channels_feeds_directory(tmp_path):
     client = _FakeSlackClient(
         [
