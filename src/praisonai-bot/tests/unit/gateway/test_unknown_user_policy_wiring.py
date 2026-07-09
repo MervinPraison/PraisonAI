@@ -103,6 +103,42 @@ async def test_empty_allowlist_allow_warns_accepts_everyone(caplog):
     assert "SILENTLY DROPPED" not in text
 
 
+async def _capture_config_hot_reload(gateway, channel_name, ch_cfg):
+    captured = {}
+
+    def mock_create_bot(channel_type, token, agent, config, cfg):
+        captured["config"] = config
+        return None
+
+    with patch.object(gateway, "_create_bot", side_effect=mock_create_bot):
+        await gateway._start_single_channel(channel_name, ch_cfg)
+    return captured.get("config")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["allow", "pair", "deny"])
+async def test_unknown_user_policy_wired_from_yaml_hot_reload(policy):
+    """Hot-reload path must wire unknown_user_policy the same as startup."""
+    gateway = create_test_gateway_with_agent()
+    config = await _capture_config_hot_reload(
+        gateway, "telegram", {"token": "test-token", "unknown_user_policy": policy}
+    )
+    assert config is not None
+    assert config.unknown_user_policy == policy
+
+
+@pytest.mark.asyncio
+async def test_hot_reload_owner_user_id_and_default_deny():
+    """Hot-reload path trims owner_user_id and preserves the secure default."""
+    gateway = create_test_gateway_with_agent()
+    config = await _capture_config_hot_reload(
+        gateway, "telegram", {"token": "test-token", "owner_user_id": "  555  "}
+    )
+    assert config is not None
+    assert config.owner_user_id == "555"
+    assert config.unknown_user_policy == "deny"
+
+
 def test_is_explicitly_allowed_semantics():
     """Empty allowlist is NOT explicitly allowed; populated list gates by id."""
     empty = BotConfig(token="x", allowed_users=[])
