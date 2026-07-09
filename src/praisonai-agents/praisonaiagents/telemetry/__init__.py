@@ -176,7 +176,6 @@ def cleanup_telemetry_resources():
 
 
 # Auto-instrumentation and cleanup setup
-_initialized = False
 _atexit_registered = False
 
 def _ensure_atexit():
@@ -196,31 +195,6 @@ def _ensure_atexit():
         # Register atexit handler to properly shutdown telemetry on exit
         atexit.register(lambda: get_telemetry().shutdown())
         _atexit_registered = True
-
-def _initialize_telemetry():
-    """Initialize telemetry with auto-instrumentation and cleanup."""
-    global _initialized
-    if _initialized:
-        return
-    
-    # Ensure atexit is registered
-    _ensure_atexit()
-    
-    # Check if telemetry should be disabled
-    telemetry_disabled = any([
-        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-    ])
-    
-    if not telemetry_disabled:
-        try:
-            # Defer the actual instrumentation to avoid circular imports
-            # This will be called when get_telemetry() is first accessed
-            _initialized = True
-        except Exception:
-            # Silently fail if there are any issues
-            pass
 
 
 # No need for lazy auto-instrumentation here since main __init__.py handles it

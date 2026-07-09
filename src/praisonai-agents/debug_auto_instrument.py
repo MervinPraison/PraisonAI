@@ -7,8 +7,8 @@ print("1. Import telemetry module...")
 import praisonaiagents.telemetry
 print("   Telemetry module imported")
 
-print("\n2. Check if auto_instrument_all was called...")
-print(f"   _initialized: {praisonaiagents.telemetry._initialized}")
+print("\n2. Check atexit handler registration...")
+print(f"   _atexit_registered: {praisonaiagents.telemetry._atexit_registered}")
 
 print("\n3. Import Agent and Agents...")
 from praisonaiagents import Agent, AgentTeam
