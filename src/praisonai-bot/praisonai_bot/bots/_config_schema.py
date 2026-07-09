@@ -127,6 +127,18 @@ class SessionConfigSchema(BaseModel):
     # Sender-attribution template applied to each turn in per_chat scope.
     # Supports ``{sender}`` and ``{time}`` placeholders.
     attribution: str = "[{sender}] "
+    # Temporal grounding (Issue #2834). When enabled, each inbound turn is
+    # prefixed with its real arrival time so an always-on gateway agent can
+    # reason about "now", gaps between messages and relative-time requests
+    # ("in 2 hours"). Applied to both per_user (DM) and per_chat (group)
+    # scopes. De-duplicated on history replay so prefixes never accumulate.
+    timestamps: bool = False
+    # strftime template for the per-message arrival-time prefix. To keep replay
+    # de-duplication working (see ``strip_leading_timestamps`` in ``_session.py``),
+    # a custom template should render a ``YYYY-MM-DD HH:MM`` date-time inside the
+    # bracket (i.e. include ``%Y-%m-%d %H:%M``); the leading ``%a`` weekday and
+    # ``%Z`` timezone are optional and locale-independent for de-duplication.
+    timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] "
 
     @field_validator("session_scope")
     @classmethod
