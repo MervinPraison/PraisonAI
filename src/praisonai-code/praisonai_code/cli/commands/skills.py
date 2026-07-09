@@ -98,23 +98,13 @@ def skills_list(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
     """List available skills."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['skills', 'list']
     if verbose:
         argv.append('--verbose')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="skills")
 
 
 @app.command("validate")
@@ -122,21 +112,11 @@ def skills_validate(
     path: str = typer.Argument(..., help="Skill directory path"),
 ):
     """Validate a skill."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['skills', 'validate', path]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="skills")
 
 
 @app.command("create")
@@ -144,21 +124,11 @@ def skills_create(
     name: str = typer.Argument(..., help="Skill name"),
 ):
     """Create a new skill."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['skills', 'create', name]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="skills")
 
 
 @app.command("learn")

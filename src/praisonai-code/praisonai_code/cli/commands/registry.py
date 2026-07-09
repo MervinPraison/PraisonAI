@@ -14,7 +14,20 @@ app = typer.Typer(help="Registry management")
 
 
 def _run(argv):
-    """Dispatch to the registry feature handler and exit with its code."""
+    """Dispatch to the registry feature handler and exit with its code.
+
+    On a standalone ``pip install praisonai-code`` (no ``praisonai`` wrapper)
+    the feature handler import raises a Rich ``ImportError`` traceback (issue
+    #2837). Guard that path so it fails fast with a single-line install hint.
+    """
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if not wrapper_available():
+        from praisonai_code._wrapper_bridge import _INSTALL_HINT
+
+        print(f"registry requires the full wrapper. {_INSTALL_HINT}", file=sys.stderr)
+        raise typer.Exit(1)
+
     from praisonai_code.cli.features.registry import handle_registry_command
 
     raise typer.Exit(handle_registry_command(argv))

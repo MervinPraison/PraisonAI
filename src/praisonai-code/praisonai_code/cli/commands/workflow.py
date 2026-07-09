@@ -27,8 +27,7 @@ def workflow_run(
         praisonai workflow run my_workflow.yaml --var topic="AI Tools"
         praisonai workflow run publish-pypi.yaml --dry-run
     """
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['workflow', 'run', file]
     # Pass through extra args (includes --var arguments and custom flags)
@@ -40,36 +39,17 @@ def workflow_run(
     if dry_run:
         argv.append('--dry-run')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="workflow")
 
 
 @app.command("list")
 def workflow_list():
     """List available workflows."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['workflow', 'list']
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="workflow")
 
 
 @app.command("create")
@@ -78,20 +58,10 @@ def workflow_create(
     template: str = typer.Option(None, "--template", "-t", help="Template to use"),
 ):
     """Create a new workflow."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['workflow', 'create', name]
     if template:
         argv.extend(['--template', template])
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="workflow")

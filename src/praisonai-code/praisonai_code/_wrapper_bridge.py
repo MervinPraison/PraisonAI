@@ -51,3 +51,44 @@ def optional_wrapper_attr(module_name: str, attr: str, default: T | None = None)
         return get_wrapper_attr(module_name, attr)
     except (ImportError, AttributeError):
         return default
+
+
+def run_wrapper_command(argv: list[str], *, feature: str) -> None:
+    """Re-enter the legacy ``PraisonAI().main()`` for a wrapper-resident command.
+
+    Typer stub commands (``agents``, ``workflow``, ``registry`` and peers) still
+    dispatch to the legacy CLI by mutating ``sys.argv`` and calling
+    ``PraisonAI().main()``. On a standalone ``pip install praisonai-code`` the
+    legacy path imports ``praisonai.cli.legacy.dispatch.argparse_builder`` which
+    is wrapper-only, so it raises a Rich ``ImportError`` traceback before any
+    feature handler runs (issue #2837).
+
+    This helper guards that re-entry: when the ``praisonai`` wrapper is not
+    installed it fails fast with a single-line install hint (exit code 1) instead
+    of a traceback. When the wrapper is present it performs the ``sys.argv``
+    mutation + ``main()`` call exactly as before, restoring ``sys.argv`` after.
+
+    Args:
+        argv: Legacy argv tokens (e.g. ``["agents", "list"]``) without the
+            leading program name.
+        feature: Command group name used in the standalone hint message.
+    """
+    import sys
+
+    if not wrapper_available():
+        print(
+            f"{feature} requires the full wrapper. {_INSTALL_HINT}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    from praisonai_code.cli.main import PraisonAI
+
+    original_argv = sys.argv
+    sys.argv = ["praisonai"] + argv
+    try:
+        PraisonAI().main()
+    except SystemExit:
+        pass
+    finally:
+        sys.argv = original_argv

@@ -24,8 +24,7 @@ def commit_main(
         praisonai commit -m "Fix bug"
         praisonai commit --all --push
     """
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['commit']
     if message:
@@ -35,13 +34,4 @@ def commit_main(
     if push:
         argv.append('--push')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="commit")

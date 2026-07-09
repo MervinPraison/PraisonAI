@@ -17,21 +17,11 @@ def eval_accuracy(
     iterations: int = typer.Option(3, "--iterations", "-n", help="Number of iterations"),
 ):
     """Run accuracy evaluation."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['eval', 'accuracy', agent, '--input', input_text, '--expected', expected]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="eval")
 
 
 @app.command("performance")
@@ -40,21 +30,11 @@ def eval_performance(
     iterations: int = typer.Option(50, "--iterations", "-n", help="Number of iterations"),
 ):
     """Run performance evaluation."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['eval', 'performance', agent, '--iterations', str(iterations)]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="eval")
 
 
 @app.command("judge")

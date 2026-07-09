@@ -14,23 +14,13 @@ def agents_list(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
     """List available agents."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['agents', 'list']
     if verbose:
         argv.append('--verbose')
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="agents")
 
 
 @app.command("create")
@@ -39,23 +29,13 @@ def agents_create(
     template: str = typer.Option(None, "--template", "-t", help="Template to use"),
 ):
     """Create a new agent."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['agents', 'create', name]
     if template:
         argv.extend(['--template', template])
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="agents")
 
 
 @app.command("info")
@@ -63,18 +43,8 @@ def agents_info(
     name: str = typer.Argument(..., help="Agent name"),
 ):
     """Show agent information."""
-    from praisonai_code.cli.main import PraisonAI
-    import sys
+    from praisonai_code._wrapper_bridge import run_wrapper_command
     
     argv = ['agents', 'info', name]
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    run_wrapper_command(argv, feature="agents")
