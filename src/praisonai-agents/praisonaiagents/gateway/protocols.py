@@ -228,6 +228,8 @@ class HelloParams:
     session_id: Optional[str] = None
     since: Optional[int] = None
 
+    type: str = field(default="hello", init=False)
+
 
 @dataclass
 class HelloResult:
@@ -374,7 +376,7 @@ def _coerce_int(value: Any, *, field_name: str, default: Optional[int] = None) -
                 message=f"Field '{field_name}' must be an integer, got {value!r}",
                 next_step=ConnectRecoveryStep.DO_NOT_RETRY,
             )
-        )
+        ) from None
 
 
 def _coerce_str_list(value: Any) -> List[str]:
@@ -508,11 +510,11 @@ class JoinParams:
         agent_id = _require_str(data.get("agent_id"), field_name="agent_id")
         min_version = _coerce_int(
             data.get("min_version"), field_name="min_version",
-            default=MIN_PROTOCOL_VERSION,
+            default=MIN_CLIENT_PROTOCOL_VERSION,
         )
         max_version = _coerce_int(
             data.get("max_version"), field_name="max_version",
-            default=PROTOCOL_VERSION,
+            default=GATEWAY_PROTOCOL_VERSION,
         )
         if min_version > max_version:
             raise FrameDecodeError(
@@ -545,22 +547,27 @@ def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
 
     if "protocol_min" in data or "protocol_max" in data:
         client_min = _coerce_int(
-            data.get("protocol_min"), field_name="protocol_min", default=1
+            data.get("protocol_min"), field_name="protocol_min",
+            default=MIN_CLIENT_PROTOCOL_VERSION,
         )
         client_max = _coerce_int(
-            data.get("protocol_max"), field_name="protocol_max", default=1
+            data.get("protocol_max"), field_name="protocol_max",
+            default=GATEWAY_PROTOCOL_VERSION,
         )
     else:
         protocol_info = data.get("protocol")
         if isinstance(protocol_info, dict):
             client_min = _coerce_int(
-                protocol_info.get("min"), field_name="protocol.min", default=1
+                protocol_info.get("min"), field_name="protocol.min",
+                default=MIN_CLIENT_PROTOCOL_VERSION,
             )
             client_max = _coerce_int(
-                protocol_info.get("max"), field_name="protocol.max", default=1
+                protocol_info.get("max"), field_name="protocol.max",
+                default=GATEWAY_PROTOCOL_VERSION,
             )
         else:
-            client_min = client_max = 1
+            client_min = MIN_CLIENT_PROTOCOL_VERSION
+            client_max = GATEWAY_PROTOCOL_VERSION
 
     if client_min > client_max:
         raise FrameDecodeError(

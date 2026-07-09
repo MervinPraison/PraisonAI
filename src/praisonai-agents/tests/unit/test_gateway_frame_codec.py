@@ -34,6 +34,7 @@ def test_hello_direct_fields():
         "since": 10,
     })
     assert isinstance(frame, HelloParams)
+    assert frame.type == "hello"
     assert frame.agent_id == "agent-1"
     assert frame.protocol_min == 1
     assert frame.protocol_max == 2
@@ -241,3 +242,13 @@ def test_decode_error_carries_serialisable_hello_error():
     payload = exc.value.error.to_dict()
     assert isinstance(payload, dict)
     assert "code" in payload
+
+
+def test_every_frame_type_exposes_type_discriminant():
+    frames = [
+        decode_client_frame({"type": "hello", "agent_id": "a"}),
+        decode_client_frame({"type": "message", "content": "hi"}),
+        decode_client_frame({"type": "leave"}),
+        decode_client_frame({"type": "join", "agent_id": "a"}),
+    ]
+    assert [f.type for f in frames] == ["hello", "message", "leave", "join"]
