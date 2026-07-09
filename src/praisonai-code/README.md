@@ -58,10 +58,10 @@ importing the wrapper. Only commands in `_WRAPPER_RESIDENT_COMMANDS` (see
 |---------|-------------------|-------|
 | `praisonai-code --version` | Yes | |
 | `run --help`, `config`, `doctor` | Yes | |
-| `run --output verbose "…"` | Yes | In-process `Agent` (verified). `run` modes: `silent` (default), `plain`, `actions`, `verbose`, `json`, `stream` |
-| `run "…"` (default) | Yes | In-process `Agent` on standalone; delegates to the wrapper's `handle_direct_prompt` when `praisonai` is installed |
-| `run --output plain "…"` | Yes | In-process `Agent` (mapped to the `silent` preset; final text is printed) |
-| `run --output actions "…"` | Yes (intended) | In-process `Agent` |
+| `run --output actions "…"` | Yes | In-process `Agent` (structured events). `run` modes: `silent` (default), `plain`, `actions`, `verbose`, `json`, `stream`, `stream-json` |
+| `run --output json/stream/stream-json "…"` | Yes | In-process `Agent` (structured output) |
+| `run "…"` (default) | Needs `praisonai` | Human-readable text run delegates to the wrapper's `handle_direct_prompt`; standalone gates with an install hint pointing to `--output actions` |
+| `run --output plain/verbose/silent "…"` | Needs `praisonai` | Same text path as default; standalone gates with an install hint |
 | `chat --output plain "…"` | Yes | One-shot; interactive REPL also in code package. `chat` modes: `actions` (default), `plain`, `verbose`, `json`, `silent` |
 | `code --help` | Yes | Full code assistant command registered |
 | `daemon start` (foreground) | Yes | |
