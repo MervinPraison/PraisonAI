@@ -6,6 +6,8 @@ failures (FAIL) instead of skips (SKIP), causing ``praisonai-code doctor`` to
 exit 1 despite a healthy core agent path.
 """
 
+import subprocess
+
 import pytest
 
 from praisonai_code.cli.features.doctor.models import CheckStatus, DoctorConfig
@@ -28,6 +30,7 @@ WRAPPER_SKIP_CHECKS = [
     performance_checks.check_performance_praisonai_import,
     acp_checks.check_acp_module,
     packaging_checks.check_praisonai_package_structure,
+    packaging_checks.check_console_script_execution,
 ]
 
 
@@ -56,6 +59,17 @@ def test_python_module_execution_targets_wrapper_when_present(monkeypatch):
     monkeypatch.setattr(
         "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
     )
+
+    # Mock subprocess.run so the assertion never depends on a live
+    # ``python -m praisonai`` subprocess (fragile in CI environments that lack
+    # the wrapper). We only care about the resolved target command here.
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="praisonai 0.0.0", stderr=""
+    )
+    monkeypatch.setattr(
+        packaging_checks.subprocess, "run", lambda *a, **k: completed
+    )
+
     result = packaging_checks.check_python_module_execution(DoctorConfig())
 
     assert "-m praisonai " in result.metadata["test_command"]

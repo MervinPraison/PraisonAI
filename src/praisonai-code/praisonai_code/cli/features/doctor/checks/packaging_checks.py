@@ -43,29 +43,27 @@ def check_praisonai_package_structure(config: DoctorConfig) -> CheckResult:
     metadata = {}
     
     try:
-        from praisonai_code._wrapper_bridge import import_wrapper_module, wrapper_available
+        from praisonai_code._wrapper_bridge import import_wrapper_module
 
-        if not wrapper_available():
-            issues.append("praisonai wrapper not installed")
-            metadata["import_error"] = "wrapper not available"
-        else:
-            praisonai = import_wrapper_module("praisonai")
-            package_path = praisonai.__file__
-            if package_path:
-                package_dir = os.path.dirname(package_path)
-                metadata["package_path"] = package_path
-                metadata["package_dir"] = package_dir
+        # Wrapper presence is guaranteed here: skip_if_no_wrapper() returns
+        # early above when the wrapper is absent (issue #2838).
+        praisonai = import_wrapper_module("praisonai")
+        package_path = praisonai.__file__
+        if package_path:
+            package_dir = os.path.dirname(package_path)
+            metadata["package_path"] = package_path
+            metadata["package_dir"] = package_dir
 
-                # Check for __main__.py
-                main_py_path = os.path.join(package_dir, "__main__.py")
-                if os.path.exists(main_py_path):
-                    metadata["has_main_py"] = True
-                    metadata["main_py_path"] = main_py_path
-                else:
-                    issues.append("Missing __main__.py - python -m praisonai will not work")
-                    metadata["has_main_py"] = False
+            # Check for __main__.py
+            main_py_path = os.path.join(package_dir, "__main__.py")
+            if os.path.exists(main_py_path):
+                metadata["has_main_py"] = True
+                metadata["main_py_path"] = main_py_path
             else:
-                issues.append("praisonai.__file__ is None - namespace package detected")
+                issues.append("Missing __main__.py - python -m praisonai will not work")
+                metadata["has_main_py"] = False
+        else:
+            issues.append("praisonai.__file__ is None - namespace package detected")
 
     except ImportError as e:
         issues.append(f"Cannot import praisonai: {e}")
@@ -179,7 +177,20 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
     severity=CheckSeverity.HIGH,
 )
 def check_console_script_execution(config: DoctorConfig) -> CheckResult:
-    """Test praisonai console script execution."""
+    """Test praisonai console script execution.
+
+    On a standalone ``praisonai-code`` install the ``praisonai`` wrapper (and its
+    console script) is intentionally absent, so this check SKIPs rather than
+    emitting a hard FAIL that would force ``doctor`` to exit 1 (issue #2838).
+    """
+    skipped = skip_if_no_wrapper(
+        "console_script_execution",
+        "Console Script Execution",
+        category=CheckCategory.PACKAGING,
+    )
+    if skipped:
+        return skipped
+
     praisonai_script = shutil.which("praisonai")
     
     if not praisonai_script:
