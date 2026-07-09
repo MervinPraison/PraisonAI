@@ -52,6 +52,7 @@ class RegistryHandler:
         remaining = args[1:]
         
         commands = {
+            "list": self.cmd_list,
             "serve": self.cmd_serve,
             "status": self.cmd_status,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -75,14 +76,22 @@ PraisonAI Registry Commands
 Usage: praisonai registry <command> [options]
 
 Commands:
+  list      List recipes in the local registry
   serve     Start local HTTP registry server
   status    Check registry server status
 
 Examples:
+  praisonai registry list
+  praisonai registry list --tags audio,video
   praisonai registry serve
   praisonai registry serve --port 7777 --token mysecret
   praisonai registry serve --read-only
   praisonai registry status --registry http://localhost:7777
+
+Options for 'list':
+  --dir PATH        Registry directory (default: ~/.praison/registry)
+  --tags a,b        Filter by tags (comma-separated)
+  --json            Output in JSON format
 
 Options for 'serve':
   --host HOST       Host to bind to (default: 127.0.0.1)
@@ -140,6 +149,73 @@ Options for 'status':
         
         return result
     
+    def cmd_list(self, args: List[str]) -> int:
+        """List recipes in the local registry."""
+        spec = {
+            "dir": {"default": None},
+            "tags": {"default": None},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+
+        try:
+            from praisonai.recipe.registry import LocalRegistry, DEFAULT_REGISTRY_PATH
+
+            registry_path = Path(parsed["dir"]) if parsed["dir"] else DEFAULT_REGISTRY_PATH
+            tags = None
+            if parsed["tags"]:
+                tags = [t.strip() for t in parsed["tags"].split(",") if t.strip()]
+
+            registry = LocalRegistry(registry_path)
+            recipes = registry.list_recipes(tags=tags)
+
+            if parsed["json"]:
+                self._print_json({
+                    "ok": True,
+                    "registry_path": str(registry_path),
+                    "count": len(recipes),
+                    "recipes": recipes,
+                })
+                return self.EXIT_SUCCESS
+
+            if not recipes:
+                print(f"No recipes found in registry: {registry_path}")
+                return self.EXIT_SUCCESS
+
+            try:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                table = Table(title=f"Registry: {registry_path}")
+                table.add_column("Name", style="cyan")
+                table.add_column("Version", style="magenta")
+                table.add_column("Description")
+                table.add_column("Tags", style="yellow")
+
+                for recipe in recipes:
+                    desc = recipe.get("description", "")
+                    table.add_row(
+                        recipe.get("name", ""),
+                        recipe.get("version", ""),
+                        (desc[:50] + "...") if len(desc) > 50 else desc,
+                        ", ".join(recipe.get("tags", [])),
+                    )
+
+                console.print(table)
+            except ImportError:
+                for recipe in recipes:
+                    print(f"{recipe.get('name')} ({recipe.get('version')}): {recipe.get('description', '')}")
+
+            return self.EXIT_SUCCESS
+
+        except Exception as e:
+            if parsed["json"]:
+                self._print_json({"ok": False, "error": str(e)})
+            else:
+                self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+
     def cmd_serve(self, args: List[str]) -> int:
         """Start local HTTP registry server."""
         spec = {
@@ -227,3 +303,9 @@ Options for 'status':
             else:
                 self._print_error(f"Cannot connect to registry: {e}")
             return self.EXIT_NETWORK_ERROR
+
+
+def handle_registry_command(args: List[str]) -> int:
+    """Entry point for the registry command."""
+    handler = RegistryHandler()
+    return handler.handle(args)
