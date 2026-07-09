@@ -397,6 +397,23 @@ class TestPermissionManagerWiring:
         assert isinstance(result, dict)
         assert result.get("permission_denied") is True
 
+    def test_manager_blocks_denied_tool_at_call_time_async(self, tmp_path):
+        import asyncio
+        from praisonaiagents import Agent
+        from praisonaiagents.permissions import PermissionManager
+
+        mgr = PermissionManager(storage_dir=str(tmp_path))
+        mgr.load_rules_from_config({"write_file": "deny"})
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        agent._permission_manager = mgr
+
+        result = asyncio.run(agent._check_tool_approval_async("write_file", {}))
+        assert isinstance(result, dict)
+        assert result.get("permission_denied") is True
+
     def test_manager_allows_non_denied_tool(self, tmp_path):
         from praisonaiagents import Agent
         from praisonaiagents.permissions import PermissionManager

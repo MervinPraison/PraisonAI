@@ -2018,15 +2018,17 @@ Your Goal: {self.goal}
         if self._approval_permissions:
             try:
                 from ..permissions import PermissionManager, PermissionRule
-                _mgr = PermissionManager(agent_name=self.name)
                 if isinstance(self._approval_permissions, PermissionManager):
+                    # Reuse the caller's manager as-is (no disk I/O side-effect).
                     _mgr = self._approval_permissions
-                elif isinstance(self._approval_permissions, dict):
-                    _mgr.load_rules_from_config(self._approval_permissions)
-                elif isinstance(self._approval_permissions, (list, tuple)):
-                    for _rule in self._approval_permissions:
-                        if isinstance(_rule, PermissionRule):
-                            _mgr.add_rule(_rule)
+                else:
+                    _mgr = PermissionManager(agent_name=self.name)
+                    if isinstance(self._approval_permissions, dict):
+                        _mgr.load_rules_from_config(self._approval_permissions)
+                    elif isinstance(self._approval_permissions, (list, tuple)):
+                        for _rule in self._approval_permissions:
+                            if isinstance(_rule, PermissionRule):
+                                _mgr.add_rule(_rule)
                 self._permission_manager = _mgr
             except Exception as _e:
                 logging.getLogger(__name__).debug(
