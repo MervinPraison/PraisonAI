@@ -74,7 +74,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Retrieval | 5 | 1 | 150 |
 | ✅ Routing | 1 | 1 | 153 |
 | ✅ Sandbox | 8 | 2 | 134 |
-| ✅ Scheduler | 2 | 2 | 398 |
+| ✅ Scheduler | 2 | 2 | 401 |
 | ✅ Security | 2 | 1 | 157 |
 | ✅ Sessions | 3 | 2 | 429 |
 | ✅ Skills | 7 | 2 | 380 |
