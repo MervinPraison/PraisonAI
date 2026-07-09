@@ -27,18 +27,18 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 6 | 2209 |
 | ✅ Bots | 7 | 28 | 10627 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 112 | 30046 |
+| ✅ CLI | 5 | 112 | 30054 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
-| ✅ Configuration | 3 | 7 | 2392 |
+| ✅ Configuration | 3 | 7 | 2511 |
 | ✅ Context Management | 16 | 33 | 12520 |
 | ✅ Database | 1 | 40 | 6102 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2036 |
-| ✅ Evaluation | 1 | 6 | 2511 |
+| ✅ Evaluation | 1 | 6 | 2556 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
@@ -49,8 +49,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Handoffs | 11 | 6 | 2454 |
 | ✅ Hooks | 2 | 9 | 3819 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 13 | 3957 |
-| ✅ LLM | 3 | 14 | 4753 |
+| ✅ Knowledge | 4 | 13 | 4055 |
+| ✅ LLM | 3 | 14 | 4757 |
 | ✅ Loops | 4 | 3 | 801 |
 | ✅ MCP | 1 | 52 | 11235 |
 | ✅ Memory | 6 | 17 | 6434 |
