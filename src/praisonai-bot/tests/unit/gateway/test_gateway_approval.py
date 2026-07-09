@@ -187,6 +187,104 @@ async def test_secret_persists_across_instances():
 
 
 @pytest.mark.asyncio
+async def test_secret_created_mode_0600():
+    """New secret files must be owner-only (0600) on POSIX."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        PairingStore(store_dir=tmpdir)
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        assert os.path.exists(secret_path)
+        mode = stat.S_IMODE(os.stat(secret_path).st_mode)
+        assert mode == 0o600
+
+
+@pytest.mark.asyncio
+async def test_insecure_file_chmod_on_load():
+    """An existing 0o666 secret file should be remediated to 0o600 on load."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        with open(secret_path, "wb") as f:
+            f.write(b"x" * 64)
+        os.chmod(secret_path, 0o666)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o666
+
+        # Instantiating should remediate the insecure permissions.
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+
+@pytest.mark.asyncio
+async def test_insecure_file_remediated_across_instances():
+    """Repeated inits should not spam warnings after permissions are fixed."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        with open(secret_path, "wb") as f:
+            f.write(b"y" * 64)
+        os.chmod(secret_path, 0o644)
+
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+        # Second instance sees an already-secured file (no further change).
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+
+@pytest.mark.asyncio
+async def test_chmod_failure_fails_closed_without_rotating_secret():
+    """A chmod failure must raise (fail closed), not swallow and regenerate.
+
+    Silently regenerating would rotate the HMAC key and invalidate all
+    outstanding pairing codes, so the OSError must propagate instead of
+    being caught by the file-read handler.
+    """
+    import tempfile
+    import os
+    from unittest import mock
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        original = b"z" * 64
+        with open(secret_path, "wb") as f:
+            f.write(original)
+        os.chmod(secret_path, 0o666)
+
+        with mock.patch(
+            "praisonai_bot.gateway.pairing.os.chmod",
+            side_effect=OSError("chmod denied"),
+        ):
+            with pytest.raises(OSError):
+                PairingStore(store_dir=tmpdir)
+
+        # The secret file was NOT rewritten/rotated.
+        with open(secret_path, "rb") as f:
+            assert f.read() == original
+
+
+@pytest.mark.asyncio
 async def test_cli_approve_e2e():
     """Test CLI pairing approve command end-to-end."""
     import tempfile
