@@ -186,6 +186,19 @@ def test_is_ssl_error_classification():
     assert _is_ssl_error(ok_result) is False
 
 
+def test_is_ssl_error_ignores_handshake_failures():
+    """Non cert-verify TLS handshake errors must NOT soft-fail — runtime fails too (#2845)."""
+    from praisonai_bot.cli.commands.gateway import _is_ssl_error
+
+    for err in (
+        "[SSL: WRONG_VERSION_NUMBER] wrong version number",
+        "[SSL: NO_SHARED_CIPHER] no shared cipher",
+        "[SSL: HANDSHAKE_FAILURE] handshake failure",
+    ):
+        result = ProbeResult(ok=False, platform="telegram", error=err)
+        assert _is_ssl_error(result) is False, err
+
+
 def test_render_ssl_error_mentions_ssl_not_credentials(capsys):
     """Render output for an SSL failure must point at SSL/proxy, not bad token (#2845)."""
     from praisonai_bot.cli.commands.gateway import _render_probe_results
@@ -220,6 +233,44 @@ def test_apply_probe_ca_bundle_honors_env(monkeypatch, tmp_path):
 
     assert os.environ["SSL_CERT_FILE"] == str(ca)
     assert os.environ["REQUESTS_CA_BUNDLE"] == str(ca)
+
+
+def test_apply_probe_ca_bundle_prefers_praisonai_override(monkeypatch, tmp_path):
+    """PRAISONAI_SSL_CA_BUNDLE must win even when SSL_CERT_FILE is already set (#2845)."""
+    import os
+    from praisonai_bot.cli.commands.gateway import _apply_probe_ca_bundle
+
+    corp_ca = tmp_path / "corp-ca.pem"
+    corp_ca.write_text("-----BEGIN CERTIFICATE-----\n")
+    system_ca = tmp_path / "system-ca.pem"
+    system_ca.write_text("-----BEGIN CERTIFICATE-----\n")
+
+    monkeypatch.setenv("SSL_CERT_FILE", str(system_ca))
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+    monkeypatch.setenv("PRAISONAI_SSL_CA_BUNDLE", str(corp_ca))
+
+    _apply_probe_ca_bundle()
+
+    assert os.environ["SSL_CERT_FILE"] == str(corp_ca)
+    assert os.environ["REQUESTS_CA_BUNDLE"] == str(corp_ca)
+
+
+def test_apply_probe_ca_bundle_warns_on_missing_path(monkeypatch, tmp_path, capsys):
+    """A configured-but-missing CA bundle must warn, not silently no-op (#2845)."""
+    import os
+    from praisonai_bot.cli.commands.gateway import _apply_probe_ca_bundle
+
+    missing = tmp_path / "does-not-exist.pem"
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+    monkeypatch.setenv("PRAISONAI_SSL_CA_BUNDLE", str(missing))
+
+    _apply_probe_ca_bundle()
+
+    out = capsys.readouterr().out
+    assert "does not exist" in out
+    assert "SSL_CERT_FILE" not in os.environ
 
 
 def test_start_preflight_soft_fails_on_ssl_only(monkeypatch, tmp_path):

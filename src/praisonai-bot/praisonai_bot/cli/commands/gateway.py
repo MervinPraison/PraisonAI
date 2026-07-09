@@ -223,7 +223,6 @@ def _is_ssl_error(result) -> bool:
             "self-signed certificate",
             "self signed certificate",
             "ssl: certificate",
-            "[ssl:",
         )
     )
 
@@ -240,12 +239,27 @@ def _apply_probe_ca_bundle() -> None:
     """
     import os
 
+    preferred = os.environ.get("PRAISONAI_SSL_CA_BUNDLE")
     ca_bundle = (
-        os.environ.get("PRAISONAI_SSL_CA_BUNDLE")
+        preferred
         or os.environ.get("REQUESTS_CA_BUNDLE")
         or os.environ.get("SSL_CERT_FILE")
     )
-    if ca_bundle and os.path.exists(ca_bundle):
+    if not ca_bundle:
+        return
+
+    if not os.path.exists(ca_bundle):
+        print(
+            f"Warning: CA bundle path '{ca_bundle}' does not exist — "
+            "SSL_CERT_FILE / REQUESTS_CA_BUNDLE not updated for probe."
+        )
+        return
+
+    if preferred and preferred == ca_bundle:
+        # Explicit PraisonAI override wins over any pre-existing values.
+        os.environ["SSL_CERT_FILE"] = ca_bundle
+        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
+    else:
         os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
         os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
 
