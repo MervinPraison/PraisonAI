@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from .delivery import ChannelRef
 
 from praisonai_bot.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
@@ -992,6 +993,67 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         except Exception:
             return None
     
+    async def _list_channels_async(self) -> List["ChannelRef"]:
+        """Paginate the Slack Web API for every reachable conversation."""
+        from .delivery import ChannelRef
+
+        out: List[ChannelRef] = []
+        if not self._client:
+            return out
+
+        cursor: Optional[str] = None
+        while True:
+            resp = await self._client.conversations_list(
+                cursor=cursor,
+                limit=200,
+                types="public_channel,private_channel",
+                exclude_archived=True,
+            )
+            for c in resp.get("channels", []) or []:
+                cid = c.get("id")
+                if not cid:
+                    continue
+                out.append(
+                    ChannelRef(id=cid, name=c.get("name"), type="channel")
+                )
+            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                return out
+
+    def list_channels(self) -> List["ChannelRef"]:
+        """Enumerate reachable Slack channels for the channel directory.
+
+        Consumed synchronously by
+        :meth:`ChannelDirectory.refresh_from_adapters`, but the Slack Web client
+        is async, so the coroutine is driven to completion here. If an event
+        loop is already running in this thread, the work is dispatched to a
+        short-lived worker thread to avoid re-entrancy; otherwise it runs on a
+        transient loop. Any failure degrades to an empty list, leaving the
+        adapter observed-only.
+        """
+        if not self._client:
+            return []
+
+        try:
+            import asyncio
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(self._list_channels_async())
+
+            # A loop is already running in this thread — run in a worker thread.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    lambda: asyncio.run(self._list_channels_async())
+                )
+                return future.result()
+        except Exception as e:  # noqa: BLE001 — enumeration is best-effort
+            logger.warning("Slack list_channels failed: %s", e)
+            return []
+
     async def probe(self):
         """Test Slack API connectivity without starting the bot."""
         from praisonaiagents.bots import ProbeResult

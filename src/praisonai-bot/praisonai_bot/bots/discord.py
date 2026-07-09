@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from .delivery import ChannelRef
 
 from praisonai_bot.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
@@ -508,6 +509,39 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             channel=BotChannel(channel_id=channel_id),
         )
     
+    def list_channels(self) -> List["ChannelRef"]:
+        """Enumerate reachable text channels across all joined guilds.
+
+        Consumed by :meth:`ChannelDirectory.refresh_from_adapters` so channels
+        the bot can address become known without waiting for inbound traffic.
+        Walking cached ``guilds``/``text_channels`` is synchronous (the
+        ``guilds`` intent is enabled in :meth:`start`), so no event-loop work is
+        needed here. Returns an empty list when the client is not yet ready.
+        """
+        from .delivery import ChannelRef
+
+        if not self._client:
+            return []
+
+        out: List[ChannelRef] = []
+        try:
+            guilds = list(getattr(self._client, "guilds", []) or [])
+        except Exception as e:  # noqa: BLE001 — enumeration is best-effort
+            logger.debug(f"Discord list_channels: could not read guilds: {e}")
+            return []
+
+        for guild in guilds:
+            guild_name = getattr(guild, "name", "") or ""
+            for ch in getattr(guild, "text_channels", []) or []:
+                try:
+                    ch_id = str(ch.id)
+                except Exception:
+                    continue
+                ch_name = getattr(ch, "name", "") or ch_id
+                display = f"{guild_name}/{ch_name}" if guild_name else ch_name
+                out.append(ChannelRef(id=ch_id, name=display, type="channel"))
+        return out
+
     async def _send_long_message(self, channel, text: str, reference=None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
         from ._chunk import chunk_message
