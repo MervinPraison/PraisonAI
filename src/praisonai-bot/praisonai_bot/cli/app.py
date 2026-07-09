@@ -23,11 +23,17 @@ _BOT_COMMANDS = {
 
 class _BotCommandGroup(TyperGroup):
     def list_commands(self, ctx: click.Context) -> List[str]:
-        return sorted(_BOT_COMMANDS.keys())
+        return sorted(key.replace("_", "-") for key in _BOT_COMMANDS)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> Optional[click.Command]:
-        if cmd_name not in _BOT_COMMANDS:
+        key = cmd_name
+        if key not in _BOT_COMMANDS:
+            key = cmd_name.replace("-", "_")
+        if key not in _BOT_COMMANDS:
+            key = cmd_name.replace("_", "-")
+        if key not in _BOT_COMMANDS:
             return None
+        cmd_name = key
         mod_path, attr = _BOT_COMMANDS[cmd_name]
         try:
             module = importlib.import_module(mod_path)
