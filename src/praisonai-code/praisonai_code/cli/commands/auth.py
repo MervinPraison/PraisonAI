@@ -80,7 +80,14 @@ def _validate_with_live_call(provider: str, api_key: str, base_url: Optional[str
         return False, f"API key invalid: {str(e)}"
 
 
-def _run_oauth_login(provider: str, output, base_url, model, no_browser: bool) -> None:
+def _run_oauth_login(
+    provider: str,
+    output,
+    base_url,
+    model,
+    no_browser: bool,
+    overrides: Optional[dict] = None,
+) -> None:
     """Run the browser/device-code OAuth flow and store the resulting tokens."""
     from ..configuration.oauth import run_oauth_login
 
@@ -95,6 +102,7 @@ def _run_oauth_login(provider: str, output, base_url, model, no_browser: bool) -
     try:
         config, tokens = run_oauth_login(
             provider,
+            overrides=overrides or None,
             open_browser=not no_browser,
             on_prompt=_on_prompt,
         )
@@ -148,6 +156,11 @@ def auth_login(
     model: Optional[str] = typer.Option(None, "--model", help="Default model for this provider"),
     skip_validation: bool = typer.Option(False, "--skip-validation", help="Skip API key validation"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not auto-open the browser for OAuth"),
+    client_id: Optional[str] = typer.Option(None, "--client-id", help="OAuth client id (overrides the built-in provider entry)"),
+    token_url: Optional[str] = typer.Option(None, "--token-url", help="OAuth token endpoint (for providers not in the built-in registry)"),
+    device_authorization_url: Optional[str] = typer.Option(None, "--device-authorization-url", help="OAuth device-code endpoint (RFC 8628)"),
+    authorization_url: Optional[str] = typer.Option(None, "--authorization-url", help="OAuth authorization endpoint (RFC 7636 PKCE)"),
+    scope: Optional[str] = typer.Option(None, "--scope", help="OAuth scope(s) to request"),
 ):
     """
     Store API credentials for a provider.
@@ -156,9 +169,21 @@ def auth_login(
         praisonai auth login openai
         praisonai auth login openai --key sk-...
         echo "sk-..." | praisonai auth login openai --key-stdin
-        praisonai auth login openai --method oauth
+        praisonai auth login github --method oauth --client-id <app-id>
     """
     output = get_output_controller()
+
+    # Assemble any OAuth endpoint overrides supplied on the command line. These
+    # let users sign in to a built-in provider that needs an app client id, or
+    # to a provider not in the registry (e.g. a self-hosted gateway).
+    oauth_overrides = {
+        "client_id": client_id,
+        "token_url": token_url,
+        "device_authorization_url": device_authorization_url,
+        "authorization_url": authorization_url,
+        "scope": scope,
+    }
+    oauth_overrides = {k: v for k, v in oauth_overrides.items() if v is not None}
 
     # Decide between OAuth and API-key login. ``auto`` selects OAuth only when
     # the provider has an OAuth config AND no key was supplied; otherwise it
@@ -168,14 +193,18 @@ def auth_login(
         output.print_error("Invalid auth method. Use: auto, apikey, or oauth")
         raise typer.Exit(1)
     if method == "oauth":
-        _run_oauth_login(provider, output, base_url, model, no_browser)
+        _run_oauth_login(provider, output, base_url, model, no_browser, oauth_overrides)
         return
     if method == "auto" and not key and not key_stdin:
         try:
-            from ..configuration.oauth import provider_supports_oauth
-            if provider_supports_oauth(provider):
-                _run_oauth_login(provider, output, base_url, model, no_browser)
-                return
+            from ..configuration.oauth import provider_supports_oauth, provider_requires_client_id
+            if provider_supports_oauth(provider, oauth_overrides):
+                # Don't silently start an OAuth flow that will immediately fail
+                # for lack of a client id; fall through to API-key login unless
+                # the user explicitly supplied one.
+                if not provider_requires_client_id(provider, oauth_overrides):
+                    _run_oauth_login(provider, output, base_url, model, no_browser, oauth_overrides)
+                    return
         except Exception:
             # Fall through to API-key login on any OAuth detection error.
             pass
