@@ -14,8 +14,25 @@ from praisonaiagents._logging import get_logger
 import os
 from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction
-from ..llm import get_openai_client, LLM, OpenAIClient
 import json
+import sys
+
+
+def __getattr__(name):
+    """Lazily expose selected llm symbols as module attributes.
+
+    Keeps ``praisonaiagents.agents`` import light (the heavy ``llm.llm`` and
+    ``llm.openai_client`` module bodies are only loaded on first use) while
+    still allowing these names to be resolved and patched as module-level
+    attributes (e.g. ``patch('...autoagents.LLM')``).
+    """
+    if name in ("get_openai_client", "LLM"):
+        from .. import llm as _llm
+        value = getattr(_llm, name)
+        setattr(sys.modules[__name__], name, value)
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Define Pydantic models for structured output
 class TaskConfig(BaseModel):
@@ -353,11 +370,14 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             else:
                 prompt = base_prompt
             
+            # Resolve get_openai_client / LLM via module attributes so they stay
+            # lazily loaded yet remain patchable in tests (see module __getattr__).
+            _module = sys.modules[__name__]
             try:
                 # Check if we have OpenAI API and the model supports structured output
                 from ..llm import supports_structured_outputs
                 if self.llm and supports_structured_outputs(self.llm):
-                    client = get_openai_client()
+                    client = _module.get_openai_client()
                     use_openai_structured = True
             except Exception as e:
                 # If OpenAI client is not available, we'll use the LLM class
@@ -378,7 +398,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                     last_response = json.dumps(config.model_dump(), indent=2)
                 else:
                     # Use LLM class for all other providers (Gemini, Anthropic, etc.)
-                    llm_instance = LLM(
+                    llm_instance = _module.LLM(
                         model=self.llm,
                         base_url=self.base_url,
                         api_key=self.api_key
