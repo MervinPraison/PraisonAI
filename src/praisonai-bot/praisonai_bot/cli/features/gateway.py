@@ -574,6 +574,10 @@ class GatewayHandler:
                 
         except ImportError:
             print("PID lock status: Utilities not available")
+        except Exception as e:
+            # PID lock inspection is advisory only; never let it block the
+            # authoritative /health probe (e.g. os.kill SystemError on Windows).
+            print(f"PID lock status: Unavailable ({e})")
         
         # Try to connect to health endpoint
         url = f"http://{host}:{port}/health"
