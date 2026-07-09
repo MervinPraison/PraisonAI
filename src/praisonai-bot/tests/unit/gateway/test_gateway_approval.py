@@ -187,6 +187,70 @@ async def test_secret_persists_across_instances():
 
 
 @pytest.mark.asyncio
+async def test_secret_created_mode_0600():
+    """New secret files must be owner-only (0600) on POSIX."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        PairingStore(store_dir=tmpdir)
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        assert os.path.exists(secret_path)
+        mode = stat.S_IMODE(os.stat(secret_path).st_mode)
+        assert mode == 0o600
+
+
+@pytest.mark.asyncio
+async def test_insecure_file_chmod_on_load():
+    """An existing 0o666 secret file should be remediated to 0o600 on load."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        with open(secret_path, "wb") as f:
+            f.write(b"x" * 64)
+        os.chmod(secret_path, 0o666)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o666
+
+        # Instantiating should remediate the insecure permissions.
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+
+@pytest.mark.asyncio
+async def test_insecure_file_remediated_across_instances():
+    """Repeated inits should not spam warnings after permissions are fixed."""
+    import tempfile
+    import os
+    import stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits are not authoritative on Windows")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secret_path = os.path.join(tmpdir, ".gateway_secret")
+        with open(secret_path, "wb") as f:
+            f.write(b"y" * 64)
+        os.chmod(secret_path, 0o644)
+
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+        # Second instance sees an already-secured file (no further change).
+        PairingStore(store_dir=tmpdir)
+        assert stat.S_IMODE(os.stat(secret_path).st_mode) == 0o600
+
+
+@pytest.mark.asyncio
 async def test_cli_approve_e2e():
     """Test CLI pairing approve command end-to-end."""
     import tempfile

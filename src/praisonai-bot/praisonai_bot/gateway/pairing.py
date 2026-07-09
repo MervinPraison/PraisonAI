@@ -40,32 +40,109 @@ def _get_secret() -> str:
     return os.environ.get("PRAISONAI_GATEWAY_SECRET", "") or secrets.token_hex(32)
 
 
+def _secure_secret_permissions(secret_path: str) -> None:
+    """Ensure <secret_path> is owner-only (0600), remediating insecure modes.
+
+    On POSIX the file is ``chmod`` ed to ``0o600`` when its mode differs.
+    On Windows ``os.chmod`` cannot express owner-only ACLs, so we attempt a
+    best-effort restriction via ``icacls`` and downgrade the message to debug
+    when it is unavailable (avoids per-init warning spam).
+
+    Raises ``OSError`` if a POSIX ``chmod`` fails, allowing the caller to
+    decide whether to fail closed.
+    """
+    import stat
+
+    mode = stat.S_IMODE(os.stat(secret_path).st_mode)
+    if mode == 0o600:
+        return
+
+    if os.name == "nt":
+        # POSIX mode bits are unreliable on Windows; attempt an ACL lockdown.
+        if _restrict_windows_acl(secret_path):
+            logger.debug(
+                "Restricted gateway secret ACL to current user: %s", secret_path
+            )
+        else:
+            logger.debug(
+                "Gateway secret file %s reports mode %s on Windows; "
+                "POSIX permissions are not authoritative here.",
+                secret_path,
+                oct(mode),
+            )
+        return
+
+    # POSIX: remediate by chmod-ing to owner-only.
+    try:
+        os.chmod(secret_path, 0o600)
+        logger.info(
+            "Remediated insecure gateway secret permissions %s -> 0o600 at %s",
+            oct(mode),
+            secret_path,
+        )
+    except OSError as exc:
+        logger.error(
+            "Failed to secure gateway secret %s (mode %s): %s",
+            secret_path,
+            oct(mode),
+            exc,
+        )
+        raise
+
+
+def _restrict_windows_acl(secret_path: str) -> bool:
+    """Best-effort restrict a file's ACL to the current user on Windows.
+
+    Returns ``True`` when the ACL was applied, ``False`` otherwise. Never
+    raises — callers treat failure as non-fatal.
+    """
+    try:
+        import getpass
+        import subprocess
+
+        user = os.environ.get("USERNAME") or getpass.getuser()
+        result = subprocess.run(
+            [
+                "icacls",
+                secret_path,
+                "/inheritance:r",
+                "/grant:r",
+                f"{user}:F",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:  # pragma: no cover - defensive, Windows-only path
+        return False
+
+
 def _load_or_create_secret(store_dir: str) -> bytes:
     """Persist per-install secret at <store_dir>/.gateway_secret (0600).
-    
+
     This ensures HMAC signatures remain consistent across process restarts,
     allowing pairing codes to work between gateway and CLI processes.
+
+    Existing files with insecure permissions are remediated to ``0o600``
+    (POSIX) or restricted via ACL (Windows) instead of merely warning.
     """
     env = os.environ.get("PRAISONAI_GATEWAY_SECRET")
     if env:
         return env.encode()
-    
+
     os.makedirs(store_dir, exist_ok=True)
     secret_path = os.path.join(store_dir, ".gateway_secret")
-    
+
     if os.path.exists(secret_path):
         try:
             with open(secret_path, "rb") as f:
                 secret = f.read().strip()
-            # Warn if file is world-readable
-            import stat
-            mode = stat.S_IMODE(os.stat(secret_path).st_mode)
-            if mode != 0o600:
-                logger.warning(f"Gateway secret file {secret_path} has insecure permissions {oct(mode)}")
+            # Remediate insecure permissions instead of warn-and-load.
+            _secure_secret_permissions(secret_path)
             return secret
         except (OSError, IOError) as e:
             logger.warning(f"Failed to read gateway secret from {secret_path}: {e}")
-    
+
     # Generate new secret
     secret = secrets.token_hex(32).encode()
     try:
@@ -73,11 +150,13 @@ def _load_or_create_secret(store_dir: str) -> bytes:
         fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(secret)
+        # On Windows the 0o600 open flag is not authoritative; lock down ACL.
+        _secure_secret_permissions(secret_path)
         logger.info(f"Generated new gateway secret at {secret_path}")
     except (OSError, IOError) as e:
         logger.warning(f"Failed to save gateway secret to {secret_path}: {e}")
         # Fall back to in-memory secret for this process
-    
+
     return secret
 
 
