@@ -21,6 +21,8 @@ def memory_show(
     argv = ['memory', 'show']
     if user_id:
         argv.extend(['--user-id', user_id])
+    if limit is not None:
+        argv.extend(['--limit', str(limit)])
     
     original_argv = sys.argv
     sys.argv = ['praisonai'] + argv
@@ -32,6 +34,15 @@ def memory_show(
         pass
     finally:
         sys.argv = original_argv
+
+
+@app.command("list")
+def memory_list(
+    user_id: str = typer.Option(None, "--user-id", help="User ID for memory isolation"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of memories to show"),
+):
+    """List stored memories (alias for 'show')."""
+    memory_show(user_id=user_id, limit=limit)
 
 
 @app.command("add")
