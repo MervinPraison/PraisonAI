@@ -486,6 +486,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         goal: Optional[str] = None,
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
+        phone_number: Optional[str] = None,  # Contact phone number assigned to this agent (e.g. WhatsApp/SMS routing)
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,  # Can be string, dict, or LLMConfig object
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
@@ -543,6 +544,10 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             goal: Primary objective the agent aims to achieve.
             backstory: Background context shaping personality and decisions.
             instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
+            phone_number: Optional contact phone number assigned to this agent (E.164 recommended,
+                e.g. "+14155550123"). Lightweight identity attribute used by channel/bot layers
+                (e.g. WhatsApp/SMS) to route inbound messages to a specific agent. Whitespace is
+                stripped; ``None`` when unset.
             llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet"), LLMConfig object, or custom LLM.
                 Can accept LLMConfig(model="gpt-4o", fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"]).
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
@@ -1522,6 +1527,9 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
+        # Optional contact phone number assigned to this agent (lightweight identity
+        # attribute; used by channel/bot layers such as WhatsApp/SMS for routing).
+        self.phone_number = phone_number.strip() if isinstance(phone_number, str) and phone_number.strip() else None
         
         # Resolve tool_config for tool execution settings
         _tool_config = Agent._resolve_tool_config(
@@ -2259,6 +2267,7 @@ Your Goal: {self.goal}
             'goal': self.goal,
             'backstory': self.backstory,
             'instructions': self.instructions,
+            'phone_number': getattr(self, 'phone_number', None),
             
             # LLM configuration 
             'llm': self.llm,
