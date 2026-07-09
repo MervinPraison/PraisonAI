@@ -117,40 +117,6 @@ from ._framework_availability import is_available
 # adapter system. Use framework_adapters.registry.get_default_registry().
 
 
-# --- PraisonAI Tools lazy loading ---
-def _get_praisonai_tools():
-    """Lazy load praisonai_tools classes (thread-safe)."""
-    def tools_loader():
-        from praisonai_tools import (
-            CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
-            DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
-            MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool,
-            ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
-            YoutubeChannelSearchTool, YoutubeVideoSearchTool
-        )
-        return {
-            'CodeDocsSearchTool': CodeDocsSearchTool,
-            'CSVSearchTool': CSVSearchTool,
-            'DirectorySearchTool': DirectorySearchTool,
-            'DOCXSearchTool': DOCXSearchTool,
-            'DirectoryReadTool': DirectoryReadTool,
-            'FileReadTool': FileReadTool,
-            'TXTSearchTool': TXTSearchTool,
-            'JSONSearchTool': JSONSearchTool,
-            'MDXSearchTool': MDXSearchTool,
-            'PDFSearchTool': PDFSearchTool,
-            'RagTool': RagTool,
-            'ScrapeElementFromWebsiteTool': ScrapeElementFromWebsiteTool,
-            'ScrapeWebsiteTool': ScrapeWebsiteTool,
-            'WebsiteSearchTool': WebsiteSearchTool,
-            'XMLSearchTool': XMLSearchTool,
-            'YoutubeChannelSearchTool': YoutubeChannelSearchTool,
-            'YoutubeVideoSearchTool': YoutubeVideoSearchTool,
-        }
-    
-    return lazy_get("praisonai_tools_dict", tools_loader)
-
-
 def _get_litellm():
     """Lazy load litellm module."""
     result = lazy_get("litellm", lambda: __import__("litellm"))
