@@ -133,22 +133,40 @@ def index_command(
                 console=console,
                 transient=True,
             ) as progress:
+                failures = 0
                 for source in sources:
                     task = progress.add_task(f"Indexing {source}...", total=None)
                     try:
                         result = knowledge.add(source)
-                        count = len(result.get("results", [])) if isinstance(result, dict) else 0
-                        console.print(f"[green]✓[/green] Indexed {source}: {count} chunks")
+                        ids = [x for x in result.get("results", []) if x] if isinstance(result, dict) else []
+                        if not ids:
+                            failures += 1
+                            console.print(
+                                f"[red]✗[/red] Failed to index {source}: no chunks stored "
+                                "(no supported files found, or content could not be extracted)"
+                            )
+                        else:
+                            console.print(f"[green]✓[/green] Indexed {source}: {len(ids)} chunks")
                     except Exception as e:
+                        failures += 1
                         console.print(f"[red]✗[/red] Failed to index {source}: {e}")
                     progress.remove_task(task)
             
+            if failures:
+                console.print(
+                    f"\n[bold red]Indexing failed[/bold red] for {failures} of {len(sources)} "
+                    f"source(s). Collection: {collection}"
+                )
+                raise typer.Exit(1)
+
             console.print(f"\n[bold green]Indexing complete![/bold green] Collection: {collection}")
             if profile_data:
                 profile_data["command"] = "index"
                 profile_data["collection"] = collection
                 profile_data["sources"] = sources
             
+        except typer.Exit:
+            raise
         except ImportError as e:
             console.print(f"[red]Error:[/red] Missing dependency: {e}")
             console.print("Install with: pip install 'praisonaiagents[knowledge]'")

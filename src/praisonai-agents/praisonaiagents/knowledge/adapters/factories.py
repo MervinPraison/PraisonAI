@@ -15,8 +15,11 @@ out of the core Knowledge class while preserving backward compatibility.
 """
 
 import os
+import logging
 from typing import Any, Dict, List, Optional
 from ..protocols import KnowledgeStoreProtocol
+
+logger = logging.getLogger(__name__)
 
 
 def create_mem0_knowledge_adapter(**kwargs) -> KnowledgeStoreProtocol:
@@ -141,11 +144,15 @@ class ChromaKnowledgeAdapter:
         from ..models import SearchResult, SearchResultItem
         
         # Get embedding for query
+        embedding_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         try:
             from praisonaiagents.embedding import embedding
-            result = embedding(query, model="text-embedding-3-small")
+            result = embedding(query, model=embedding_model)
             query_embedding = result.embeddings[0] if result.embeddings else None
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Embedding failed for search query (model=%s): %s", embedding_model, e
+            )
             query_embedding = None
         
         if query_embedding is None:
@@ -205,8 +212,6 @@ class ChromaKnowledgeAdapter:
             
         except Exception as e:
             # Log ChromaDB query errors for better debugging
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"ChromaDB search failed: {e}")
             return SearchResult(results=[])
     
@@ -220,15 +225,29 @@ class ChromaKnowledgeAdapter:
         content_str = str(content)
         
         # Get embedding
+        embedding_model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        embedding_error = None
         try:
             from praisonaiagents.embedding import embedding
-            result = embedding(content_str, model="text-embedding-3-small")
+            result = embedding(content_str, model=embedding_model)
             content_embedding = result.embeddings[0] if result.embeddings else None
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Embedding failed for add (model=%s): %s", embedding_model, e
+            )
+            embedding_error = e
             content_embedding = None
         
         if content_embedding is None:
-            return AddResult(success=False, message="Failed to generate embedding")
+            if embedding_error is not None:
+                return AddResult(
+                    success=False,
+                    message=f"Failed to generate embedding (model={embedding_model}): {embedding_error}"
+                )
+            return AddResult(
+                success=False,
+                message=f"Failed to generate embedding (model={embedding_model})"
+            )
         
         # Generate ID and store
         import time
