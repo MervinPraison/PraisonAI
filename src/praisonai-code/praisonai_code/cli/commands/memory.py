@@ -34,6 +34,15 @@ def memory_show(
         sys.argv = original_argv
 
 
+@app.command("list")
+def memory_list(
+    user_id: str = typer.Option(None, "--user-id", help="User ID for memory isolation"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of memories to show"),
+):
+    """List stored memories (alias for 'show')."""
+    memory_show(user_id=user_id, limit=limit)
+
+
 @app.command("add")
 def memory_add(
     content: str = typer.Argument(..., help="Memory content to add"),
