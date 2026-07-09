@@ -109,6 +109,18 @@ from .protocols import (
     LivenessDecision,
     LivenessPolicyProtocol,
     LivenessPolicy,
+    # Schema-validated inbound frame codec (Issue #2831)
+    HelloParams,
+    HelloResult,
+    HelloError,
+    ConnectErrorCode,
+    ConnectRecoveryStep,
+    MessageParams,
+    LeaveParams,
+    JoinParams,
+    FrameDecodeError,
+    ClientFrame,
+    decode_client_frame,
 )
 from .hooks import (
     HookAction,
@@ -279,6 +291,18 @@ __all__ = [
     "LivenessDecision",
     "LivenessPolicyProtocol",
     "LivenessPolicy",
+    # Schema-validated inbound frame codec (Issue #2831)
+    "HelloParams",
+    "HelloResult",
+    "HelloError",
+    "ConnectErrorCode",
+    "ConnectRecoveryStep",
+    "MessageParams",
+    "LeaveParams",
+    "JoinParams",
+    "FrameDecodeError",
+    "ClientFrame",
+    "decode_client_frame",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
