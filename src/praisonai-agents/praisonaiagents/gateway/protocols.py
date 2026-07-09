@@ -228,6 +228,8 @@ class HelloParams:
     session_id: Optional[str] = None
     since: Optional[int] = None
 
+    type: str = field(default="hello", init=False)
+
 
 @dataclass
 class HelloResult:
@@ -300,6 +302,362 @@ class HelloError:
         if legacy_next is not None:
             frame["next"] = legacy_next
         return frame
+
+
+# ---------------------------------------------------------------------------
+# Schema-validated inbound frame codec (Issue #2831)
+#
+# The gateway is the externally reachable control plane for an agent, yet every
+# WebSocket handler used to re-parse raw client frames by hand (``data.get(...)``
+# with ad-hoc ``isinstance`` guards). That left malformed/hostile frames handled
+# inconsistently, the typed frame contract decorative on inbound, and no single
+# source of truth a first-/third-party client SDK could be validated against.
+#
+# This codec is the missing *validating decode step* at the WebSocket boundary:
+# a small, dependency-free validator (no pydantic/jsonschema — core keeps its
+# no-heavy-import rule) that turns a raw inbound frame into a typed, discriminated
+# object (``HelloParams``/``MessageParams``/``LeaveParams``/``JoinParams``) or
+# rejects it deterministically with the existing structured ``HelloError``
+# envelope (``code``/``next_step``/``retry_after_seconds``). Handlers then receive
+# already-validated objects and stop re-implementing defensive parsing.
+#
+# It is intentionally *additive*: the wrapper server may migrate to
+# ``decode_client_frame`` at its own pace; existing hand-parsers keep working.
+# ---------------------------------------------------------------------------
+
+
+class FrameDecodeError(Exception):
+    """Raised when a raw inbound frame fails schema validation.
+
+    Carries a structured :class:`HelloError` so the transport can reject the
+    frame deterministically with the existing ``(code, next_step,
+    retry_after_seconds)`` contract instead of a per-handler ``try/except`` and
+    ad-hoc ``isinstance`` checks. The wrapper server maps ``error.to_dict()``
+    onto the outbound ``hello_error`` (or ``error``) frame.
+
+    Attributes:
+        error: The structured rejection envelope to send back to the client.
+    """
+
+    def __init__(self, error: "HelloError"):
+        self.error = error
+        super().__init__(error.message)
+
+
+def _coerce_int(value: Any, *, field_name: str, default: Optional[int] = None) -> int:
+    """Coerce a wire value to ``int`` or raise a structured decode error.
+
+    Accepts real integers and integral strings/floats (``"1"``, ``1.0``) since
+    JSON transports and hand-rolled clients differ; rejects booleans and
+    non-integral values so a malformed frame cannot slip through as ``True``/``1``.
+    ``None`` falls back to ``default`` when one is provided.
+    """
+    if value is None and default is not None:
+        return default
+    # bool is an int subclass; a boolean protocol version is a malformed frame.
+    if isinstance(value, bool):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message=f"Field '{field_name}' must be an integer, got a boolean",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    try:
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError
+            return int(value)
+        return int(value)
+    except (TypeError, ValueError):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message=f"Field '{field_name}' must be an integer, got {value!r}",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        ) from None
+
+
+def _coerce_str_list(value: Any) -> List[str]:
+    """Coerce an optional wire value into a ``List[str]``.
+
+    ``None`` / missing becomes an empty list; a non-list (or a list with
+    non-string members) is normalised leniently to strings so a slightly
+    off-shape ``capabilities`` array never rejects an otherwise valid frame.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _require_str(value: Any, *, field_name: str) -> str:
+    """Return ``value`` as a non-empty string or raise a structured error."""
+    if not isinstance(value, str) or not value:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message=f"Field '{field_name}' is required and must be a non-empty string",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    return value
+
+
+@dataclass
+class MessageParams:
+    """Validated ``message`` frame — a client turn sent to the agent.
+
+    Completes the typed contract for the advertised ``message`` method so it
+    is no longer hand-parsed per handler.
+
+    Attributes:
+        content: The message body (text, or a structured payload).
+        session_id: Optional session the message belongs to.
+        message_id: Optional client-supplied idempotency/correlation id.
+        metadata: Optional additional message metadata.
+    """
+
+    content: Union[str, Dict[str, Any]]
+    session_id: Optional[str] = None
+    message_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    type: str = field(default="message", init=False)
+
+    @classmethod
+    def from_frame(cls, data: Dict[str, Any]) -> "MessageParams":
+        """Validate a raw ``message`` frame into typed params."""
+        content = data.get("content", data.get("text"))
+        if content is None or (isinstance(content, str) and content == ""):
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message="Field 'content' is required for a 'message' frame",
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        if not isinstance(content, (str, dict)):
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.CONFIGURATION_ERROR,
+                    message="Field 'content' must be a string or object",
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                )
+            )
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return cls(
+            content=content,
+            session_id=_as_opt_str(data.get("session_id")),
+            message_id=_as_opt_str(data.get("message_id")),
+            metadata=metadata,
+        )
+
+
+@dataclass
+class LeaveParams:
+    """Validated ``leave`` frame — a client ending its participation.
+
+    Completes the typed contract for the advertised ``leave`` method.
+
+    Attributes:
+        session_id: Optional session the client is leaving.
+        reason: Optional human-readable reason (display / logging only).
+    """
+
+    session_id: Optional[str] = None
+    reason: Optional[str] = None
+
+    type: str = field(default="leave", init=False)
+
+    @classmethod
+    def from_frame(cls, data: Dict[str, Any]) -> "LeaveParams":
+        """Validate a raw ``leave`` frame into typed params."""
+        return cls(
+            session_id=_as_opt_str(data.get("session_id")),
+            reason=_as_opt_str(data.get("reason")),
+        )
+
+
+@dataclass
+class JoinParams:
+    """Validated legacy ``join`` frame — the pre-``hello`` handshake.
+
+    Retained so the legacy path shares the same single validating decode step
+    instead of its own separate hand-written guards.
+
+    Attributes:
+        agent_id: The agent to connect to.
+        min_version: Minimum protocol version the client supports.
+        max_version: Maximum protocol version the client supports.
+        session_id: Optional session to resume.
+    """
+
+    agent_id: str
+    min_version: int
+    max_version: int
+    session_id: Optional[str] = None
+
+    type: str = field(default="join", init=False)
+
+    @classmethod
+    def from_frame(cls, data: Dict[str, Any]) -> "JoinParams":
+        """Validate a raw ``join`` frame into typed params."""
+        agent_id = _require_str(data.get("agent_id"), field_name="agent_id")
+        min_version = _coerce_int(
+            data.get("min_version"), field_name="min_version",
+            default=MIN_CLIENT_PROTOCOL_VERSION,
+        )
+        max_version = _coerce_int(
+            data.get("max_version"), field_name="max_version",
+            default=GATEWAY_PROTOCOL_VERSION,
+        )
+        if min_version > max_version:
+            raise FrameDecodeError(
+                HelloError(
+                    code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+                    message=(
+                        f"Invalid version range: min_version ({min_version}) "
+                        f"> max_version ({max_version})"
+                    ),
+                    next_step=ConnectRecoveryStep.UPGRADE_CLIENT,
+                )
+            )
+        return cls(
+            agent_id=agent_id,
+            min_version=min_version,
+            max_version=max_version,
+            session_id=_as_opt_str(data.get("session_id")),
+        )
+
+
+def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
+    """Validate a raw ``hello`` frame into :class:`HelloParams`.
+
+    Supports both the ``HelloParams`` wire shape (``protocol_min``/``protocol_max``
+    as direct fields) and the legacy nested ``protocol: {min, max}`` shape, plus
+    the ``capabilities``/``caps`` alias, coercing/validating each once here so
+    handlers never re-implement the dual-format branch.
+    """
+    agent_id = _require_str(data.get("agent_id"), field_name="agent_id")
+
+    if "protocol_min" in data or "protocol_max" in data:
+        client_min = _coerce_int(
+            data.get("protocol_min"), field_name="protocol_min",
+            default=MIN_CLIENT_PROTOCOL_VERSION,
+        )
+        client_max = _coerce_int(
+            data.get("protocol_max"), field_name="protocol_max",
+            default=GATEWAY_PROTOCOL_VERSION,
+        )
+    else:
+        protocol_info = data.get("protocol")
+        if isinstance(protocol_info, dict):
+            client_min = _coerce_int(
+                protocol_info.get("min"), field_name="protocol.min",
+                default=MIN_CLIENT_PROTOCOL_VERSION,
+            )
+            client_max = _coerce_int(
+                protocol_info.get("max"), field_name="protocol.max",
+                default=GATEWAY_PROTOCOL_VERSION,
+            )
+        else:
+            client_min = MIN_CLIENT_PROTOCOL_VERSION
+            client_max = GATEWAY_PROTOCOL_VERSION
+
+    if client_min > client_max:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+                message=(
+                    f"Invalid version range: protocol_min ({client_min}) "
+                    f"> protocol_max ({client_max})"
+                ),
+                next_step=ConnectRecoveryStep.UPGRADE_CLIENT,
+            )
+        )
+
+    capabilities = _coerce_str_list(data.get("capabilities", data.get("caps")))
+
+    since = data.get("since")
+    if since is not None:
+        since = _coerce_int(since, field_name="since")
+
+    return HelloParams(
+        agent_id=agent_id,
+        protocol_min=client_min,
+        protocol_max=client_max,
+        capabilities=capabilities,
+        session_id=_as_opt_str(data.get("session_id")),
+        since=since,
+    )
+
+
+# Discriminated union of the validated inbound frame types the gateway accepts.
+ClientFrame = Union["HelloParams", MessageParams, LeaveParams, JoinParams]
+
+
+def decode_client_frame(data: Dict[str, Any]) -> ClientFrame:
+    """Validate a raw inbound frame into a typed, discriminated client frame.
+
+    This is the single source of truth for the gateway wire contract: it
+    decodes every advertised inbound method (``hello``, ``message``, ``leave``)
+    and the legacy ``join`` handshake into a validated dataclass, or raises
+    :class:`FrameDecodeError` carrying a structured :class:`HelloError` for the
+    transport to reject with. Field coercion/validation happens once, here, at
+    the WebSocket boundary — handlers receive already-typed objects.
+
+    Args:
+        data: The raw, JSON-decoded inbound frame (discriminated on ``type``).
+
+    Returns:
+        A validated :class:`HelloParams`, :class:`MessageParams`,
+        :class:`LeaveParams`, or :class:`JoinParams`.
+
+    Raises:
+        FrameDecodeError: When ``data`` is not a mapping, carries an unknown /
+            missing ``type``, or fails per-frame validation. The attached
+            :class:`HelloError` is safe to serialise straight back to the client.
+    """
+    if not isinstance(data, dict):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Inbound frame must be a JSON object",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+
+    msg_type = data.get("type")
+    if not isinstance(msg_type, str) or not msg_type:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Frame 'type' is required and must be a non-empty string",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+
+    if msg_type == "hello":
+        return _decode_hello(data)
+    if msg_type == "message":
+        return MessageParams.from_frame(data)
+    if msg_type == "leave":
+        return LeaveParams.from_frame(data)
+    if msg_type == "join":
+        return JoinParams.from_frame(data)
+
+    raise FrameDecodeError(
+        HelloError(
+            code=ConnectErrorCode.CONFIGURATION_ERROR,
+            message=f"Unknown frame type: {msg_type!r}",
+            next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+        )
+    )
 
 
 @dataclass
