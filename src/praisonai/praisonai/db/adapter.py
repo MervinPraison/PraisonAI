@@ -6,6 +6,7 @@ and the wrapper's persistence layer (PersistenceOrchestrator).
 """
 
 import asyncio
+import inspect
 import time
 import logging
 import threading
@@ -665,8 +666,6 @@ class PraisonAIDB:
         is awaited directly, otherwise it is off-loaded to a thread so the event
         loop is never blocked. Returns ``None`` when neither method exists.
         """
-        import inspect
-
         fn = getattr(store, async_name, None) or getattr(store, sync_name, None)
         if fn is None:
             return None
@@ -857,7 +856,23 @@ class PraisonAIDB:
     ) -> None:
         """Async version of on_agent_end."""
         await self._ainit_stores()
-        
+
+        if self._conversation_store:
+            session = await self._dispatch_async(
+                self._conversation_store,
+                "get_session",
+                "async_get_session",
+                session_id,
+            )
+            if session:
+                session.metadata = {**(session.metadata or {}), "ended_at": time.time()}
+                await self._dispatch_async(
+                    self._conversation_store,
+                    "update_session",
+                    "async_update_session",
+                    session,
+                )
+
         if self._state_store:
             await self._dispatch_async(
                 self._state_store,

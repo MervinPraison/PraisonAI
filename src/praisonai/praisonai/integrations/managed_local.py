@@ -42,6 +42,11 @@ from typing import (
 
 logger = logging.getLogger(__name__)
 
+# Strict allowlist for pip requirement specifiers. Only characters that appear
+# in valid PEP 508 specifiers are permitted; leading dashes (pip options such
+# as ``--upgrade`` or ``-r``) are rejected separately at the call site.
+_PIP_SPECIFIER_RE = re.compile(r'^[A-Za-z0-9._\-\[\]<>=,~!+ ]+$')
+
 _DEFAULT_SYSTEM = "You are a helpful coding assistant."
 
 _DEFAULT_TOOLS = [
@@ -622,9 +627,14 @@ class LocalManagedAgent:
         # Validate package names against a strict allowlist (valid pip
         # requirement specifiers) so malformed/malicious names fail fast, then
         # shell-quote each token to prevent shell injection inside the sandbox.
-        _pip_name_re = re.compile(r'^[A-Za-z0-9._\-\[\]<>=,~!+ ]+$')
+        # Reject pip options (leading dash) so values like ``--upgrade`` or
+        # ``-r requirements.txt`` cannot be smuggled in as package specifiers.
         for pkg in pip_pkgs:
-            if not isinstance(pkg, str) or not _pip_name_re.match(pkg):
+            if (
+                not isinstance(pkg, str)
+                or pkg.lstrip().startswith("-")
+                or not _PIP_SPECIFIER_RE.fullmatch(pkg)
+            ):
                 raise ValueError(
                     f"Invalid pip package specifier: {pkg!r}. Only pip "
                     "requirement specifiers are allowed."
