@@ -252,7 +252,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             
             # Handle unknown users with pairing system
             user_id = bot_message.sender.user_id if bot_message.sender else ""
-            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            is_explicitly_allowed = self.config.is_explicitly_allowed(user_id)
             if not is_explicitly_allowed:
                 user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
                 if not user_allowed:
