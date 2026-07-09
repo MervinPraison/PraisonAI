@@ -24,6 +24,8 @@ Usage::
 import asyncio
 import logging
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -39,6 +41,11 @@ from typing import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Strict allowlist for pip requirement specifiers. Only characters that appear
+# in valid PEP 508 specifiers are permitted; leading dashes (pip options such
+# as ``--upgrade`` or ``-r``) are rejected separately at the call site.
+_PIP_SPECIFIER_RE = re.compile(r'^[A-Za-z0-9._\-\[\]<>=,~!+ ]+$')
 
 _DEFAULT_SYSTEM = "You are a helpful coding assistant."
 
@@ -617,7 +624,22 @@ class LocalManagedAgent:
             from .._async_bridge import run_sync
             run_sync(self.provision_compute())
         
-        pip_cmd = "python -m pip install -q " + " ".join(f'"{pkg}"' for pkg in pip_pkgs)
+        # Validate package names against a strict allowlist (valid pip
+        # requirement specifiers) so malformed/malicious names fail fast, then
+        # shell-quote each token to prevent shell injection inside the sandbox.
+        # Reject pip options (leading dash) so values like ``--upgrade`` or
+        # ``-r requirements.txt`` cannot be smuggled in as package specifiers.
+        for pkg in pip_pkgs:
+            if (
+                not isinstance(pkg, str)
+                or pkg.lstrip().startswith("-")
+                or not _PIP_SPECIFIER_RE.fullmatch(pkg)
+            ):
+                raise ValueError(
+                    f"Invalid pip package specifier: {pkg!r}. Only pip "
+                    "requirement specifiers are allowed."
+                )
+        pip_cmd = "python -m pip install -q " + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
         logger.info("[local_managed] installing pip packages in compute: %s", pip_pkgs)
         
         try:
