@@ -71,11 +71,28 @@ def gateway_start(
             results = asyncio.run(_probe_channels(channels))
             all_ok = _render_probe_results(results)
             if not all_ok:
-                print(
-                    "\nPre-flight check failed — aborting start. "
-                    "Fix the channel credentials above or pass --no-preflight to skip."
+                # An SSL certificate-verify failure (corporate proxy / MITM)
+                # is NOT a credential problem — the same token connects fine at
+                # runtime (#2845). Only hard-abort when a *non-SSL* channel
+                # failed; otherwise warn and proceed so the runtime adapter can
+                # connect, matching --no-preflight behavior.
+                non_ssl_failures = any(
+                    not getattr(r, "ok", False) and not _is_ssl_error(r)
+                    for r in results.values()
                 )
-                raise typer.Exit(1)
+                if non_ssl_failures:
+                    print(
+                        "\nPre-flight check failed — aborting start. "
+                        "Fix the channel credentials above or pass --no-preflight to skip."
+                    )
+                    raise typer.Exit(1)
+                print(
+                    "\nPre-flight found SSL certificate-verify failures only "
+                    "(likely a proxy/MITM network). Tokens may still be valid — "
+                    "continuing start. Set SSL_CERT_FILE / REQUESTS_CA_BUNDLE / "
+                    "PRAISONAI_SSL_CA_BUNDLE to your corporate CA, or pass "
+                    "--no-preflight to skip this check."
+                )
 
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
@@ -186,6 +203,67 @@ def _resolve_env_token(value):
     return value
 
 
+def _is_ssl_error(result) -> bool:
+    """True if a failed probe result is an SSL certificate-verify failure.
+
+    On SSL-inspecting networks (corporate proxy / MITM) the probe's HTTP client
+    rejects the self-signed CA in the chain even though the runtime bot adapter
+    connects fine, so this must be classified separately from bad/expired tokens
+    to avoid a misleading "fix credentials" abort (#2845).
+    """
+    if getattr(result, "ok", False):
+        return False
+    error = (getattr(result, "error", None) or "").lower()
+    return any(
+        marker in error
+        for marker in (
+            "sslcertverificationerror",
+            "certificate_verify_failed",
+            "certificate verify failed",
+            "self-signed certificate",
+            "self signed certificate",
+            "ssl: certificate",
+        )
+    )
+
+
+def _apply_probe_ca_bundle() -> None:
+    """Point the probe HTTP client at a custom CA bundle if configured.
+
+    Honors ``PRAISONAI_SSL_CA_BUNDLE`` (preferred), ``REQUESTS_CA_BUNDLE`` and
+    ``SSL_CERT_FILE`` so enterprise users behind an SSL-inspecting proxy can
+    supply their corporate CA and have the preflight probe trust it — mirroring
+    what the runtime adapter's SSL stack already honors (#2845). Setting
+    ``SSL_CERT_FILE`` is what Python's default ``ssl`` context (used by
+    ``aiohttp``) reads at load time.
+    """
+    import os
+
+    preferred = os.environ.get("PRAISONAI_SSL_CA_BUNDLE")
+    ca_bundle = (
+        preferred
+        or os.environ.get("REQUESTS_CA_BUNDLE")
+        or os.environ.get("SSL_CERT_FILE")
+    )
+    if not ca_bundle:
+        return
+
+    if not os.path.exists(ca_bundle):
+        print(
+            f"Warning: CA bundle path '{ca_bundle}' does not exist — "
+            "SSL_CERT_FILE / REQUESTS_CA_BUNDLE not updated for probe."
+        )
+        return
+
+    if preferred and preferred == ca_bundle:
+        # Explicit PraisonAI override wins over any pre-existing values.
+        os.environ["SSL_CERT_FILE"] = ca_bundle
+        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
+    else:
+        os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
+
+
 def _load_channels(config: str) -> dict:
     """Load the ``channels`` mapping from a gateway.yaml file (or exit)."""
     import os
@@ -226,6 +304,10 @@ async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
         _load_praisonai_env_file()
     except Exception:  # pragma: no cover — defensive
         pass
+
+    # Honor a custom CA bundle so the probe's HTTP client trusts a corporate
+    # proxy/MITM certificate the same way the runtime adapter does (#2845).
+    _apply_probe_ca_bundle()
 
     from praisonai_bot.bots import Bot
     from praisonaiagents.bots import ProbeResult
@@ -279,6 +361,15 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
         identity = getattr(r, "bot_username", None) or ""
         if getattr(r, "ok", False):
             detail = f"@{identity}" if identity else (getattr(r, "platform", "") or "")
+        elif _is_ssl_error(r):
+            # Distinguish an SSL certificate-verify failure (network/proxy) from
+            # a bad/expired token so the operator does not chase a credential
+            # problem that does not exist (#2845).
+            detail = (
+                "SSL certificate verify failed (network/proxy?). "
+                "Token may still be valid. Try SSL_CERT_FILE=/path/to/corp-ca.pem "
+                "or gateway start --no-preflight"
+            )
         else:
             detail = getattr(r, "error", None) or "unknown error"
         print(f"{name:<12} {mark}  {detail}")
