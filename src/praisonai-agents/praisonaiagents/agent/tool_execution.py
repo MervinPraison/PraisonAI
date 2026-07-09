@@ -764,10 +764,13 @@ class ToolExecutionMixin:
                     # Get configured limit
                     limit = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT)
                     
+                    # Initialize artifact reference before limit check so downstream
+                    # `if artifact_ref:` guards remain valid on short-result paths.
+                    artifact_ref = None
+
                     # Check if we need to spill to artifact store
                     if len(result_str) > limit:
                         # Try to use artifact store if available
-                        artifact_ref = None
                         if hasattr(self, '_artifact_store') and self._artifact_store is not None:
                             try:
                                 from ..context.artifacts import ArtifactMetadata
