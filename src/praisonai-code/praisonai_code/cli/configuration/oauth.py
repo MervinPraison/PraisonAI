@@ -39,7 +39,50 @@ class OAuthProviderConfig:
 # Built-in OAuth-capable providers. This registry is intentionally small and
 # additive: providers absent here transparently fall back to API-key login.
 # Endpoints can also be supplied at call-time (e.g. for self-hosted gateways).
-OAUTH_PROVIDERS: Dict[str, OAuthProviderConfig] = {}
+#
+# Only providers with publicly documented, standards-compliant device-code
+# (RFC 8628) or authorization-code + PKCE (RFC 7636) endpoints are included.
+# ``client_id`` values are the public client identifiers each provider ships
+# for native/CLI apps; they are not secrets. Users may still override any field
+# at call-time (e.g. to point at a self-hosted gateway or a first-party app).
+OAUTH_PROVIDERS: Dict[str, OAuthProviderConfig] = {
+    # GitHub — RFC 8628 device flow. The client_id below is a placeholder for a
+    # first-party PraisonAI GitHub App; override with --client-id to use your
+    # own registered OAuth app until one is provisioned.
+    "github": OAuthProviderConfig(
+        flow="device",
+        client_id="",
+        device_authorization_url="https://github.com/login/device/code",
+        token_url="https://github.com/login/oauth/access_token",
+        scope="read:user",
+    ),
+    # Google — RFC 8628 device flow (used by Gemini / Google AI). Requires a
+    # registered OAuth client of type "TVs and Limited Input devices".
+    "google": OAuthProviderConfig(
+        flow="device",
+        client_id="",
+        device_authorization_url="https://oauth2.googleapis.com/device/code",
+        token_url="https://oauth2.googleapis.com/token",
+        scope="https://www.googleapis.com/auth/generative-language.retriever",
+    ),
+    "gemini": OAuthProviderConfig(
+        flow="device",
+        client_id="",
+        device_authorization_url="https://oauth2.googleapis.com/device/code",
+        token_url="https://oauth2.googleapis.com/token",
+        scope="https://www.googleapis.com/auth/generative-language.retriever",
+    ),
+    # Microsoft / Azure common tenant — RFC 8628 device flow (used by Azure
+    # OpenAI). Override the tenant in the URLs and supply a client_id for a
+    # registered Azure AD application.
+    "azure": OAuthProviderConfig(
+        flow="device",
+        client_id="",
+        device_authorization_url="https://login.microsoftonline.com/common/oauth2/v2.0/devicecode",
+        token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        scope="https://cognitiveservices.azure.com/.default offline_access",
+    ),
+}
 
 
 def get_provider_config(
@@ -87,8 +130,34 @@ def provider_supports_oauth(
     provider: str,
     overrides: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Return True if ``provider`` has a usable OAuth configuration."""
-    return get_provider_config(provider, overrides) is not None
+    """Return True if ``provider`` has a usable OAuth configuration.
+
+    A provider is considered OAuth-capable when it appears in the built-in
+    registry (its endpoints are known) *or* the caller supplies enough
+    endpoint overrides to construct a config. A registry provider whose
+    ``client_id`` is not yet baked in is still "capable" — the client id can be
+    supplied at login time via ``--client-id``.
+    """
+    if get_provider_config(provider, overrides) is not None:
+        return True
+    return provider.lower() in OAUTH_PROVIDERS
+
+
+def provider_requires_client_id(
+    provider: str,
+    overrides: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return True if the provider is known but still needs a ``client_id``.
+
+    This lets the CLI print a precise, actionable message ("pass --client-id")
+    instead of silently falling back to API-key login for a provider whose
+    endpoints we ship but whose OAuth app id is registration-specific.
+    """
+    overrides = overrides or {}
+    base = OAUTH_PROVIDERS.get(provider.lower())
+    if base is None:
+        return False
+    return not (overrides.get("client_id") or base.client_id)
 
 
 def _tokens_to_credential_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -139,13 +208,19 @@ def run_device_code_flow(
     if not config.device_authorization_url:
         raise RuntimeError("Provider does not define a device authorization endpoint")
 
+    # Some providers (notably GitHub) return application/x-www-form-urlencoded
+    # by default; request JSON explicitly so ``resp.json()`` is always valid.
+    json_headers = {"Accept": "application/json"}
+
     data = {"client_id": config.client_id}
     if config.scope:
         data["scope"] = config.scope
     if config.audience:
         data["audience"] = config.audience
 
-    resp = requests.post(config.device_authorization_url, data=data, timeout=30)
+    resp = requests.post(
+        config.device_authorization_url, data=data, headers=json_headers, timeout=30
+    )
     resp.raise_for_status()
     dev = resp.json()
 
@@ -173,7 +248,9 @@ def run_device_code_flow(
 
     while time.time() < deadline:
         time.sleep(interval)
-        tok = requests.post(config.token_url, data=token_data, timeout=30)
+        tok = requests.post(
+            config.token_url, data=token_data, headers=json_headers, timeout=30
+        )
         payload = tok.json()
         if tok.status_code == 200 and payload.get("access_token"):
             return _tokens_to_credential_kwargs(payload)
@@ -282,7 +359,12 @@ def run_authcode_flow(
         "client_id": config.client_id,
         "code_verifier": verifier,
     }
-    tok = requests.post(config.token_url, data=token_data, timeout=30)
+    tok = requests.post(
+        config.token_url,
+        data=token_data,
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
     tok.raise_for_status()
     payload = tok.json()
     if not payload.get("access_token"):
@@ -375,6 +457,12 @@ def run_oauth_login(
     """
     config = get_provider_config(provider, overrides)
     if config is None:
+        if provider_requires_client_id(provider, overrides):
+            raise ValueError(
+                f"Provider '{provider}' supports OAuth but needs a client id. "
+                f"Re-run with: praisonai auth login {provider} --method oauth "
+                f"--client-id <your-oauth-app-client-id>"
+            )
         raise ValueError(f"Provider '{provider}' does not support OAuth login")
 
     if config.flow == "device":
