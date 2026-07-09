@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 )
 def check_acp_module(config=None) -> CheckResult:
     """Check if ACP module is available."""
+    skipped = skip_if_no_wrapper("acp_module", "ACP Module Available", category=CheckCategory.TOOLS)
+    if skipped:
+        return skipped
     try:
         import importlib.util
         spec = importlib.util.find_spec("praisonai.acp")

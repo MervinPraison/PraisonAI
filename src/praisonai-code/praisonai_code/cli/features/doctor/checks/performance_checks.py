@@ -15,6 +15,7 @@ from ..models import (
     DoctorConfig,
 )
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
 
 
 def _measure_import_time(module_name: str) -> tuple:
@@ -44,6 +45,14 @@ def _measure_import_time(module_name: str) -> tuple:
 )
 def check_performance_praisonai_import(config: DoctorConfig) -> CheckResult:
     """Measure praisonai package import time."""
+    skipped = skip_if_no_wrapper(
+        "performance_praisonai_import",
+        "PraisonAI Import Time",
+        category=CheckCategory.PERFORMANCE,
+    )
+    if skipped:
+        return skipped
+
     budget_ms = config.budget_ms or 2000  # 2 second default budget
     
     # praisonai is already imported, measure a fresh import of a submodule

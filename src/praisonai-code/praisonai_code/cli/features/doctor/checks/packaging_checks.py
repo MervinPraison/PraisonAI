@@ -19,6 +19,7 @@ from ..models import (
     DoctorConfig,
 )
 from ..registry import register_check
+from ._wrapper_checks import skip_if_no_wrapper
 
 
 @register_check(
@@ -30,6 +31,14 @@ from ..registry import register_check
 )
 def check_praisonai_package_structure(config: DoctorConfig) -> CheckResult:
     """Check PraisonAI package structure and entry points."""
+    skipped = skip_if_no_wrapper(
+        "praisonai_package_structure",
+        "PraisonAI Package Structure",
+        category=CheckCategory.PACKAGING,
+    )
+    if skipped:
+        return skipped
+
     issues = []
     metadata = {}
     
@@ -99,12 +108,20 @@ def check_praisonai_package_structure(config: DoctorConfig) -> CheckResult:
     severity=CheckSeverity.HIGH,
 )
 def check_python_module_execution(config: DoctorConfig) -> CheckResult:
-    """Test python -m praisonai execution."""
-    metadata = {"test_command": f"{sys.executable} -m praisonai --version"}
+    """Test python -m execution for the active product entry point.
+
+    On a standalone ``praisonai-code`` install (no wrapper) the wrapper module
+    ``praisonai`` is intentionally absent, so we test the product's own entry
+    point ``python -m praisonai_code`` instead of failing.
+    """
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    module_name = "praisonai" if wrapper_available() else "praisonai_code"
+    metadata = {"test_command": f"{sys.executable} -m {module_name} --version"}
     
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "praisonai", "--version"],
+            [sys.executable, "-m", module_name, "--version"],
             capture_output=True,
             text=True,
             timeout=config.timeout,
@@ -120,7 +137,7 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
                 title="Python Module Execution",
                 category=CheckCategory.PACKAGING,
                 status=CheckStatus.PASS,
-                message=f"python -m praisonai works: {result.stdout.strip() or result.stderr.strip()}",
+                message=f"python -m {module_name} works: {result.stdout.strip() or result.stderr.strip()}",
                 metadata=metadata,
             )
         else:
@@ -129,7 +146,7 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
                 title="Python Module Execution",
                 category=CheckCategory.PACKAGING,
                 status=CheckStatus.FAIL,
-                message=f"python -m praisonai failed with exit code {result.returncode}",
+                message=f"python -m {module_name} failed with exit code {result.returncode}",
                 metadata=metadata,
             )
             
@@ -139,7 +156,7 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
             title="Python Module Execution",
             category=CheckCategory.PACKAGING,
             status=CheckStatus.FAIL,
-            message=f"python -m praisonai timed out (>{config.timeout}s)",
+            message=f"python -m {module_name} timed out (>{config.timeout}s)",
             metadata=metadata,
         )
     except Exception as e:
@@ -149,7 +166,7 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
             title="Python Module Execution",
             category=CheckCategory.PACKAGING,
             status=CheckStatus.FAIL,
-            message=f"python -m praisonai execution failed: {e}",
+            message=f"python -m {module_name} execution failed: {e}",
             metadata=metadata,
         )
 
