@@ -725,12 +725,30 @@ class AgentsGenerator:
         if adapter is None:
             try:
                 adapter = self._get_framework_adapter(framework)
-            except (ImportError, KeyError, LookupError) as exc:
-                # Expected when running a minimal/mock generator without a
-                # registry, or when an optional adapter dependency is missing.
-                self.logger.warning(
-                    "Could not resolve framework adapter for %r: %r", framework, exc
-                )
+            except (
+                ImportError,
+                KeyError,
+                LookupError,
+                ValueError,
+                TypeError,
+                AttributeError,
+            ) as exc:
+                # Adapter could not be resolved. This is expected when:
+                #  - an optional adapter dependency is missing (ImportError),
+                #  - the framework is unknown/unavailable in the registry, whose
+                #    create()/is_available() surface (Value|Type|Import)Error, or
+                #  - a minimal/mock generator has no _adapter_registry attribute
+                #    (AttributeError).
+                # In all cases we fall back to native-only behaviour below and
+                # log a warning instead of aborting generator setup or silently
+                # swallowing the failure.
+                logger = getattr(self, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Could not resolve framework adapter for %r: %r",
+                        framework,
+                        exc,
+                    )
                 adapter = None
         if adapter is not None:
             supports_runtime_features = bool(

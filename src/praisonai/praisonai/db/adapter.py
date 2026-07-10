@@ -114,6 +114,38 @@ class PraisonAIDB:
                 backend, url=self._knowledge_url, **self._options
             )
 
+    # DBAPI/driver exception class names that indicate a *transient* connection
+    # or availability failure (network down, backend unreachable, pool
+    # exhausted) rather than a fatal misconfiguration. These drivers (psycopg2,
+    # pymysql, redis, etc.) are optional deps, so we match by class name across
+    # the MRO instead of importing them here — keeping the optional-dependency
+    # boundary intact while still memoizing genuine outages for the cool-down.
+    _TRANSIENT_INIT_ERROR_NAMES = frozenset(
+        {
+            "OperationalError",
+            "InterfaceError",
+            "ConnectionError",
+            "PoolError",
+            "PoolTimeout",
+            "TimeoutError",
+        }
+    )
+
+    @classmethod
+    def _is_transient_init_error(cls, exc: BaseException) -> bool:
+        """Return True if ``exc`` is a transient (retryable) init failure.
+
+        Built-in transient errors are matched by type; driver-specific DBAPI
+        errors (e.g. ``psycopg2.OperationalError``) are matched by class name
+        across the exception's MRO so optional drivers need not be imported.
+        """
+        if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+            return True
+        for klass in type(exc).__mro__:
+            if klass.__name__ in cls._TRANSIENT_INIT_ERROR_NAMES:
+                return True
+        return False
+
     def _init_failure_active(self) -> Optional[Exception]:
         """Return the cached init failure if still within the cool-down window.
 
@@ -149,18 +181,25 @@ class PraisonAIDB:
                 self._initialized = True
                 self._init_failed = None
                 self._init_failed_at = 0.0
-            except (ConnectionError, TimeoutError, OSError) as e:
-                # Only well-defined *transient* backend/network errors are
-                # memoized for a bounded cool-down window so a down backend is
-                # not hammered on every callback, while recovery is still
-                # possible (see _init_failure_active). Fatal misconfiguration
-                # (permission/typo/programming errors) must surface immediately
-                # rather than being suppressed for the whole cooldown window.
-                # KeyboardInterrupt/SystemExit and other BaseExceptions (e.g.
-                # CancelledError surfacing through to_thread) already bypass
-                # this handler and must NOT poison _init_failed.
-                self._init_failed = e
-                self._init_failed_at = time.monotonic()
+            except Exception as e:
+                # Only *transient* backend/network errors are memoized for a
+                # bounded cool-down window so a down backend is not hammered on
+                # every callback, while recovery is still possible (see
+                # _init_failure_active). This includes driver-specific DBAPI
+                # errors such as psycopg2.OperationalError, which are NOT
+                # subclasses of ConnectionError/OSError and would otherwise
+                # escape the cooldown (see _is_transient_init_error).
+                #
+                # Fatal misconfiguration (permission/typo/programming errors)
+                # is re-raised WITHOUT being memoized so it surfaces immediately
+                # on the next call rather than being suppressed for the whole
+                # cooldown window. KeyboardInterrupt/SystemExit and other
+                # BaseExceptions (e.g. CancelledError surfacing through
+                # to_thread) already bypass this handler and must NOT poison
+                # _init_failed.
+                if self._is_transient_init_error(e):
+                    self._init_failed = e
+                    self._init_failed_at = time.monotonic()
                 raise
 
     async def _ainit_stores(self):
