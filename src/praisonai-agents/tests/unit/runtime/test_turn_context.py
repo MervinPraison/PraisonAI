@@ -223,6 +223,57 @@ def test_context_builder_with_tools():
     assert context.tools[0].callable == test_function
 
 
+@pytest.mark.parametrize(
+    "tools_kwargs,expected_count",
+    [
+        ({}, 1),  # omitted -> use agent.tools
+        ({"tools": None}, 1),  # explicit None -> use agent.tools
+        ({"tools": []}, 0),  # explicit empty list -> disable tools
+    ],
+)
+def test_context_builder_tools_kwarg_semantics(tools_kwargs, expected_count):
+    """None/omitted tools use agent.tools; [] explicitly disables tools."""
+    def agent_function(query: str) -> str:
+        """Agent default tool."""
+        return f"Result for {query}"
+
+    builder = DefaultTurnContextBuilder()
+    agent = MockAgent()
+    agent.tools = [agent_function]
+
+    context = builder.build_context(
+        agent=agent,
+        prompt="Use tools",
+        **tools_kwargs,
+    )
+
+    assert len(context.tools) == expected_count
+
+
+def test_context_builder_tools_override():
+    """An explicit non-empty tools list overrides agent.tools."""
+    def agent_function(query: str) -> str:
+        """Agent default tool."""
+        return query
+
+    def override_function(value: str) -> str:
+        """Override tool."""
+        return value
+
+    builder = DefaultTurnContextBuilder()
+    agent = MockAgent()
+    agent.tools = [agent_function]
+
+    context = builder.build_context(
+        agent=agent,
+        prompt="Use tools",
+        tools=[override_function],
+    )
+
+    assert len(context.tools) == 1
+    assert context.tools[0].name == "override_function"
+
+
 def test_context_immutability():
     """Test that PreparedTurnContext is immutable."""
     builder = DefaultTurnContextBuilder()
