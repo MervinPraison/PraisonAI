@@ -128,9 +128,24 @@ class LoopHealthResult:
             print(f"  Duration: {self.total_duration_s:.2f}s")
 
 
-# Guard event "type" values that indicate a doom-loop was detected.
+# Guard event "type" values that indicate a doom-loop was detected. This
+# covers both the generic markers used by callers and the concrete
+# ``DoomLoopType`` values emitted by ``escalation/doom_loop.py``.
 _DOOM_LOOP_EVENT_TYPES = frozenset(
-    {"doom_loop", "doom-loop", "doomloop", "repetition", "loop_detected"}
+    {
+        "doom_loop",
+        "doom-loop",
+        "doomloop",
+        "repetition",
+        "loop_detected",
+        # DoomLoopType enum values (escalation/doom_loop.py)
+        "repeated_action",
+        "repeated_failure",
+        "no_progress",
+        "circular_plan",
+        "resource_exhaustion",
+        "repeated_output",
+    }
 )
 
 
@@ -170,20 +185,48 @@ class LoopEvaluator(BaseEvaluator):
         self.max_wasted_iterations = max_wasted_iterations
 
     @staticmethod
-    def _is_doom_loop_event(event: Any) -> bool:
-        """Return True if a guard event indicates a doom-loop was detected."""
+    def _event_field(event: Any, *names: str, default: Any = None) -> Any:
+        """Read a field from an event that may be a dict or an object."""
         if isinstance(event, dict):
-            event_type = str(event.get("type", event.get("event", ""))).lower()
-            if event_type in _DOOM_LOOP_EVENT_TYPES:
-                return True
-            return bool(event.get("doom_loop") or event.get("doom_loop_fired"))
-        event_type = str(getattr(event, "type", getattr(event, "event", ""))).lower()
-        if event_type in _DOOM_LOOP_EVENT_TYPES:
+            for name in names:
+                if name in event:
+                    return event[name]
+            return default
+        for name in names:
+            if hasattr(event, name):
+                return getattr(event, name)
+        return default
+
+    @classmethod
+    def _is_doom_loop_event(cls, event: Any) -> bool:
+        """
+        Return True if a guard event indicates a doom-loop was detected.
+
+        Handles the package's real guard shapes as well as generic markers:
+        - ``DoomLoopEvent`` (``escalation/doom_loop.py``): presence of a
+          ``loop_type`` (a ``DoomLoopType`` enum) means a loop fired.
+        - ``DoomLoopResult`` (``permissions/doom_loop.py``): ``is_loop`` bool.
+        - Generic dict/object markers via ``type``/``event`` fields or an
+          explicit ``doom_loop``/``doom_loop_fired`` flag.
+        """
+        # DoomLoopResult-style: explicit boolean loop flag.
+        is_loop = cls._event_field(event, "is_loop")
+        if is_loop is not None:
+            return bool(is_loop)
+
+        # DoomLoopEvent-style: presence of a loop_type means a loop fired.
+        loop_type = cls._event_field(event, "loop_type")
+        if loop_type is not None:
             return True
-        return bool(
-            getattr(event, "doom_loop", False)
-            or getattr(event, "doom_loop_fired", False)
-        )
+
+        # Explicit doom-loop flags.
+        if cls._event_field(event, "doom_loop", "doom_loop_fired", default=False):
+            return True
+
+        # Generic type/event markers (strings or enums).
+        raw_type = cls._event_field(event, "type", "event", default="")
+        event_type = str(getattr(raw_type, "value", raw_type)).lower()
+        return event_type in _DOOM_LOOP_EVENT_TYPES
 
     def run(
         self,
@@ -215,6 +258,14 @@ class LoopEvaluator(BaseEvaluator):
         total_duration = float(getattr(loop_result, "total_duration_seconds", 0.0))
         num_iterations = len(score_history)
 
+        # The loop mode and its own success verdict, when available. In
+        # "review" mode ``EvaluationLoop`` runs every iteration and derives
+        # success from the *final* score, so a transient earlier score above
+        # the threshold must not be treated as convergence (an earlier high
+        # score followed by a lower final score is a failed run).
+        mode = str(getattr(loop_result, "mode", "optimize") or "optimize").lower()
+        loop_success = getattr(loop_result, "success", None)
+
         # Iteration (1-based) at which threshold was first met.
         iterations_to_success = num_iterations
         converged = False
@@ -224,9 +275,22 @@ class LoopEvaluator(BaseEvaluator):
                 converged = True
                 break
 
+        # In review mode, defer to the final score / loop's own success so the
+        # health verdict never disagrees with the loop result itself.
+        if mode == "review" and num_iterations:
+            final_converged = score_history[-1] >= threshold
+            if loop_success is not None:
+                final_converged = bool(loop_success)
+            converged = final_converged
+            iterations_to_success = num_iterations
+
         # Iterations that ran after threshold was first met = wasted work.
+        # Only meaningful in optimize mode, where the loop stops on success;
+        # review mode intentionally runs all iterations.
         wasted_iterations = (
-            num_iterations - iterations_to_success if converged else 0
+            num_iterations - iterations_to_success
+            if (converged and mode != "review")
+            else 0
         )
 
         # Per-iteration score deltas.

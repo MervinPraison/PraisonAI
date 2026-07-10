@@ -135,6 +135,80 @@ class TestDoomLoop:
         assert health.guard_interventions == 1
         assert health.success is True
 
+    def test_real_doom_loop_event_loop_type(self):
+        """DoomLoopEvent (escalation/doom_loop.py) exposes a ``loop_type``."""
+        from praisonaiagents.eval import LoopEvaluator
+
+        class DoomLoopType:
+            value = "repeated_action"
+
+        class DoomLoopEvent:
+            loop_type = DoomLoopType()
+            description = "same action repeated"
+
+        result = _make_loop_result([9.0], threshold=8.0)
+        health = LoopEvaluator().run(result, guard_events=[DoomLoopEvent()])
+
+        assert health.doom_loop_fired is True
+        assert health.success is False
+
+    def test_real_doom_loop_result_is_loop(self):
+        """DoomLoopResult (permissions/doom_loop.py) exposes ``is_loop``."""
+        from praisonaiagents.eval import LoopEvaluator
+
+        result = _make_loop_result([9.0], threshold=8.0)
+        health = LoopEvaluator().run(
+            result, guard_events=[{"is_loop": True, "reason": "stuck"}]
+        )
+
+        assert health.doom_loop_fired is True
+        assert health.success is False
+
+    def test_doom_loop_result_is_loop_false_not_fatal(self):
+        from praisonaiagents.eval import LoopEvaluator
+
+        result = _make_loop_result([9.0], threshold=8.0)
+        health = LoopEvaluator().run(
+            result, guard_events=[{"is_loop": False, "reason": "ok"}]
+        )
+
+        assert health.doom_loop_fired is False
+        assert health.success is True
+
+    def test_doom_loop_type_enum_value_string(self):
+        from praisonaiagents.eval import LoopEvaluator
+
+        result = _make_loop_result([9.0], threshold=8.0)
+        health = LoopEvaluator().run(
+            result, guard_events=[{"type": "resource_exhaustion"}]
+        )
+
+        assert health.doom_loop_fired is True
+
+
+class TestReviewMode:
+    def test_review_mode_transient_high_score_not_healthy(self):
+        """Earlier high score with failing final score must not be healthy."""
+        from praisonaiagents.eval import LoopEvaluator
+
+        # scores [9.0, 8.0, 6.0]: final score 6.0 < 8.0 → loop failed.
+        result = _make_loop_result([9.0, 8.0, 6.0], threshold=8.0, mode="review")
+        health = LoopEvaluator(max_wasted_iterations=5).run(result)
+
+        assert health.converged is False
+        assert health.wasted_iterations == 0
+        assert health.success is False
+
+    def test_review_mode_final_score_passes(self):
+        from praisonaiagents.eval import LoopEvaluator
+
+        result = _make_loop_result([6.0, 7.0, 9.0], threshold=8.0, mode="review")
+        health = LoopEvaluator().run(result)
+
+        assert health.converged is True
+        assert health.wasted_iterations == 0
+        assert health.success is True
+
 
 class TestResultSerialization:
     def test_to_dict_and_json(self):
