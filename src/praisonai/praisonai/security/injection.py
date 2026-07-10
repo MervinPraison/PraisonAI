@@ -405,8 +405,12 @@ class InjectionDefense:
             if prompt:
                 strings.append(prompt)
 
-            # Determine source: tool calls from agent internals are semi-trusted
-            source = getattr(data, "_source", "external")
+            # SECURITY: never derive trust from a plain attribute on the hook
+            # payload. A compromised tool wrapper or a mis-wired intermediate
+            # could set ``data._source = "internal"`` and silently disable
+            # scanning. Hook inputs are always treated as external so the
+            # injection checks cannot be bypassed by a forged label.
+            source = "external"
 
             for text in strings:
                 if not text:

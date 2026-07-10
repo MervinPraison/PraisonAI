@@ -149,12 +149,16 @@ class PraisonAIDB:
                 self._initialized = True
                 self._init_failed = None
                 self._init_failed_at = 0.0
-            except Exception as e:
-                # Memoize ordinary errors for a bounded cool-down window so a
-                # down backend is not hammered on every callback, but recovery
-                # is still possible (see _init_failure_active). KeyboardInterrupt
-                # /SystemExit and other BaseExceptions (e.g. CancelledError
-                # surfacing through to_thread) must NOT poison _init_failed.
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # Only well-defined *transient* backend/network errors are
+                # memoized for a bounded cool-down window so a down backend is
+                # not hammered on every callback, while recovery is still
+                # possible (see _init_failure_active). Fatal misconfiguration
+                # (permission/typo/programming errors) must surface immediately
+                # rather than being suppressed for the whole cooldown window.
+                # KeyboardInterrupt/SystemExit and other BaseExceptions (e.g.
+                # CancelledError surfacing through to_thread) already bypass
+                # this handler and must NOT poison _init_failed.
                 self._init_failed = e
                 self._init_failed_at = time.monotonic()
                 raise
@@ -1038,7 +1042,11 @@ class PostgresDB(PraisonAIDB):
         password: str = "",
         **options
     ):
-        url = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        from urllib.parse import quote_plus
+        url = (
+            f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
+            f"@{host}:{port}/{database}"
+        )
         super().__init__(database_url=url, **options)
 
 
