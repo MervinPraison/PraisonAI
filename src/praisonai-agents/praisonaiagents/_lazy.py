@@ -22,8 +22,11 @@ Usage:
 """
 
 import importlib
+import logging
 import threading
 from typing import Any, Callable, Dict, Optional, Tuple
+
+_logger = logging.getLogger(__name__)
 
 # Global cache lock for thread-safe access
 _cache_lock = threading.Lock()
@@ -201,8 +204,26 @@ def create_lazy_getattr_with_fallback(
                 value = lazy_import(module_path, attr_name, _cache)
                 _cache[name] = value
                 return value
-            except (ImportError, AttributeError):
-                # Optional module not available
+            except AttributeError as exc:
+                # Module imported but the attribute is missing: this usually
+                # indicates a stale/renamed mapping entry rather than a genuinely
+                # optional dependency, so surface it louder. Preserve the graceful
+                # None fallback for backward compatibility.
+                _logger.warning(
+                    "Lazy import of %r (%s.%s) failed with a missing attribute; "
+                    "this may indicate a stale mapping entry: %s",
+                    name, module_path, attr_name, exc,
+                )
+                _cache[name] = None
+                return None
+            except ImportError as exc:
+                # Optional module not available: preserve the graceful None
+                # fallback, but record why so real import failures remain
+                # diagnosable instead of surfacing later as NoneType errors.
+                _logger.debug(
+                    "Lazy import of %r (%s.%s) failed: %s",
+                    name, module_path, attr_name, exc,
+                )
                 _cache[name] = None
                 return None
         
