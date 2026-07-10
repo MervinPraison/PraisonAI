@@ -60,24 +60,16 @@ class IntegrationRegistry(PluginRegistry[Any]):
     
     def _register_builtin_integrations(self):
         """Register all built-in integrations with lazy loading."""
-        
-        # CLI Tools
-        def _claude_code():
-            from .claude_code import ClaudeCodeIntegration
-            return ClaudeCodeIntegration
-            
-        def _gemini_cli():
-            from .gemini_cli import GeminiCLIIntegration
-            return GeminiCLIIntegration
-            
-        def _codex_cli():
-            from .codex_cli import CodexCLIIntegration
-            return CodexCLIIntegration
-            
-        def _cursor_cli():
-            from .cursor_cli import CursorCLIIntegration
-            return CursorCLIIntegration
-        
+
+        # CLI Tools — canonical loaders shared with ExternalAgentRegistry so a
+        # new backend only has to be registered in one place (_cli_loaders.py).
+        from ._cli_loaders import CLASS_NAME_LOADERS
+
+        _claude_code = CLASS_NAME_LOADERS["ClaudeCodeIntegration"]
+        _gemini_cli = CLASS_NAME_LOADERS["GeminiCLIIntegration"]
+        _codex_cli = CLASS_NAME_LOADERS["CodexCLIIntegration"]
+        _cursor_cli = CLASS_NAME_LOADERS["CursorCLIIntegration"]
+
         # Base classes
         def _base_cli_integration():
             from .base import BaseCLIIntegration
@@ -189,5 +181,28 @@ class IntegrationRegistry(PluginRegistry[Any]):
         self.register_lazy("create_integration", _create_integration)
 
 
-# Global registry instance
-INTEGRATIONS_REGISTRY = IntegrationRegistry()
+# Global registry instance — lazily constructed on first access instead of at
+# import time. Constructing at module top violated the "no heavy module-level
+# work" rule and paid the entry-point discovery cost even when the registry was
+# never used. ``get_integrations_registry()`` is the preferred accessor; the
+# historical ``INTEGRATIONS_REGISTRY`` name is preserved via module __getattr__.
+import threading as _threading
+
+_registry_instance: "IntegrationRegistry | None" = None
+_registry_lock = _threading.Lock()
+
+
+def get_integrations_registry() -> "IntegrationRegistry":
+    """Return the process-default integration registry, building it lazily."""
+    global _registry_instance
+    if _registry_instance is None:
+        with _registry_lock:
+            if _registry_instance is None:
+                _registry_instance = IntegrationRegistry()
+    return _registry_instance
+
+
+def __getattr__(name: str) -> Any:
+    if name == "INTEGRATIONS_REGISTRY":
+        return get_integrations_registry()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

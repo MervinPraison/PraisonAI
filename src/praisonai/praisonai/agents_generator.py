@@ -493,8 +493,14 @@ class AgentsGenerator:
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
                     }
-            except (ImportError, AttributeError, TypeError):
-                pass
+            except ImportError as exc:
+                # The optional retry backend is missing. The CLI accepted
+                # --tool-retry-* flags, so surface a warning instead of
+                # silently telling the user their settings were honoured.
+                self.logger.warning(
+                    "tool_retry_policy requested but retry backend unavailable: %r",
+                    exc,
+                )
         
         # Handle handoff configuration - convert CLI flags into handoff dict
         handoff_fields = ['handoff', 'handoff_policy', 'handoff_timeout', 'handoff_max_depth', 'handoff_max_concurrent', 'handoff_detect_cycles']
@@ -719,7 +725,30 @@ class AgentsGenerator:
         if adapter is None:
             try:
                 adapter = self._get_framework_adapter(framework)
-            except Exception:
+            except (
+                ImportError,
+                KeyError,
+                LookupError,
+                ValueError,
+                TypeError,
+                AttributeError,
+            ) as exc:
+                # Adapter could not be resolved. This is expected when:
+                #  - an optional adapter dependency is missing (ImportError),
+                #  - the framework is unknown/unavailable in the registry, whose
+                #    create()/is_available() surface (Value|Type|Import)Error, or
+                #  - a minimal/mock generator has no _adapter_registry attribute
+                #    (AttributeError).
+                # In all cases we fall back to native-only behaviour below and
+                # log a warning instead of aborting generator setup or silently
+                # swallowing the failure.
+                logger = getattr(self, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Could not resolve framework adapter for %r: %r",
+                        framework,
+                        exc,
+                    )
                 adapter = None
         if adapter is not None:
             supports_runtime_features = bool(

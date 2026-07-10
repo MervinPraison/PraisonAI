@@ -33,31 +33,7 @@ from typing import Dict, Type, Optional, Any, List
 
 from .base import BaseCLIIntegration
 from .._registry import PluginRegistry
-
-
-def _claude_code_loader():
-    from .claude_code import ClaudeCodeIntegration
-    return ClaudeCodeIntegration
-
-def _gemini_cli_loader():
-    from .gemini_cli import GeminiCLIIntegration
-    return GeminiCLIIntegration
-
-def _codex_cli_loader():
-    from .codex_cli import CodexCLIIntegration
-    return CodexCLIIntegration
-
-def _cursor_cli_loader():
-    from .cursor_cli import CursorCLIIntegration
-    return CursorCLIIntegration
-
-# Built-in external agent integrations with lazy loading
-_BUILTIN_INTEGRATIONS = {
-    "claude": _claude_code_loader,
-    "gemini": _gemini_cli_loader,
-    "codex": _codex_cli_loader,
-    "cursor": _cursor_cli_loader,
-}
+from ._cli_loaders import BUILTIN_INTEGRATIONS as _BUILTIN_INTEGRATIONS
 
 
 class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):

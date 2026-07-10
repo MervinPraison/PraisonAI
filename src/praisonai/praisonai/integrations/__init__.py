@@ -57,6 +57,14 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy load integrations using unified registry."""
-    from ._unified_registry import INTEGRATIONS_REGISTRY
-    return INTEGRATIONS_REGISTRY.get_by_attr(__name__, name)
+    """Lazy load integrations using unified registry.
+
+    Submodule names (dunder / private modules such as ``_unified_registry``)
+    must fall through to normal import machinery — intercepting them here would
+    eagerly build the registry the moment ``from praisonai.integrations import
+    _unified_registry`` runs.
+    """
+    if name.startswith("_"):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from ._unified_registry import get_integrations_registry
+    return get_integrations_registry().get_by_attr(__name__, name)
