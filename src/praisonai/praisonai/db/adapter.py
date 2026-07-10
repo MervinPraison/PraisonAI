@@ -138,7 +138,14 @@ class PraisonAIDB:
         Built-in transient errors are matched by type; driver-specific DBAPI
         errors (e.g. ``psycopg2.OperationalError``) are matched by class name
         across the exception's MRO so optional drivers need not be imported.
+
+        ``PermissionError`` is deliberately excluded: it is an ``OSError``
+        subclass but represents a fatal misconfiguration (bad credentials, wrong
+        file mode) that must surface immediately on every call rather than being
+        suppressed for the whole cooldown window.
         """
+        if isinstance(exc, PermissionError):
+            return False
         if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
             return True
         for klass in type(exc).__mro__:
