@@ -140,7 +140,7 @@ class TestContextMonitor:
         monitor = ContextMonitor()
         monitor.set_path("/new/path/context.txt")
         
-        assert str(monitor.path) == "/new/path/context.txt"
+        assert monitor.path.as_posix() == "/new/path/context.txt"
     
     def test_set_format(self):
         """Test set_format method."""
