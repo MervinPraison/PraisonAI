@@ -9,6 +9,7 @@ Evaluator Types:
     - PerformanceEvaluator: Measure runtime and memory usage
     - ReliabilityEvaluator: Verify expected tool calls are made
     - CriteriaEvaluator: Evaluate against custom criteria
+    - ContextEvaluator: Score context budget compliance and multi-agent handoff fidelity
     - ComparisonEval: Side-by-side comparison of two agent outputs
     - SafetyEval: Detect harmful, biased, or inappropriate outputs
     - EvalSuite: Orchestrator for running multiple evaluations
@@ -29,6 +30,7 @@ __all__ = [
     "PerformanceEvaluator",
     "ReliabilityEvaluator",
     "CriteriaEvaluator",
+    "ContextEvaluator",
     "MediaEvaluator",
     "ComparisonEval",
     "SafetyEval",
@@ -37,6 +39,9 @@ __all__ = [
     "PerformanceResult",
     "ReliabilityResult",
     "CriteriaResult",
+    "ContextHandoffResult",
+    "BudgetComplianceResult",
+    "ContextEvalResult",
     "MediaEvaluationResult",
     "ComparisonResult",
     "SafetyResult",
@@ -100,6 +105,7 @@ _LAZY_IMPORTS = {
     "PerformanceEvaluator": ("performance", "PerformanceEvaluator"),
     "ReliabilityEvaluator": ("reliability", "ReliabilityEvaluator"),
     "CriteriaEvaluator": ("criteria", "CriteriaEvaluator"),
+    "ContextEvaluator": ("context_eval", "ContextEvaluator"),
     "MediaEvaluator": ("media", "MediaEvaluator"),
     "ComparisonEval": ("comparison", "ComparisonEval"),
     "SafetyEval": ("safety", "SafetyEval"),
@@ -108,6 +114,9 @@ _LAZY_IMPORTS = {
     "PerformanceResult": ("results", "PerformanceResult"),
     "ReliabilityResult": ("results", "ReliabilityResult"),
     "CriteriaResult": ("results", "CriteriaResult"),
+    "ContextHandoffResult": ("context_eval", "ContextHandoffResult"),
+    "BudgetComplianceResult": ("context_eval", "BudgetComplianceResult"),
+    "ContextEvalResult": ("context_eval", "ContextEvalResult"),
     "MediaEvaluationResult": ("media", "MediaEvaluationResult"),
     "ComparisonResult": ("comparison", "ComparisonResult"),
     "SafetyResult": ("safety", "SafetyResult"),
