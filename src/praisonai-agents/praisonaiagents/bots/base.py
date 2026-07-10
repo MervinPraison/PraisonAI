@@ -214,6 +214,43 @@ class BasePlatformAdapter(ABC):
         ...
 
     # ------------------------------------------------------------------ #
+    # Inbound run/supervision contract seam.                              #
+    #                                                                     #
+    # The base defines *where* an adapter's inbound run loop lives so the #
+    # wrapper's supervision layer (ConnectionMonitor / ChannelSupervisor  #
+    # / ChannelHealthMonitor) can wrap it uniformly for every channel,    #
+    # rather than each adapter hand-rolling its own reconnect loop. The   #
+    # concrete supervisor engine stays in the wrapper to keep core        #
+    # protocol-only and dependency-light; core owns only the seam.        #
+    # ------------------------------------------------------------------ #
+
+    #: Whether inbound supervision (auto-reconnect + health restart) should
+    #: wrap this adapter's run loop by default. Adapters that manage their own
+    #: reconnect loop internally may set this False to opt out.
+    supervised_inbound: bool = True
+
+    async def start(self) -> None:
+        """Establish the connection and run the inbound loop until stopped.
+
+        This is the seam the wrapper's supervision layer wraps: an adapter's
+        ``start`` should run its inbound source (poll/listen/socket) and only
+        return when the channel is stopped cleanly, raising on an unexpected
+        drop so the supervisor can reconnect with backoff. Concrete adapters
+        override this with their platform run loop.
+        """
+        raise NotImplementedError(
+            "adapter must implement start() to run its inbound loop"
+        )
+
+    async def stop(self) -> None:
+        """Signal the inbound loop to stop and tear down the connection.
+
+        Default delegates to :meth:`disconnect`. Adapters with an explicit
+        stop event override this to unblock their run loop first.
+        """
+        await self.disconnect()
+
+    # ------------------------------------------------------------------ #
     # Capability helpers                                                  #
     # ------------------------------------------------------------------ #
 

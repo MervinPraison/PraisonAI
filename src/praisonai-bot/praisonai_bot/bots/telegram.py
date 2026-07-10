@@ -85,7 +85,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
     
     Requires: pip install python-telegram-bot
     """
-    
+
+    #: Telegram manages its own inbound reconnect loop internally
+    #: (ConnectionMonitor-based polling in ``start``), so the single-``Bot``
+    #: supervision wrapper opts out here to avoid double reconnect layers.
+    supervised_inbound: bool = False
+
     def __init__(
         self,
         token: str,

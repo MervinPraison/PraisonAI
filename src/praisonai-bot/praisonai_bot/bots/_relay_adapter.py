@@ -36,6 +36,11 @@ class RelayAdapter:
         config: Optional BotConfig override.
     """
 
+    #: The relay transport owns its own out-of-process reconnection and
+    #: scale-to-zero dormancy, so the single-``Bot`` supervision wrapper opts
+    #: out here rather than double-driving the connection.
+    supervised_inbound: bool = False
+
     def __init__(
         self,
         transport: Any,
