@@ -83,6 +83,13 @@ class Bot:
             process and relayed in, so the gateway needs no public inbound port
             and no platform SDK. Must satisfy
             ``praisonaiagents.gateway.RelayTransport``.
+        enable_supervision: When True (default), the ``start()``/``run()`` path
+            wraps the adapter's inbound run loop with a ``ChannelSupervisor``
+            (auto-reconnect with capped exponential backoff + health-based
+            restart) — the same resilience ``BotOS``/gateway already provides —
+            so a single ``Bot("slack", ...).run()`` survives a dropped
+            connection identically to Telegram. Set False to run the raw adapter
+            without supervision (useful for tests or embedding).
         **kwargs: Platform-specific arguments passed to the adapter.
     """
 
@@ -94,6 +101,7 @@ class Bot:
         config: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
         transport: Optional[Any] = None,
+        enable_supervision: bool = True,
         **kwargs: Any,
     ):
         self._platform = platform.lower().strip()
@@ -126,6 +134,13 @@ class Bot:
         # Spliced into the adapter session in ``_build_adapter`` (same duck-typed
         # post-construction pattern as the delivery router).
         self._admission_gate: Optional[Any] = None
+
+        # Issue #2869: supervise the single-Bot inbound run loop by default so
+        # every channel (not just Telegram) auto-reconnects with capped backoff
+        # and health-based restart, matching BotOS/gateway robustness.
+        self._enable_supervision = enable_supervision
+        self._supervisor: Optional[Any] = None
+        self._supervisor_task: Optional[Any] = None
 
         self._adapter: Optional[Any] = None
         self._is_running = False
@@ -272,20 +287,123 @@ class Bot:
 
         return adapter
 
+    def _supervision_enabled(self) -> bool:
+        """Whether inbound supervision should wrap the adapter run loop.
+
+        Honours the ``enable_supervision`` kwarg and lets an adapter opt out
+        via ``supervised_inbound = False`` (e.g. relay/webhook adapters that
+        own their own reconnect/dormancy). Falls back to raw start if the
+        supervision layer cannot be imported (optional wrapper machinery).
+        """
+        if not self._enable_supervision:
+            return False
+        adapter = self._adapter
+        if adapter is not None and getattr(adapter, "supervised_inbound", True) is False:
+            return False
+        return True
+
+    @staticmethod
+    async def _wait_until_stopped(adapter: Any) -> None:
+        """Block until a non-blocking adapter's inbound source stops running.
+
+        Adapters whose ``start()`` spawns a background task/server and returns
+        immediately (Email poll, Linear/WhatsApp/AgentMail webhook servers) need
+        the supervised run to stay alive so a drop is noticed and reconnected.
+        Prefers awaiting the adapter's own background task when it exposes one
+        (surfacing its exception so the supervisor can classify + reconnect),
+        else falls back to polling the ``is_running`` flag.
+        """
+        import asyncio
+
+        for attr in ("_poll_task", "_run_task", "_serve_task"):
+            task = getattr(adapter, attr, None)
+            if task is not None and hasattr(task, "__await__"):
+                await task
+                return
+        while getattr(adapter, "is_running", False):
+            await asyncio.sleep(0.5)
+
     async def start(self) -> None:
-        """Build the adapter and start the bot."""
+        """Build the adapter and start the bot.
+
+        By default (``enable_supervision=True``) the adapter's inbound run loop
+        is wrapped in a :class:`ChannelSupervisor` so a dropped connection is
+        reconnected with capped exponential backoff and an unhealthy channel is
+        restarted — the same resilience ``BotOS``/gateway already provide, now
+        on the single-``Bot`` path for *every* platform, not just Telegram
+        (Issue #2869).
+        """
         if self._adapter and self.is_running:
             logger.warning(f"Bot({self._platform}) already running")
             return
 
         self._adapter = self._build_adapter()
         self._is_running = True
-        await self._adapter.start()
+
+        if not self._supervision_enabled():
+            await self._adapter.start()
+            return
+
+        try:
+            from ..gateway.supervisor import ChannelSupervisor
+        except Exception as exc:  # pragma: no cover - optional supervision layer
+            logger.debug(
+                "Bot(%s): supervision layer unavailable (%s); "
+                "running adapter without supervision.",
+                self._platform,
+                exc,
+            )
+            await self._adapter.start()
+            return
+
+        self._supervisor = ChannelSupervisor()
+
+        import asyncio
+
+        async def _start(name: str, adapter: Any) -> None:
+            # The supervisor's run loop treats the return of this coroutine as
+            # "channel stopped cleanly" and stops supervising. Blocking adapters
+            # (e.g. Slack ``handler.start_async()``, Discord ``client.start()``)
+            # naturally hold here until disconnected. But several adapters spawn
+            # their inbound source in a background task / server and return from
+            # ``start()`` immediately (e.g. Email IMAP poll, Linear/WhatsApp/
+            # AgentMail webhook servers). For those, returning would end
+            # supervision the instant the bot came up — the inbound loop would
+            # run unsupervised and ``Bot.run()`` would exit right after starting
+            # (Issue #2869). So after ``start()`` returns we keep the supervised
+            # run alive until the adapter reports it is no longer running,
+            # surfacing an unexpected stop so the supervisor can reconnect.
+            await adapter.start()
+            if getattr(adapter, "is_running", False):
+                await self._wait_until_stopped(adapter)
+
+        await self._supervisor.start_health_monitoring()
+        self._supervisor_task = asyncio.ensure_future(
+            self._supervisor.run(self._platform, self._adapter, _start)
+        )
+        try:
+            await self._supervisor_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await self._supervisor.stop_health_monitoring()
+            self._supervisor.cleanup(self._platform)
+            self._supervisor_task = None
 
     async def stop(self) -> None:
         """Stop the bot."""
+        # Tell the adapter to unblock its inbound loop first so the supervised
+        # run returns cleanly, then cancel the supervision loop if still live.
         if self._adapter:
             await self._adapter.stop()
+        task = getattr(self, "_supervisor_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        elif self._supervisor is not None:
+            try:
+                self._supervisor.cleanup(self._platform)
+            except Exception:
+                pass
         self._is_running = False
 
     async def go_dormant(self) -> None:
