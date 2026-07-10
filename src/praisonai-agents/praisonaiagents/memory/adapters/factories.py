@@ -172,6 +172,52 @@ def create_dakera_memory_adapter(**kwargs) -> MemoryProtocol:
     return DakeraMemoryAdapter(dakera_config=kwargs)
 
 
+def create_perseus_vault_memory_adapter(**kwargs) -> MemoryProtocol:
+    """
+    Factory function to create a Perseus Vault memory adapter.
+
+    Perseus Vault is a single static-binary MCP memory server (SQLite + FTS5 +
+    bundled ONNX embeddings, optional AES-256-GCM). Unlike the other wrapper
+    adapters this needs **no third-party Python SDK** — it talks JSON-RPC over
+    the binary's stdio ``serve`` transport directly, matching Perseus Vault's
+    zero-dependency, local-first design. The only requirement is that the
+    ``perseus-vault`` binary is reachable.
+
+    Args:
+        **kwargs: Configuration passed to the adapter. Recognised keys (either at
+            the top level or nested under a ``"config"`` dict, mirroring the mem0
+            and dakera adapters):
+
+            - ``binary`` / ``bin``: path to the ``perseus-vault`` binary
+              (falls back to ``PERSEUS_VAULT_BIN`` env, then ``perseus-vault`` on PATH).
+            - ``db_path`` / ``db``: SQLite DB path
+              (falls back to ``PERSEUS_VAULT_DB`` env, then ``./perseus-vault.db``).
+            - ``encryption_key``: path to an AES-256-GCM key file
+              (falls back to ``PERSEUS_VAULT_ENCRYPTION_KEY`` env; optional).
+            - ``short_term_category`` / ``long_term_category``: entity categories
+              for the two tiers (default ``working`` and ``episodic``).
+            - ``search_mode``: ``hybrid`` (default), ``fts5``, or ``dense``.
+            - ``default_importance``: initial importance 0.0-1.0 (default ``0.5``).
+
+    Returns:
+        MemoryProtocol adapter instance.
+
+    Raises:
+        FileNotFoundError: If the ``perseus-vault`` binary cannot be launched.
+    """
+    from .perseus_vault_adapter import PerseusVaultMemoryAdapter
+
+    try:
+        return PerseusVaultMemoryAdapter(config=kwargs)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "The 'perseus-vault' binary was not found. Install it (single static "
+            "binary, no Python deps) from "
+            "https://github.com/Perseus-Computing-LLC/perseus-vault and either put "
+            "it on PATH or set the PERSEUS_VAULT_BIN env / `binary=` config key."
+        ) from exc
+
+
 class Mem0MemoryAdapter:
     """
     Memory adapter that wraps mem0.Memory to implement MemoryProtocol.
