@@ -36,7 +36,12 @@ KNOWN_TOP_LEVEL_KEYS = {
     "commands",
     # Auto workspace checkpointing for the coding loop ({auto, storage_dir}).
     "checkpoints",
+    # Plugin enablement + per-plugin options (unified project config surface).
+    "plugins",
 }
+
+# Reserved keys in the plugins section; any other key is a per-plugin option map.
+KNOWN_PLUGINS_KEYS = {"enabled", "auto_discover", "directories"}
 
 # Known keys for the nested output section.
 KNOWN_OUTPUT_KEYS = {"format", "color", "verbose", "quiet"}
@@ -105,6 +110,19 @@ def validate_config_data(
             continue
         if key not in KNOWN_TOP_LEVEL_KEYS:
             _record(_format_unknown_key_message(key, KNOWN_TOP_LEVEL_KEYS, "top-level", source))
+            continue
+
+        if key == "plugins":
+            if not isinstance(value, dict):
+                location = f" in {source}" if source else ""
+                _record(f"Configuration section 'plugins'{location} must be a mapping.")
+                continue
+            # Reserved keys carry scalars/lists; per-plugin option maps are dicts
+            # and use free-form names, so only typo-check the non-dict scalars.
+            for sub, sub_value in value.items():
+                if sub in KNOWN_PLUGINS_KEYS or isinstance(sub_value, dict):
+                    continue
+                _record(_format_unknown_key_message(sub, KNOWN_PLUGINS_KEYS, "plugins", source))
             continue
 
         section_fields = {
@@ -215,6 +233,11 @@ class ResolvedConfig:
     # Permission policy declared in project config (single source of truth)
     permissions: Dict[str, Any] = field(default_factory=dict)
     
+    # Plugin enablement + per-plugin options declared in project config.
+    # Reserved keys: enabled/auto_discover/directories; any other key is a
+    # per-plugin option map delivered to that plugin's on_config hook.
+    plugins: Dict[str, Any] = field(default_factory=dict)
+    
     # Provenance tracking
     sources: List[str] = field(default_factory=list)
     
@@ -239,6 +262,8 @@ class ResolvedConfig:
             result["mcp"] = self.mcp
         if self.permissions:
             result["permissions"] = self.permissions
+        if self.plugins:
+            result["plugins"] = self.plugins
         return result
     
     @classmethod
@@ -249,7 +274,7 @@ class ResolvedConfig:
         output_data = data.get("output", {})
         
         # Extract known top-level fields
-        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources", "$schema", "_source"}
+        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "plugins", "sources", "$schema", "_source"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         return cls(
@@ -262,6 +287,7 @@ class ResolvedConfig:
             telemetry=data.get("telemetry", True),
             mcp=mcp_data if isinstance(mcp_data := data.get("mcp"), dict) else {},
             permissions=perm_data if isinstance(perm_data := data.get("permissions"), dict) else {},
+            plugins=plugins_data if isinstance(plugins_data := data.get("plugins"), dict) else {},
             sources=data.get("sources", []),
             extra=extra,
         )

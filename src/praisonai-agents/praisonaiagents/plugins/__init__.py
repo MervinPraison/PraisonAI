@@ -104,17 +104,21 @@ def maybe_enable_from_config() -> None:
         _auto_enable_attempted = True
 
         try:
-            from praisonaiagents.config.loader import get_enabled_plugins, is_plugins_enabled
+            from praisonaiagents.config.loader import (
+                get_enabled_plugins,
+                get_plugin_options,
+                is_plugins_enabled,
+            )
 
             if is_plugins_enabled():
-                enable(get_enabled_plugins())
+                enable(get_enabled_plugins(), options_by_name=get_plugin_options())
         except Exception as exc:
             import logging
 
             logging.getLogger(__name__).debug("Plugin auto-enable skipped: %s", exc)
 
 
-def enable(plugins: list = None) -> None:
+def enable(plugins: list = None, options_by_name: dict = None) -> None:
     """Enable the plugin system.
     
     Discovers and enables plugins from default directories.
@@ -123,6 +127,9 @@ def enable(plugins: list = None) -> None:
     Args:
         plugins: Optional list of plugin names to enable.
                  If None, enables all discovered plugins.
+        options_by_name: Optional ``{plugin_name: options_dict}`` mapping of
+                 per-plugin options (e.g. from ``.praisonai/config.yaml``).
+                 Each enabled plugin receives its own options via ``on_config``.
     
     Examples:
         # Enable all discovered plugins
@@ -131,12 +138,15 @@ def enable(plugins: list = None) -> None:
         
         # Enable specific plugins only
         plugins.enable(["logging", "metrics"])
+
+        # Enable with per-plugin options
+        plugins.enable(["pii_guardrail"], {"pii_guardrail": {"redact": ["email"]}})
     
     Note:
         - Tools and guardrails work WITHOUT calling enable()
         - Only background plugins (hooks, metrics, logging) need enable()
         - Can also be enabled via PRAISONAI_PLUGINS env var
-        - Can also be enabled via .praisonai/config.toml
+        - Can also be enabled via .praisonai/config.yaml (unified) or config.toml
     """
     global _plugins_enabled, _enabled_plugin_names
     
@@ -147,6 +157,10 @@ def enable(plugins: list = None) -> None:
     # Get plugin manager and auto-discover
     from .manager import get_plugin_manager
     manager = get_plugin_manager()
+
+    # Register per-plugin options so they can be delivered via on_config.
+    if options_by_name:
+        manager.set_plugin_options(options_by_name)
     
     # Auto-discover plugins from default directories and entry points
     manager.auto_discover_plugins()
@@ -174,6 +188,14 @@ def enable(plugins: list = None) -> None:
         logging.debug(f"Wired {wired} plugin hook(s) into the default registry")
     except Exception as e:
         logging.warning(f"Failed to wire plugins into hook registry: {e}")
+
+    # Deliver per-plugin options to each enabled plugin via its on_config hook.
+    try:
+        delivered = manager.apply_plugin_options()
+        if delivered:
+            logging.debug(f"Delivered options to {delivered} plugin(s) via on_config")
+    except Exception as e:
+        logging.warning(f"Failed to deliver plugin options: {e}")
 
     logging.debug(f"Plugins enabled: {plugins if plugins else 'all'}")
 
