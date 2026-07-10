@@ -450,6 +450,81 @@ class JudgeResult:
 
 
 @dataclass
+class HarnessResult:
+    """Result from evaluating an Interactive Test Harness trace.
+
+    Bridges harness runs into the eval pipeline by scoring tool traces,
+    produced artifacts, tool-schema consistency, and an optional judge score.
+    """
+    passed: bool
+    score: float  # 0.0 to 1.0
+    tool_call_count: int = 0
+    schema_hash: Optional[str] = None
+    schema_consistent: bool = True
+    artifacts_complete: bool = True
+    missing_artifacts: List[str] = field(default_factory=list)
+    judge_score: Optional[float] = None
+    judge_passed: bool = True
+    eval_id: str = ""
+    name: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
+        return {
+            "eval_id": self.eval_id,
+            "name": self.name,
+            "passed": self.passed,
+            "score": self.score,
+            "tool_call_count": self.tool_call_count,
+            "schema_hash": self.schema_hash,
+            "schema_consistent": self.schema_consistent,
+            "artifacts_complete": self.artifacts_complete,
+            "missing_artifacts": self.missing_artifacts,
+            "judge_score": self.judge_score,
+            "judge_passed": self.judge_passed,
+            "timestamp": self.timestamp,
+            "metadata": self.metadata,
+        }
+
+    def to_json(self) -> str:
+        """Convert result to JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
+
+    def print_summary(self) -> None:
+        """Print a summary of the harness evaluation results."""
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+
+            table = Table(title="Harness Evaluation Summary")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green" if self.passed else "red")
+
+            table.add_row("Score", f"{self.score:.2f}")
+            table.add_row("Tool Calls", str(self.tool_call_count))
+            table.add_row("Schema Consistent", "✅" if self.schema_consistent else "❌")
+            table.add_row("Artifacts Complete", "✅" if self.artifacts_complete else "❌")
+            if self.judge_score is not None:
+                table.add_row("Judge Score", f"{self.judge_score:.1f}/10")
+            table.add_row("Status", "✅ PASSED" if self.passed else "❌ FAILED")
+
+            console.print(table)
+        except ImportError:
+            print("Harness Evaluation Summary")
+            print(f"  Score: {self.score:.2f}")
+            print(f"  Tool Calls: {self.tool_call_count}")
+            print(f"  Schema Consistent: {self.schema_consistent}")
+            print(f"  Artifacts Complete: {self.artifacts_complete}")
+            if self.judge_score is not None:
+                print(f"  Judge Score: {self.judge_score:.1f}/10")
+            print(f"  Status: {'PASSED' if self.passed else 'FAILED'}")
+
+
+@dataclass
 class CriteriaScore:
     """Individual criteria evaluation score."""
     score: float
