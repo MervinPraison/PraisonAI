@@ -398,9 +398,27 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
             except ImportError:
                 print("[yellow]Warning: Context management not available[/yellow]")
         
+        # Determine workflow input: CLI --var input takes precedence, then the
+        # YAML top-level `input:` field (stored on workflow.default_input).
+        # An explicit `--var input=` (empty) is respected and NOT replaced by
+        # the default; only an absent input key falls back to default_input.
+        default_input = getattr(workflow, "default_input", "") or ""
+        input_overridden = bool(parsed_vars) and "input" in parsed_vars
+        start_input = parsed_vars["input"] if input_overridden else default_input
+
+        # Seed the runtime `{{input}}` variable when it is not overridden via --var
+        if start_input and not input_overridden:
+            workflow.variables.setdefault("input", start_input)
+
+        if start_input:
+            preview = start_input[:80] + ("..." if len(start_input) > 80 else "")
+            print(f"[cyan]Workflow input: {preview}[/cyan]")
+        else:
+            print("[yellow]Warning: no workflow input — {{input}} will be empty unless --var input=... is set[/yellow]")
+
         # Execute
         print("\n[bold]Executing workflow...[/bold]\n")
-        result = workflow.start("")
+        result = workflow.start(start_input)
         
         if result.get("status") == "completed":
             print("\n[green]✅ Workflow completed successfully![/green]")
