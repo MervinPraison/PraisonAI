@@ -95,6 +95,29 @@ class TestConfigurableModelProvider:
         )
         assert agent is not None
 
+    def test_agent_with_evolink_openai_compatible_config(self):
+        """Agent should pass EvoLink OpenAI-compatible settings to LLM."""
+        from praisonaiagents import Agent
+
+        with patch("praisonaiagents.llm.llm.LLM") as mock_llm:
+            agent = Agent(
+                name="Test",
+                instructions="Test agent",
+                llm={
+                    "model": "openai/gpt-5.2",
+                    "api_key": "test-evolink-key",
+                    "base_url": "https://direct.evolink.ai/v1",
+                },
+            )
+
+        assert agent is not None
+        assert agent.llm == "openai/gpt-5.2"
+        assert agent._llm_init_params["model"] == "openai/gpt-5.2"
+        assert agent._llm_init_params["api_key"] == "test-evolink-key"
+        assert agent._llm_init_params["base_url"] == "https://direct.evolink.ai/v1"
+        assert agent._using_custom_llm is True
+        mock_llm.assert_not_called()
+
 
 class TestConfigurableModelThreadSafety:
     """Test thread safety of agent model usage."""
