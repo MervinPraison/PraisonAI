@@ -400,11 +400,14 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         
         # Determine workflow input: CLI --var input takes precedence, then the
         # YAML top-level `input:` field (stored on workflow.default_input).
+        # An explicit `--var input=` (empty) is respected and NOT replaced by
+        # the default; only an absent input key falls back to default_input.
         default_input = getattr(workflow, "default_input", "") or ""
-        start_input = parsed_vars.get("input", default_input) if parsed_vars else default_input
+        input_overridden = bool(parsed_vars) and "input" in parsed_vars
+        start_input = parsed_vars["input"] if input_overridden else default_input
 
         # Seed the runtime `{{input}}` variable when it is not overridden via --var
-        if start_input and (not parsed_vars or "input" not in parsed_vars):
+        if start_input and not input_overridden:
             workflow.variables.setdefault("input", start_input)
 
         if start_input:
