@@ -157,6 +157,36 @@ class TestPathValidation:
         is_valid, error = validate_monitor_path("/home/user/file.txt")
         assert is_valid is False
 
+    def test_sensitive_absolute_blocked_even_when_absolute_allowed(self):
+        """Sensitive system roots stay blocked even with allow_absolute=True."""
+        is_valid, error = validate_monitor_path(
+            "/etc/passwd",
+            allow_absolute=True,
+        )
+        assert is_valid is False
+        assert "suspicious" in error.lower()
+
+    def test_tilde_home_reference_blocked(self):
+        """Home reference (~) paths are blocked as suspicious."""
+        is_valid, error = validate_monitor_path("~/context.txt")
+        assert is_valid is False
+        assert "suspicious" in error.lower()
+
+    def test_relative_path_with_system_substring_allowed(self):
+        """Relative project paths containing system-like substrings are allowed."""
+        for candidate in (
+            "myapp/home/config.txt",
+            "project/users/context.txt",
+            "data/var/output.txt",
+        ):
+            is_valid, error = validate_monitor_path(candidate)
+            assert is_valid is True, f"{candidate!r} rejected: {error}"
+
+    def test_windows_drive_relative_not_treated_as_absolute(self):
+        """Drive-relative paths (e.g. 'C:context.txt') are not absolute."""
+        is_valid, error = validate_monitor_path("C:context.txt")
+        assert is_valid is True, error
+
 
 class TestIgnoreIncludePatterns:
     """Tests for ignore/include pattern handling."""
