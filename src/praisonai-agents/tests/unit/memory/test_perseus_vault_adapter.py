@@ -214,6 +214,35 @@ class TestPerseusVaultBehavior:
         adapter.store_long_term("b", {"key": "k2"})
         assert adapter.delete_memories(["k1", "k2"]) == 2
 
+    def test_delete_memory_short_term_hint(self):
+        adapter = _make_adapter()
+        adapter.store_short_term("scratch note", {"key": "st-1"})
+        # The MemoryProtocol hint "short_term" must target the short-term tier.
+        assert adapter.delete_memory("st-1", memory_type="short_term") is True
+        assert adapter.search_short_term("scratch") == []
+
+    def test_delete_missing_reports_false(self):
+        adapter = _make_adapter()
+        # Nothing stored, so nothing is archived -> must not report success.
+        assert adapter.delete_memory("does-not-exist") is False
+
+    def test_importance_propagated_from_kwargs(self):
+        client = _FakeVaultClient()
+        adapter = PerseusVaultMemoryAdapter(config={}, client=client)
+        adapter.store_long_term("weighted fact", {"key": "w1"}, importance=0.87)
+        remember = [c for c in client.calls if c[0] == "perseus_vault_remember"][-1]
+        assert remember[1]["importance"] == 0.87
+
+    def test_search_metadata_and_score_never_none(self):
+        adapter = _make_adapter()
+        # Stored without metadata: result metadata must be {} not None, and
+        # score must be numeric so downstream filtering never crashes.
+        adapter.store_long_term("bare memory with no metadata", None)
+        hits = adapter.search_long_term("bare", limit=5)
+        assert len(hits) == 1
+        assert hits[0]["metadata"] == {}
+        assert isinstance(hits[0]["score"], (int, float))
+
     def test_get_context_returns_markdown(self):
         adapter = _make_adapter()
         adapter.store_long_term("some fact", None)

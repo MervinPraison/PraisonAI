@@ -40,7 +40,9 @@ class _VaultStdioClient:
         self._db_path = db_path
         self._encryption_key = encryption_key
         self._env = {**os.environ, **(env or {})}
-        self._lock = threading.Lock()
+        # Reentrant: _request may recurse into _start (which calls _request
+        # again during the handshake) while already holding the lock.
+        self._lock = threading.RLock()
         self._id = 0
         self._proc: Optional[subprocess.Popen] = None
         self._startup_timeout = startup_timeout
@@ -66,10 +68,34 @@ class _VaultStdioClient:
         self._id += 1
         return self._id
 
+    def _readline_with_timeout(self, timeout: float) -> Optional[str]:
+        """Read one line from stdout, giving up after ``timeout`` seconds.
+
+        A plain ``readline()`` blocks forever if the child accepts the request
+        but never emits a newline, which would hang every subsequent memory
+        call while the lock is held. Reading on a daemon thread lets the
+        deadline actually fire and surface a ``TimeoutError``.
+        """
+        assert self._proc and self._proc.stdout
+        result: List[Optional[str]] = [None]
+
+        def _read() -> None:
+            try:
+                result[0] = self._proc.stdout.readline()
+            except Exception:
+                result[0] = None
+
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            return None
+        return result[0]
+
     def _request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        if self._proc is None or self._proc.poll() is not None:
-            self._start()
         with self._lock:
+            if self._proc is None or self._proc.poll() is not None:
+                self._start()
             rid = self._next_id()
             msg = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
             assert self._proc and self._proc.stdin and self._proc.stdout
@@ -77,9 +103,18 @@ class _VaultStdioClient:
             self._proc.stdin.flush()
             # Read until we get the response with our id (skip notifications).
             deadline = time.time() + self._startup_timeout
-            while time.time() < deadline:
-                line = self._proc.stdout.readline()
-                if not line:
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"perseus-vault did not respond to {method} in time"
+                    )
+                line = self._readline_with_timeout(remaining)
+                if line is None:
+                    raise TimeoutError(
+                        f"perseus-vault did not respond to {method} in time"
+                    )
+                if line == "":
                     raise RuntimeError("perseus-vault closed stdout unexpectedly")
                 line = line.strip()
                 if not line:
@@ -92,7 +127,6 @@ class _VaultStdioClient:
                     if "error" in resp and resp["error"]:
                         raise RuntimeError(f"perseus-vault error: {resp['error']}")
                     return resp.get("result", {})
-            raise TimeoutError(f"perseus-vault did not respond to {method} in time")
 
     def _notify(self, method: str, params: Dict[str, Any]) -> None:
         with self._lock:
@@ -169,16 +203,23 @@ class PerseusVaultMemoryAdapter:
 
     # -- internal helpers ---------------------------------------------------
 
-    def _store(self, category: str, text: str, metadata: Optional[Dict[str, Any]]) -> str:
+    def _store(self, category: str, text: str, metadata: Optional[Dict[str, Any]],
+               **kwargs) -> str:
         key = (metadata or {}).get("key") or f"{category}-{uuid.uuid4().hex[:12]}"
         body = {"content": text}
         if metadata:
             body["metadata"] = metadata
+        # Honour a caller-supplied importance (kwargs win over metadata), like
+        # the dakera adapter, rather than always using the default.
+        importance = kwargs.get("importance")
+        if importance is None and metadata:
+            importance = metadata.get("importance")
+        importance = self._default_importance if importance is None else float(importance)
         self._client.call_tool("perseus_vault_remember", {
             "category": category,
             "key": key,
             "body_json": json.dumps(body),
-            "importance": self._default_importance,
+            "importance": importance,
         })
         return key
 
@@ -198,24 +239,29 @@ class PerseusVaultMemoryAdapter:
                     body = json.loads(body)
                 except json.JSONDecodeError:
                     body = {"content": body}
+            score = it.get("score")
+            if score is None:
+                score = it.get("confidence")
             out.append({
                 "id": it.get("key") or it.get("id"),
                 "text": body.get("content", ""),
-                "metadata": body.get("metadata"),
-                "score": it.get("score") or it.get("confidence"),
+                # Callers treat metadata as a dict and score as numeric, so
+                # never surface None for either.
+                "metadata": body.get("metadata") or {},
+                "score": score if score is not None else 1.0,
             })
         return out
 
     # -- MemoryProtocol -----------------------------------------------------
 
     def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        return self._store(self._st_cat, text, metadata)
+        return self._store(self._st_cat, text, metadata, **kwargs)
 
     def search_short_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
         return self._search(self._st_cat, query, limit)
 
     def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        return self._store(self._lt_cat, text, metadata)
+        return self._store(self._lt_cat, text, metadata, **kwargs)
 
     def search_long_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
         return self._search(self._lt_cat, query, limit)
@@ -245,18 +291,32 @@ class PerseusVaultMemoryAdapter:
         })
 
     def delete_memory(self, memory_id: str, memory_type: Optional[str] = None) -> bool:
-        cat = self._st_cat if memory_type == "short" else self._lt_cat
-        # Try both categories if type unspecified.
-        cats = [cat] if memory_type else [self._st_cat, self._lt_cat]
+        # Accept both the short hint ("short") and the MemoryProtocol value
+        # ("short_term"); anything else targets the long-term tier.
+        if memory_type in ("short", "short_term"):
+            cats = [self._st_cat]
+        elif memory_type in ("long", "long_term"):
+            cats = [self._lt_cat]
+        else:
+            # Type unspecified: try both tiers.
+            cats = [self._st_cat, self._lt_cat]
         ok = False
         for c in cats:
             try:
-                self._client.call_tool("perseus_vault_forget", {
+                res = self._client.call_tool("perseus_vault_forget", {
                     "category": c, "key": memory_id, "reason": "PraisonAI delete_memory",
                 })
-                ok = True
             except Exception:
                 continue
+            # Only report success if the vault actually archived the entity;
+            # a missing key / wrong category yields archived == 0.
+            if isinstance(res, dict):
+                if res.get("archived", 0):
+                    ok = True
+            else:
+                # Non-dict response (older/edge builds): fall back to
+                # "no exception" as the success signal.
+                ok = True
         return ok
 
     def delete_memories(self, memory_ids: List[str]) -> int:
