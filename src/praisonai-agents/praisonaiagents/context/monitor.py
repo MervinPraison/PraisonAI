@@ -89,23 +89,34 @@ def validate_monitor_path(
         Tuple of (is_valid, error_message)
     """
     from pathlib import Path as PathLib
-    
-    path_obj = PathLib(path)
-    
-    # Check for path traversal attempts
-    if '..' in path_obj.parts:
+
+    raw = path.strip()
+    path_obj = PathLib(raw)
+
+    # Cross-platform absolute detection. pathlib.Path.is_absolute() is
+    # OS-specific: on Windows, a POSIX-style path like "/etc/passwd" is NOT
+    # considered absolute. Detect POSIX leading slashes and Windows drive
+    # letters (e.g. "C:\...") explicitly so behavior is consistent across OSes.
+    posix_absolute = raw.startswith('/') or raw.startswith('\\')
+    win_drive_absolute = len(raw) >= 2 and raw[1] == ':'
+    looks_absolute = (
+        path_obj.is_absolute() or posix_absolute or win_drive_absolute
+    )
+
+    # Check for path traversal attempts (match both native and posix parts)
+    if '..' in path_obj.parts or '..' in raw.replace('\\', '/').split('/'):
         return False, "Path traversal (..) not allowed"
-    
+
     # Check absolute path restriction
-    if path_obj.is_absolute() and not allow_absolute:
+    if looks_absolute and not allow_absolute:
         return False, "Absolute paths not allowed (set allow_absolute_paths=True to override)"
-    
+
     # If base_dir specified, ensure path stays within it
     if base_dir:
         base = PathLib(base_dir).resolve()
         try:
             # For relative paths, resolve against base
-            if not path_obj.is_absolute():
+            if not looks_absolute:
                 full_path = (base / path_obj).resolve()
             else:
                 full_path = path_obj.resolve()
@@ -115,14 +126,18 @@ def validate_monitor_path(
                 return False, f"Path must be within {base_dir}"
         except Exception as e:
             return False, f"Path validation error: {e}"
-    
-    # Check for suspicious patterns
-    suspicious = ['/etc/', '/var/', '/usr/', '/root/', '/home/', '~']
-    path_str = str(path_obj).lower()
+
+    # Check for suspicious patterns. Compare against a normalized posix form so
+    # POSIX patterns match regardless of how the host OS renders separators.
+    suspicious = [
+        '/etc/', '/var/', '/usr/', '/root/', '/home/', '~',
+        '/windows/', '/system32/', '/users/',
+    ]
+    haystack = (raw + ' ' + path_obj.as_posix()).replace('\\', '/').lower()
     for pattern in suspicious:
-        if pattern in path_str and not allow_absolute:
+        if pattern in haystack and not allow_absolute:
             return False, f"Suspicious path pattern: {pattern}"
-    
+
     return True, ""
 
 
