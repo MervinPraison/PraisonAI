@@ -42,3 +42,4 @@ include = ["praisonai_code*"]
 
 [tool.setuptools.package-data]
 "praisonai_code.cli.configuration" = ["*.json"]
+"praisonai_code.data" = ["fixtures/interactive/*.csv"]

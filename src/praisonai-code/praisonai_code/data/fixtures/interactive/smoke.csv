@@ -1,0 +1,4 @@
+id,name,prompts,description,mode,workspace_fixture,expected_tools,forbidden_tools,expected_files,expected_response,judge_rubric,judge_threshold,judge_model,timeout,retries,skip_if,agents,workflow
+smoke-001,Basic Chat,"What is 2+2? Reply with only the number.",Basic chat response without tools,headless,empty,,,{},4,Response contains the number 4,7.0,gpt-4o-mini,60,0,no_openai_key,[],{}
+smoke-002,Create File,"Create a file called hello.txt containing the text: hello world",Create a simple file in the workspace,headless,empty,acp_create_file,,"{""hello.txt"": ""hello world""}",,A file named hello.txt was created containing hello world,7.0,gpt-4o-mini,90,0,no_openai_key,[],{}
+smoke-003,List Files,"List the files in the current workspace.",Inspect a seeded workspace,headless,seeded,,,{},,Response lists one or more files present in the workspace,7.0,gpt-4o-mini,60,0,no_openai_key,[],{}

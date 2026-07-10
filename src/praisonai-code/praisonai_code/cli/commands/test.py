@@ -263,21 +263,50 @@ SPECIAL_SUITES = {
 }
 
 
+def _iter_fixtures_dirs():
+    """Yield candidate fixtures/interactive directories.
+
+    Resolution is tried in order so that both editable/dev checkouts and
+    installed wheels (where fixtures ship as package data) resolve correctly:
+      1. Packaged data inside praisonai_code (importlib.resources).
+      2. src/praisonai/tests/fixtures/interactive relative to this module.
+      3. tests/fixtures/interactive under the current working directory.
+    """
+    from pathlib import Path
+
+    # 1. Packaged data shipped inside the praisonai_code wheel.
+    try:
+        from importlib.resources import files as _resource_files
+
+        packaged = _resource_files("praisonai_code") / "data" / "fixtures" / "interactive"
+        yield Path(str(packaged))
+    except Exception:
+        pass
+
+    # 2. Development tree layout: .../src/praisonai/tests/fixtures/interactive.
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        if parent.name == "src":
+            yield parent / "praisonai" / "tests" / "fixtures" / "interactive"
+            break
+
+    # 3. Current working directory (running from a repo checkout).
+    cwd = Path.cwd()
+    yield cwd / "tests" / "fixtures" / "interactive"
+    yield cwd / "src" / "praisonai" / "tests" / "fixtures" / "interactive"
+
+
 def _get_builtin_suite_path(suite: str):
     """Get path to built-in test suite."""
-    from pathlib import Path
-    
     if suite not in BUILTIN_SUITES:
         return None
-    
-    # Find fixtures directory relative to package
-    package_dir = Path(__file__).parent.parent.parent.parent  # Up to src/praisonai
-    fixtures_dir = package_dir / "tests" / "fixtures" / "interactive"
-    
-    suite_path = fixtures_dir / BUILTIN_SUITES[suite]
-    if suite_path.exists():
-        return suite_path
-    
+
+    filename = BUILTIN_SUITES[suite]
+    for fixtures_dir in _iter_fixtures_dirs():
+        suite_path = fixtures_dir / filename
+        if suite_path.exists():
+            return suite_path
+
     return None
 
 
