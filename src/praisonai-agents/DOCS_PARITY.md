@@ -25,15 +25,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 8 | 2301 |
 | ✅ Autonomy | 3 | 6 | 2209 |
-| ✅ Bots | 7 | 28 | 10784 |
+| ✅ Bots | 7 | 28 | 10828 |
 | ✅ Budget | 1 | 1 | 287 |
 | ✅ CLI | 5 | 113 | 30427 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
-| ✅ Configuration | 3 | 7 | 2511 |
-| ✅ Context Management | 16 | 33 | 12520 |
+| ✅ Configuration | 3 | 7 | 2537 |
+| ✅ Context Management | 16 | 34 | 12756 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4055 |
 | ✅ LLM | 3 | 14 | 4757 |
-| ✅ Loops | 4 | 3 | 801 |
+| ✅ Loops | 4 | 4 | 1075 |
 | ✅ MCP | 1 | 52 | 11235 |
 | ✅ Memory | 6 | 17 | 6434 |
 | ✅ OCR | 2 | 1 | 237 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
-| ✅ Plugins | 8 | 3 | 1608 |
+| ✅ Plugins | 8 | 3 | 1644 |
 | ✅ Prompts | 2 | 7 | 1359 |
 | ✅ Providers | 1 | 55 | 7451 |
 | ✅ Query | 1 | 2 | 736 |
