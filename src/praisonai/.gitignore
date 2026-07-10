@@ -1,4 +1,7 @@
 chainlit.md
-tests/fixtures
+tests/fixtures/*
+!tests/fixtures/interactive/
+tests/fixtures/interactive/*
+!tests/fixtures/interactive/*.csv
 reports
 .agent

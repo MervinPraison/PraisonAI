@@ -18,8 +18,10 @@ Usage:
     praisonai test interactive --generate-template
 """
 
+import atexit
 import os
 import subprocess
+from contextlib import ExitStack
 from typing import Optional, List
 
 import typer
@@ -263,21 +265,77 @@ SPECIAL_SUITES = {
 }
 
 
+# Keeps any resources materialized from non-filesystem package data (e.g. a
+# zipimport wheel) alive for the lifetime of the process. The CSV test runner
+# opens the returned path lazily, so the extracted temp file must outlive
+# _get_builtin_suite_path().
+_RESOURCE_STACK = ExitStack()
+atexit.register(_RESOURCE_STACK.close)
+
+
+def _packaged_suite_path(filename: str):
+    """Resolve a built-in suite from packaged data as a real filesystem path.
+
+    Uses importlib.resources so it works for wheel installs. When the package
+    is loaded from a non-filesystem importer (e.g. a zip), as_file() extracts
+    the resource to a temporary file that stays alive via _RESOURCE_STACK.
+    Returns a Path if the resource exists, otherwise None.
+    """
+    try:
+        from importlib.resources import as_file, files as _resource_files
+
+        resource = (
+            _resource_files("praisonai_code")
+            / "data" / "fixtures" / "interactive" / filename
+        )
+        if not resource.is_file():
+            return None
+        return _RESOURCE_STACK.enter_context(as_file(resource))
+    except Exception:
+        return None
+
+
+def _iter_fixtures_dirs():
+    """Yield candidate dev-tree/cwd fixtures/interactive directories.
+
+    Packaged data is handled separately by _packaged_suite_path(); this covers
+    editable/dev checkouts:
+      1. src/praisonai/tests/fixtures/interactive relative to this module.
+      2. tests/fixtures/interactive under the current working directory.
+    """
+    from pathlib import Path
+
+    # 1. Development tree layout: .../src/praisonai/tests/fixtures/interactive.
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        if parent.name == "src":
+            yield parent / "praisonai" / "tests" / "fixtures" / "interactive"
+            break
+
+    # 2. Current working directory (running from a repo checkout).
+    cwd = Path.cwd()
+    yield cwd / "tests" / "fixtures" / "interactive"
+    yield cwd / "src" / "praisonai" / "tests" / "fixtures" / "interactive"
+
+
 def _get_builtin_suite_path(suite: str):
     """Get path to built-in test suite."""
-    from pathlib import Path
-    
     if suite not in BUILTIN_SUITES:
         return None
-    
-    # Find fixtures directory relative to package
-    package_dir = Path(__file__).parent.parent.parent.parent  # Up to src/praisonai
-    fixtures_dir = package_dir / "tests" / "fixtures" / "interactive"
-    
-    suite_path = fixtures_dir / BUILTIN_SUITES[suite]
-    if suite_path.exists():
-        return suite_path
-    
+
+    filename = BUILTIN_SUITES[suite]
+
+    # 1. Packaged data shipped inside the praisonai_code wheel.
+    packaged = _packaged_suite_path(filename)
+    if packaged is not None:
+        return packaged
+
+    # 2. Development-tree / cwd fallbacks.
+    for fixtures_dir in _iter_fixtures_dirs():
+        suite_path = fixtures_dir / filename
+        if suite_path.exists():
+            return suite_path
+
     return None
 
 
