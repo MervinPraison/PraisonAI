@@ -16,7 +16,7 @@ Design follows AGENTS.md and mirrors ``runtime/registry.py``:
 """
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 __all__ = [
@@ -85,6 +85,25 @@ class RuntimeProfile:
         (No prompt overrides and no preferred edit-tool format.)
         """
         return self.is_prompt_neutral and self.preferred_edit_format is None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RuntimeProfile":
+        """Build a profile from a config dict, validating keys.
+
+        Unlike ``RuntimeProfile(**data)``, this raises a clear ``ValueError``
+        listing unknown keys so an explicitly-configured profile with a typo is
+        surfaced to the caller instead of being silently dropped.
+        """
+        if not isinstance(data, dict):
+            raise TypeError("runtime_profile dict must be a mapping")
+        allowed = {f.name for f in fields(cls)}
+        unknown = set(data) - allowed
+        if unknown:
+            raise ValueError(
+                "Unknown runtime_profile key(s): "
+                f"{sorted(unknown)}; allowed keys are {sorted(allowed)}"
+            )
+        return cls(**data)
 
     def apply_system_prompt(self, system_prompt: str) -> str:
         """Apply prefix/suffix overrides to an already-assembled prompt.
@@ -242,6 +261,12 @@ def _discover_entry_point_profiles() -> None:
         eps = entry_points(group="praisonaiagents.runtime_profiles")
         for ep in eps:
             try:
+                # Never let a plugin silently override the behaviour-neutral
+                # ``default`` profile: unconfigured agents resolve it for unknown
+                # model families, so overriding it would change prompts for users
+                # who never opted in. Reserved names are protected.
+                if ep.name == DEFAULT_PROFILE_NAME:
+                    continue
                 obj = ep.load()
                 profile = obj() if callable(obj) and not isinstance(obj, RuntimeProfile) else obj
                 if isinstance(profile, RuntimeProfile):

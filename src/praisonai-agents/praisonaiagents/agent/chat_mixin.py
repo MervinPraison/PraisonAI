@@ -282,16 +282,15 @@ Your Goal: {self.goal}"""
         # is configured for the active model family, the resolved profile is the
         # behaviour-neutral "default" whose apply_system_prompt is a no-op, so
         # the generated prompt is byte-for-byte identical to before.
-        try:
-            profile = self._resolve_runtime_profile()
-            if profile is not None:
-                # apply_system_prompt is a pure no-op unless the profile declares
-                # prompt overrides, so the default/family profiles leave the
-                # generated prompt byte-for-byte identical.
-                system_prompt = profile.apply_system_prompt(system_prompt)
-        except Exception as e:
-            import logging
-            logging.debug(f"Runtime profile application failed: {e}", exc_info=True)
+        # An explicitly-configured profile (str/dict/RuntimeProfile) must fail
+        # loudly on misconfiguration; only the implicit family-resolution path is
+        # best-effort and swallowed so the run loop is never affected.
+        profile = self._resolve_runtime_profile()
+        if profile is not None:
+            # apply_system_prompt is a pure no-op unless the profile declares
+            # prompt overrides, so the default/family profiles leave the
+            # generated prompt byte-for-byte identical.
+            system_prompt = profile.apply_system_prompt(system_prompt)
 
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
@@ -308,17 +307,28 @@ Your Goal: {self.goal}"""
 
         configured = getattr(self, "runtime_profile", None)
 
+        # Explicit configuration: validate eagerly and let errors surface so a
+        # user's typo isn't silently dropped.
         if configured is False:
             return None
         if isinstance(configured, RuntimeProfile):
             return configured
         if isinstance(configured, dict):
-            return RuntimeProfile(**configured)
+            return RuntimeProfile.from_dict(configured)
 
         model = self.llm if isinstance(self.llm, str) else str(self.llm) if self.llm else None
         if isinstance(configured, str):
             return resolve_profile(model=model, name=configured)
-        return resolve_profile(model=model)
+
+        # Implicit path (no explicit config): resolve by model family. This must
+        # never break prompt construction, so swallow any unexpected error and
+        # fall back to today's behaviour.
+        try:
+            return resolve_profile(model=model)
+        except Exception as e:
+            import logging
+            logging.debug(f"Runtime profile resolution failed: {e}", exc_info=True)
+            return None
 
     def _build_response_format(self, schema_model):
         """Build response_format dict for native structured output.

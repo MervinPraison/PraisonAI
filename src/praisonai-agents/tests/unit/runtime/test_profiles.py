@@ -74,6 +74,15 @@ class TestRuntimeProfile:
         p = RuntimeProfile()
         assert isinstance(p, RuntimeProfileProtocol)
 
+    def test_from_dict_valid(self):
+        p = RuntimeProfile.from_dict({"name": "x", "system_prompt_prefix": "P"})
+        assert p.name == "x"
+        assert p.system_prompt_prefix == "P"
+
+    def test_from_dict_rejects_unknown_key(self):
+        with pytest.raises(ValueError):
+            RuntimeProfile.from_dict({"systemPromptPrefix": "typo"})
+
 
 class TestResolveProfile:
     def test_resolve_by_model(self):
@@ -121,8 +130,13 @@ class TestRegistry:
         assert reg.resolve(name="nope").name == DEFAULT_PROFILE_NAME
 
     def test_global_register_profile(self):
+        from praisonaiagents.runtime.profiles import _global_registry
         register_profile("global-test", RuntimeProfile(name="global-test", system_prompt_prefix="G"))
-        assert resolve_profile(name="global-test").name == "global-test"
+        try:
+            assert resolve_profile(name="global-test").name == "global-test"
+        finally:
+            with _global_registry._lock:
+                _global_registry._profiles.pop("global-test", None)
 
 
 class TestBackwardCompatibility:
