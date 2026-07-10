@@ -1042,4 +1042,30 @@ The core remains **free and open source**. Clear upgrade paths to paid value:
 
 ---
 
+## 15. Context / Harness / Loop (CHL) Engineering
+
+PraisonAI's reliability engineering rests on three pillars — **C**ontext, **H**arness, **L**oop. Full principles, cross-links, and the **measurable rubric** live in the docs: [`concepts/chl-engineering`](https://docs.praison.ai/concepts/chl-engineering) (source: `PraisonAIDocs/docs/concepts/chl-engineering.mdx`).
+
+| Pillar | Meaning | Code anchors | Evaluator (rubric) |
+|--------|---------|--------------|--------------------|
+| **Context** | Budget, compaction, injection, handoff | `context/`, `compaction/`, `ContextAgent` | `ContextEvaluator` |
+| **Harness** | Turn-context parity, traces, artifacts | `runtime/turn_context.py`, interactive test harness | `HarnessEvaluator` |
+| **Loop** | Convergence, guardrails, efficiency | `eval/loop.py` (`EvaluationLoop`), `agent/autonomy.py` | `LoopEvaluator` |
+
+**Rubric summary** (targets are defaults, configurable per project):
+
+| Principle | Metric | Target |
+|-----------|--------|--------|
+| Context handoff | handoff score 0–10 | ≥ 8.0 |
+| Context budget | tokens ≤ budget | 100% |
+| Compaction loss | semantic retention (judge) | ≥ 7.0 |
+| Harness parity | tool schema hash match | 100% |
+| Harness artifacts | required files present | 100% |
+| Loop convergence | iterations to threshold | ≤ N |
+| Doom-loop safety | guard fires on repeat fixture | required |
+
+The `ContextEvaluator` / `HarnessEvaluator` / `LoopEvaluator` classes are tracked follow-ups (PA-CHL-001–004); today's `estimate_tokens`/`count_tokens`, the compaction judge, the interactive test harness, and `EvaluationLoop` cover the equivalent checks. Keep terminology consistent with the `ContextAgent` PRP methodology.
+
+---
+
 *This document is the source of truth for the PraisonAI SDK architecture and design principles.*
