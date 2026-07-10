@@ -12,6 +12,7 @@ Evaluator Types:
     - ContextEvaluator: Score context budget compliance and multi-agent handoff fidelity
     - ComparisonEval: Side-by-side comparison of two agent outputs
     - SafetyEval: Detect harmful, biased, or inappropriate outputs
+    - LoopEvaluator: Score loop health (convergence, wasted iterations, doom-loop guards)
     - EvalSuite: Orchestrator for running multiple evaluations
 
 Example:
@@ -100,6 +101,9 @@ __all__ = [
     "EvaluationLoopResult",
     "EvaluationLoopProtocol",
     "EvaluationLoopResultProtocol",
+    # LoopEvaluator (loop health: convergence, waste, doom-loop guards)
+    "LoopEvaluator",
+    "LoopHealthResult",
 ]
 
 _LAZY_IMPORTS = {
@@ -178,6 +182,9 @@ _LAZY_IMPORTS = {
     "EvaluationLoopResult": ("results", "EvaluationLoopResult"),
     "EvaluationLoopProtocol": ("protocols", "EvaluationLoopProtocol"),
     "EvaluationLoopResultProtocol": ("protocols", "EvaluationLoopResultProtocol"),
+    # LoopEvaluator (loop health: convergence, waste, doom-loop guards)
+    "LoopEvaluator": ("loop_eval", "LoopEvaluator"),
+    "LoopHealthResult": ("loop_eval", "LoopHealthResult"),
 }
 
 
