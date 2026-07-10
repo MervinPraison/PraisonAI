@@ -33,12 +33,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
 | ✅ Configuration | 3 | 7 | 2537 |
-| ✅ Context Management | 16 | 34 | 12756 |
+| ✅ Context Management | 16 | 34 | 12786 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2036 |
-| ✅ Evaluation | 1 | 6 | 2556 |
+| ✅ Evaluation | 1 | 7 | 2779 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4055 |
 | ✅ LLM | 3 | 14 | 4757 |
-| ✅ Loops | 4 | 4 | 1075 |
+| ✅ Loops | 4 | 4 | 1082 |
 | ✅ MCP | 1 | 52 | 11235 |
 | ✅ Memory | 6 | 17 | 6434 |
 | ✅ OCR | 2 | 1 | 237 |
