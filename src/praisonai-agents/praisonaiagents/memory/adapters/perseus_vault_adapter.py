@@ -106,11 +106,18 @@ class _VaultStdioClient:
             while True:
                 remaining = deadline - time.time()
                 if remaining <= 0:
+                    self._teardown()
                     raise TimeoutError(
                         f"perseus-vault did not respond to {method} in time"
                     )
                 line = self._readline_with_timeout(remaining)
                 if line is None:
+                    # Timed out mid-read. The daemon reader thread is still
+                    # blocked on this stdout, so we must NOT reuse the process:
+                    # a later call would race two readers on the same stream and
+                    # one could steal the other's response. Tear the child down
+                    # so the next _request() spawns a clean one.
+                    self._teardown()
                     raise TimeoutError(
                         f"perseus-vault did not respond to {method} in time"
                     )
@@ -147,15 +154,27 @@ class _VaultStdioClient:
         except (json.JSONDecodeError, TypeError):
             return text
 
-    def close(self) -> None:
-        if self._proc and self._proc.poll() is None:
+    def _teardown(self) -> None:
+        """Forcibly terminate the child process. Used both on close and after a
+        read timeout, where a daemon reader thread may still be attached to the
+        old stdout — killing the process unblocks it and guarantees the next
+        _request() starts from a clean subprocess."""
+        proc, self._proc = self._proc, None
+        if proc and proc.poll() is None:
             try:
-                if self._proc.stdin:
-                    self._proc.stdin.close()
-                self._proc.terminate()
-                self._proc.wait(timeout=5)
+                if proc.stdin:
+                    proc.stdin.close()
+                proc.terminate()
+                proc.wait(timeout=5)
             except Exception:
-                self._proc.kill()
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def close(self) -> None:
+        with self._lock:
+            self._teardown()
 
 
 class PerseusVaultMemoryAdapter:
@@ -193,7 +212,23 @@ class PerseusVaultMemoryAdapter:
         self._st_cat = cfg.get("short_term_category", "working")
         self._lt_cat = cfg.get("long_term_category", "episodic")
         self._search_mode = cfg.get("search_mode", "hybrid")
-        self._default_importance = float(cfg.get("default_importance", 0.5))
+        if self._search_mode not in ("hybrid", "fts5", "dense"):
+            raise ValueError(
+                f"search_mode must be one of 'hybrid', 'fts5', 'dense'; "
+                f"got {self._search_mode!r}"
+            )
+        try:
+            self._default_importance = float(cfg.get("default_importance", 0.5))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"default_importance must be a number in [0.0, 1.0]; "
+                f"got {cfg.get('default_importance')!r}"
+            )
+        if not (0.0 <= self._default_importance <= 1.0):
+            raise ValueError(
+                f"default_importance must be in [0.0, 1.0]; "
+                f"got {self._default_importance!r}"
+            )
 
         # `client` is injectable for testing; otherwise spawn the real binary.
         self._client = client if client is not None else _VaultStdioClient(
@@ -309,13 +344,10 @@ class PerseusVaultMemoryAdapter:
             except Exception:
                 continue
             # Only report success if the vault actually archived the entity;
-            # a missing key / wrong category yields archived == 0.
-            if isinstance(res, dict):
-                if res.get("archived", 0):
-                    ok = True
-            else:
-                # Non-dict response (older/edge builds): fall back to
-                # "no exception" as the success signal.
+            # a missing key / wrong category yields archived == 0. A non-dict
+            # response is ambiguous and is NOT treated as success (avoids
+            # reporting a delete that may never have happened).
+            if isinstance(res, dict) and res.get("archived", 0):
                 ok = True
         return ok
 

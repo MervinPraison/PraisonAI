@@ -140,6 +140,18 @@ class TestPerseusVaultConfig:
         assert adapter._binary == "/opt/pv/perseus-vault"
         assert adapter._db_path == "/data/pv.db"
 
+    def test_invalid_search_mode_rejected(self):
+        with pytest.raises(ValueError, match="search_mode"):
+            _make_adapter(search_mode="fuzzy")
+
+    def test_out_of_range_importance_rejected(self):
+        with pytest.raises(ValueError, match="default_importance"):
+            _make_adapter(default_importance=1.5)
+
+    def test_non_numeric_importance_rejected(self):
+        with pytest.raises(ValueError, match="default_importance"):
+            _make_adapter(default_importance="high")
+
 
 # ---------------------------------------------------------------------------
 # Protocol conformance + behavior
@@ -226,6 +238,18 @@ class TestPerseusVaultBehavior:
         # Nothing stored, so nothing is archived -> must not report success.
         assert adapter.delete_memory("does-not-exist") is False
 
+    def test_delete_non_dict_response_not_success(self):
+        # A vault response that isn't a dict is ambiguous and must NOT be
+        # reported as a successful delete.
+        class _NonDictClient(_FakeVaultClient):
+            def call_tool(self, name, arguments):
+                if name == "perseus_vault_forget":
+                    return "archived"  # non-dict, ambiguous
+                return super().call_tool(name, arguments)
+
+        adapter = PerseusVaultMemoryAdapter(config={}, client=_NonDictClient())
+        assert adapter.delete_memory("whatever") is False
+
     def test_importance_propagated_from_kwargs(self):
         client = _FakeVaultClient()
         adapter = PerseusVaultMemoryAdapter(config={}, client=client)
@@ -248,3 +272,67 @@ class TestPerseusVaultBehavior:
         adapter.store_long_term("some fact", None)
         ctx = adapter.get_context(query="fact")
         assert ctx.startswith("## Perseus Vault Context")
+
+
+# ---------------------------------------------------------------------------
+# Stdio client transport (uses a fake "binary" that hangs after the handshake)
+# ---------------------------------------------------------------------------
+
+class TestVaultStdioClientTimeout:
+    def test_timeout_tears_down_process(self, tmp_path):
+        """A binary that completes the handshake but then hangs on the next
+        request must raise TimeoutError AND terminate the child, so a reused
+        client doesn't leak a process or race a stale reader thread."""
+        import sys
+        import textwrap
+        from praisonaiagents.memory.adapters.perseus_vault_adapter import (
+            _VaultStdioClient,
+        )
+
+        # Fake binary: answer the `initialize` handshake, then go silent.
+        fake = tmp_path / "fake_vault.py"
+        fake.write_text(textwrap.dedent('''
+            import sys, json
+            first = True
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                msg = json.loads(line)
+                if msg.get("method") == "initialize":
+                    sys.stdout.write(json.dumps(
+                        {"jsonrpc": "2.0", "id": msg["id"], "result": {}}) + "\\n")
+                    sys.stdout.flush()
+                # Any later request: never respond (simulate a hung server).
+        '''))
+
+        # Wrap so `[binary, "serve", "--db", db]` runs our script.
+        client = _VaultStdioClient.__new__(_VaultStdioClient)
+        client._binary = sys.executable
+        client._db_path = str(fake)  # ignored by the script
+        client._encryption_key = None
+        client._env = dict(__import__("os").environ)
+        import threading
+        client._lock = threading.RLock()
+        client._id = 0
+        client._proc = None
+        client._startup_timeout = 1.0
+
+        # Manually spawn with our script as the "serve" target.
+        import subprocess
+        client._proc = subprocess.Popen(
+            [sys.executable, str(fake)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1, env=client._env,
+        )
+        # Handshake succeeds...
+        client._request("initialize", {"protocolVersion": "2024-11-05",
+                                        "capabilities": {}, "clientInfo": {}})
+        proc = client._proc
+        # ...next call hangs -> TimeoutError + teardown.
+        with pytest.raises(TimeoutError):
+            client._request("tools/call", {"name": "x", "arguments": {}})
+        proc.wait(timeout=5)
+        assert proc.poll() is not None  # process was terminated
+        assert client._proc is None     # client reset for a clean respawn
+

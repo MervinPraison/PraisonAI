@@ -52,6 +52,12 @@ def main():
     )
 
     workflow.start()
+    # Expected output (abridged): the agent produces a short summary and the
+    # workflow persists it to Perseus Vault under the ./praisonai-perseus-vault.db
+    # file, e.g.:
+    #> Local-first agent memory keeps data on your own hardware, works offline,
+    #> and gives deterministic recall — no external memory service required.
+    # On the next run the agent can recall this via Perseus Vault's hybrid search.
 
 
 if __name__ == "__main__":
