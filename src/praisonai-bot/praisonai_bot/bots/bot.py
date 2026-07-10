@@ -302,6 +302,27 @@ class Bot:
             return False
         return True
 
+    @staticmethod
+    async def _wait_until_stopped(adapter: Any) -> None:
+        """Block until a non-blocking adapter's inbound source stops running.
+
+        Adapters whose ``start()`` spawns a background task/server and returns
+        immediately (Email poll, Linear/WhatsApp/AgentMail webhook servers) need
+        the supervised run to stay alive so a drop is noticed and reconnected.
+        Prefers awaiting the adapter's own background task when it exposes one
+        (surfacing its exception so the supervisor can classify + reconnect),
+        else falls back to polling the ``is_running`` flag.
+        """
+        import asyncio
+
+        for attr in ("_poll_task", "_run_task", "_serve_task"):
+            task = getattr(adapter, attr, None)
+            if task is not None and hasattr(task, "__await__"):
+                await task
+                return
+        while getattr(adapter, "is_running", False):
+            await asyncio.sleep(0.5)
+
     async def start(self) -> None:
         """Build the adapter and start the bot.
 
@@ -337,10 +358,24 @@ class Bot:
 
         self._supervisor = ChannelSupervisor()
 
-        async def _start(name: str, adapter: Any) -> None:
-            await adapter.start()
-
         import asyncio
+
+        async def _start(name: str, adapter: Any) -> None:
+            # The supervisor's run loop treats the return of this coroutine as
+            # "channel stopped cleanly" and stops supervising. Blocking adapters
+            # (e.g. Slack ``handler.start_async()``, Discord ``client.start()``)
+            # naturally hold here until disconnected. But several adapters spawn
+            # their inbound source in a background task / server and return from
+            # ``start()`` immediately (e.g. Email IMAP poll, Linear/WhatsApp/
+            # AgentMail webhook servers). For those, returning would end
+            # supervision the instant the bot came up — the inbound loop would
+            # run unsupervised and ``Bot.run()`` would exit right after starting
+            # (Issue #2869). So after ``start()`` returns we keep the supervised
+            # run alive until the adapter reports it is no longer running,
+            # surfacing an unexpected stop so the supervisor can reconnect.
+            await adapter.start()
+            if getattr(adapter, "is_running", False):
+                await self._wait_until_stopped(adapter)
 
         await self._supervisor.start_health_monitoring()
         self._supervisor_task = asyncio.ensure_future(

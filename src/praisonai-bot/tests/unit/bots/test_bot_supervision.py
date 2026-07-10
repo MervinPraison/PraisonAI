@@ -59,6 +59,35 @@ class _RawAdapter:
         pass
 
 
+class _NonBlockingAdapter:
+    """Adapter whose ``start()`` spawns a background loop and returns.
+
+    Mirrors Email/Linear/WhatsApp/AgentMail: ``start()`` sets ``is_running`` and
+    returns immediately rather than blocking for the connection's lifetime. The
+    supervised run must stay alive until the adapter stops (Issue #2869 —
+    "returned starts lose supervision").
+    """
+
+    platform = "email"
+
+    def __init__(self):
+        self.start_calls = 0
+        self.stop_calls = 0
+        self._is_running = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
+
+    async def start(self) -> None:
+        self.start_calls += 1
+        self._is_running = True  # spawns background loop, returns immediately
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+        self._is_running = False
+
+
 def _make_bot(adapter, **kwargs) -> Bot:
     bot = Bot("slack", **kwargs)
     bot._build_adapter = lambda: adapter  # type: ignore[method-assign]
@@ -113,3 +142,27 @@ async def test_adapter_opt_out_via_supervised_inbound_flag():
     await bot.start()
     assert adapter.start_calls == 1
     assert bot._supervisor is None
+
+
+@pytest.mark.asyncio
+async def test_non_blocking_start_stays_supervised_until_stopped():
+    # An adapter whose start() returns immediately (Email/Linear/etc.) must not
+    # end supervision the instant it comes up: the supervised run stays alive
+    # until the adapter stops, so a drop would be reconnected (Issue #2869).
+    adapter = _NonBlockingAdapter()
+    bot = _make_bot(adapter)
+
+    task = asyncio.ensure_future(bot.start())
+    for _ in range(200):
+        if adapter.start_calls >= 1 and adapter.is_running:
+            break
+        await asyncio.sleep(0.01)
+
+    assert adapter.start_calls == 1
+    assert adapter.is_running
+    # Supervision is still active — the run has NOT returned yet.
+    assert not task.done(), "supervised run must stay alive after non-blocking start"
+
+    await bot.stop()
+    await asyncio.wait_for(task, timeout=2)
+    assert adapter.stop_calls >= 1
