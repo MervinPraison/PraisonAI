@@ -1066,6 +1066,13 @@ class AgentFlow:
         # Gap 3c: Clear handoff chain at start of new workflow run  
         self._handoff_chain.clear()
         
+        # Fall back to the YAML-defined default input when no explicit input
+        # is provided. The parser stores the top-level `input:` field as
+        # `default_input`; honoring it here ensures `{{input}}` substitution
+        # works for both CLI and programmatic `start()`/`run()` calls.
+        if not input:
+            input = getattr(self, "default_input", "") or ""
+        
         # Fail fast if a non-praisonai framework is requested via YAML.
         # The YAML parser stores `framework` on the workflow, but execution
         # always uses the native PraisonAI engine. Silently ignoring a

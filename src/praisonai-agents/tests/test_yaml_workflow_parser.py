@@ -1886,3 +1886,96 @@ steps:
         assert workflow is not None
         assert 'researcher' in parser._agents
         assert 'writer' in parser._agents
+
+
+class _StopWorkflow(BaseException):
+    """Sentinel used to short-circuit workflow execution during tests.
+
+    Inherits from ``BaseException`` so it propagates through the workflow's
+    internal ``except Exception`` step-error handling.
+    """
+
+
+class TestWorkflowDefaultInput:
+    """Tests that the YAML top-level `input:` field is consumed at runtime.
+
+    Regression coverage for the bug where `workflow.start("")` dropped the
+    parsed `default_input`, leaving every `{{input}}` step empty.
+    """
+
+    def _build_yaml(self):
+        return """
+name: Input Workflow
+description: Ensures {{input}} resolves from YAML input field
+input: "The benefits of renewable energy"
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research the following topic: {{input}}"
+"""
+
+    def test_parser_populates_default_input(self):
+        """Parser must store the top-level `input:` as workflow.default_input."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(self._build_yaml())
+
+        assert workflow.default_input == "The benefits of renewable energy"
+
+    def test_run_falls_back_to_default_input(self, monkeypatch):
+        """AgentFlow.run() with empty input must use default_input for {{input}}."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        from praisonaiagents.workflows import workflows as workflows_module
+
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(self._build_yaml())
+
+        captured = {}
+
+        original_substitute = workflows_module._substitute_action_variables
+
+        def spy_substitute(action, all_variables, previous_output, task_input):
+            captured.setdefault("task_input", task_input)
+            captured.setdefault("action", original_substitute(action, all_variables, previous_output, task_input))
+            raise _StopWorkflow()
+
+        monkeypatch.setattr(workflows_module, "_substitute_action_variables", spy_substitute)
+
+        try:
+            workflow.start("")
+        except _StopWorkflow:
+            pass
+
+        assert captured.get("task_input") == "The benefits of renewable energy"
+        assert "renewable energy" in captured.get("action", "")
+
+    def test_explicit_input_overrides_default(self, monkeypatch):
+        """An explicit input passed to start() takes precedence over the default."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        from praisonaiagents.workflows import workflows as workflows_module
+
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(self._build_yaml())
+
+        captured = {}
+
+        def spy_substitute(action, all_variables, previous_output, task_input):
+            captured["task_input"] = task_input
+            raise _StopWorkflow()
+
+        monkeypatch.setattr(workflows_module, "_substitute_action_variables", spy_substitute)
+
+        try:
+            workflow.start("Custom topic")
+        except _StopWorkflow:
+            pass
+
+        assert captured.get("task_input") == "Custom topic"
