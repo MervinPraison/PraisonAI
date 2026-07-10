@@ -15,6 +15,7 @@ from typer.main import get_command as typer_get_command
 
 from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
+from .help_categories import category_for
 
 # Single source of truth for the terminal fallback model; entry points route
 # through resolve_default_model() and never re-declare this literal.
@@ -114,6 +115,20 @@ def _setup_langextract_observability(*, verbose: bool = False) -> None:
         # Avoid breaking CLI if observability setup fails
         if verbose:
             typer.echo(f"Warning: failed to initialize langextract observability: {e}", err=True)
+
+
+def _help_panel_unset(command: click.Command) -> bool:
+    """Return True when ``command`` has no explicit ``rich_help_panel``.
+
+    Typer leaves the attribute as a ``DefaultPlaceholder`` (not ``None``) for
+    commands that don't set one, so both cases must be treated as "unset" before
+    we assign a category.
+    """
+    panel = getattr(command, "rich_help_panel", None)
+    if panel is None:
+        return True
+    # ``DefaultPlaceholder`` is Typer's sentinel for "value not provided".
+    return type(panel).__name__ == "DefaultPlaceholder"
 
 
 class OutputFormat(str, Enum):
@@ -320,7 +335,19 @@ class LazyCommandGroup(TyperGroup):
         return sorted(list(commands))
     
     def get_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
-        """Lazily import and return the command."""
+        """Lazily import and return the command, tagged with its help category."""
+        command = self._resolve_command(ctx, name)
+        if command is not None and _help_panel_unset(command):
+            # Group the command into a categorised ``--help`` panel. This is the
+            # single hook Typer's rich renderer reads; setting it lazily here keeps
+            # the registry the source of truth without importing every command up
+            # front just to categorise it. Commands that explicitly declare their
+            # own ``rich_help_panel`` keep it.
+            command.rich_help_panel = category_for(name)
+        return command
+
+    def _resolve_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
+        """Lazily import and return the command (without category tagging)."""
         # First check if command is already registered (e.g., retrieval commands)
         existing = super().get_command(ctx, name)
         if existing is not None:
