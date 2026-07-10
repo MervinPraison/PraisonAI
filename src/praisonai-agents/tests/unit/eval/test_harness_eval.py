@@ -127,6 +127,51 @@ class TestHarnessEvaluator:
         assert eval_result.passed is True
         assert "artifacts_complete" in eval_result.criteria_scores
 
+    def test_tool_trace_key_counts_calls(self):
+        # Real interactive harness stores tool usage under `tool_trace`.
+        trace = {"tool_trace": [{"name": "read"}, {"name": "write"}], "artifacts": []}
+        ev = HarnessEvaluator(trace=trace, min_tool_calls=2)
+        result = ev.run()
+        assert result.tool_call_count == 2
+        assert result.passed is True
+
+    def test_structured_artifacts_match(self):
+        # Artifacts can be structured dicts rather than flat file names.
+        trace = {
+            "tool_calls": [1],
+            "artifacts": [{"path": "out.txt", "bytes": 12}, {"name": "log.json"}],
+        }
+        ev = HarnessEvaluator(trace=trace, required_artifacts=["out.txt", "log.json"])
+        result = ev.run()
+        assert result.artifacts_complete is True
+        assert result.missing_artifacts == []
+
+    def test_invalid_judge_score_does_not_crash(self):
+        # A malformed judge value must fail the gate, not raise.
+        ev = HarnessEvaluator(trace={"judge_score": "not-a-number"})
+        result = ev.run()
+        assert result.judge_passed is False
+        assert result.judge_score is None
+        assert result.passed is False
+
+    def test_tool_gate_reflected_in_eval_result(self):
+        trace = {"tool_calls": [], "artifacts": ["a.txt"], "judge_score": 9.0}
+        ev = HarnessEvaluator(
+            trace=trace, required_artifacts=["a.txt"], min_tool_calls=2, name="tg"
+        )
+        eval_result = ev.to_eval_result()
+        assert eval_result.passed is False
+        assert eval_result.criteria_scores["tool_calls_sufficient"] == 0.0
+        # Other criteria should still pass, isolating the failing gate.
+        assert eval_result.criteria_scores["artifacts_complete"] == 1.0
+
+    def test_overall_score_is_ten_scale(self):
+        trace = {"tool_calls": [1], "artifacts": ["a.txt"]}
+        ev = HarnessEvaluator(trace=trace, required_artifacts=["a.txt"])
+        result = ev.run()
+        assert result.score == 1.0
+        assert result.overall_score == 10.0
+
 
 class TestHarnessEvalReportExport:
     """Harness results aggregate into an EvalReport-compatible structure."""
@@ -187,3 +232,17 @@ class TestHarnessInEvalSuite:
         result = suite.run(print_summary=False)
         assert result.success is True
         assert len(result.evaluator_results) == 1
+
+    def test_suite_aggregates_harness_on_ten_scale(self):
+        # A perfect harness run (0-1 score of 1.0) must contribute as 10/10,
+        # not 1/10, when averaged by EvalSuite.
+        from praisonaiagents.eval import EvalSuite
+
+        harness = HarnessEvaluator(
+            trace={"tool_calls": [1], "artifacts": ["x.txt"]},
+            required_artifacts=["x.txt"],
+            name="harness_smoke",
+        )
+        suite = EvalSuite(evaluators=[harness], name="scale")
+        result = suite.run(print_summary=False)
+        assert result.overall_score == 10.0

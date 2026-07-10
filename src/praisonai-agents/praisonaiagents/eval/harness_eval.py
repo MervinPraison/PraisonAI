@@ -125,14 +125,37 @@ class HarnessEvaluator(BaseEvaluator):
         self.judge_threshold = judge_threshold
 
     def _tool_calls(self) -> List[Any]:
-        calls = self.trace.get("tool_calls") or self.trace.get("tools") or []
+        calls = (
+            self.trace.get("tool_calls")
+            or self.trace.get("tool_trace")
+            or self.trace.get("tools")
+            or []
+        )
         if isinstance(calls, int):
             return list(range(calls))
         return list(calls)
 
+    @staticmethod
+    def _artifact_name(artifact: Any) -> str:
+        """Extract a comparable file name from a flat string or structured entry."""
+        if isinstance(artifact, dict):
+            for key in ("path", "name", "file", "filename", "artifact"):
+                value = artifact.get(key)
+                if value:
+                    return str(value)
+            return str(artifact)
+        return str(artifact)
+
     def _artifacts(self) -> List[str]:
-        artifacts = self.trace.get("artifacts") or self.trace.get("files") or []
-        return [str(a) for a in artifacts]
+        artifacts = (
+            self.trace.get("artifacts")
+            or self.trace.get("files")
+            or self.trace.get("outputs")
+            or []
+        )
+        if isinstance(artifacts, dict):
+            artifacts = list(artifacts.values())
+        return [self._artifact_name(a) for a in artifacts]
 
     def run(self, print_summary: bool = False, **kwargs) -> HarnessResult:
         """Evaluate the harness trace synchronously.
@@ -159,11 +182,18 @@ class HarnessEvaluator(BaseEvaluator):
         else:
             schema_consistent = schema_hash == self.expected_schema_hash
 
-        judge_score = self.trace.get("judge_score")
-        if judge_score is None:
+        raw_judge_score = self.trace.get("judge_score")
+        judge_score: Optional[float] = None
+        if raw_judge_score is None:
             judge_passed = True  # No judge configured -> not a gate
         else:
-            judge_passed = float(judge_score) >= self.judge_threshold
+            try:
+                judge_score = float(raw_judge_score)
+                judge_passed = judge_score >= self.judge_threshold
+            except (TypeError, ValueError):
+                # A malformed judge value must fail the gate, not crash the suite.
+                judge_score = None
+                judge_passed = False
 
         gates = [artifacts_complete, tool_gate_passed, schema_consistent, judge_passed]
         passed = all(gates)
@@ -175,11 +205,12 @@ class HarnessEvaluator(BaseEvaluator):
             passed=passed,
             score=score,
             tool_call_count=tool_call_count,
+            tool_calls_sufficient=tool_gate_passed,
             schema_hash=schema_hash,
             schema_consistent=schema_consistent,
             artifacts_complete=artifacts_complete,
             missing_artifacts=missing_artifacts,
-            judge_score=float(judge_score) if judge_score is not None else None,
+            judge_score=judge_score,
             judge_passed=judge_passed,
             metadata={"required_artifacts": self.required_artifacts},
         )
@@ -208,6 +239,7 @@ class HarnessEvaluator(BaseEvaluator):
             error=None,
             criteria_scores={
                 "artifacts_complete": 1.0 if r.artifacts_complete else 0.0,
+                "tool_calls_sufficient": 1.0 if r.tool_calls_sufficient else 0.0,
                 "schema_consistent": 1.0 if r.schema_consistent else 0.0,
                 "judge_passed": 1.0 if r.judge_passed else 0.0,
             },

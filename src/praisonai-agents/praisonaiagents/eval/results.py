@@ -459,6 +459,7 @@ class HarnessResult:
     passed: bool
     score: float  # 0.0 to 1.0
     tool_call_count: int = 0
+    tool_calls_sufficient: bool = True
     schema_hash: Optional[str] = None
     schema_consistent: bool = True
     artifacts_complete: bool = True
@@ -470,6 +471,15 @@ class HarnessResult:
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    # ``score`` is a 0.0-1.0 fraction (for ``EvalResult`` parity). ``EvalSuite``
+    # aggregates on a ``/10`` scale, so it reads this marker to rescale.
+    score_scale: str = "fraction"
+
+    @property
+    def overall_score(self) -> float:
+        """Score on the shared 0-10 scale used by ``EvalSuite`` aggregation."""
+        return self.score * 10.0
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary."""
         return {
@@ -478,6 +488,7 @@ class HarnessResult:
             "passed": self.passed,
             "score": self.score,
             "tool_call_count": self.tool_call_count,
+            "tool_calls_sufficient": self.tool_calls_sufficient,
             "schema_hash": self.schema_hash,
             "schema_consistent": self.schema_consistent,
             "artifacts_complete": self.artifacts_complete,

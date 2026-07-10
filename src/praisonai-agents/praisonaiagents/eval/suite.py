@@ -206,13 +206,24 @@ class EvalSuite:
         return total_score / total_weight if total_weight > 0 else 0.0
     
     def _extract_score(self, eval_result: Any) -> Optional[float]:
-        """Extract numeric score from evaluation result."""
+        """Extract numeric score from evaluation result.
+
+        Scores are aggregated on a shared ``/10`` scale. Result types whose
+        primary ``score`` is a 0.0-1.0 fraction (e.g. ``HarnessResult``) are
+        detected via their ``score_scale`` attribute and rescaled so mixed
+        suites do not understate them.
+        """
+        score_scale = getattr(eval_result, 'score_scale', None)
+
         if hasattr(eval_result, 'score'):
             score = eval_result.score
             if hasattr(score, 'value'):
-                return float(score.value)
-            return float(score)
-        
+                score = score.value
+            score = float(score)
+            if score_scale == "fraction":
+                score *= 10.0
+            return score
+
         if hasattr(eval_result, 'overall_score'):
             return float(eval_result.overall_score)
 
