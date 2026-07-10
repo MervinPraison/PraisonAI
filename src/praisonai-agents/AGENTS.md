@@ -1064,7 +1064,13 @@ PraisonAI's reliability engineering rests on three pillars — **C**ontext, **H*
 | Loop convergence | iterations to threshold | ≤ N |
 | Doom-loop safety | guard fires on repeat fixture | required |
 
-The `ContextEvaluator` / `HarnessEvaluator` / `LoopEvaluator` classes are tracked follow-ups (PA-CHL-001–004); today's `estimate_tokens`/`count_tokens`, the compaction judge, the interactive test harness, and `EvaluationLoop` cover the equivalent checks. Keep terminology consistent with the `ContextAgent` PRP methodology.
+> **Evaluator status.** The `ContextEvaluator` / `HarnessEvaluator` / `LoopEvaluator` classes named in the rubric are **planned follow-ups** (PA-CHL-001–004), not yet in the repo. Until they land, the equivalent checks are covered by existing modules:
+>
+> - **Context** — `context/tokens.py` and `eval/tokens.py` (`estimate_tokens` / `count_tokens`) for budget; `compaction/compactor.py` (`ContextCompactor`) for compaction/retention.
+> - **Harness** — `runtime/turn_context.py` for turn-context parity; `runtime/example_harness.py` and `tests/` for harness/artifact checks.
+> - **Loop** — `eval/loop.py` (`EvaluationLoop`) and `agent/autonomy.py` for convergence and doom-loop guards.
+>
+> Keep terminology consistent with the `agent/context_agent.py` (`ContextAgent`) PRP methodology.
 
 ---
 
