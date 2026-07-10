@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 399,
+    "pythonCoreFeatures": 404,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 105,
+    "gapCount": 110,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 92
+    "priorityP3": 97
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -137,6 +137,10 @@
       "GatewayMessage",
       "GatewayProtocol",
       "GatewaySessionProtocol",
+      "Goal",
+      "GoalConfig",
+      "GoalEngineer",
+      "GoalVerificationResult",
       "GuardrailAction",
       "GuardrailConfig",
       "GuardrailResult",
@@ -271,6 +275,7 @@
       "StepResult",
       "StopReason",
       "StructuredFormatter",
+      "SuccessCriterion",
       "Task",
       "TaskOutput",
       "TelemetryCollector",
@@ -680,6 +685,10 @@
         "EventType",
         "FileTracker",
         "FrameworkAdapterProtocol",
+        "Goal",
+        "GoalConfig",
+        "GoalEngineer",
+        "GoalVerificationResult",
         "HandoffCycleError",
         "HandoffDepthError",
         "HandoffError",
@@ -707,6 +716,7 @@
         "SessionIdleEvent",
         "StopReason",
         "StructuredFormatter",
+        "SuccessCriterion",
         "ToolExecutionError",
         "ToolUseEvent",
         "ToolsetRegistry",
@@ -4896,6 +4906,42 @@
         "category": "gateway"
       },
       {
+        "feature": "Goal",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalEngineer",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalVerificationResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "GuardrailAction",
         "python": true,
         "typescript": true,
@@ -5608,6 +5654,15 @@
       },
       {
         "feature": "StructuredFormatter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "SuccessCriterion",
         "python": true,
         "typescript": false,
         "priority": "P3",

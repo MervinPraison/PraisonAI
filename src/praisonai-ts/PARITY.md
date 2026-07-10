@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 399 |
+| Python Core Features | 404 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **105** |
+| **Gap Count** | **110** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 92 |
+| P3 (Low) | 97 |
 
 ## Gap Matrix
 
@@ -160,7 +160,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 92 todo)
+### P3_Advanced (180 done, 97 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -199,6 +199,10 @@
 | `FileTracker` | ✅ | ❌ | high | ⏳ TODO |
 | `FrameworkAdapterProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `GatewayEventType` | ✅ | ❌ | high | ⏳ TODO |
+| `Goal` | ✅ | ❌ | high | ⏳ TODO |
+| `GoalConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `GoalEngineer` | ✅ | ❌ | high | ⏳ TODO |
+| `GoalVerificationResult` | ✅ | ❌ | low | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `IndexResult` | ✅ | ❌ | low | ⏳ TODO |
@@ -227,6 +231,7 @@
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
+| `SuccessCriterion` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
@@ -595,7 +600,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (95 exports)</summary>
+<summary><strong>other</strong> (100 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

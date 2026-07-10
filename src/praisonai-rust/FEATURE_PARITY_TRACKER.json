@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 399,
+    "pythonCoreFeatures": 404,
     "rustFeatures": 667,
-    "gapCount": 117,
-    "parityPercentage": 167.2
+    "gapCount": 122,
+    "parityPercentage": 165.1
   },
   "pythonCoreSDK": {
     "exports": [
@@ -133,6 +133,10 @@
       "GatewayMessage",
       "GatewayProtocol",
       "GatewaySessionProtocol",
+      "Goal",
+      "GoalConfig",
+      "GoalEngineer",
+      "GoalVerificationResult",
       "GuardrailAction",
       "GuardrailConfig",
       "GuardrailResult",
@@ -267,6 +271,7 @@
       "StepResult",
       "StopReason",
       "StructuredFormatter",
+      "SuccessCriterion",
       "Task",
       "TaskOutput",
       "TelemetryCollector",
@@ -3821,6 +3826,42 @@
         "category": "gateway"
       },
       {
+        "feature": "Goal",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalEngineer",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "GoalVerificationResult",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "GuardrailAction",
         "python": true,
         "rust": true,
@@ -4533,6 +4574,15 @@
       },
       {
         "feature": "StructuredFormatter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "SuccessCriterion",
         "python": true,
         "rust": false,
         "priority": "P3",
