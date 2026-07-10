@@ -113,13 +113,22 @@ class PluginsConfig:
         str(_default_project_plugins_dir()),
         str(_default_global_plugins_dir())
     ])
+    # Per-plugin option maps keyed by plugin name, e.g.
+    # {"pii_guardrail": {"redact": ["email"]}}. Delivered to each plugin's
+    # on_config hook. Reserved keys (enabled/auto_discover/directories) are
+    # never included here.
+    options: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "enabled": self.enabled,
             "auto_discover": self.auto_discover,
             "directories": self.directories,
         }
+        # Flatten per-plugin option maps back to top level for round-tripping.
+        for name, opts in self.options.items():
+            result[name] = opts
+        return result
 
 
 @dataclass  
@@ -259,7 +268,18 @@ def _load_config() -> Dict[str, Any]:
 
 
 def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
-    """Convert dict to PluginsConfig."""
+    """Convert dict to PluginsConfig.
+
+    Reserved keys (enabled/auto_discover/directories) configure the plugin
+    system; any other key whose value is a mapping is treated as a per-plugin
+    option map delivered to that plugin's ``on_config`` hook.
+    """
+    reserved = {"enabled", "auto_discover", "directories"}
+    options = {
+        name: value
+        for name, value in data.items()
+        if name not in reserved and isinstance(value, dict)
+    }
     return PluginsConfig(
         enabled=data.get("enabled", False),
         auto_discover=data.get("auto_discover", True),
@@ -267,6 +287,7 @@ def _dict_to_plugins_config(data: Dict[str, Any]) -> PluginsConfig:
             str(_default_project_plugins_dir()),
             str(_default_global_plugins_dir())
         ]),
+        options=options,
     )
 
 
@@ -392,11 +413,28 @@ def is_plugins_enabled() -> bool:
     # Check config file
     plugins_config = get_plugins_config()
     if isinstance(plugins_config.enabled, bool):
-        return plugins_config.enabled
+        if plugins_config.enabled:
+            return True
+        # Explicit global disable wins over per-plugin blocks.
+        if "enabled" in _raw_plugins_section():
+            return False
     if isinstance(plugins_config.enabled, list):
         return len(plugins_config.enabled) > 0
-    
+
+    # Per-plugin option blocks imply plugins are in use even without a global
+    # 'enabled' flag, unless every block sets enabled: false.
+    options = plugins_config.options
+    if options:
+        return any(opts.get("enabled", True) for opts in options.values())
+
     return False
+
+
+def _raw_plugins_section() -> Dict[str, Any]:
+    """Return the raw ``[plugins]`` mapping from the loaded config file."""
+    raw = _load_config()
+    section = raw.get("plugins", {})
+    return section if isinstance(section, dict) else {}
 
 
 def get_enabled_plugins() -> Optional[List[str]]:
@@ -415,8 +453,28 @@ def get_enabled_plugins() -> Optional[List[str]]:
     plugins_config = get_plugins_config()
     if isinstance(plugins_config.enabled, list):
         return plugins_config.enabled
-    
+
+    # Derive an allow-list from per-plugin blocks: if any plugin block sets
+    # enabled explicitly, honour those flags (enabled: false disables).
+    options = plugins_config.options
+    if options and any("enabled" in opts for opts in options.values()):
+        return [
+            name for name, opts in options.items()
+            if opts.get("enabled", True)
+        ]
+
     return None  # All plugins enabled
+
+
+def get_plugin_options() -> Dict[str, Dict[str, Any]]:
+    """Get per-plugin option maps from the unified project config.
+
+    Returns:
+        Mapping of ``{plugin_name: options_dict}``. Empty when no per-plugin
+        options are configured. The reserved ``enabled`` flag (if present in a
+        plugin block) is preserved so plugins can read it via ``on_config``.
+    """
+    return dict(get_plugins_config().options)
 
 
 def _defaults_has_any_values() -> bool:

@@ -49,7 +49,58 @@ class PluginManager:
         self._plugins: Dict[str, Plugin] = {}
         self._enabled: Dict[str, bool] = {}
         self._single_file_plugins: Dict[str, Dict[str, Any]] = {}  # WordPress-style plugins
+        # Per-plugin option maps sourced from the unified project config,
+        # delivered to each plugin's on_config hook. {plugin_name: options}.
+        self._plugin_options: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()  # Thread safety for multi-agent environments
+
+    def set_plugin_options(self, options_by_name: Dict[str, Dict[str, Any]]) -> None:
+        """Store per-plugin option maps from the unified project config.
+
+        Args:
+            options_by_name: Mapping of ``{plugin_name: options_dict}`` that is
+                delivered to each plugin's ``on_config`` hook via
+                :meth:`apply_plugin_options`.
+        """
+        if not isinstance(options_by_name, dict):
+            return
+        with self._lock:
+            for name, opts in options_by_name.items():
+                if isinstance(opts, dict):
+                    self._plugin_options[name] = dict(opts)
+
+    def get_plugin_options(self, name: str) -> Dict[str, Any]:
+        """Return the configured option map for a plugin (empty if none)."""
+        return dict(self._plugin_options.get(name, {}))
+
+    def apply_plugin_options(self) -> int:
+        """Deliver each enabled plugin its own configured options via on_config.
+
+        Invokes ``plugin.on_config(options)`` for every enabled plugin that has
+        a configured option map. Safe to call repeatedly; plugins without
+        options are skipped. Errors in a single plugin are logged and do not
+        abort delivery to the others.
+
+        Returns:
+            Number of plugins that received their options.
+        """
+        delivered = 0
+        with self._lock:
+            targets = [
+                (name, plugin, self._plugin_options[name])
+                for name, plugin in self._plugins.items()
+                if self._enabled.get(name, False) and name in self._plugin_options
+            ]
+        for name, plugin, options in targets:
+            on_config = getattr(plugin, "on_config", None)
+            if not callable(on_config):
+                continue
+            try:
+                on_config(options)
+                delivered += 1
+            except Exception as e:
+                logger.warning(f"Plugin '{name}' on_config failed: {e}")
+        return delivered
     
     def register(self, plugin: Plugin) -> bool:
         """
