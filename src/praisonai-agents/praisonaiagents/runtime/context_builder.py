@@ -59,7 +59,8 @@ class DefaultTurnContextBuilder:
             prompt: The user prompt for this turn
             **kwargs: Additional request parameters including:
                 - model: Override model ID
-                - tools: Override tools list
+                - tools: Override tools list. Omit or pass None to use
+                  agent.tools. Pass [] to explicitly disable tools for this turn.
                 - stream: Enable streaming
                 - temperature: Model temperature
                 - max_tokens: Token limit
@@ -186,12 +187,20 @@ class DefaultTurnContextBuilder:
         agent: AgentProtocol,
         kwargs: Dict[str, Any]
     ) -> List[ToolSchema]:
-        """Build normalized tool schemas from agent tools."""
-        # Get tools from kwargs override or agent - respect explicit empty list
-        if 'tools' in kwargs:
+        """Build normalized tool schemas from agent tools.
+
+        Tool resolution semantics:
+            - ``tools`` omitted or ``tools=None`` -> use ``agent.tools``.
+            - ``tools=[]`` -> explicitly disable tools for this turn.
+            - ``tools=[...]`` -> override agent tools with the given list.
+        """
+        # Get tools from kwargs override or agent.
+        # Treat a missing key and an explicit None identically (use agent tools),
+        # while still respecting an explicit empty list as a deliberate override.
+        if kwargs.get('tools') is not None:
             raw_tools = kwargs['tools']
         else:
-            raw_tools = getattr(agent, 'tools', [])
+            raw_tools = getattr(agent, 'tools', []) or []
         
         if not raw_tools:
             return []
