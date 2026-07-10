@@ -72,6 +72,23 @@ class TestGoalModels:
         c = SuccessCriterion(description="D", weight=2.0, status="met")
         assert SuccessCriterion.from_dict(c.to_dict()).weight == 2.0
 
+    def test_progress_with_zero_weights(self):
+        goal = Goal(statement="Zero weights")
+        a = goal.add_criterion("A", weight=0.0)
+        goal.add_criterion("B", weight=0.0)
+        a.status = "met"
+        assert goal.progress == pytest.approx(0.5)
+
+    def test_progress_with_negative_weight_stays_in_range(self):
+        goal = Goal(statement="Negative weight")
+        a = goal.add_criterion("A", weight=-5.0)
+        b = goal.add_criterion("B", weight=1.0)
+        b.status = "met"
+        assert 0.0 <= goal.progress <= 1.0
+        assert goal.progress == pytest.approx(1.0)
+        a.status = "met"
+        assert 0.0 <= goal.progress <= 1.0
+
 
 # =============================================================================
 # Config tests
@@ -160,6 +177,49 @@ class TestGoalEngineer:
         result = engineer.verify(goal, "Nope")
         assert result.achieved is False
         assert all(c.status == "unmet" for c in result.criteria)
+
+    def test_verify_judge_unavailable_stays_pending(self, monkeypatch):
+        engineer = GoalEngineer(auto_decompose=False)
+        goal = engineer.engineer("Answer correctly", criteria=["Correct"])
+
+        class BrokenJudge:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("judge unavailable")
+
+        import praisonaiagents.eval as eval_mod
+        monkeypatch.setattr(eval_mod, "Judge", BrokenJudge, raising=False)
+
+        result = engineer.verify(goal, "The answer is 4")
+        assert result.achieved is False
+        assert result.score == 0.0
+        # A transient failure must NOT be recorded as a real unmet criterion.
+        assert all(c.status == "pending" for c in result.criteria)
+        assert all(c.status == "pending" for c in goal.criteria)
+
+    def test_verify_result_is_independent_snapshot(self, monkeypatch):
+        engineer = GoalEngineer(auto_decompose=False, threshold=8.0)
+        goal = engineer.engineer("Answer correctly", criteria=["Correct"])
+
+        class FakeJudgeResult:
+            score = 9.0
+            reasoning = "Looks correct"
+
+        class FakeJudge:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self, output=""):
+                return FakeJudgeResult()
+
+        import praisonaiagents.eval as eval_mod
+        monkeypatch.setattr(eval_mod, "Judge", FakeJudge, raising=False)
+
+        result = engineer.verify(goal, "The answer is 4")
+        # Mutating the result must not corrupt the goal's own criteria.
+        result.criteria[0].status = "unmet"
+        result.criteria[0].notes = "changed"
+        assert goal.criteria[0].status == "met"
+        assert goal.criteria[0].notes == ""
 
 
 # =============================================================================

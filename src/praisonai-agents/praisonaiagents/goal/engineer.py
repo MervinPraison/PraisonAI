@@ -22,6 +22,7 @@ Zero performance impact: heavy LLM helpers are imported lazily inside methods.
 
 import json
 import re
+from dataclasses import replace
 from typing import Any, List, Optional
 
 from praisonaiagents._logging import get_logger
@@ -165,6 +166,7 @@ class GoalEngineer:
 
         score = 0.0
         reasoning = ""
+        verification_failed = False
         try:
             from ..eval import Judge
 
@@ -177,16 +179,29 @@ class GoalEngineer:
         except Exception as exc:  # pragma: no cover - network/optional dep
             logger.warning("Goal verification failed: %s", exc)
             reasoning = f"Verification unavailable: {exc}"
+            verification_failed = True
 
-        achieved = score >= self.config.threshold
-        status = "met" if achieved else ("unmet" if reasoning else "pending")
+        # A judge failure is inconclusive, not a real failure: leave criteria
+        # ``pending`` and report ``achieved=False`` without mutating the goal
+        # into an ``unmet`` state.
+        if verification_failed:
+            achieved = False
+            status = "pending"
+        else:
+            achieved = score >= self.config.threshold
+            status = "met" if achieved else "unmet"
+
         for criterion in goal.criteria:
             criterion.status = status
+
+        # Return an independent snapshot so mutating the result never leaks
+        # back into the goal's own criteria.
+        snapshot = [replace(criterion) for criterion in goal.criteria]
 
         return GoalVerificationResult(
             goal_id=goal.id,
             score=score,
             achieved=achieved,
-            criteria=list(goal.criteria),
+            criteria=snapshot,
             reasoning=reasoning,
         )

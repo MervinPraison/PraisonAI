@@ -82,11 +82,21 @@ class Goal:
 
     @property
     def progress(self) -> float:
-        """Fraction of weighted criteria currently met (0.0 - 1.0)."""
+        """Fraction of weighted criteria currently met (0.0 - 1.0).
+
+        Non-positive weights are treated as 0 so a single criterion cannot skew
+        the fraction outside the documented range. If no criterion carries a
+        positive weight, criteria are counted equally.
+        """
         if not self.criteria:
             return 0.0
-        total = sum(c.weight for c in self.criteria) or 1.0
-        met = sum(c.weight for c in self.criteria if c.status == "met")
+        total = sum(max(c.weight, 0.0) for c in self.criteria)
+        if total <= 0.0:
+            met = sum(1 for c in self.criteria if c.status == "met")
+            return met / len(self.criteria)
+        met = sum(
+            max(c.weight, 0.0) for c in self.criteria if c.status == "met"
+        )
         return met / total
 
     @property
