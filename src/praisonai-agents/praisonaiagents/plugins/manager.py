@@ -54,20 +54,36 @@ class PluginManager:
         self._plugin_options: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()  # Thread safety for multi-agent environments
 
-    def set_plugin_options(self, options_by_name: Dict[str, Dict[str, Any]]) -> None:
+    def set_plugin_options(
+        self,
+        options_by_name: Dict[str, Dict[str, Any]],
+        replace: bool = True,
+    ) -> None:
         """Store per-plugin option maps from the unified project config.
 
         Args:
             options_by_name: Mapping of ``{plugin_name: options_dict}`` that is
                 delivered to each plugin's ``on_config`` hook via
                 :meth:`apply_plugin_options`.
+            replace: When ``True`` (default) the provided mapping is treated as
+                the authoritative set — option blocks removed from the config
+                since a previous call are dropped, so a reused manager never
+                delivers stale options for a plugin the user has since removed.
+                When ``False`` the maps are merged into any existing state.
         """
         if not isinstance(options_by_name, dict):
             return
         with self._lock:
-            for name, opts in options_by_name.items():
-                if isinstance(opts, dict):
-                    self._plugin_options[name] = dict(opts)
+            if replace:
+                self._plugin_options = {
+                    name: dict(opts)
+                    for name, opts in options_by_name.items()
+                    if isinstance(opts, dict)
+                }
+            else:
+                for name, opts in options_by_name.items():
+                    if isinstance(opts, dict):
+                        self._plugin_options[name] = dict(opts)
 
     def get_plugin_options(self, name: str) -> Dict[str, Any]:
         """Return the configured option map for a plugin (empty if none)."""

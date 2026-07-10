@@ -57,7 +57,7 @@
       "description": "Plugin enablement and per-plugin options. 'enabled' may be a boolean (all on/off) or a list of plugin names to allow. Any additional key is treated as a plugin name mapping to that plugin's options dict; set 'enabled: false' inside a plugin block to disable it individually.",
       "additionalProperties": true,
       "properties": {
-        "enabled": { "type": ["boolean", "array", "string"], "items": { "type": "string" } },
+        "enabled": { "type": ["boolean", "array"], "items": { "type": "string" } },
         "auto_discover": { "type": "boolean" },
         "directories": { "type": "array", "items": { "type": "string" } }
       }

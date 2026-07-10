@@ -4,7 +4,7 @@ Configuration Loader for PraisonAI Agents.
 Loads configuration from multiple sources with precedence:
 1. Explicit parameters (highest)
 2. Environment variables
-3. Config file (.praisonai/config.toml or praisonai.toml)
+3. Config file (.praisonai/config.toml, .praisonai/config.yaml, or praisonai.toml/.yaml)
 4. Defaults (lowest)
 
 Zero Performance Impact:
@@ -190,20 +190,29 @@ class PraisonConfig:
 
 def _find_config_file() -> Optional[Path]:
     """Find config file in standard locations.
-    
+
+    Both TOML and the unified YAML surface (``.praisonai/config.yaml``) are
+    discovered so the documented declarative plugin config actually reaches the
+    agents runtime.
+
     Search order:
-    1. .praisonai/config.toml (project-local)
-    2. praisonai.toml (project root)
-    3. ~/.praisonai/config.toml (user global)
-    
+    1. .praisonai/config.toml then .praisonai/config.yaml (project-local)
+    2. praisonai.toml then praisonai.yaml (project root)
+    3. ~/.praisonai/config.toml then ~/.praisonai/config.yaml (user global)
+
     Returns:
         Path to config file if found, None otherwise
     """
     # Project-local locations
     cwd = Path.cwd()
+    project_data = get_project_data_dir()
     local_paths = [
-        get_project_data_dir() / "config.toml",
+        project_data / "config.toml",
+        project_data / "config.yaml",
+        project_data / "config.yml",
         cwd / "praisonai.toml",
+        cwd / "praisonai.yaml",
+        cwd / "praisonai.yml",
     ]
     
     for path in local_paths:
@@ -212,9 +221,14 @@ def _find_config_file() -> Optional[Path]:
     
     # User global location
     from ..paths import get_data_dir
-    global_path = get_data_dir() / "config.toml"
-    if global_path.exists():
-        return global_path
+    data_dir = get_data_dir()
+    for global_path in (
+        data_dir / "config.toml",
+        data_dir / "config.yaml",
+        data_dir / "config.yml",
+    ):
+        if global_path.exists():
+            return global_path
     
     return None
 
@@ -249,8 +263,28 @@ def _parse_toml(path: Path) -> Dict[str, Any]:
             return {}
 
 
+def _parse_yaml(path: Path) -> Dict[str, Any]:
+    """Parse a YAML config file. Returns {} if PyYAML is unavailable.
+
+    YAML is an optional dependency in the core SDK, so a missing parser is
+    treated as an absent config rather than an error.
+    """
+    try:
+        import yaml
+    except ImportError:
+        import logging
+        logging.debug(
+            "PyYAML not available; cannot read YAML config. Install pyyaml to "
+            "use .praisonai/config.yaml."
+        )
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data if isinstance(data, dict) else {}
+
+
 def _load_config() -> Dict[str, Any]:
-    """Load configuration from file.
+    """Load configuration from file (TOML or the unified YAML surface).
     
     Returns:
         Config dict (empty if no config file found)
@@ -260,6 +294,8 @@ def _load_config() -> Dict[str, Any]:
         return {}
     
     try:
+        if config_path.suffix.lower() in (".yaml", ".yml"):
+            return _parse_yaml(config_path)
         return _parse_toml(config_path)
     except Exception as e:
         import logging
@@ -420,6 +456,10 @@ def is_plugins_enabled() -> bool:
             return False
     if isinstance(plugins_config.enabled, list):
         return len(plugins_config.enabled) > 0
+    # A bare string (e.g. TOML `enabled = "pii_guardrail"`) is treated as a
+    # single plugin name, matching the list-of-names semantics.
+    if isinstance(plugins_config.enabled, str):
+        return bool(plugins_config.enabled.strip())
 
     # Per-plugin option blocks imply plugins are in use even without a global
     # 'enabled' flag, unless every block sets enabled: false.
@@ -453,6 +493,9 @@ def get_enabled_plugins() -> Optional[List[str]]:
     plugins_config = get_plugins_config()
     if isinstance(plugins_config.enabled, list):
         return plugins_config.enabled
+    # A bare string names a single plugin to allow.
+    if isinstance(plugins_config.enabled, str) and plugins_config.enabled.strip():
+        return [plugins_config.enabled.strip()]
 
     # Derive an allow-list from per-plugin blocks: if any plugin block sets
     # enabled explicitly, honour those flags (enabled: false disables).

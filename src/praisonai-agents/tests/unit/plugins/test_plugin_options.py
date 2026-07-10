@@ -128,6 +128,57 @@ class TestManagerPluginOptionsDelivery:
         assert delivered == 0
         assert plugin.received is None
 
+    def test_set_options_replaces_stale_blocks(self):
+        # A reused manager must drop option blocks removed from a later config
+        # so removed plugins never receive stale options via on_config.
+        manager = PluginManager()
+        manager.set_plugin_options({"a": {"k": 1}, "b": {"k": 2}})
+        manager.set_plugin_options({"a": {"k": 3}})
+        assert manager.get_plugin_options("a") == {"k": 3}
+        assert manager.get_plugin_options("b") == {}
+
+    def test_set_options_merge_mode_keeps_existing(self):
+        manager = PluginManager()
+        manager.set_plugin_options({"a": {"k": 1}})
+        manager.set_plugin_options({"b": {"k": 2}}, replace=False)
+        assert manager.get_plugin_options("a") == {"k": 1}
+        assert manager.get_plugin_options("b") == {"k": 2}
+
+
+class TestStringEnabled:
+    def test_is_plugins_enabled_from_string(self, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_PLUGINS", raising=False)
+        monkeypatch.setattr(
+            loader, "get_plugins_config",
+            lambda: PluginsConfig(enabled="pii_guardrail"),
+        )
+        monkeypatch.setattr(loader, "_load_config", lambda: {})
+        assert loader.is_plugins_enabled() is True
+
+    def test_get_enabled_plugins_from_string(self, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_PLUGINS", raising=False)
+        monkeypatch.setattr(
+            loader, "get_plugins_config",
+            lambda: PluginsConfig(enabled="pii_guardrail"),
+        )
+        assert loader.get_enabled_plugins() == ["pii_guardrail"]
+
+
+class TestYamlConfigDiscovery:
+    def test_load_config_parses_yaml_plugins(self, tmp_path, monkeypatch):
+        pytest.importorskip("yaml")
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            "plugins:\n"
+            "  enabled: true\n"
+            "  pii_guardrail:\n"
+            "    redact: [email]\n"
+        )
+        monkeypatch.setattr(loader, "_find_config_file", lambda: cfg)
+        data = loader._load_config()
+        assert data["plugins"]["enabled"] is True
+        assert data["plugins"]["pii_guardrail"] == {"redact": ["email"]}
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
