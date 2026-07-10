@@ -192,6 +192,13 @@ _LAZY_IMPORTS = {
     'DictCondition': ('praisonaiagents.conditions.evaluator', 'DictCondition'),
     'evaluate_condition': ('praisonaiagents.conditions.evaluator', 'evaluate_condition'),
     
+    # Goal Engineering (structured, measurable goals + verification)
+    'GoalEngineer': ('praisonaiagents.goal', 'GoalEngineer'),
+    'GoalConfig': ('praisonaiagents.goal', 'GoalConfig'),
+    'Goal': ('praisonaiagents.goal', 'Goal'),
+    'SuccessCriterion': ('praisonaiagents.goal', 'SuccessCriterion'),
+    'GoalVerificationResult': ('praisonaiagents.goal', 'GoalVerificationResult'),
+
     # Handoff
     'Handoff': ('praisonaiagents.agent.handoff', 'Handoff'),
     'handoff': ('praisonaiagents.agent.handoff', 'handoff'),
