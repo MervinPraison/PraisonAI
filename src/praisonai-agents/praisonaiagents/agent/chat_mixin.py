@@ -278,8 +278,47 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
+        # Apply model-aware runtime profile overrides (opt-in). When no profile
+        # is configured for the active model family, the resolved profile is the
+        # behaviour-neutral "default" whose apply_system_prompt is a no-op, so
+        # the generated prompt is byte-for-byte identical to before.
+        try:
+            profile = self._resolve_runtime_profile()
+            if profile is not None:
+                # apply_system_prompt is a pure no-op unless the profile declares
+                # prompt overrides, so the default/family profiles leave the
+                # generated prompt byte-for-byte identical.
+                system_prompt = profile.apply_system_prompt(system_prompt)
+        except Exception as e:
+            import logging
+            logging.debug(f"Runtime profile application failed: {e}", exc_info=True)
+
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
+
+    def _resolve_runtime_profile(self):
+        """Resolve the model-aware runtime profile for this agent.
+
+        Honours an explicit ``runtime_profile`` set on the agent (bool/str/dict/
+        RuntimeProfile); otherwise resolves by model family. Returns the
+        behaviour-neutral ``default`` profile when nothing matches or the feature
+        is disabled, keeping output identical to today.
+        """
+        from ..runtime.profiles import RuntimeProfile, resolve_profile
+
+        configured = getattr(self, "runtime_profile", None)
+
+        if configured is False:
+            return None
+        if isinstance(configured, RuntimeProfile):
+            return configured
+        if isinstance(configured, dict):
+            return RuntimeProfile(**configured)
+
+        model = self.llm if isinstance(self.llm, str) else str(self.llm) if self.llm else None
+        if isinstance(configured, str):
+            return resolve_profile(model=model, name=configured)
+        return resolve_profile(model=model)
 
     def _build_response_format(self, schema_model):
         """Build response_format dict for native structured output.
