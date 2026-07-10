@@ -10,6 +10,7 @@ DRY: Reuses BaseLLMGrader from praisonaiagents.eval for LLM-as-judge logic.
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -1374,16 +1375,61 @@ REASONING: [brief explanation]
         events: List[Any],
         agent_order: List[str],
     ) -> List[ContextFlowEvaluation]:
-        """Evaluate context flow between agents."""
+        """Evaluate context flow between agents.
+
+        Delegates to the core SDK ``ContextEvaluator.evaluate_handoff`` so the
+        scoring algorithm lives in a single place (``praisonaiagents.eval``) and
+        SDK-only installs can reuse it. If the SDK evaluator is unavailable
+        (e.g. a stale or partial ``praisonaiagents`` install), it falls back to
+        an inline implementation that preserves the previous scoring behaviour
+        so ``recipe judge --context`` never silently omits handoff-loss scores.
+        """
         if len(agent_order) < 2:
             return []
-        
-        flow_evaluations = []
-        
-        # Extract outputs per agent
-        agent_outputs = {}
-        agent_inputs = {}
-        
+
+        try:
+            from praisonaiagents.eval import ContextEvaluator
+        except ImportError:
+            logger.warning(
+                "ContextEvaluator unavailable in praisonaiagents.eval; "
+                "using inline context flow evaluation fallback"
+            )
+            return self._evaluate_context_flow_inline(events, agent_order)
+
+        handoffs = ContextEvaluator(
+            trace_events=events,
+            agent_order=agent_order,
+        ).evaluate_handoff()
+
+        return [
+            ContextFlowEvaluation(
+                from_agent=h.from_agent,
+                to_agent=h.to_agent,
+                context_passed_score=h.context_passed_score,
+                context_relevance_score=h.context_relevance_score,
+                content_loss_detected=h.content_loss_detected,
+                lost_content_summary=h.lost_content_summary,
+                reasoning=h.reasoning,
+            )
+            for h in handoffs
+        ]
+
+    def _evaluate_context_flow_inline(
+        self,
+        events: List[Any],
+        agent_order: List[str],
+    ) -> List[ContextFlowEvaluation]:
+        """Inline context-flow scoring used when the SDK evaluator is missing.
+
+        Mirrors ``ContextEvaluator.evaluate_handoff`` so scores match the SDK
+        path exactly; kept only as a resilience fallback for degraded installs.
+        """
+        if len(agent_order) < 2:
+            return []
+
+        agent_outputs: Dict[str, str] = {}
+        agent_inputs: Dict[str, str] = {}
+
         for event in events:
             if hasattr(event, 'event_type'):
                 event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
@@ -1393,60 +1439,51 @@ REASONING: [brief explanation]
                 event_type = event.get('event_type', '')
                 agent_name = event.get('agent_name')
                 data = event.get('data', {})
-            
+
             if not agent_name:
                 continue
-            
+
             if event_type == "llm_response":
                 response = data.get("response_content", "")
                 if response:
                     agent_outputs[agent_name] = response
-            
-            if event_type == "llm_request":
+            elif event_type == "llm_request":
                 messages = data.get("messages", [])
                 if messages:
                     agent_inputs[agent_name] = str(messages)
-        
-        # Evaluate flow between consecutive agents
+
+        flow_evaluations: List[ContextFlowEvaluation] = []
         for i in range(len(agent_order) - 1):
             from_agent = agent_order[i]
             to_agent = agent_order[i + 1]
-            
+
             from_output = agent_outputs.get(from_agent, "")
             to_input = agent_inputs.get(to_agent, "")
-            
-            # Check if output was passed to next agent
+
             content_loss = False
             lost_content = ""
-            
+
             if from_output and to_input:
-                # Check if output content appears in next agent's input
-                # Handle JSON outputs by checking if key values are present
-                import re
-                
-                # Extract meaningful content (alphanumeric sequences 4+ chars)
                 output_tokens = set(re.findall(r'\b[a-zA-Z0-9]{4,}\b', from_output.lower()))
                 input_tokens = set(re.findall(r'\b[a-zA-Z0-9]{4,}\b', to_input.lower()))
-                
-                # Also check for exact substring matches (for JSON values)
+
                 exact_match = from_output in to_input or str(from_output)[:200] in to_input
-                
+
                 if exact_match:
                     context_passed_score = 10.0
                     context_relevance_score = 9.0
                 else:
-                    # Calculate token overlap
                     overlap = len(output_tokens & input_tokens) / max(len(output_tokens), 1)
-                    context_passed_score = min(10.0, overlap * 12 + 2)  # Scale to 2-10
+                    context_passed_score = min(10.0, overlap * 12 + 2)
                     context_relevance_score = 7.0
-                
+
                 if context_passed_score < 5.0:
                     content_loss = True
                     lost_content = f"Only {(context_passed_score/10)*100:.0f}% of output content found in next agent's input"
             else:
                 context_passed_score = 5.0
                 context_relevance_score = 5.0
-            
+
             flow_evaluations.append(ContextFlowEvaluation(
                 from_agent=from_agent,
                 to_agent=to_agent,
@@ -1456,7 +1493,7 @@ REASONING: [brief explanation]
                 lost_content_summary=lost_content,
                 reasoning=f"Context flow from {from_agent} to {to_agent}",
             ))
-        
+
         return flow_evaluations
     
     def _detect_content_loss(self, events: List[Any]) -> tuple:
