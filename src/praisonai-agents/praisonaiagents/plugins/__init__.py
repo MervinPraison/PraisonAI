@@ -50,6 +50,8 @@ __all__ = [
     "PluginType",
     "PluginInfo",
     "FunctionPlugin",
+    "PluginDecision",
+    "GuardrailBlocked",
     "get_plugin_manager",
     # Protocols
     "PluginProtocol",
@@ -332,6 +334,14 @@ def __getattr__(name: str):
     if name == "PluginType":
         from .plugin import PluginType
         return PluginType
+
+    if name == "PluginDecision":
+        from .plugin import PluginDecision
+        return PluginDecision
+
+    if name == "GuardrailBlocked":
+        from .plugin import GuardrailBlocked
+        return GuardrailBlocked
     
     # Protocols
     if name == "PluginProtocol":
