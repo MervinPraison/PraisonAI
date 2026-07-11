@@ -8,7 +8,7 @@ durable outbound delivery.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union
 
 from ._delivery import DurableDelivery
 from ._outbox import OutboundQueue
@@ -65,6 +65,7 @@ class DurableAdapterMixin:
         max_attempts: int = 3,
         max_size: int = 50_000,
         ttl_seconds: int = 7 * 86400,
+        ordering: Literal["strict", "best_effort"] = "best_effort",
     ) -> None:
         """Set up durable outbound delivery.
         
@@ -74,6 +75,12 @@ class DurableAdapterMixin:
             max_attempts: Maximum delivery attempts per message
             max_size: Maximum messages in outbox
             ttl_seconds: TTL for sent messages
+            ordering: Per-conversation delivery ordering discipline forwarded to
+                :class:`OutboundQueue`. ``"best_effort"`` (default) preserves the
+                historic global-order behaviour; ``"strict"`` enforces per-lane
+                FIFO so a later same-conversation message can never overtake an
+                earlier undelivered one. The ``reliability="production"`` preset
+                resolves to ``"strict"`` via ``resolve_reliability``.
         """
         self.outbox: Optional[OutboundQueue] = None
         self.durable_delivery: Optional[DurableDelivery] = None
@@ -85,6 +92,7 @@ class DurableAdapterMixin:
                     max_size=max_size,
                     ttl_seconds=ttl_seconds,
                     max_attempts=max_attempts,
+                    ordering=ordering,
                 )
                 
                 self.durable_delivery = DurableDelivery(

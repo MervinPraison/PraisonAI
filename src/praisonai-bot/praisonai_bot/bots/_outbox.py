@@ -38,8 +38,9 @@ Storage schema::
     )
 
 Public API:
-  - OutboundQueue(path, *, max_size=50_000, ttl_seconds=7*86400, max_attempts=5)
-  - enqueue(idempotency_key, target, payload, metadata) -> str
+  - OutboundQueue(path, *, max_size=50_000, ttl_seconds=7*86400, max_attempts=5,
+                  ordering="best_effort")
+  - enqueue(idempotency_key, target, payload, metadata, *, lane_key=None) -> str
   - mark_sent(key)
   - mark_failed(key, error, permanent=False)
   - drain(sender, *, reconciler=None) -> (succeeded, failed)
@@ -56,7 +57,7 @@ import time
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, server_retry_after
 
@@ -96,6 +97,15 @@ class OutboundQueue:
         ttl_seconds: Sent entries older than this are evicted.
         max_attempts: Maximum delivery attempts before marking permanent failure.
         backoff: Backoff policy for retries.
+        ordering: Per-conversation delivery ordering discipline.
+            ``"best_effort"`` (default, backward compatible) drains pending
+            entries in global wall-clock order with no per-conversation gate, so
+            a later message to a chat can overtake an earlier one that is backing
+            off or retrying. ``"strict"`` enforces per-lane FIFO: only the
+            earliest non-terminal entry of each lane (``lane_key``, defaulting to
+            ``target``) is eligible to send, holding later same-lane entries
+            until the head reaches ``sent`` or ``permanent_failure``. Different
+            lanes still drain in parallel, so throughput is unaffected.
     
     Example::
     
@@ -135,12 +145,18 @@ class OutboundQueue:
         ttl_seconds: int = _DEFAULT_TTL_SECONDS,
         max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
         backoff: Optional[BackoffPolicy] = None,
+        ordering: Literal["strict", "best_effort"] = "best_effort",
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self.max_attempts = int(max_attempts)
         self.backoff = backoff or BackoffPolicy()
+        if ordering not in ("strict", "best_effort"):
+            raise ValueError(
+                f"ordering must be 'strict' or 'best_effort', got {ordering!r}"
+            )
+        self.ordering = ordering
         self._lock = threading.Lock()
         self._active_claims: Dict[str, float] = {}  # key -> claim_time
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,12 +188,26 @@ class OutboundQueue:
                     attempts INTEGER DEFAULT 0,
                     last_attempt REAL,
                     error TEXT,
-                    sent_at REAL
+                    sent_at REAL,
+                    lane_key TEXT
                 )
             """)
+            # Migrate pre-lane databases: add the per-conversation ordering
+            # column if an older schema is opened. Existing rows get lane_key
+            # backfilled to their target so strict ordering has a lane to gate.
+            cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(outbound_queue)").fetchall()
+            }
+            if "lane_key" not in cols:
+                conn.execute("ALTER TABLE outbound_queue ADD COLUMN lane_key TEXT")
+            conn.execute(
+                "UPDATE outbound_queue SET lane_key = target WHERE lane_key IS NULL"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON outbound_queue(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON outbound_queue(ts)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_at ON outbound_queue(sent_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_lane_key ON outbound_queue(lane_key)")
             
             # Move in-flight 'sending' claims from a previous crash into the
             # 'recovered' state. These were handed to (or about to be handed to)
@@ -199,6 +229,8 @@ class OutboundQueue:
         target: str,
         payload: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        lane_key: Optional[str] = None,
     ) -> str:
         """Persist an outbound message for delivery.
         
@@ -207,6 +239,10 @@ class OutboundQueue:
             target: Target channel identifier (e.g., "telegram:12345")
             payload: Message payload to deliver
             metadata: Optional metadata for tracking/routing
+            lane_key: Per-conversation ordering lane. Defaults to ``target`` so
+                messages to the same chat share a lane and, under
+                ``ordering="strict"``, are delivered in FIFO order. Pass an
+                explicit value to group differently (e.g. a thread id).
             
         Returns:
             Unique entry key for tracking this message
@@ -216,10 +252,11 @@ class OutboundQueue:
         
         # Create synchronous version for thread pool
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._sync_enqueue, idempotency_key, target, payload, metadata)
+        return await loop.run_in_executor(None, self._sync_enqueue, idempotency_key, target, payload, metadata, lane_key)
     
-    def _sync_enqueue(self, idempotency_key: str, target: str, payload: Dict[str, Any], metadata: Optional[Dict[str, Any]]) -> str:
+    def _sync_enqueue(self, idempotency_key: str, target: str, payload: Dict[str, Any], metadata: Optional[Dict[str, Any]], lane_key: Optional[str] = None) -> str:
         """Synchronous version of enqueue for thread pool execution."""
+        lane = lane_key if lane_key is not None else target
         with self._lock, closing(self._connect()) as conn:
             try:
                 conn.execute("BEGIN IMMEDIATE")
@@ -228,11 +265,11 @@ class OutboundQueue:
                 # Try to insert - will fail on duplicate idempotency_key
                 cur = conn.execute("""
                     INSERT INTO outbound_queue(ts, idempotency_key, target, 
-                                              payload, metadata, status)
-                    VALUES (?, ?, ?, ?, ?, 'pending')
+                                              payload, metadata, status, lane_key)
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?)
                 """, (
                     time.time(), idempotency_key, target,
-                    json.dumps(payload), json.dumps(metadata)
+                    json.dumps(payload), json.dumps(metadata), lane
                 ))
                 
                 entry_id = cur.lastrowid
@@ -477,17 +514,47 @@ class OutboundQueue:
             conn.commit()
     
     def _get_pending_entries(self, limit: Optional[int] = None) -> List[OutboundEntry]:
-        """Get pending entries for processing."""
+        """Get pending entries for processing.
+
+        Under ``ordering="strict"`` only the head (earliest ``id``, i.e. the
+        first-enqueued still-non-terminal) entry of each lane is offered, so a
+        later same-lane message can never overtake an earlier undelivered one.
+        A lane's head is held until it reaches ``sent`` or ``permanent_failure``;
+        different lanes are offered concurrently for cross-lane fairness. Under
+        ``ordering="best_effort"`` (default) the historic global ``ts`` order is
+        preserved with no per-lane gate.
+        """
         with self._lock, closing(self._connect()) as conn:
             stale_claim_cutoff = time.time() - 300  # 5 minute stale claim timeout
-            query = """
+            select_cols = """
                 SELECT id, ts, idempotency_key, target, payload, metadata,
                        status, attempts, last_attempt, error, sent_at
-                FROM outbound_queue
-                WHERE status IN ('pending', 'recovered', 'failed')
-                   OR (status = 'sending' AND (last_attempt IS NULL OR last_attempt <= ?))
-                ORDER BY ts ASC
             """
+            if self.ordering == "strict":
+                # Gate each lane to its head: join to the earliest non-terminal
+                # id per lane so entry N+1 is never offered while entry N is
+                # still pending/failed/recovered/sending. A NULL lane_key (only
+                # possible for legacy rows before migration) collapses to its
+                # target so it still forms a stable lane.
+                query = select_cols + """
+                    FROM outbound_queue q
+                    JOIN (
+                        SELECT COALESCE(lane_key, target) AS lane, MIN(id) AS head_id
+                        FROM outbound_queue
+                        WHERE status IN ('pending', 'recovered', 'failed', 'sending')
+                        GROUP BY COALESCE(lane_key, target)
+                    ) h ON COALESCE(q.lane_key, q.target) = h.lane AND q.id = h.head_id
+                    WHERE q.status IN ('pending', 'recovered', 'failed')
+                       OR (q.status = 'sending' AND (q.last_attempt IS NULL OR q.last_attempt <= ?))
+                    ORDER BY q.ts ASC, q.id ASC
+                """
+            else:
+                query = select_cols + """
+                    FROM outbound_queue
+                    WHERE status IN ('pending', 'recovered', 'failed')
+                       OR (status = 'sending' AND (last_attempt IS NULL OR last_attempt <= ?))
+                    ORDER BY ts ASC
+                """
             params = [stale_claim_cutoff]
             
             if limit:

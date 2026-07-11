@@ -79,6 +79,10 @@ class ResolvedReliability:
     max_concurrent_runs: int
     queue_depth: int
     overflow_policy: str
+    # Per-conversation outbound delivery ordering for the durable outbox.
+    # ``"strict"`` gives per-lane FIFO (production preset); ``"best_effort"``
+    # keeps the historic global-order behaviour (default / off presets).
+    outbound_ordering: str = "best_effort"
 
 
 def normalize_reliability(reliability: Optional[str]) -> Optional[str]:
@@ -113,6 +117,7 @@ def resolve_reliability(
     queue_depth: int = 0,
     overflow_policy: str = "reject",
     admission_policy: Optional[object] = None,
+    outbound_ordering: Optional[str] = None,
 ) -> ResolvedReliability:
     """Compose a reliability preset with explicit constructor overrides.
 
@@ -127,6 +132,9 @@ def resolve_reliability(
         overflow_policy: Explicit overflow behaviour when the queue is full.
         admission_policy: Explicit admission policy object; when supplied the
             preset does not synthesise admission knobs (the policy wins).
+        outbound_ordering: Explicit per-conversation outbound ordering
+            (``"strict"`` | ``"best_effort"``); ``None`` means "let the preset
+            decide" (``strict`` for production, ``best_effort`` otherwise).
 
     Returns:
         A :class:`ResolvedReliability` carrying the effective knobs.
@@ -141,6 +149,20 @@ def resolve_reliability(
 
     explicit_admission = admission_policy is not None or resolved_max > 0
 
+    if outbound_ordering is not None and outbound_ordering not in (
+        "strict",
+        "best_effort",
+    ):
+        raise ValueError(
+            f"outbound_ordering must be 'strict' or 'best_effort', "
+            f"got {outbound_ordering!r}"
+        )
+    # An explicit ordering always wins; otherwise only production upgrades to
+    # strict, keeping default/off backward compatible.
+    resolved_ordering = outbound_ordering or (
+        "strict" if profile == "production" else "best_effort"
+    )
+
     if profile == "off":
         # Preserve today's immediate-teardown / unbounded-dispatch behaviour,
         # but never override an explicit opt-in.
@@ -151,6 +173,7 @@ def resolve_reliability(
             max_concurrent_runs=resolved_max,
             queue_depth=resolved_queue,
             overflow_policy=resolved_overflow,
+            outbound_ordering=resolved_ordering,
         )
 
     if profile == "production":
@@ -169,6 +192,7 @@ def resolve_reliability(
             max_concurrent_runs=resolved_max,
             queue_depth=resolved_queue,
             overflow_policy=resolved_overflow,
+            outbound_ordering=resolved_ordering,
         )
 
     # profile in (None, "default"): a sane small drain window so a restart does
@@ -180,6 +204,7 @@ def resolve_reliability(
         max_concurrent_runs=resolved_max,
         queue_depth=resolved_queue,
         overflow_policy=resolved_overflow,
+        outbound_ordering=resolved_ordering,
     )
 
 
