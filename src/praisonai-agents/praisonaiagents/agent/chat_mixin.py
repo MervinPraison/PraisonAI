@@ -619,7 +619,21 @@ Your Goal: {self.goal}"""
         try:
             from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
-            self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
+            _results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
+            # Fail closed on a blocking hook/plugin: a POLICY/GUARDRAIL that
+            # denies the advertised tool surface must actually withhold it,
+            # not just rewrite it. Dropping every definition keeps the model
+            # from being offered a tool a guardrail refused.
+            if self._hook_runner.is_blocked(_results):
+                _reason = next(
+                    (getattr(r.output, "reason", None) for r in _results
+                     if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                    None,
+                ) or "Blocked by hook"
+                logging.warning(
+                    f"[before-tool-definitions] tool definitions blocked by hook: {_reason}"
+                )
+                return []
             # Adopt mutations, mirroring how BEFORE_LLM adopts its payload.
             return _inp.tool_definitions
         except Exception as _e:
@@ -637,7 +651,18 @@ Your Goal: {self.goal}"""
         try:
             from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
-            await self._hook_runner.execute(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
+            _results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
+            # Fail closed on a blocking hook/plugin (see sync variant).
+            if self._hook_runner.is_blocked(_results):
+                _reason = next(
+                    (getattr(r.output, "reason", None) for r in _results
+                     if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                    None,
+                ) or "Blocked by hook"
+                logging.warning(
+                    f"[before-tool-definitions] tool definitions blocked by hook: {_reason}"
+                )
+                return []
             return _inp.tool_definitions
         except Exception as _e:
             logging.debug(f"[before-tool-definitions] async hook skipped: {_e}")
@@ -1172,7 +1197,19 @@ Your Goal: {self.goal}"""
             model=self.llm if isinstance(self.llm, str) else str(self.llm),
             temperature=temperature
         )
-        self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
+        _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
+        # Honour a blocking BEFORE_LLM hook/plugin (POLICY/GUARDRAIL) by
+        # refusing to dispatch the request, mirroring how BEFORE_TOOL/BEFORE_AGENT
+        # enforce blocks. Without this, a plugin that returns PluginDecision.deny()
+        # (or raises GuardrailBlocked) would fail open and still hit the model.
+        if self._hook_runner.is_blocked(_before_llm_results):
+            _block_reason = next(
+                (getattr(r.output, "reason", None) for r in _before_llm_results
+                 if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                None,
+            ) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+            return f"[LLM request blocked by hook: {_block_reason}]"
         # C7 - honour any BEFORE_LLM hook that mutated the message stream
         # (e.g. PII redactor). The runner applies modified_input in-place on
         # before_llm_input.messages; adopt that value for the actual LLM call.
@@ -3536,15 +3573,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_input=arguments,
                         )
                         _before_results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL, _before_tool_input)
-                        if self._hook_runner.is_blocked(_before_results):
-                            _block_reason = next(
-                                (r.output.get_reason() for r in _before_results if r.output and r.output.is_blocking()),
-                                "Blocked by hook"
-                            )
-                            results.append(f"[Tool blocked by hook: {_block_reason}]")
-                            continue
+                        _tool_blocked = self._hook_runner.is_blocked(_before_results)
                     except Exception as _hook_err:
                         logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
+                        _tool_blocked = False
+                    if _tool_blocked:
+                        # Reason extraction must not be able to re-open a block:
+                        # use attributes present on both HookResult (plugin
+                        # bridge) and HookOutput, defaulting safely.
+                        _block_reason = next(
+                            (getattr(r.output, "reason", None) for r in _before_results
+                             if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                            None,
+                        ) or "Blocked by hook"
+                        results.append(f"[Tool blocked by hook: {_block_reason}]")
+                        continue
 
                     # Route through safety pipeline instead of direct execution
                     # Pass the tools list to honor task-scoped tools

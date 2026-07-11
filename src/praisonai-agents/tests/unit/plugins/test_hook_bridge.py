@@ -438,3 +438,113 @@ class TestDecisionPropagation:
         results = runner.execute_sync(HookEvent.BEFORE_TOOL, data)
         assert runner.is_blocked(results) is False
         assert data.tool_input.get("injected") is True
+
+
+class BlockToolDefsPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(
+            name="blocktooldefs", hooks=[PluginHook.BEFORE_TOOL_DEFINITIONS]
+        )
+
+    def before_tool_definitions(self, definitions):
+        return PluginDecision.block("Dangerous tool surface not permitted")
+
+
+class BlockLLMPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="blockllm", hooks=[PluginHook.BEFORE_LLM])
+
+    def before_llm(self, messages, context):
+        return PluginDecision.deny("LLM request refused by policy")
+
+
+class RewriteToolDefsPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(
+            name="rewritetooldefs", hooks=[PluginHook.BEFORE_TOOL_DEFINITIONS]
+        )
+
+    def before_tool_definitions(self, definitions):
+        defs = list(definitions)
+        defs.append({"type": "function", "function": {"name": "extra"}})
+        return defs
+
+
+def _runner_with(plugin):
+    reg = HookRegistry()
+    mgr = PluginManager()
+    mgr.register(plugin)
+    mgr.wire_into_hook_registry(reg)
+    return HookRunner(registry=reg, cwd=os.getcwd())
+
+
+def _make_agent_stub(runner):
+    """Concrete ChatMixin subclass carrying only the attributes the
+    ``_apply_before_tool_definitions_hook`` helper reads at runtime."""
+    from praisonaiagents.agent.chat_mixin import ChatMixin
+
+    class _AgentStub(ChatMixin):
+        def __init__(self):
+            self._hook_runner = runner
+            self.name = "a"
+            self._session_id = "s"
+            self.llm = "gpt-test"
+
+    return _AgentStub()
+
+
+class TestCallerEnforcement:
+    """Regression tests: the runtime callers actually HONOUR block decisions
+    on the BEFORE_LLM and BEFORE_TOOL_DEFINITIONS paths (previously fail-open).
+    """
+
+    def test_before_tool_definitions_block_drops_tools(self):
+        agent = _make_agent_stub(_runner_with(BlockToolDefsPlugin()))
+        tools = [{"type": "function", "function": {"name": "dangerous"}}]
+        out = agent._apply_before_tool_definitions_hook(tools)
+        assert out == []
+
+    def test_before_tool_definitions_rewrite_still_adopted(self):
+        agent = _make_agent_stub(_runner_with(RewriteToolDefsPlugin()))
+        tools = [{"type": "function", "function": {"name": "base"}}]
+        out = agent._apply_before_tool_definitions_hook(tools)
+        names = [t["function"]["name"] for t in out]
+        assert "extra" in names
+
+    def test_before_tool_definitions_no_hooks_passthrough(self):
+        reg = HookRegistry()
+        runner = HookRunner(registry=reg, cwd=os.getcwd())
+        agent = _make_agent_stub(runner)
+        tools = [{"type": "function", "function": {"name": "base"}}]
+        out = agent._apply_before_tool_definitions_hook(tools)
+        assert out == tools
+
+    def test_before_tool_definitions_enforces_via_public_api(self):
+        # The blocking hook input surfaces is_blocked through the runner,
+        # proving the caller has the signal it needs to fail closed.
+        from praisonaiagents.hooks.events import BeforeToolDefinitionsInput
+
+        runner = _runner_with(BlockToolDefsPlugin())
+        inp = BeforeToolDefinitionsInput(
+            session_id="s", cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_TOOL_DEFINITIONS,
+            timestamp=str(time.time()), agent_name="a",
+            tool_definitions=[{"type": "function", "function": {"name": "x"}}],
+        )
+        results = runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, inp)
+        assert runner.is_blocked(results) is True
+
+    def test_before_llm_block_signal_available(self):
+        from praisonaiagents.hooks.events import BeforeLLMInput
+
+        runner = _runner_with(BlockLLMPlugin())
+        inp = BeforeLLMInput(
+            session_id="s", cwd=os.getcwd(), event_name=HookEvent.BEFORE_LLM,
+            timestamp=str(time.time()), agent_name="a",
+            messages=[{"role": "user", "content": "hi"}], model="gpt-test",
+        )
+        results = runner.execute_sync(HookEvent.BEFORE_LLM, inp)
+        assert runner.is_blocked(results) is True
