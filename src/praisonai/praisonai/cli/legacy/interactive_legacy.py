@@ -79,6 +79,9 @@ def _start_interactive_mode(self, args):
             'error_tasks': [],  # Queue of error tasks to display
             'tool_activity': None,  # Current tool being used
             'last_status_line': None,  # For transient status updates
+            'stream_deltas': queue_module.Queue(),  # Real streaming deltas (worker -> display)
+            'stream_active': False,  # True while a turn is actively streaming
+            'stream_header_shown': False,  # Whether the streaming header was printed
         }
         
         # Task counter for unique IDs (FIFO position tracking)
@@ -220,17 +223,50 @@ def _start_interactive_mode(self, args):
             """
             while display_running['value']:
                 try:
-                    # Check for completed tasks to display (FIFO order guaranteed)
-                    if worker_state['completed_tasks']:
+                    # Render real streaming deltas as they arrive from the worker.
+                    # This replaces the previous post-hoc simulated word replay:
+                    # text now appears incrementally, in real time-to-first-token.
+                    stream_deltas = worker_state.get('stream_deltas')
+                    if stream_deltas is not None:
+                        drained_any = False
+                        while True:
+                            try:
+                                delta = stream_deltas.get_nowait()
+                            except queue_module.Empty:
+                                break
+                            if delta is None:
+                                continue
+                            # First delta of a turn: clear status line + print header.
+                            if not worker_state.get('stream_header_shown'):
+                                if worker_state.get('last_status_line'):
+                                    console.print("\r" + " " * 80 + "\r", end="")
+                                    worker_state['last_status_line'] = None
+                                console.print()  # New line before response
+                                if verbose_mode:
+                                    console.print("[bold blue]A:[/bold blue] ", end="")
+                                worker_state['stream_header_shown'] = True
+                            console.print(delta, end="")
+                            sys.stdout.flush()
+                            drained_any = True
+                        if drained_any:
+                            # Yield briefly so input/status threads stay responsive.
+                            time.sleep(0.001)
+
+                    # Check for completed tasks to display (FIFO order guaranteed).
+                    # Defer finalisation until the delta queue is fully drained so the
+                    # last streamed chunks are not clipped by the completion path.
+                    deltas_pending = (
+                        stream_deltas is not None and not stream_deltas.empty()
+                    )
+                    if worker_state['completed_tasks'] and not deltas_pending:
                         task = worker_state['completed_tasks'].pop(0)
                         response = task.get('response', '')
+                        streamed = task.get('streamed', False)
                         
                         # Clear any transient status line
                         if worker_state.get('last_status_line'):
                             console.print("\r" + " " * 80 + "\r", end="")
                             worker_state['last_status_line'] = None
-                        
-                        console.print()  # New line before response
                         
                         if verbose_mode:
                             # VERBOSE: Full task lifecycle with metadata
@@ -240,18 +276,22 @@ def _start_interactive_mode(self, args):
                             word_count = len(response.split()) if response else 0
                             q_display = question[:80] + "..." if len(question) > 80 else question
                             
-                            console.print(f"[bold cyan]─── Task #{task_id} completed ({elapsed:.1f}s, {word_count} words) ───[/bold cyan]")
+                            if not streamed:
+                                console.print()  # New line before response
+                            console.print(f"\n[bold cyan]─── Task #{task_id} completed ({elapsed:.1f}s, {word_count} words) ───[/bold cyan]")
                             console.print(f"[bold green]Q:[/bold green] {q_display}")
-                            console.print(f"[bold blue]A:[/bold blue] ", end="")
+                            if not streamed:
+                                console.print(f"[bold blue]A:[/bold blue] ", end="")
                         
-                        # Stream response (both modes)
-                        if response:
-                            words = response.split()
-                            for i, word in enumerate(words):
-                                console.print(word + " ", end="")
-                                if i % 20 == 19:
-                                    time.sleep(0.003)
-                        console.print()
+                        if streamed:
+                            # Text already rendered live via stream_deltas; just finalise.
+                            console.print()
+                        else:
+                            # Fallback path (streaming unavailable): print the full text.
+                            console.print()  # New line before response
+                            if response:
+                                console.print(response, end="")
+                            console.print()
                         
                         if verbose_mode:
                             task_id = task.get('task_id', 0)
@@ -1264,8 +1304,37 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         
                         live_status.update_status(f"Task #{task_id}: Calling LLM...")
                         
-                        response = agent.chat(prompt, stream=False)
-                        response_str = str(response) if response else ""
+                        # Consume REAL token streaming from core (iter_stream yields
+                        # incremental chunks) and push each delta to the display thread
+                        # so text renders as it is generated — real time-to-first-token
+                        # instead of the previous post-hoc simulated word replay.
+                        response_str = ""
+                        streamed = False
+                        stream_deltas = worker_state.get('stream_deltas')
+                        try:
+                            worker_state['stream_header_shown'] = False
+                            worker_state['stream_active'] = True
+                            for chunk in agent.iter_stream(prompt):
+                                if chunk:
+                                    response_str += chunk
+                                    if stream_deltas is not None:
+                                        stream_deltas.put(chunk)
+                            streamed = True
+                        except Exception:
+                            # If chunks were already emitted to the live display,
+                            # do NOT re-run the prompt via chat() — that would show
+                            # partial streamed tokens followed by a full second
+                            # answer. Keep the partial streamed text as-is and let
+                            # the display finalise it. Only fall back to the
+                            # non-streamed path when nothing streamed yet.
+                            if response_str:
+                                streamed = True
+                            else:
+                                response = agent.chat(prompt, stream=False)
+                                response_str = str(response) if response else ""
+                                streamed = False
+                        finally:
+                            worker_state['stream_active'] = False
                         
                         # Calculate elapsed time
                         elapsed = time.time() - start_time
@@ -1277,6 +1346,7 @@ def _start_execution_worker(self, tools_list, console, session_state):
                             'response': response_str,
                             'elapsed': elapsed,
                             'status': 'completed',
+                            'streamed': streamed,
                         }
                         worker_state['completed_tasks'].append(completed_task)
                         
@@ -1421,29 +1491,43 @@ def _process_interactive_prompt(self, prompt, tools_list, console, show_profilin
         
         timings['llm_start'] = time.time()
         
-        # Use chat method (streaming is handled internally by verbose mode)
-        response = agent.chat(prompt, stream=False)
-        
+        # Consume REAL token streaming from core: render each incremental chunk
+        # as it is generated (real time-to-first-token) rather than replaying a
+        # finished string word-by-word with fixed sleeps.
+        timings['display_start'] = time.time()
+        response_str = ""
+        streamed = False
+        try:
+            for chunk in agent.iter_stream(prompt):
+                if chunk:
+                    response_str += chunk
+                    console.print(chunk, end="")
+                    sys.stdout.flush()
+            streamed = True
+            if response_str:
+                console.print()  # Final newline
+        except Exception:
+            if response_str:
+                # Chunks were already printed to the console — do NOT re-run the
+                # prompt via chat(), otherwise the user sees partial streamed
+                # output followed by a full second answer. Keep the partial
+                # streamed text and just terminate the line.
+                streamed = True
+                console.print()  # Final newline
+            else:
+                # Nothing streamed yet: fall back to the non-streamed path.
+                response = agent.chat(prompt, stream=False)
+                response_str = str(response) if response else ""
+                if response_str:
+                    console.print(response_str)
         timings['llm_end'] = time.time()
+        timings['display_end'] = time.time()
         
         # Check if tools were used by looking at agent's tool execution history
-        if hasattr(agent, '_tool_calls') and agent._tool_calls:
+        if not streamed and hasattr(agent, '_tool_calls') and agent._tool_calls:
             for tool_call in agent._tool_calls:
                 tool_name = tool_call.get('name', 'unknown')
                 console.print(f"[dim]⚙ Used tool: {tool_name}[/dim]")
-        
-        # Print response with simulated streaming effect
-        timings['display_start'] = time.time()
-        response_str = str(response) if response else ""
-        if response_str:
-            words = response_str.split()
-            for i, word in enumerate(words):
-                console.print(word + " ", end="")
-                sys.stdout.flush()
-                if i % 15 == 14:  # Small pause every 15 words for streaming effect
-                    time.sleep(0.005)
-            console.print()  # Final newline
-        timings['display_end'] = time.time()
         
         # Update session state with token estimates and history
         if session_state is not None:
