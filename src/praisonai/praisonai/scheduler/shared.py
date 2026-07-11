@@ -39,6 +39,14 @@ class ScheduleParser:
         if expr.lower().startswith("cron:"):
             return ScheduleParser._parse_cron_to_interval(expr[5:].strip())
 
+        # Wrapper-specific backward-compat: bare ``*/N`` (no unit) means N
+        # seconds. Core ``parse_schedule`` requires a unit suffix, so handle
+        # the unit-less case here to avoid rejecting previously-valid configs.
+        if expr.startswith("*/"):
+            part = expr[2:].strip()
+            if part.isdigit():
+                return int(part)
+
         # Delegate the shared grammar to the single core owner.
         from praisonaiagents.scheduler.parser import parse_schedule
 
