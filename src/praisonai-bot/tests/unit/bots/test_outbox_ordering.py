@@ -206,3 +206,33 @@ def test_legacy_db_migrates_lane_key(tmp_path):
     assert lane == "telegram:9"
     # And it is offered as its lane head under strict ordering.
     assert [e.idempotency_key for e in q._get_pending_entries()] == ["old"]
+
+
+def test_setup_durable_delivery_forwards_ordering(tmp_path):
+    """The durable adapter mixin must propagate ``ordering`` into the outbox.
+
+    Regression guard: ``resolve_reliability('production')`` resolves to
+    ``strict`` but that value is worthless unless the outbox construction path
+    honours it. This asserts the wiring so ``production`` genuinely enforces
+    per-lane FIFO instead of silently staying best-effort.
+    """
+    from praisonai_bot.bots._durable_adapter import DurableAdapterMixin
+
+    class _Adapter(DurableAdapterMixin):
+        pass
+
+    # Default keeps historic best-effort behaviour.
+    a = _Adapter()
+    a.setup_durable_delivery(outbox_path=str(tmp_path / "d.sqlite"), platform="telegram")
+    assert a.outbox is not None
+    assert a.outbox.ordering == "best_effort"
+
+    # Explicit / preset-driven strict ordering is forwarded to the queue.
+    b = _Adapter()
+    b.setup_durable_delivery(
+        outbox_path=str(tmp_path / "s.sqlite"),
+        platform="telegram",
+        ordering=resolve_reliability("production").outbound_ordering,
+    )
+    assert b.outbox is not None
+    assert b.outbox.ordering == "strict"

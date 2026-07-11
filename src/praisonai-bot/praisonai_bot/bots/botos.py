@@ -143,6 +143,12 @@ class BotOS:
         max_concurrent_runs = _resolved.max_concurrent_runs
         queue_depth = _resolved.queue_depth
         overflow_policy = _resolved.overflow_policy
+        # Per-conversation outbound ordering resolved from the reliability
+        # preset (``strict`` under ``production``). Exposed so adapters that set
+        # up durable delivery can forward it to their ``OutboundQueue`` and the
+        # production posture actually enforces per-lane FIFO instead of silently
+        # staying best-effort.
+        self._outbound_ordering: str = _resolved.outbound_ordering
 
         # Issue #2375: graceful drain on shutdown. A sane default window is now
         # applied via the reliability preset (Issue #2531) so a restart does not
