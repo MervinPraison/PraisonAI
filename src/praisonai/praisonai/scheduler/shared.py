@@ -8,9 +8,17 @@ class ScheduleParser:
         """
         Parse schedule expression and return interval in seconds.
 
+        The shared grammar (keywords, ``*/N{m,h,s}``, raw seconds) is owned by
+        core ``praisonaiagents.scheduler.parser.parse_schedule``; this wrapper
+        delegates to it and derives an integer interval for the polling loop.
+        The ``cron:`` → best-effort interval collapse is wrapper-specific and
+        stays local, since the interval loop needs an integer rather than a
+        natively-run cron schedule.
+
         Supported formats:
         - "daily" -> 86400 seconds
         - "hourly" -> 3600 seconds
+        - "weekly" -> 604800 seconds
         - "*/30m" -> 1800 seconds (every 30 minutes)
         - "*/1h" -> 3600 seconds (every 1 hour)
         - "60" -> 60 seconds (plain number)
@@ -25,25 +33,29 @@ class ScheduleParser:
         Raises:
             ValueError: If schedule format is not supported
         """
-        expr = schedule_expr.strip().lower()
+        expr = schedule_expr.strip()
 
-        if expr == "daily":
-            return 86400
-        if expr == "hourly":
-            return 3600
-        if expr.isdigit():
-            return int(expr)
-        if expr.startswith("*/"):
-            part = expr[2:]
-            if part.endswith("m"):
-                return int(part[:-1]) * 60
-            if part.endswith("h"):
-                return int(part[:-1]) * 3600
-            if part.endswith("s"):
-                return int(part[:-1])
-            return int(part)
-        if expr.startswith("cron:"):
+        # Wrapper-specific: cron → best-effort integer interval for polling loop.
+        if expr.lower().startswith("cron:"):
             return ScheduleParser._parse_cron_to_interval(expr[5:].strip())
+
+        # Wrapper-specific backward-compat: bare ``*/N`` (no unit) means N
+        # seconds. Core ``parse_schedule`` requires a unit suffix, so handle
+        # the unit-less case here to avoid rejecting previously-valid configs.
+        if expr.startswith("*/"):
+            part = expr[2:].strip()
+            if part.isdigit():
+                return int(part)
+
+        # Delegate the shared grammar to the single core owner.
+        from praisonaiagents.scheduler.parser import parse_schedule
+
+        try:
+            sched = parse_schedule(expr)
+        except ValueError:
+            raise ValueError(f"Unsupported schedule format: {schedule_expr}")
+        if sched.kind == "every" and sched.every_seconds is not None:
+            return sched.every_seconds
         raise ValueError(f"Unsupported schedule format: {schedule_expr}")
 
     @staticmethod
