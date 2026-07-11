@@ -260,17 +260,21 @@ def _load_edit_tools(config: ToolConfig) -> Dict[str, Callable]:
             add_yaml_approved_tools(["edit_file", "apply_patch"])
         except ImportError:
             # Older core without the non-clobbering merge helper: fall back but
-            # preserve any tools already approved in this context.
+            # preserve every tool already approved in this context (not just the
+            # interactive-group ones) by reading the current set directly from
+            # the registry's context-local store before merging.
             try:
                 from praisonaiagents.approval import (
-                    is_yaml_approved,
+                    get_approval_registry,
                     set_yaml_approved_tools,
                 )
-                keep = [
-                    name for name in TOOL_GROUPS["interactive"]
-                    if is_yaml_approved(name)
-                ]
-                set_yaml_approved_tools(keep + ["edit_file", "apply_patch"])
+                registry = get_approval_registry()
+                try:
+                    current = set(registry._yaml_approved_tools.get())
+                except (LookupError, AttributeError):
+                    current = set()
+                merged = current | {"edit_file", "apply_patch"}
+                set_yaml_approved_tools(sorted(merged))
             except Exception as e:
                 logger.debug(f"Could not auto-approve edit tools: {e}")
         except Exception as e:
