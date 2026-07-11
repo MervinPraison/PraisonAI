@@ -10,7 +10,7 @@ from praisonaiagents._logging import get_logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # Import HookEvent at module level for alias (DRY)
 from ..hooks.types import HookEvent
@@ -19,6 +19,55 @@ logger = get_logger(__name__)
 
 # PluginHook is now an alias for HookEvent - single source of truth
 PluginHook = HookEvent
+
+
+class GuardrailBlocked(Exception):
+    """Raised by a plugin lifecycle method to block/deny the current action.
+
+    A ``POLICY``/``GUARDRAIL`` plugin can raise this from any ``before_*``
+    method (``before_tool``, ``before_llm``, ``before_agent``,
+    ``before_message``) to stop the tool call / LLM request / agent run /
+    inbound message. The plugin bridge converts it into a denying
+    ``HookResult`` so the runtime's existing ``is_blocked`` enforcement skips
+    the action and surfaces ``reason``.
+    """
+
+    def __init__(self, reason: str = "Blocked by guardrail plugin"):
+        self.reason = reason
+        super().__init__(reason)
+
+
+class PluginDecision:
+    """Lightweight deny/block signal a plugin method can return.
+
+    This is an alternative to returning a full ``HookResult`` (which requires
+    importing from ``hooks.types``) or raising :class:`GuardrailBlocked`. Return
+    ``PluginDecision.deny(reason)`` or ``PluginDecision.block(reason)`` from a
+    ``before_*`` method to stop the action; the bridge forwards it to the
+    runtime's block enforcement. Returning ``allow()`` (or the usual
+    ``dict``/``str``/``tuple``/``None``) keeps today's rewrite/no-op semantics.
+    """
+
+    __slots__ = ("decision", "reason")
+
+    def __init__(self, decision: str, reason: Optional[str] = None):
+        self.decision = decision
+        self.reason = reason
+
+    @classmethod
+    def allow(cls, reason: Optional[str] = None) -> "PluginDecision":
+        return cls("allow", reason)
+
+    @classmethod
+    def deny(cls, reason: str) -> "PluginDecision":
+        return cls("deny", reason)
+
+    @classmethod
+    def block(cls, reason: str) -> "PluginDecision":
+        return cls("block", reason)
+
+    def is_denied(self) -> bool:
+        return self.decision in ("deny", "block")
 
 class PluginType(str, Enum):
     """Types of plugins that can be registered.
@@ -102,16 +151,30 @@ class Plugin(ABC):
         """Called when an error occurs during agent execution. Observe-only."""
         pass
 
-    def before_agent(self, prompt: str, context: Dict[str, Any]) -> str:
-        """Called before agent execution. Can modify prompt."""
+    def before_agent(
+        self, prompt: str, context: Dict[str, Any]
+    ) -> Union[str, "PluginDecision", None]:
+        """Called before agent execution.
+
+        Return a modified ``prompt`` (rewrite), or a deny/block decision
+        (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to abort the run, or ``None`` for no-op.
+        """
         return prompt
     
     def after_agent(self, response: str, context: Dict[str, Any]) -> str:
         """Called after agent execution. Can modify response."""
         return response
     
-    def before_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Called before tool execution. Can modify args."""
+    def before_tool(
+        self, tool_name: str, args: Dict[str, Any]
+    ) -> Union[Dict[str, Any], "PluginDecision", None]:
+        """Called before tool execution.
+
+        Return modified ``args`` (rewrite), or a deny/block decision
+        (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to skip the tool call, or ``None`` for no-op.
+        """
         return args
     
     def after_tool(self, tool_name: str, result: Any) -> Any:
@@ -125,16 +188,30 @@ class Plugin(ABC):
         they reach the LLM. Can inspect, filter, or rewrite them."""
         return tool_definitions
     
-    def before_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Called before message is processed. Can modify message."""
+    def before_message(
+        self, message: Dict[str, Any]
+    ) -> Union[Dict[str, Any], "PluginDecision", None]:
+        """Called before message is processed.
+
+        Return a modified ``message`` (rewrite), or a deny/block decision
+        (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to drop the inbound message, or ``None``.
+        """
         return message
     
     def after_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Called after message is processed. Can modify message."""
         return message
     
-    def before_llm(self, messages: List[Dict], params: Dict[str, Any]) -> tuple:
-        """Called before LLM call. Can modify messages and params."""
+    def before_llm(
+        self, messages: List[Dict], params: Dict[str, Any]
+    ) -> Union[tuple, "PluginDecision", None]:
+        """Called before LLM call.
+
+        Return a ``(messages, params)`` tuple (rewrite), or a deny/block
+        decision (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to refuse the LLM request, or ``None``.
+        """
         return messages, params
     
     def after_llm(self, response: str, usage: Dict[str, Any]) -> str:

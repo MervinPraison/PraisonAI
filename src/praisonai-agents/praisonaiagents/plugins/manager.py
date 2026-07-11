@@ -676,8 +676,24 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     matching the existing BEFORE_LLM contract.
     """
     from ..hooks.types import HookEvent, HookResult
+    from .plugin import GuardrailBlocked, PluginDecision
 
     base = Plugin
+
+    def _as_decision(result: Any) -> Optional[HookResult]:
+        """Coerce a plugin's return value into a denying ``HookResult``.
+
+        Returns a ``HookResult`` when the plugin signalled an explicit
+        allow/deny/block decision (via ``HookResult`` or ``PluginDecision``),
+        otherwise ``None`` so the caller keeps today's rewrite semantics.
+        """
+        if isinstance(result, HookResult):
+            return result
+        if isinstance(result, PluginDecision):
+            if result.is_denied():
+                return HookResult(decision=result.decision, reason=result.reason)
+            return HookResult.allow(result.reason)
+        return None
 
     def _overrides(method_name: str) -> bool:
         # Declared in PluginInfo.hooks OR overridden on the concrete class
@@ -701,8 +717,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("before_agent"):
         def before_agent_hook(data, _p=plugin):
-            new_prompt = _p.before_agent(getattr(data, "prompt", ""),
-                                         {"agent_name": getattr(data, "agent_name", None)})
+            try:
+                new_prompt = _p.before_agent(getattr(data, "prompt", ""),
+                                             {"agent_name": getattr(data, "agent_name", None)})
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_prompt)
+            if decision is not None:
+                return decision
             if isinstance(new_prompt, str) and hasattr(data, "prompt"):
                 data.prompt = new_prompt
             return HookResult.allow()
@@ -720,7 +742,13 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     if _overrides("before_llm"):
         def before_llm_hook(data, _p=plugin):
             messages = getattr(data, "messages", [])
-            result = _p.before_llm(messages, {"model": getattr(data, "model", "")})
+            try:
+                result = _p.before_llm(messages, {"model": getattr(data, "model", "")})
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(result)
+            if decision is not None:
+                return decision
             if isinstance(result, tuple) and result and isinstance(result[0], list):
                 if hasattr(data, "messages"):
                     data.messages[:] = result[0]
@@ -739,7 +767,13 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     if _overrides("before_tool"):
         def before_tool_hook(data, _p=plugin):
             args = getattr(data, "tool_input", {}) or {}
-            new_args = _p.before_tool(getattr(data, "tool_name", ""), args)
+            try:
+                new_args = _p.before_tool(getattr(data, "tool_name", ""), args)
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_args)
+            if decision is not None:
+                return decision
             if isinstance(new_args, dict) and isinstance(getattr(data, "tool_input", None), dict):
                 data.tool_input.clear()
                 data.tool_input.update(new_args)
@@ -755,7 +789,13 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     if _overrides("before_tool_definitions"):
         def before_tool_definitions_hook(data, _p=plugin):
             defs = getattr(data, "tool_definitions", []) or []
-            new_defs = _p.before_tool_definitions(defs)
+            try:
+                new_defs = _p.before_tool_definitions(defs)
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_defs)
+            if decision is not None:
+                return decision
             if isinstance(new_defs, list) and isinstance(getattr(data, "tool_definitions", None), list):
                 data.tool_definitions[:] = new_defs
             return HookResult.allow()
@@ -764,7 +804,13 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     if _overrides("before_message"):
         def before_message_hook(data, _p=plugin):
             content = getattr(data, "content", "")
-            new = _p.before_message({"content": content})
+            try:
+                new = _p.before_message({"content": content})
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new)
+            if decision is not None:
+                return decision
             if isinstance(new, dict) and "content" in new and hasattr(data, "content"):
                 data.content = new["content"]
             return HookResult.allow()
