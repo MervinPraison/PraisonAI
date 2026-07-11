@@ -35,6 +35,17 @@ def test_usable_budget_subtracts_output_reserve():
     assert il._usable_context_budget(session_state) == 128000 - 8000
 
 
+def test_usable_budget_caps_reserve_on_small_models():
+    # gpt-4 has an 8192-token window; an 8000-token reserve must not swallow it.
+    session_state = {
+        "current_model": "gpt-4",
+        "context_config": {"output_reserve": 8000},
+    }
+    budget = il._usable_context_budget(session_state)
+    assert budget == 8192 - (8192 // 4)
+    assert budget > 1000
+
+
 def test_context_length_error_detection():
     assert il._is_context_length_error(
         Exception("This model's maximum context length is 8192 tokens")

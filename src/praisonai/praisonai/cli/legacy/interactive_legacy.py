@@ -952,6 +952,10 @@ def _usable_context_budget(session_state):
     model = session_state.get('current_model')
     window = _model_context_window(model)
     output_reserve = int(config.get('output_reserve', 8000) or 8000)
+    # Never let the output reserve swallow the whole window; on small-context
+    # models (e.g. gpt-4 with an 8192 window) an 8000-token reserve would leave
+    # almost no usable input budget and trigger compaction on nearly every turn.
+    output_reserve = min(output_reserve, max(1, window // 4))
     return max(1, window - output_reserve)
 
 
@@ -1387,39 +1391,45 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         # building the agent so the turn stays within budget.
                         _maybe_auto_compact(self, console, session_state)
 
-                        conversation_history = session_state.get('conversation_history', [])
-                        
                         live_status.update_status("Creating agent...")
-                        
-                        # Build backstory with context
-                        backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
 
                         # Auto-load AGENTS.md/CLAUDE.md project context (unless --no-context)
+                        _project_context = None
                         if not getattr(getattr(self, 'args', None), 'no_context', False):
-                            project_context = _load_cli_project_context(self)
-                            if project_context:
-                                backstory += "\n\n# Project Context\n" + project_context
+                            _project_context = _load_cli_project_context(self)
 
-                        if conversation_history:
-                            recent = conversation_history[-10:]
-                            context_lines = []
-                            for msg in recent:
-                                role = msg.get('role', 'unknown')
-                                content = msg.get('content', '')[:200]
-                                context_lines.append(f"{role}: {content}")
-                            if context_lines:
-                                backstory += "\n\nRecent conversation context:\n" + "\n".join(context_lines)
-                        
-                        agent = Agent(
-                            name="Assistant",
-                            role="Helpful AI Assistant",
-                            goal="Help the user with their tasks",
-                            backstory=backstory,
-                            tools=tools_list if tools_list else None,
-                            output="minimal",
-                            llm=model
-                        )
-                        
+                        def _build_agent():
+                            # Build the agent from the CURRENT conversation history
+                            # so that a post-compaction retry rebuilds with the
+                            # summarised (smaller) context rather than reusing the
+                            # stale, oversized backstory baked in before compaction.
+                            backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
+                            if _project_context:
+                                backstory += "\n\n# Project Context\n" + _project_context
+
+                            history = session_state.get('conversation_history', [])
+                            if history:
+                                recent = history[-10:]
+                                context_lines = []
+                                for msg in recent:
+                                    role = msg.get('role', 'unknown')
+                                    content = msg.get('content', '')[:200]
+                                    context_lines.append(f"{role}: {content}")
+                                if context_lines:
+                                    backstory += "\n\nRecent conversation context:\n" + "\n".join(context_lines)
+
+                            return Agent(
+                                name="Assistant",
+                                role="Helpful AI Assistant",
+                                goal="Help the user with their tasks",
+                                backstory=backstory,
+                                tools=tools_list if tools_list else None,
+                                output="minimal",
+                                llm=model
+                            )
+
+                        agent = _build_agent()
+
                         live_status.update_status(f"Task #{task_id}: Calling LLM...")
                         
                         # Consume REAL token streaming from core (iter_stream yields
@@ -1453,15 +1463,24 @@ def _start_execution_worker(self, tools_list, console, session_state):
                                 except Exception as chat_exc:
                                     # Reactive safety net: on a context-length
                                     # error, force a compaction (ignoring the
-                                    # proactive threshold) and retry the turn
-                                    # once instead of surfacing the raw provider
-                                    # error.
-                                    if _is_context_length_error(chat_exc):
+                                    # proactive threshold) and retry the turn once
+                                    # instead of surfacing the raw provider error.
+                                    # Skipped when the user has disabled
+                                    # auto-compaction so their history is never
+                                    # rewritten without consent.
+                                    _auto_compact_enabled = (
+                                        session_state.get('context_config', {}) or {}
+                                    ).get('auto_compact', True)
+                                    if _is_context_length_error(chat_exc) and _auto_compact_enabled:
                                         console.print(
                                             "[yellow]Context limit hit; compacting "
                                             "and retrying...[/yellow]"
                                         )
                                         _handle_compact_command(self, console, session_state)
+                                        # Rebuild the agent so the retry uses the
+                                        # compacted history instead of the stale
+                                        # oversized backstory.
+                                        agent = _build_agent()
                                         response = agent.chat(prompt, stream=False)
                                     else:
                                         raise
