@@ -10,7 +10,7 @@ This module uses FULL LAZY LOADING for all heavy dependencies:
 
 This ensures minimal import-time overhead.
 """
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import asyncio
@@ -620,7 +620,45 @@ class BaseAutoGenerator:
             ImportError: If neither litellm nor openai is installed
         """
         return await self._completion_impl(response_model, messages, is_async=True, **kwargs)
-    
+
+    def _run_coro_sync(self, coro: Awaitable[T]) -> T:
+        """Drive an async coroutine to completion from a sync caller.
+
+        Single source of truth so the sync ``generate()`` twins can delegate to
+        their ``agenerate()`` implementation instead of duplicating the body.
+
+        Mirrors the running-loop handling in ``_structured_completion``: when no
+        event loop is running we use the shared async bridge; when a loop is
+        already running (FastAPI handler, Jupyter, async test) ``run_sync``
+        would raise, so we drive the coroutine on a dedicated worker thread with
+        its own loop instead.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if not running_loop:
+            return run_sync(coro)
+
+        result: List[Any] = []
+        error: List[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result.append(asyncio.run(coro))
+            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
+                error.append(e)
+
+        thread = threading.Thread(target=_runner, name="praisonai-sync-generate")
+        thread.start()
+        thread.join()
+        if error:
+            raise error[0]
+        return result[0]
+
     @staticmethod
     def get_available_tools() -> List[str]:
         """Return list of available tools for agent assignment."""
@@ -850,18 +888,8 @@ class AutoGenerator(BaseAutoGenerator):
             path = generator.generate()
             _rich_print(path)
         """
-        response = self._structured_completion(
-            response_model=_get_team_models()['TeamStructure'],
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
-                {"role": "user", "content": self.get_user_content()}
-            ]
-        )
-        json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data, merge=merge)
-        full_path = os.path.abspath(self.agent_file)
-        return full_path
-    
+        return self._run_coro_sync(self.agenerate(merge=merge))
+
     async def agenerate(self, merge=False):
         """
         Async version of generate() - generates a team structure for the specified topic.
@@ -1354,20 +1382,8 @@ Respond with:
         Returns:
             Path to the generated workflow file
         """
-        response = self._structured_completion(
-            response_model=_get_workflow_models()['WorkflowStructure'],
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
-                {"role": "user", "content": self._get_prompt(pattern)}
-            ]
-        )
-        
-        json_data = json.loads(response.model_dump_json())
-        
-        if merge and os.path.exists(self.workflow_file):
-            return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
-        return self._save_workflow(json_data, pattern)
-    
+        return self._run_coro_sync(self.agenerate(pattern=pattern, merge=merge))
+
     async def agenerate(self, pattern: str = "sequential", merge: bool = False) -> str:
         """
         Async version of generate() - Generate a workflow YAML file.
@@ -1708,18 +1724,10 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
         Returns:
             Path to the generated workflow file
         """
-        prompt = self._get_prompt(include_judge, include_approve)
-        
-        response = self._structured_completion(
-            response_model=_get_job_workflow_models()['JobWorkflowStructure'],
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
-                {"role": "user", "content": prompt}
-            ]
+        return self._run_coro_sync(
+            self.agenerate(include_judge=include_judge, include_approve=include_approve)
         )
-        
-        return self._save_workflow(response)
-    
+
     async def agenerate(self, include_judge: bool = True, include_approve: bool = False) -> str:
         """
         Async version of generate() - Generate a job workflow YAML file.
