@@ -621,6 +621,22 @@ class BaseAutoGenerator:
         """
         return await self._completion_impl(response_model, messages, is_async=True, **kwargs)
 
+    async def _structured_completion_async(
+        self, response_model: Type[T], messages: List[Dict], *, is_async: bool, **kwargs
+    ) -> T:
+        """Await the structured-completion ladder with an explicit provider path.
+
+        Lets a single generation coroutine be driven either through the async
+        provider clients (``is_async=True``, from ``agenerate()``) or the sync
+        provider clients (``is_async=False``, from the sync ``generate()``
+        bridge). This preserves the historical behavior where a sync
+        ``generate()`` call used the blocking sync client/network stack, while
+        still routing both entry points through one shared body.
+        """
+        return await self._completion_impl(
+            response_model, messages, is_async=is_async, **kwargs
+        )
+
     def _run_coro_sync(self, coro: Awaitable[T]) -> T:
         """Drive an async coroutine to completion from a sync caller.
 
@@ -888,7 +904,7 @@ class AutoGenerator(BaseAutoGenerator):
             path = generator.generate()
             _rich_print(path)
         """
-        return self._run_coro_sync(self.agenerate(merge=merge))
+        return self._run_coro_sync(self._agenerate_impl(merge=merge, is_async=False))
 
     async def agenerate(self, merge=False):
         """
@@ -908,12 +924,23 @@ class AutoGenerator(BaseAutoGenerator):
                 path = await gen.agenerate()
                 _rich_print(path)
         """
-        response = await self._astructured_completion(
+        return await self._agenerate_impl(merge=merge, is_async=True)
+
+    async def _agenerate_impl(self, merge=False, *, is_async: bool):
+        """Shared generation body for both sync and async entry points.
+
+        The only divergence is ``is_async``, which selects the async provider
+        clients (``agenerate()``) or the blocking sync clients driven on the
+        bridge (sync ``generate()``), preserving the historical sync provider
+        path while keeping merge/save/path-resolution logic in one place.
+        """
+        response = await self._structured_completion_async(
             response_model=_get_team_models()['TeamStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
                 {"role": "user", "content": self.get_user_content()}
-            ]
+            ],
+            is_async=is_async,
         )
         json_data = json.loads(response.model_dump_json())
         self.convert_and_save(json_data, merge=merge)
@@ -1382,7 +1409,9 @@ Respond with:
         Returns:
             Path to the generated workflow file
         """
-        return self._run_coro_sync(self.agenerate(pattern=pattern, merge=merge))
+        return self._run_coro_sync(
+            self._agenerate_impl(pattern=pattern, merge=merge, is_async=False)
+        )
 
     async def agenerate(self, pattern: str = "sequential", merge: bool = False) -> str:
         """
@@ -1396,12 +1425,25 @@ Respond with:
         Returns:
             Path to the generated workflow file
         """
-        response = await self._astructured_completion(
+        return await self._agenerate_impl(pattern=pattern, merge=merge, is_async=True)
+
+    async def _agenerate_impl(
+        self, pattern: str = "sequential", merge: bool = False, *, is_async: bool
+    ) -> str:
+        """Shared generation body for both sync and async entry points.
+
+        ``is_async`` selects the async provider clients (``agenerate()``) or the
+        blocking sync clients driven on the bridge (sync ``generate()``),
+        preserving the historical sync provider path while keeping merge/save
+        logic in one place.
+        """
+        response = await self._structured_completion_async(
             response_model=_get_workflow_models()['WorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
                 {"role": "user", "content": self._get_prompt(pattern)}
-            ]
+            ],
+            is_async=is_async,
         )
         
         json_data = json.loads(response.model_dump_json())
@@ -1725,7 +1767,9 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
             Path to the generated workflow file
         """
         return self._run_coro_sync(
-            self.agenerate(include_judge=include_judge, include_approve=include_approve)
+            self._agenerate_impl(
+                include_judge=include_judge, include_approve=include_approve, is_async=False
+            )
         )
 
     async def agenerate(self, include_judge: bool = True, include_approve: bool = False) -> str:
@@ -1739,14 +1783,29 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
         Returns:
             Path to the generated workflow file
         """
+        return await self._agenerate_impl(
+            include_judge=include_judge, include_approve=include_approve, is_async=True
+        )
+
+    async def _agenerate_impl(
+        self, include_judge: bool = True, include_approve: bool = False, *, is_async: bool
+    ) -> str:
+        """Shared generation body for both sync and async entry points.
+
+        ``is_async`` selects the async provider clients (``agenerate()``) or the
+        blocking sync clients driven on the bridge (sync ``generate()``),
+        preserving the historical sync provider path while keeping prompt/save
+        logic in one place.
+        """
         prompt = self._get_prompt(include_judge, include_approve)
         
-        response = await self._astructured_completion(
+        response = await self._structured_completion_async(
             response_model=_get_job_workflow_models()['JobWorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            is_async=is_async,
         )
         
         return self._save_workflow(response)
