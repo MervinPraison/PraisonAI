@@ -199,6 +199,19 @@ class ApprovalRegistry:
     def set_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
         return self._yaml_approved_tools.set(set(tools))
 
+    def add_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
+        """Merge ``tools`` into the YAML-approved set without clobbering it.
+
+        Unlike :meth:`set_yaml_approved_tools`, this preserves any tools already
+        approved in the current context. Returns a token that can be passed to
+        :meth:`reset_yaml_approved_tools` to restore the prior approval set.
+        """
+        try:
+            current = set(self._yaml_approved_tools.get())
+        except LookupError:
+            current = set()
+        return self._yaml_approved_tools.set(current | set(tools))
+
     def reset_yaml_approved_tools(self, token: contextvars.Token) -> None:
         self._yaml_approved_tools.reset(token)
 

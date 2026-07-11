@@ -103,3 +103,60 @@ def test_whole_file_creation_still_available(tmp_path):
     # Targeted edit is present alongside whole-file creation paths.
     assert "edit_file" in names
     assert "write_file" in names
+
+
+@requires_engine
+def test_auto_approval_does_not_clobber_existing_approvals(tmp_path):
+    """Auto-mode edit-tool approval must merge, not replace, the YAML set.
+
+    Loading the edit tools in ``auto`` mode context-approves ``edit_file``/
+    ``apply_patch`` so they don't block on a console prompt. It must preserve
+    any previously approved workflow tools rather than overwriting the whole
+    set (regression guard for the clobber/leak issue).
+    """
+    from praisonaiagents.approval import (
+        get_approval_registry,
+        set_yaml_approved_tools,
+        reset_yaml_approved_tools,
+    )
+
+    reg = get_approval_registry()
+    token = set_yaml_approved_tools(["my_workflow_tool"])
+    try:
+        get_interactive_tools(
+            groups=["edit"],
+            config=ToolConfig(workspace=str(tmp_path), approval_mode="auto"),
+        )
+        approved = reg._yaml_approved_tools.get()
+        # Newly approved edit tools are present ...
+        assert "edit_file" in approved
+        assert "apply_patch" in approved
+        # ... and the pre-existing approval is not clobbered.
+        assert "my_workflow_tool" in approved
+    finally:
+        reset_yaml_approved_tools(token)
+
+
+@requires_engine
+def test_edit_tools_require_workspace_containment(monkeypatch, tmp_path):
+    """Edit tools must fail closed when workspace containment is unavailable.
+
+    The core engine's no-workspace fallback accepts absolute paths, which under
+    auto-approval could escape the configured workspace, so the loader must not
+    expose ``edit_file``/``apply_patch`` when the ``Workspace`` cannot be built.
+    """
+    import praisonaiagents.workspace as ws
+
+    class _BrokenWorkspace:
+        def __init__(self, *a, **k):
+            raise RuntimeError("containment unavailable")
+
+    monkeypatch.setattr(ws, "Workspace", _BrokenWorkspace)
+
+    tools = get_interactive_tools(
+        groups=["edit"],
+        config=ToolConfig(workspace=str(tmp_path), approval_mode="auto"),
+    )
+    names = {t.__name__ for t in tools}
+    assert "edit_file" not in names
+    assert "apply_patch" not in names

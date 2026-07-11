@@ -63,7 +63,12 @@ class TestToolGroups:
         """Test interactive group is union of all groups."""
         from praisonai.cli.features.interactive_tools import TOOL_GROUPS
         
-        expected = set(TOOL_GROUPS["acp"]) | set(TOOL_GROUPS["lsp"]) | set(TOOL_GROUPS["basic"])
+        expected = (
+            set(TOOL_GROUPS["acp"])
+            | set(TOOL_GROUPS["edit"])
+            | set(TOOL_GROUPS["lsp"])
+            | set(TOOL_GROUPS["basic"])
+        )
         assert set(TOOL_GROUPS["interactive"]) == expected
 
 

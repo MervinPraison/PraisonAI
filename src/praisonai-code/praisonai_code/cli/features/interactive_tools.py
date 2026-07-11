@@ -224,13 +224,20 @@ def _load_edit_tools(config: ToolConfig) -> Dict[str, Callable]:
         logger.debug(f"Edit tools not available: {e}")
         return tools
 
+    # Fail closed on workspace containment: the fallback path inside the core
+    # engine (workspace=None) only rejects ``..`` traversal and still accepts
+    # absolute paths (e.g. ``/etc/hosts``). Combined with auto-approval that
+    # would let an edit escape the configured workspace, so if containment is
+    # unavailable we simply do not expose the edit tools.
     try:
         from pathlib import Path
         from praisonaiagents.workspace import Workspace  # type: ignore
         workspace = Workspace(root=Path(config.workspace))
     except Exception as e:
-        logger.debug(f"Edit tools workspace containment unavailable: {e}")
-        workspace = None
+        logger.warning(
+            f"Edit tools disabled: workspace containment unavailable: {e}"
+        )
+        return tools
 
     engine = EditTools(workspace=workspace)
 
@@ -240,10 +247,32 @@ def _load_edit_tools(config: ToolConfig) -> Dict[str, Callable]:
     # register these as context-approved to avoid a blocking console prompt.
     # Manual/scoped modes leave the normal approval flow (with diff preview)
     # in place.
+    #
+    # Merge into the existing YAML-approved set rather than replacing it:
+    # ``set_yaml_approved_tools`` overwrites the whole context-local set, which
+    # would clobber previously approved workflow tools. ``add_yaml_approved_tools``
+    # unions ``edit_file``/``apply_patch`` into the current context set so no
+    # existing approval is dropped. Approvals are context-local (a contextvar),
+    # so they do not leak across independent agent/task contexts.
     if config.approval_mode == "auto":
         try:
-            from praisonaiagents.approval import set_yaml_approved_tools
-            set_yaml_approved_tools(["edit_file", "apply_patch"])
+            from praisonaiagents.approval import add_yaml_approved_tools
+            add_yaml_approved_tools(["edit_file", "apply_patch"])
+        except ImportError:
+            # Older core without the non-clobbering merge helper: fall back but
+            # preserve any tools already approved in this context.
+            try:
+                from praisonaiagents.approval import (
+                    is_yaml_approved,
+                    set_yaml_approved_tools,
+                )
+                keep = [
+                    name for name in TOOL_GROUPS["interactive"]
+                    if is_yaml_approved(name)
+                ]
+                set_yaml_approved_tools(keep + ["edit_file", "apply_patch"])
+            except Exception as e:
+                logger.debug(f"Could not auto-approve edit tools: {e}")
         except Exception as e:
             logger.debug(f"Could not auto-approve edit tools: {e}")
 
