@@ -900,6 +900,117 @@ Provide a concise summary (max 200 words):"""
     except Exception as e:
         console.print(f"[red]Error compacting: {e}[/red]")
 
+
+# Coarse per-model context-window map used only as a fallback when a precise
+# lookup is unavailable. Values are conservative (input side); the output
+# reserve is subtracted separately by _usable_context_budget().
+_MODEL_CONTEXT_WINDOW = {
+    'gpt-4o': 128000,
+    'gpt-4o-mini': 128000,
+    'gpt-4-turbo': 128000,
+    'gpt-4': 8192,
+    'gpt-3.5-turbo': 16385,
+    'o1': 200000,
+    'o1-mini': 128000,
+    'claude-3-5-sonnet': 200000,
+    'claude-3-5-haiku': 200000,
+    'claude-3-opus': 200000,
+    'claude-3-sonnet': 200000,
+    'claude-3-haiku': 200000,
+    'gemini-1.5-pro': 1000000,
+    'gemini-1.5-flash': 1000000,
+    'gemini-2.0-flash': 1000000,
+}
+
+
+def _model_context_window(model):
+    """Best-effort context-window size (in tokens) for a model name.
+
+    Prefers litellm's model registry when available, then falls back to a
+    coarse built-in map, then a safe default. Never raises.
+    """
+    if not model:
+        return 128000
+    name = str(model).lower().split('/')[-1]
+    try:
+        import litellm  # type: ignore
+        info = litellm.get_model_info(name)
+        window = info.get('max_input_tokens') or info.get('max_tokens')
+        if window:
+            return int(window)
+    except Exception:
+        pass
+    for key, window in _MODEL_CONTEXT_WINDOW.items():
+        if name.startswith(key) or key in name:
+            return window
+    return 128000
+
+
+def _usable_context_budget(session_state):
+    """Usable input-token budget = context window minus the output reserve."""
+    config = session_state.get('context_config', {}) or {}
+    model = session_state.get('current_model')
+    window = _model_context_window(model)
+    output_reserve = int(config.get('output_reserve', 8000) or 8000)
+    return max(1, window - output_reserve)
+
+
+def _maybe_auto_compact(self, console, session_state):
+    """Proactively compact conversation history when nearing the context budget.
+
+    Honours session_state['context_config']['auto_compact'] (write-only until
+    now) and the configured threshold. Reuses the existing _handle_compact_command
+    summariser rather than reimplementing compaction. Returns True if a
+    compaction ran, else False. Never raises.
+    """
+    try:
+        config = session_state.get('context_config', {}) or {}
+        if not config.get('auto_compact', True):
+            return False
+
+        history = session_state.get('conversation_history', []) or []
+        if len(history) < 4:
+            return False
+
+        try:
+            from praisonaiagents.context.tokens import estimate_messages_tokens
+            used_tokens = estimate_messages_tokens(history)
+        except Exception:
+            used_tokens = sum(len(str(m.get('content', ''))) for m in history) // 4
+
+        budget = _usable_context_budget(session_state)
+        threshold = float(config.get('threshold', 0.8) or 0.8)
+
+        if used_tokens < budget * threshold:
+            return False
+
+        console.print(
+            f"[dim]Auto-compacting: ~{used_tokens} tokens ≈ "
+            f"{int(100 * used_tokens / budget)}% of usable budget "
+            f"({budget}).[/dim]"
+        )
+        _handle_compact_command(self, console, session_state)
+        return True
+    except Exception:
+        return False
+
+
+def _is_context_length_error(exc):
+    """Heuristically detect context-window/token-limit errors from a provider."""
+    message = str(exc).lower()
+    markers = (
+        'context length',
+        'context window',
+        'maximum context',
+        'context_length_exceeded',
+        'too many tokens',
+        'reduce the length',
+        'prompt is too long',
+        'string too long',
+    )
+    return any(marker in message for marker in markers)
+
+
 def _handle_context_command(self, console, args, session_state):
     """
     Handle /context command - manage context budgeting and monitoring.
@@ -1269,6 +1380,13 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         warnings.filterwarnings("ignore")
                         
                         model = session_state.get('current_model')
+
+                        # Proactive auto-compaction: if the running history is
+                        # nearing the model's usable context budget and
+                        # auto_compact is enabled, summarise older turns before
+                        # building the agent so the turn stays within budget.
+                        _maybe_auto_compact(self, console, session_state)
+
                         conversation_history = session_state.get('conversation_history', [])
                         
                         live_status.update_status("Creating agent...")
@@ -1330,7 +1448,23 @@ def _start_execution_worker(self, tools_list, console, session_state):
                             if response_str:
                                 streamed = True
                             else:
-                                response = agent.chat(prompt, stream=False)
+                                try:
+                                    response = agent.chat(prompt, stream=False)
+                                except Exception as chat_exc:
+                                    # Reactive safety net: on a context-length
+                                    # error, force a compaction (ignoring the
+                                    # proactive threshold) and retry the turn
+                                    # once instead of surfacing the raw provider
+                                    # error.
+                                    if _is_context_length_error(chat_exc):
+                                        console.print(
+                                            "[yellow]Context limit hit; compacting "
+                                            "and retrying...[/yellow]"
+                                        )
+                                        _handle_compact_command(self, console, session_state)
+                                        response = agent.chat(prompt, stream=False)
+                                    else:
+                                        raise
                                 response_str = str(response) if response else ""
                                 streamed = False
                         finally:
