@@ -1321,11 +1321,18 @@ def _start_execution_worker(self, tools_list, console, session_state):
                                         stream_deltas.put(chunk)
                             streamed = True
                         except Exception:
-                            # Fallback: streaming unavailable for this provider/model.
-                            # Preserve the original non-streamed behaviour.
-                            response = agent.chat(prompt, stream=False)
-                            response_str = str(response) if response else ""
-                            streamed = False
+                            # If chunks were already emitted to the live display,
+                            # do NOT re-run the prompt via chat() — that would show
+                            # partial streamed tokens followed by a full second
+                            # answer. Keep the partial streamed text as-is and let
+                            # the display finalise it. Only fall back to the
+                            # non-streamed path when nothing streamed yet.
+                            if response_str:
+                                streamed = True
+                            else:
+                                response = agent.chat(prompt, stream=False)
+                                response_str = str(response) if response else ""
+                                streamed = False
                         finally:
                             worker_state['stream_active'] = False
                         
@@ -1500,11 +1507,19 @@ def _process_interactive_prompt(self, prompt, tools_list, console, show_profilin
             if response_str:
                 console.print()  # Final newline
         except Exception:
-            # Fallback: streaming unavailable — preserve non-streamed behaviour.
-            response = agent.chat(prompt, stream=False)
-            response_str = str(response) if response else ""
             if response_str:
-                console.print(response_str)
+                # Chunks were already printed to the console — do NOT re-run the
+                # prompt via chat(), otherwise the user sees partial streamed
+                # output followed by a full second answer. Keep the partial
+                # streamed text and just terminate the line.
+                streamed = True
+                console.print()  # Final newline
+            else:
+                # Nothing streamed yet: fall back to the non-streamed path.
+                response = agent.chat(prompt, stream=False)
+                response_str = str(response) if response else ""
+                if response_str:
+                    console.print(response_str)
         timings['llm_end'] = time.time()
         timings['display_end'] = time.time()
         
