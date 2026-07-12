@@ -351,8 +351,14 @@ def _run_direct_prompt_via_adapter(self, prompt):
 
     llm = getattr(getattr(self, "args", None), "llm", None)
     config_list = getattr(self, "config_list", None) or [{"model": llm or "gpt-4o"}]
-    model = llm or config_list[0].get("model", "gpt-4o")
-    llm_config = [{"model": model}]
+    # Preserve the full first config entry so credentials/endpoint fields
+    # (base_url, api_key, api_type, ...) that the adapter's _resolve_llm and the
+    # AutoGen config_list depend on survive. Only the explicit --llm override
+    # replaces the model; a missing model falls back to a sane default.
+    llm_config = [dict(config_list[0])]
+    if llm:
+        llm_config[0]["model"] = llm
+    llm_config[0].setdefault("model", "gpt-4o")
 
     # Canonical one-shot config shape shared with the YAML path; the adapter's
     # spec builder turns this into agents/tasks with a proper expected_output.

@@ -29,6 +29,7 @@ class ObservabilityRun:
 
     sinks: List[Any] = field(default_factory=list)
     prev_emitter: Any = None
+    own_emitter: Any = None
     _emitter_swapped: bool = False
 
 
@@ -40,6 +41,19 @@ class ObservabilityRun:
 # process-wide ``_installed_sinks`` list that made concurrent runs trample
 # each other.
 _run_stack = threading.local()
+
+# Process-wide guard for the global trace emitter swap/restore. The emitter set
+# via ``set_default_emitter`` is a single process-global slot, so concurrent
+# runs on different threads form a logical chain (each run's ``prev_emitter``
+# points at whatever was active when it swapped in). This lock serialises the
+# swap and the restore so the chain can be repaired safely regardless of the
+# order in which overlapping runs finalize (non-LIFO included).
+_emitter_lock = threading.Lock()
+
+# Ordered list of runs that currently hold an emitter swap, oldest first. Used
+# only to repair the ``prev_emitter`` chain when a middle run finalizes out of
+# order. Guarded by ``_emitter_lock``.
+_swapped_runs: List["ObservabilityRun"] = []
 
 
 def _get_run_stack() -> List[ObservabilityRun]:
@@ -154,12 +168,18 @@ def init_observability(
         except Exception:  # noqa: BLE001 -- core trace API unavailable; skip silently
             logger.debug("trace protocol unavailable; skipping sink wiring", exc_info=True)
         else:
-            try:
-                run.prev_emitter = get_default_emitter()
-            except Exception:  # noqa: BLE001 -- older cores may lack the getter
-                run.prev_emitter = None
-            set_default_emitter(TraceEmitter(sink=_FanoutSink(sinks), enabled=True))
-            run._emitter_swapped = True
+            emitter = TraceEmitter(sink=_FanoutSink(sinks), enabled=True)
+            # Serialise capture + swap + registration so an overlapping run on
+            # another thread can never observe a half-updated chain.
+            with _emitter_lock:
+                try:
+                    run.prev_emitter = get_default_emitter()
+                except Exception:  # noqa: BLE001 -- older cores may lack the getter
+                    run.prev_emitter = None
+                run.own_emitter = emitter
+                set_default_emitter(emitter)
+                run._emitter_swapped = True
+                _swapped_runs.append(run)
 
     _get_run_stack().append(run)
 
@@ -218,16 +238,45 @@ def finalize_observability(
         except Exception:  # noqa: BLE001
             logger.debug("sink close failed", exc_info=True)
 
-    # Restore the emitter that was active before this run swapped it in, so the
-    # global default is never left pointing at a closed Fanout.
+    # Restore the emitter chain. Because the global emitter is a single
+    # process-wide slot shared by every thread, overlapping runs form a chain
+    # (each run captured whatever was active when it swapped in). Repair it so:
+    #   * if THIS run is still the active (top) emitter, restore its prev; else
+    #   * a newer run swapped in on top — just splice this run out of the chain
+    #     by pointing whichever run captured us at our own prev, and leave the
+    #     live global emitter untouched.
+    # This keeps traces flowing to the correct sink even when a middle run
+    # finalizes out of LIFO order or two runs overlap across threads.
     if run._emitter_swapped:
         try:
-            from praisonaiagents.trace.protocol import set_default_emitter
-            set_default_emitter(run.prev_emitter)
+            from praisonaiagents.trace.protocol import (
+                get_default_emitter,
+                set_default_emitter,
+            )
         except Exception:  # noqa: BLE001
-            logger.debug("failed to restore previous trace emitter", exc_info=True)
+            logger.debug("failed to import trace emitter API for restore", exc_info=True)
+        else:
+            with _emitter_lock:
+                try:
+                    current = get_default_emitter()
+                except Exception:  # noqa: BLE001
+                    current = None
+                if current is run.own_emitter:
+                    # This run is the live top: hand control back to its prev.
+                    set_default_emitter(run.prev_emitter)
+                else:
+                    # A newer run is on top. Re-parent it onto our prev so that
+                    # when it later restores, it skips our (now closed) emitter.
+                    for other in _swapped_runs:
+                        if other is not run and other.prev_emitter is run.own_emitter:
+                            other.prev_emitter = run.prev_emitter
+                try:
+                    _swapped_runs.remove(run)
+                except ValueError:
+                    pass
 
     run.sinks = []
+    run.own_emitter = None
     run._emitter_swapped = False
 
     # Future: Add other observability providers here
