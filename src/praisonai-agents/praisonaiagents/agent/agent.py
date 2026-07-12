@@ -1730,8 +1730,12 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         # Handle toolsets parameter - resolve named toolset groups
         if toolsets:
             try:
-                from ..toolsets import resolve_toolsets
-                toolset_tool_names = resolve_toolsets(toolsets)
+                from ..toolsets import resolve_toolsets_for_model
+                # Advertise the model-family's preferred edit primitive first
+                # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
+                # non-string models fall back to the byte-for-byte default order.
+                model_id = self.llm if isinstance(self.llm, str) else None
+                toolset_tool_names = resolve_toolsets_for_model(toolsets, model_id)
                 # Remove duplicates with existing tools
                 existing_tool_names = set()
                 for tool in self.tools:

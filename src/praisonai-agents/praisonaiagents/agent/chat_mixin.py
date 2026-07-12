@@ -78,7 +78,11 @@ class ChatMixin:
             return override
         try:
             from ..model_harness import resolve_harness
-            profile = resolve_harness(getattr(self, "llm", None))
+            # self.llm may be a string model id or an LLM object; resolve the
+            # string form only (unknown/object models keep the default profile).
+            model = getattr(self, "llm", None)
+            model_id = model if isinstance(model, str) else None
+            profile = resolve_harness(model_id)
             return profile.base_prompt or ""
         except Exception:
             return ""

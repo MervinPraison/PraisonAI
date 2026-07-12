@@ -95,5 +95,18 @@ def test_coding_toolset_openai_prefers_edit_file_first():
     assert set(tools) == set(reg.resolve_toolset("coding"))
 
 
+def test_resolve_toolsets_for_model_is_model_aware():
+    reg = ToolsetRegistry()
+    baseline = reg.resolve_toolsets(["coding"])
+    # None / unknown model → byte-for-byte identical.
+    assert reg.resolve_toolsets_for_model(["coding"], None) == baseline
+    assert reg.resolve_toolsets_for_model(["coding"], "unknown") == baseline
+    # Anthropic → apply_patch advertised first, same set of tools.
+    claude = reg.resolve_toolsets_for_model(["coding"], "claude-opus-4")
+    ep = [t for t in claude if t in ("edit_file", "apply_patch")]
+    assert ep[0] == "apply_patch"
+    assert set(claude) == set(baseline)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
