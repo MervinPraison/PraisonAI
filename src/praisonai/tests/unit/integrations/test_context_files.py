@@ -4,8 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from types import SimpleNamespace
+
 from praisonai.integration.context_files import (
     PathContextAttacher,
+    build_subtree_context_hook,
+    file_tool_matcher,
     load_context_files,
     load_context_files_for_path,
 )
@@ -216,3 +220,104 @@ def test_no_instruction_files_returns_empty(monorepo):
     _root, foo, _bar = monorepo
     attacher = PathContextAttacher()
     assert attacher.attach_for_path(foo / "main.py") == ""
+
+
+# --- AFTER_TOOL hook wiring -------------------------------------------------
+
+
+def _tool_event(tool_input):
+    """Minimal AfterToolInput stand-in exposing ``tool_input``."""
+    return SimpleNamespace(tool_input=tool_input)
+
+
+def test_hook_injects_subtree_rules_on_file_touch(monorepo):
+    root, foo, _bar = monorepo
+    (root / "AGENTS.md").write_text("ROOT RULES")
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    hook = build_subtree_context_hook(already_loaded="ROOT RULES")
+    result = hook(_tool_event({"filepath": str(foo / "main.py")}))
+
+    assert result is not None
+    assert "FOO RULES" in result.additional_context
+    # Root was already loaded up front -> not re-attached.
+    assert "ROOT RULES" not in result.additional_context
+
+
+def test_hook_dedups_across_subtree_dirs(monorepo):
+    _root, foo, _bar = monorepo
+    sub = foo / "sub"
+    sub.mkdir()
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    hook = build_subtree_context_hook()
+    first = hook(_tool_event({"path": str(foo / "a.py")}))
+    assert first is not None and "FOO RULES" in first.additional_context
+    # Touching a deeper dir walks up through foo again, but FOO RULES was
+    # already emitted, so it is not re-attached.
+    second = hook(_tool_event({"path": str(sub / "b.py")}))
+    assert second is None
+
+
+def test_hook_accepts_alternate_path_keys(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    hook = build_subtree_context_hook()
+    result = hook(_tool_event({"file_path": str(foo / "main.py")}))
+    assert result is not None
+    assert "FOO RULES" in result.additional_context
+
+
+def test_hook_noop_without_path(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("FOO RULES")
+
+    hook = build_subtree_context_hook()
+    assert hook(_tool_event({"command": "ls"})) is None
+    assert hook(_tool_event(None)) is None
+
+
+def test_hook_noop_when_no_instruction_files(monorepo):
+    _root, foo, _bar = monorepo
+    hook = build_subtree_context_hook()
+    assert hook(_tool_event({"filepath": str(foo / "main.py")})) is None
+
+
+def test_hook_respects_char_budget(monorepo):
+    _root, foo, _bar = monorepo
+    (foo / "AGENTS.md").write_text("X" * 500)
+
+    hook = build_subtree_context_hook(max_chars=100)
+    result = hook(_tool_event({"filepath": str(foo / "main.py")}))
+    assert result is not None
+    assert "truncated" in result.additional_context
+
+
+def test_file_tool_matcher_matches_expected_tools():
+    import re
+
+    pattern = file_tool_matcher()
+    for name in (
+        "read_file",
+        "edit_file",
+        "write_file",
+        "list_files",
+        "acp_create_file",
+        "acp_edit_file",
+        "acp_delete_file",
+    ):
+        assert re.match(pattern, name), name
+    assert not re.match(pattern, "bash")
+    assert not re.match(pattern, "internet_search")
+
+
+def test_hook_extracts_alternate_path_keys(project):
+    root, nested = project
+    (nested / "AGENTS.md").write_text("SUBTREE RULES")
+
+    for key in ("file_path", "path", "filename", "target_file"):
+        hook = build_subtree_context_hook()
+        result = hook(_tool_event({key: str(nested / "main.py")}))
+        assert result is not None, key
+        assert "SUBTREE RULES" in result.additional_context, key
