@@ -1151,6 +1151,84 @@ class DefaultSessionStore:
                     return text[:60]
         return str(data.get("session_id", ""))
 
+    # Number of leading/trailing user+assistant messages returned as
+    # "bookends" so a discovery hit reconstructs goal → match → resolution.
+    BOOKEND_SIZE = 2
+    # Sessions whose per-message rate exceeds this (messages / hour of span)
+    # are treated as high-volume automated runs and demoted in ranking so
+    # they cannot crowd a user's interactive history out of the top results.
+    AUTOMATED_RATE_THRESHOLD = 60.0
+    AUTOMATED_DEMOTION = 0.25  # multiply score by this when demoted
+
+    @staticmethod
+    def _is_automated_session(data: Dict[str, Any], messages: List[Any]) -> bool:
+        """Heuristically decide if a session is a high-volume automated run.
+
+        A session is treated as automated when it is explicitly tagged
+        (``source``/``metadata.source`` in {scheduled, automated, cron, system})
+        or when its message rate far exceeds interactive pace.
+        """
+        source = str(
+            data.get("source")
+            or (data.get("metadata") or {}).get("source")
+            or ""
+        ).lower()
+        if source in {"scheduled", "automated", "cron", "system", "batch"}:
+            return True
+        if (data.get("metadata") or {}).get("automated") is True:
+            return True
+
+        if len(messages) < 4:
+            return False
+        try:
+            stamps = [
+                float(m.get("timestamp"))
+                for m in messages
+                if isinstance(m, dict) and m.get("timestamp") is not None
+            ]
+        except (TypeError, ValueError):
+            return False
+        if len(stamps) < 4:
+            return False
+        span_hours = (max(stamps) - min(stamps)) / 3600.0
+        if span_hours <= 0:
+            return False
+        return (len(stamps) / span_hours) > DefaultSessionStore.AUTOMATED_RATE_THRESHOLD
+
+    @staticmethod
+    def _lineage_key(data: Dict[str, Any]) -> Optional[str]:
+        """Return a stable lineage id so reset/compacted continuations of one
+        conversation collapse to a single hit. ``None`` if no lineage is known.
+        """
+        meta = data.get("metadata") or {}
+        for key in ("lineage_id", "root_session_id", "parent_session_id", "thread_id"):
+            val = data.get(key) or meta.get(key)
+            if val:
+                return str(val)
+        return None
+
+    @staticmethod
+    def _bookends(messages: List[Any], size: int) -> Dict[str, List[Dict[str, Any]]]:
+        """Return the first and last ``size`` user/assistant messages."""
+        convo = [
+            {
+                "index": i,
+                "role": m.get("role", ""),
+                "content": m.get("content", ""),
+                "timestamp": m.get("timestamp"),
+            }
+            for i, m in enumerate(messages)
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+        ]
+        if not convo:
+            return {}
+        opening = convo[:size]
+        closing = convo[-size:]
+        # Avoid duplicating messages in short sessions.
+        if len(convo) <= size:
+            closing = []
+        return {"opening": opening, "closing": closing}
+
     @staticmethod
     def _make_snippet(content: str, query: str, width: int = 120) -> str:
         """Build a short snippet centred on the first query match."""
@@ -1187,7 +1265,7 @@ class DefaultSessionStore:
 
         needle = query.lower()
         terms = [t for t in needle.split() if t]
-        hits: List[SessionHit] = []
+        hits: List[tuple] = []
 
         try:
             filenames = os.listdir(self.session_dir)
@@ -1245,22 +1323,41 @@ class DefaultSessionStore:
                     }
                 )
 
-            hits.append(
-                SessionHit(
-                    session_id=data.get("session_id", filename[:-5]),
-                    title=self._session_title(data),
-                    when=data.get("updated_at") or data.get("created_at"),
-                    snippet=self._make_snippet(
-                        messages[best_index].get("content", ""), query
-                    ),
-                    score=total_score,
-                    anchor_index=best_index,
-                    messages=context,
-                )
-            )
+            # Recall ranking: demote high-volume automated sessions so they
+            # can't crowd a user's interactive history out of the top results.
+            if self._is_automated_session(data, messages):
+                total_score *= self.AUTOMATED_DEMOTION
 
-        hits.sort(key=lambda h: (h.score, h.when or ""), reverse=True)
-        return hits[:limit]
+            hit = SessionHit(
+                session_id=data.get("session_id", filename[:-5]),
+                title=self._session_title(data),
+                when=data.get("updated_at") or data.get("created_at"),
+                snippet=self._make_snippet(
+                    messages[best_index].get("content", ""), query
+                ),
+                score=total_score,
+                anchor_index=best_index,
+                messages=context,
+                bookends=self._bookends(messages, self.BOOKEND_SIZE),
+            )
+            hit_lineage = self._lineage_key(data)
+            hits.append((hit_lineage, hit))
+
+        hits.sort(key=lambda item: (item[1].score, item[1].when or ""), reverse=True)
+
+        # Lineage-aware dedup: a reset/compacted continuation of a conversation
+        # collapses to a single (best-scoring) hit.
+        deduped: List[SessionHit] = []
+        seen_lineage: set = set()
+        for lineage, hit in hits:
+            if lineage is not None:
+                if lineage in seen_lineage:
+                    continue
+                seen_lineage.add(lineage)
+            deduped.append(hit)
+            if len(deduped) >= limit:
+                break
+        return deduped
 
     def window(
         self,
