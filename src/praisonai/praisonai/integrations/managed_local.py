@@ -312,11 +312,24 @@ class LocalManagedAgent:
         # Import tools lazily
         tools = []
         compute_bridged_tools = {"execute_command", "read_file", "write_file", "list_files"}
-        
+        resolver = self._get_tool_resolver()
+
         for name in resolved_names:
             try:
-                from praisonaiagents import tools as tool_module
-                func = getattr(tool_module, name, None)
+                # Route through the canonical ToolResolver chain
+                # (local -> core -> praisonai-tools -> plugins) so tools that
+                # resolve elsewhere in the wrapper resolve here too. Fall back
+                # to the historical praisonaiagents.tools getattr lookup when
+                # the resolver is unavailable so behaviour never narrows.
+                func = None
+                if resolver is not None:
+                    try:
+                        func = resolver.resolve(name)
+                    except Exception as e:
+                        logger.debug("[local_managed] resolver failed for %s: %s", name, e)
+                if func is None:
+                    from praisonaiagents import tools as tool_module
+                    func = getattr(tool_module, name, None)
                 if func is not None:
                     # Bridge shell-based tools to compute when available
                     if self._compute and name in compute_bridged_tools:
@@ -344,6 +357,31 @@ class LocalManagedAgent:
                         )
 
         return tools
+
+    def _get_tool_resolver(self):
+        """Return a cached canonical ToolResolver, or None if unavailable.
+
+        The resolver (owned by ``praisonai-code``) walks the full resolution
+        chain (local tools.py -> praisonaiagents.tools -> praisonai-tools ->
+        entry-point plugins), matching how tool names resolve in the YAML /
+        Python / other CLI paths. It is imported lazily and cached; if the
+        optional ``praisonai-code`` package is not installed, callers fall
+        back to the historical ``praisonaiagents.tools`` getattr lookup.
+        """
+        resolver = getattr(self, "_tool_resolver", None)
+        if resolver is not None:
+            return resolver
+        if getattr(self, "_tool_resolver_unavailable", False):
+            return None
+        try:
+            from praisonai_code.tool_resolver import ToolResolver
+            resolver = ToolResolver()
+        except Exception as e:  # praisonai-code optional / import failure
+            logger.debug("[local_managed] ToolResolver unavailable: %s", e)
+            self._tool_resolver_unavailable = True
+            return None
+        self._tool_resolver = resolver
+        return resolver
 
     def _create_compute_bridge_tool(self, tool_name: str, original_func: Callable) -> Callable:
         """Create a compute-bridged version of a tool.
