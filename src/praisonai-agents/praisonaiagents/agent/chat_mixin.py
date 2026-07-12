@@ -65,6 +65,24 @@ class ChatMixin:
             return int(getattr(execution, "max_tool_calls_per_turn", default))
         return default
 
+    def _resolve_harness_base_prompt(self):
+        """Resolve the model-family harness base-prompt fragment, if any.
+
+        Honours an explicit ``harness_base_prompt`` override on the agent when
+        set; otherwise resolves lazily from the active model id. Returns an
+        empty string when no fragment applies (behaviour-preserving default).
+        Never raises: any resolution error collapses to no fragment.
+        """
+        override = getattr(self, "harness_base_prompt", None)
+        if override is not None:
+            return override
+        try:
+            from ..model_harness import resolve_harness
+            profile = resolve_harness(getattr(self, "llm", None))
+            return profile.base_prompt or ""
+        except Exception:
+            return ""
+
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
         
@@ -91,6 +109,13 @@ class ChatMixin:
         system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
+
+        # Prepend the model-family harness base prompt when one applies.
+        # Resolution is lazy and falls back to a behaviour-preserving default
+        # (no fragment) for unknown models, so output is unchanged by default.
+        harness_prompt = self._resolve_harness_base_prompt()
+        if harness_prompt:
+            system_prompt = f"{harness_prompt}\n\n{system_prompt}"
         
         # Add rules context when rules are enabled (default). Discovery is
         # lazy and gated: accessing self.rules_manager triggers a cheap
