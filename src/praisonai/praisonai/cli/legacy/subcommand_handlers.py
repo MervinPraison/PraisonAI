@@ -1156,16 +1156,15 @@ def handle_research_command(self, query: str, model: str = None, verbose: bool =
             if os.path.isfile(tools_path):
                 # Load from file
                 try:
-                    import inspect
-                    from praisonai_code._safe_loader import load_user_module
-                    module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
-                    if module is not None:
-                        # Get all callable functions from the module
-                        for name, obj in inspect.getmembers(module):
-                            if inspect.isfunction(obj) and not name.startswith('_'):
-                                tools_list.append(obj)
-                        if tools_list:
-                            print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                    from praisonai_code.tool_resolver import ToolResolver
+                    funcs = ToolResolver().load_functions_from_module(
+                        tools_path,
+                        functions_only=True,
+                        skip_private=True,
+                    )
+                    if funcs:
+                        tools_list.extend(funcs.values())
+                        print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
                     else:
                         print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                 except Exception as e:
