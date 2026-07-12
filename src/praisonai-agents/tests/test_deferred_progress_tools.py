@@ -179,6 +179,48 @@ def test_parallel_executor_carries_progress_and_deferred():
     assert by_name["b"].result == "b-later"
 
 
+def test_progress_stamped_with_source_identity():
+    received = []
+
+    def execute(name, args, cid, on_progress=None):
+        on_progress(ToolProgress("working"))
+        return "done"
+
+    r = run_single_tool_call(
+        _call(name="deep", cid="call-9"), execute, on_progress=received.append
+    )
+    assert r.progress[0].tool_call_id == "call-9"
+    assert r.progress[0].function_name == "deep"
+    assert received[0].tool_call_id == "call-9"
+    assert received[0].function_name == "deep"
+
+
+def test_parallel_progress_attributable_to_each_tool():
+    seen = []
+
+    def execute(name, args, cid, on_progress=None):
+        on_progress(ToolProgress(f"{name}-tick"))
+        return f"{name}-done"
+
+    calls = [_call(name="a", cid="a"), _call(name="b", cid="b")]
+    ParallelToolCallExecutor(max_workers=2).execute_batch(
+        calls, execute, on_progress=seen.append
+    )
+    by_tool = {p.tool_call_id: p for p in seen}
+    assert by_tool["a"].function_name == "a"
+    assert by_tool["b"].function_name == "b"
+
+
+def test_explicit_progress_source_not_overwritten():
+    def execute(name, args, cid, on_progress=None):
+        on_progress(ToolProgress("x", tool_call_id="custom", function_name="fn"))
+        return "ok"
+
+    r = run_single_tool_call(_call(name="deep", cid="call-9"), execute)
+    assert r.progress[0].tool_call_id == "custom"
+    assert r.progress[0].function_name == "fn"
+
+
 def test_factory_still_returns_expected_executors():
     assert isinstance(create_tool_call_executor(parallel=False), SequentialToolCallExecutor)
     assert isinstance(create_tool_call_executor(parallel=True), ParallelToolCallExecutor)

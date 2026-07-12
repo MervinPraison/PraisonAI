@@ -36,10 +36,16 @@ class ToolProgress:
         text: Human-readable progress message.
         id: Optional stable id so a channel can edit a single draft message.
         replace: If True, this update replaces the prior draft; else appends.
+        tool_call_id: Source tool call id, stamped by the executor so a
+            streaming consumer can attribute concurrent updates to the right
+            tool (important under parallel execution).
+        function_name: Source tool name, stamped by the executor.
     """
     text: str
     id: Optional[str] = None
     replace: bool = True
+    tool_call_id: Optional[str] = None
+    function_name: Optional[str] = None
 
 
 @dataclass
@@ -114,8 +120,16 @@ def _resolve_value(value: Any) -> Any:
     """Await a coroutine result if a tool (or execute_tool_fn) returned one.
 
     Native ``async def`` tools are awaited here so callers never see an
-    un-awaited coroutine. If already inside a running loop we fall back to a
-    dedicated loop in a worker thread to avoid nesting.
+    un-awaited coroutine.
+
+    This helper is only reached from the synchronous executor path. When no
+    loop is running we simply ``asyncio.run`` the coroutine. When a loop is
+    already running on the *current* thread we cannot nest ``asyncio.run``, so
+    the coroutine is driven to completion on a fresh loop in a dedicated worker
+    thread. A tool whose coroutine is bound to the caller's loop (loop-bound
+    clients/locks/sessions) should instead be invoked through the async
+    executor path; for such a tool the resulting cross-loop error is captured
+    as a structured tool error rather than crashing the turn.
     """
     if not inspect.iscoroutine(value):
         return value
@@ -123,7 +137,8 @@ def _resolve_value(value: Any) -> Any:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(value)
-    # Inside a running loop: run the coroutine to completion on its own loop.
+    # Inside a running loop: run the coroutine to completion on its own loop
+    # in a dedicated worker thread to avoid nesting event loops.
     import concurrent.futures as _futures
 
     def _runner() -> Any:
@@ -150,6 +165,12 @@ def run_single_tool_call(
     collected: List[ToolProgress] = []
 
     def _emit(update: ToolProgress) -> None:
+        # Stamp the source so a streaming consumer can attribute concurrent
+        # updates (under parallel execution) to the correct tool call.
+        if update.tool_call_id is None:
+            update.tool_call_id = tool_call.tool_call_id
+        if update.function_name is None:
+            update.function_name = tool_call.function_name
         collected.append(update)
         if on_progress is not None:
             try:
