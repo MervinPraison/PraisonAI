@@ -2390,6 +2390,36 @@ CONCISE SUMMARY:"""
             logger.debug(f"LLM summarization failed, using truncation: {e}")
             raise  # Let caller handle fallback
     
+    def _truncate_context_for_branches(
+        self,
+        previous_output: str,
+        num_branches: int
+    ) -> str:
+        """Truncation-based context summarization for parallel branch distribution.
+        
+        Extracts key information: first part (context) + last part (recent output).
+        """
+        max_chars = min(2500, len(previous_output) // max(num_branches, 2))
+        if len(previous_output) > max_chars:
+            return previous_output[:max_chars * 2 // 3] + "\n\n[... context summarized for parallel efficiency ...]\n\n" + previous_output[-max_chars // 3:]
+        return previous_output
+    
+    def _effective_workers(
+        self,
+        user_max: Optional[int],
+        n: int,
+        label: str = "Parallel"
+    ) -> int:
+        """Compute effective worker count, clamped by item count and default cap."""
+        if user_max is not None:
+            if user_max > DEFAULT_MAX_PARALLEL_WORKERS:
+                logger.info(
+                    f"{label} max_workers={user_max} exceeds default {DEFAULT_MAX_PARALLEL_WORKERS}. "
+                    f"Consider rate limiting if using LLM-backed agents."
+                )
+            return min(user_max, n)
+        return min(DEFAULT_MAX_PARALLEL_WORKERS, n)
+    
     def _execute_parallel(
         self,
         parallel_step: Parallel,
@@ -2423,9 +2453,7 @@ CONCISE SUMMARY:"""
                     optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
                 except Exception:
                     # Fallback to truncation-based summarization
-                    max_chars = min(2500, len(previous_output) // max(num_branches, 2))
-                    if len(previous_output) > max_chars:
-                        optimized_previous = previous_output[:max_chars * 2 // 3] + "\n\n[... context summarized for parallel efficiency ...]\n\n" + previous_output[-max_chars // 3:]
+                    optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
                 
                 if verbose and optimized_previous != previous_output:
                     new_tokens = estimate_tokens_heuristic(optimized_previous)
@@ -2437,15 +2465,7 @@ CONCISE SUMMARY:"""
         
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
-        if user_max is not None:
-            effective_workers = min(user_max, len(parallel_step.steps))
-            if user_max > DEFAULT_MAX_PARALLEL_WORKERS:
-                logger.info(
-                    f"Parallel max_workers={user_max} exceeds default {DEFAULT_MAX_PARALLEL_WORKERS}. "
-                    f"Consider rate limiting if using LLM-backed agents."
-                )
-        else:
-            effective_workers = min(DEFAULT_MAX_PARALLEL_WORKERS, len(parallel_step.steps))
+        effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
         with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
             futures = []
             for idx, step in enumerate(parallel_step.steps):
@@ -2549,15 +2569,7 @@ CONCISE SUMMARY:"""
         if loop_step.parallel and num_items > 1:
             # Parallel execution with configurable worker limits
             user_max = loop_step.max_workers
-            if user_max is not None:
-                max_workers = min(user_max, num_items)
-                if user_max > DEFAULT_MAX_PARALLEL_WORKERS:
-                    logger.info(
-                        f"Loop max_workers={user_max} exceeds default {DEFAULT_MAX_PARALLEL_WORKERS}. "
-                        f"Consider rate limiting if using LLM-backed agents."
-                    )
-            else:
-                max_workers = min(DEFAULT_MAX_PARALLEL_WORKERS, num_items)
+            max_workers = self._effective_workers(user_max, num_items, label="Loop")
             if verbose:
                 step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
                 print(f"⚡🔁 Parallel looping over {num_items} items{step_info} (max_workers={max_workers})...")
@@ -2570,14 +2582,11 @@ CONCISE SUMMARY:"""
                 tokens = estimate_tokens_heuristic(previous_output)
                 # Target: max 800 tokens per branch to stay well under rate limits
                 if tokens > 1000:
-                    max_chars = min(2500, len(previous_output) // max(num_items, 2))
-                    if len(previous_output) > max_chars:
-                        # Extract key information: first part (context) + last part (recent output)
-                        optimized_previous = previous_output[:max_chars * 2 // 3] + "\n\n[... context summarized for parallel efficiency ...]\n\n" + previous_output[-max_chars // 3:]
-                        if verbose:
-                            new_tokens = estimate_tokens_heuristic(optimized_previous)
-                            saved = tokens - new_tokens
-                            print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+                    optimized_previous = self._truncate_context_for_branches(previous_output, num_items)
+                    if verbose and optimized_previous != previous_output:
+                        new_tokens = estimate_tokens_heuristic(optimized_previous)
+                        saved = tokens - new_tokens
+                        print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
             
             # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
             from ..trace.context_events import copy_context_to_callable, get_context_emitter
