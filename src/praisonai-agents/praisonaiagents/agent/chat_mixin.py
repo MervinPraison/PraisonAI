@@ -1161,6 +1161,21 @@ Your Goal: {self.goal}"""
             return None
         return self.fallback_models[fallback_index]
 
+    def _max_retry_depth(self) -> int:
+        """Maximum LLM retry depth honoured by the recovery loop.
+
+        Reads ``max_retries`` from the agent's configured ``RetryBackoffConfig``
+        (``self._retry_config``) when present, so retry behaviour follows the
+        user-configured policy end to end instead of a hardcoded limit. Falls
+        back to ``2`` to preserve the previous default when no retry config is
+        set.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        max_retries = getattr(retry_config, 'max_retries', None)
+        if isinstance(max_retries, int) and max_retries >= 0:
+            return max_retries
+        return 2
+
     def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
         start_time = time.time()
 
@@ -1443,8 +1458,8 @@ Your Goal: {self.goal}"""
                     
                     logging.info(f"[{self.name}] {classification.user_message}")
                     
-                    # Retry with compressed context (recursive call with depth limit)
-                    if _retry_depth < 2:
+                    # Retry with compressed context (recursive call, bounded by configured policy)
+                    if _retry_depth < self._max_retry_depth():
                         return self._chat_completion(
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format, 
@@ -1490,7 +1505,7 @@ Your Goal: {self.goal}"""
                     # Continue to error handling without retry
                 
             elif classification.is_retryable and classification.backoff_seconds > 0:
-                if _retry_depth < 2:  # Limit retry attempts
+                if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                     logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
                     time.sleep(classification.backoff_seconds)
                     return self._chat_completion(
@@ -1599,8 +1614,8 @@ Your Goal: {self.goal}"""
                 
                 logging.info(f"[{self.name}] {classification.user_message}")
                 
-                # Retry with compressed context (recursive call with depth limit)
-                if _retry_depth < 2:
+                # Retry with compressed context (recursive call, bounded by configured policy)
+                if _retry_depth < self._max_retry_depth():
                     # Need to call the full async method that includes error handling
                     try:
                         return await self._execute_unified_achat_completion(
@@ -1658,7 +1673,7 @@ Your Goal: {self.goal}"""
                 # Continue to error handling without retry
             
         elif classification.is_retryable and classification.backoff_seconds > 0:
-            if _retry_depth < 2:  # Limit retry attempts
+            if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                 logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
                 await asyncio.sleep(classification.backoff_seconds)
                 # Need to call the full async method that includes error handling
