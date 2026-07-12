@@ -76,7 +76,11 @@ def session_list(
             get_project_session_store,
             list_project_sessions,
         )
-        from ..utils.project import get_project_id, get_project_name
+        from ..utils.project import (
+            get_project_id,
+            get_project_identity_source,
+            get_project_name,
+        )
 
         # List sessions for specific or current project. For the current
         # project, merge the project-scoped and global default stores so the
@@ -131,7 +135,10 @@ def session_list(
         if not project_id:
             current_project = get_project_name()
             current_id = get_project_id()
-            output.print_info(f"Project: {current_project} (ID: {current_id})")
+            identity_source = get_project_identity_source()
+            output.print_info(
+                f"Project: {current_project} (ID: {current_id}, identity: {identity_source})"
+            )
         
     else:
         # Use global session manager
