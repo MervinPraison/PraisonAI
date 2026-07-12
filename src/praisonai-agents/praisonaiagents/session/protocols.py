@@ -47,10 +47,14 @@ class SessionHit:
     score: float = 0.0
     anchor_index: int = -1
     messages: List[Dict[str, Any]] = field(default_factory=list)
+    # Anchored discovery: the first/last N user+assistant messages of the
+    # session so the agent can reconstruct goal → match → resolution in one
+    # call. ``{"opening": [...], "closing": [...]}``. Empty when unavailable.
+    bookends: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serialisable dict."""
-        return {
+        result = {
             "session_id": self.session_id,
             "title": self.title,
             "when": self.when,
@@ -59,6 +63,9 @@ class SessionHit:
             "anchor_index": self.anchor_index,
             "messages": self.messages,
         }
+        if self.bookends:
+            result["bookends"] = self.bookends
+        return result
 
 
 @dataclass
@@ -189,7 +196,9 @@ class SearchableSessionStoreProtocol(Protocol):
     around an anchor message, and *browse* of recent sessions.
 
     The default JSON store implements this with a dependency-free substring
-    scan. A wrapper may provide an FTS5/SQLite-backed implementation for scale.
+    scan. ``SqliteSessionStore`` provides a stdlib ``sqlite3`` + FTS5-backed
+    implementation for scale (Issue #2927), turning recall into a bounded
+    index lookup instead of a full-directory scan.
 
     Example::
 

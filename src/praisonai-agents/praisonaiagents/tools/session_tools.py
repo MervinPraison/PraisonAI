@@ -3,7 +3,9 @@
 This module provides tools for cross-session conversation recall — letting an
 agent search its *own* past conversation transcripts. It is backed by the
 default session store (``~/.praisonai/sessions/*.json``) and requires no
-optional dependencies. A wrapper may provide an FTS5/SQLite-backed store.
+optional dependencies. For scale, ``praisonaiagents.session.SqliteSessionStore``
+provides a stdlib ``sqlite3`` + FTS5 index so recall is a bounded lookup
+rather than a full-directory scan (Issue #2927).
 
 The ``session_search`` tool has three shapes:
 

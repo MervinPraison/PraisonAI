@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .store import DefaultSessionStore, SessionMessage, SessionData, CompactionCheckpoint
+    from .sqlite_store import SqliteSessionStore
     from .protocols import SessionStoreProtocol
     from .hierarchy import HierarchicalSessionStore, SessionSnapshot, ExtendedSessionData
 
@@ -50,6 +51,11 @@ def __getattr__(name: str):
         from .store import DefaultSessionStore
         _module_cache[name] = DefaultSessionStore
         return DefaultSessionStore
+
+    if name == "SqliteSessionStore":
+        from .sqlite_store import SqliteSessionStore
+        _module_cache[name] = SqliteSessionStore
+        return SqliteSessionStore
     
     if name == "SessionMessage":
         from .store import SessionMessage
@@ -153,6 +159,7 @@ def __getattr__(name: str):
 __all__ = [
     "Session",
     "DefaultSessionStore",
+    "SqliteSessionStore",
     "SessionMessage", 
     "SessionData",
     "CompactionCheckpoint",
