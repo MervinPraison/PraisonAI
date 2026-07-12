@@ -19,13 +19,18 @@ from praisonaiagents.runs import (
 
 
 def test_run_status_terminal_and_active_partition():
-    all_statuses = set(RunStatus)
-    assert ACTIVE_STATUSES | TERMINAL_STATUSES == all_statuses
+    # Every known status is either active or terminal, except the UNKNOWN
+    # forward-compat sentinel which is deliberately neither.
+    classified = ACTIVE_STATUSES | TERMINAL_STATUSES
+    assert classified == set(RunStatus) - {RunStatus.UNKNOWN}
     assert not (ACTIVE_STATUSES & TERMINAL_STATUSES)
     assert RunStatus.RUNNING.is_active
     assert not RunStatus.RUNNING.is_terminal
     assert RunStatus.SUCCEEDED.is_terminal
     assert RunStatus.LOST.is_terminal
+    # UNKNOWN is neither active nor terminal so recovery never finalises it.
+    assert not RunStatus.UNKNOWN.is_active
+    assert not RunStatus.UNKNOWN.is_terminal
 
 
 def test_run_status_is_str_enum():
@@ -53,9 +58,13 @@ def test_run_record_roundtrip():
     assert restored.metadata == {"k": "v"}
 
 
-def test_from_dict_unknown_status_becomes_lost():
+def test_from_dict_unknown_status_becomes_unknown():
+    # A status a newer writer introduced must not be finalised as LOST here:
+    # it maps to the non-terminal UNKNOWN sentinel so the run is not dropped.
     rec = RunRecord.from_dict({"run_id": "r1", "status": "bogus"})
-    assert rec.status == RunStatus.LOST
+    assert rec.status == RunStatus.UNKNOWN
+    assert not rec.status.is_terminal
+    assert not rec.status.is_active
 
 
 def test_sqlite_ledger_satisfies_protocol():
@@ -141,6 +150,44 @@ def test_list_all_newest_first(ledger):
     ledger.upsert(RunRecord(run_id="b", status=RunStatus.QUEUED))
     ids = [r.run_id for r in ledger.list_all()]
     assert set(ids) == {"a", "b"}
+
+
+def test_upsert_accepts_non_json_native_metadata(ledger):
+    import datetime
+
+    rec = RunRecord(
+        run_id="r1",
+        status=RunStatus.RUNNING,
+        metadata={
+            "when": datetime.datetime(2024, 1, 1, 12, 0, 0),
+            "tags": {"a", "b"},
+        },
+    )
+    # Must not raise: a run with rich metadata is still durably recorded.
+    ledger.upsert(rec)
+    got = ledger.get("r1")
+    assert got is not None
+    assert got.status == RunStatus.RUNNING
+
+
+def test_recover_orphans_does_not_overwrite_completed_run(ledger):
+    # A run that completed (terminal) before recovery runs must be preserved.
+    ledger.upsert(RunRecord(run_id="done", status=RunStatus.SUCCEEDED,
+                            terminal_outcome="ok"))
+    ledger.upsert(RunRecord(run_id="live", status=RunStatus.RUNNING))
+    recovered = ledger.recover_orphans()
+    assert {r.run_id for r in recovered} == {"live"}
+    assert ledger.get("done").status == RunStatus.SUCCEEDED
+    assert ledger.get("done").terminal_outcome == "ok"
+    assert ledger.get("live").status == RunStatus.LOST
+
+
+def test_recover_orphans_preserves_existing_terminal_outcome(ledger):
+    ledger.upsert(RunRecord(run_id="a", status=RunStatus.RUNNING,
+                            terminal_outcome="partial note"))
+    ledger.recover_orphans()
+    assert ledger.get("a").status == RunStatus.LOST
+    assert ledger.get("a").terminal_outcome == "partial note"
 
 
 def test_durability_across_reopen():

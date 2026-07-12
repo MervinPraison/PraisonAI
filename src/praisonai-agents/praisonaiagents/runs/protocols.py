@@ -47,6 +47,10 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     LOST = "lost"
+    #: A status this version does not recognise (e.g. written by a newer
+    #: process). Deliberately neither active nor terminal so recovery never
+    #: finalises — or drops — a run whose real state is unknown here.
+    UNKNOWN = "unknown"
 
     @property
     def is_terminal(self) -> bool:
@@ -116,7 +120,10 @@ class RunRecord:
         try:
             status = RunStatus(status)
         except ValueError:
-            status = RunStatus.LOST
+            # A status this version doesn't recognise (e.g. written by a newer
+            # process). Map to UNKNOWN — neither active nor terminal — so a
+            # still-running run is not wrongly finalised as LOST or dropped.
+            status = RunStatus.UNKNOWN
         return cls(
             run_id=data["run_id"],
             agent_id=data.get("agent_id", "") or "",

@@ -45,6 +45,19 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 """
 
 
+def _dump_metadata(metadata: object) -> str:
+    """Serialise metadata to JSON, never failing on non-JSON-native values.
+
+    ``RunRecord.metadata`` is typed ``Dict[str, Any]``; callers may attach a
+    ``datetime``, ``set``, ``bytes`` or custom object. Falling back to ``str``
+    keeps the run in the durable ledger instead of raising before insert.
+    """
+    try:
+        return json.dumps(metadata)
+    except (TypeError, ValueError):
+        return json.dumps(metadata, default=str)
+
+
 class SQLiteRunLedger(RunLedgerProtocol):
     """Durable, restart-safe run ledger backed by SQLite.
 
@@ -72,6 +85,17 @@ class SQLiteRunLedger(RunLedgerProtocol):
         )
         self._conn.row_factory = sqlite3.Row
         with self._lock:
+            # Wait (instead of failing fast) when another process/connection
+            # holds a write lock; overlapping gateway processes share one file.
+            self._conn.execute("PRAGMA busy_timeout = 5000")
+            # WAL lets readers and a writer proceed concurrently and improves
+            # crash durability. Skip for in-memory DBs where it is a no-op.
+            if db_path != ":memory:":
+                try:
+                    self._conn.execute("PRAGMA journal_mode = WAL")
+                    self._conn.execute("PRAGMA synchronous = NORMAL")
+                except sqlite3.OperationalError:  # pragma: no cover - defensive
+                    pass
             self._conn.executescript(_SCHEMA)
 
     # ── public API (RunLedgerProtocol) ────────────────────────────────
@@ -107,7 +131,7 @@ class SQLiteRunLedger(RunLedgerProtocol):
                     data["terminal_outcome"],
                     data["created_at"],
                     data["updated_at"],
-                    json.dumps(data["metadata"]),
+                    _dump_metadata(data["metadata"]),
                 ),
             )
 
@@ -147,14 +171,30 @@ class SQLiteRunLedger(RunLedgerProtocol):
         process that exited without recording a terminal outcome. They are
         reconciled to ``LOST`` so the gateway can notify their origin channels.
         """
-        active = self.list_active()
+        placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+        active_values = [s.value for s in ACTIVE_STATUSES]
+        outcome = "lost: gateway restarted mid-run"
+        now = time.time()
         recovered: List[RunRecord] = []
-        for record in active:
-            record.status = RunStatus.LOST
-            if not record.terminal_outcome:
-                record.terminal_outcome = "lost: gateway restarted mid-run"
-            self.upsert(record)
-            recovered.append(record)
+        with self._lock:
+            # Atomically transition ONLY rows that are still active. A
+            # concurrent writer that completed a run (terminal status) between
+            # boot and now is not overwritten — the WHERE clause excludes it.
+            self._conn.execute(
+                f"""
+                UPDATE runs
+                SET status = ?,
+                    terminal_outcome = COALESCE(terminal_outcome, ?),
+                    updated_at = ?
+                WHERE status IN ({placeholders})
+                """,
+                [RunStatus.LOST.value, outcome, now, *active_values],
+            )
+            rows = self._conn.execute(
+                "SELECT * FROM runs WHERE status = ? AND updated_at = ?",
+                (RunStatus.LOST.value, now),
+            ).fetchall()
+            recovered = [self._row_to_record(r) for r in rows]
         if recovered:
             logger.info(
                 "Recovered %d orphaned run(s) as LOST on ledger boot",
