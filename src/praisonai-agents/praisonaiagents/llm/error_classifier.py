@@ -322,7 +322,9 @@ _EXCEPTION_NAME_CATEGORIES: Dict[str, ErrorCategory] = {
     "contextwindowexceedederror": ErrorCategory.CONTEXT_LIMIT,
     # litellm exception classes
     "contentpolicyviolationerror": ErrorCategory.INVALID_REQUEST,
-    "budgetexceedederror": ErrorCategory.RATE_LIMIT,
+    # Budget exhaustion is a billing state, not a temporary rate limit — it must
+    # surface immediately rather than being retried under the rate-limit policy.
+    "budgetexceedederror": ErrorCategory.PERMANENT,
     # stdlib / httpx
     "timeouterror": ErrorCategory.TRANSIENT,
     "connectionerror": ErrorCategory.TRANSIENT,
@@ -356,6 +358,24 @@ def _extract_status_code(error: Exception) -> Optional[int]:
     return None
 
 
+# Status codes that some providers overload to encode a more specific
+# condition (e.g. OpenAI returns ``context_length_exceeded`` as an HTTP 400).
+# For these we let the message text refine the classification before falling
+# back to the generic bucket, so context overflow still triggers compression
+# and auth failures are not retried as invalid requests.
+_AMBIGUOUS_STATUS_CODES = frozenset({400})
+
+
+def _refine_ambiguous_category(error: Exception) -> Optional[ErrorCategory]:
+    """Refine a broad status code using message signals (context/auth only)."""
+    error_text = f"{type(error).__name__} {error}".lower()
+    for category in (ErrorCategory.CONTEXT_LIMIT, ErrorCategory.AUTH):
+        for pattern in _ERROR_PATTERNS[category]:
+            if re.search(pattern, error_text, re.IGNORECASE):
+                return category
+    return None
+
+
 def _classify_by_type_and_code(error: Exception) -> Optional[ErrorCategory]:
     """Classify an error by exception type and HTTP status code.
 
@@ -365,6 +385,12 @@ def _classify_by_type_and_code(error: Exception) -> Optional[ErrorCategory]:
     # 1. HTTP status code is the most stable signal across providers.
     status_code = _extract_status_code(error)
     if status_code is not None and status_code in _STATUS_CODE_CATEGORIES:
+        # Some providers overload broad codes (e.g. 400) to encode context
+        # overflow or auth failures — refine those before returning the bucket.
+        if status_code in _AMBIGUOUS_STATUS_CODES:
+            refined = _refine_ambiguous_category(error)
+            if refined is not None:
+                return refined
         return _STATUS_CODE_CATEGORIES[status_code]
 
     # 2. Exception class name (walking the MRO to catch provider subclasses).

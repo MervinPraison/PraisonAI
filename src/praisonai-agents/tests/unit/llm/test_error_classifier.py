@@ -168,6 +168,39 @@ class TestTypeAndCodeClassification:
         # No numeric status/type match -> falls through to message (unknown -> PERMANENT)
         assert classify_error(_ProviderError("something opaque")) == ErrorCategory.PERMANENT
 
+    def test_status_400_context_overflow_refined(self):
+        """A 400 whose message signals context overflow must be CONTEXT_LIMIT.
+
+        Some providers (e.g. OpenAI) return ``context_length_exceeded`` as an
+        HTTP 400; classifying it as INVALID_REQUEST would skip context
+        compression, so the message must refine the broad status code.
+        """
+        class _ProviderError(Exception):
+            status_code = 400
+        error = _ProviderError("This model's maximum context length is 8192 tokens")
+        assert classify_error(error) == ErrorCategory.CONTEXT_LIMIT
+
+    def test_status_400_auth_refined(self):
+        """A 400 whose message signals an auth failure must be AUTH, not retried."""
+        class _ProviderError(Exception):
+            status_code = 400
+        error = _ProviderError("invalid api key provided")
+        assert classify_error(error) == ErrorCategory.AUTH
+
+    def test_status_400_plain_stays_invalid_request(self):
+        """A generic 400 with no specific signal stays INVALID_REQUEST."""
+        class _ProviderError(Exception):
+            status_code = 400
+        assert classify_error(_ProviderError("bad request body")) == ErrorCategory.INVALID_REQUEST
+
+    def test_budget_exceeded_is_permanent(self):
+        """Budget exhaustion is a billing state and must not be retried."""
+        class BudgetExceededError(Exception):
+            pass
+        category = classify_error(BudgetExceededError("Budget has been exceeded"))
+        assert category == ErrorCategory.PERMANENT
+        assert should_retry(category) is False
+
 
 class TestStructuredRetryAfter:
     """Retry-After extraction from structured headers/attributes."""
