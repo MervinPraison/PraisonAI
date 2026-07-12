@@ -94,6 +94,7 @@ class AgentSchedulerHandler:
         max_retries = getattr(args, 'schedule_max_retries', None) or 3
         timeout = getattr(args, 'timeout', None)
         max_cost = getattr(args, 'max_cost', None)
+        deliver = getattr(args, 'schedule_deliver', None) or ''
         
         # Check if name already exists
         existing = state_manager.load_state(name)
@@ -121,7 +122,8 @@ class AgentSchedulerHandler:
             interval=interval,
             max_cost=max_cost,
             timeout=timeout,
-            max_retries=max_retries
+            max_retries=max_retries,
+            deliver=deliver
         )
         
         # Save state
@@ -134,6 +136,7 @@ class AgentSchedulerHandler:
             "timeout": timeout,
             "max_cost": max_cost,
             "max_retries": max_retries,
+            "deliver": deliver,
             "status": "running",
             "started_at": datetime.now().isoformat(),
             "executions": 0,
@@ -370,10 +373,12 @@ class AgentSchedulerHandler:
         new_pid = daemon_manager.start_scheduler_daemon(
             name=name,
             task=state['task'],
+            recipe_name=state.get('recipe_name'),
             interval=state['interval'],
             max_cost=state.get('max_cost'),
             timeout=state.get('timeout'),
-            max_retries=state.get('max_retries', 3)
+            max_retries=state.get('max_retries', 3),
+            deliver=state.get('deliver', '')
         )
         
         state['pid'] = new_pid

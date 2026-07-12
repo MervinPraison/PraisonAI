@@ -105,11 +105,26 @@ class SchedulerDelivery:
 
         channel = (self._target.channel or "").strip()
         if not channel:
-            logger.warning(
-                "Scheduler delivery: token '%s' has no resolvable platform; "
-                "cannot deliver without the full gateway",
-                self._deliver,
-            )
+            symbolic = (self._target.deliver or self._deliver or "").strip().lower()
+            if symbolic in ("origin", "all"):
+                # 'origin' needs the original request's session context and
+                # 'all' needs every configured bot — neither exists in this
+                # lightweight single-channel path. Delivering these requires
+                # the full BotOS gateway; tell the user how to target instead.
+                logger.warning(
+                    "Scheduler delivery: symbolic target '%s' cannot be "
+                    "resolved by the lightweight scheduler delivery path "
+                    "(no origin/session context). Use an explicit "
+                    "'platform' or 'platform:channel_id' token, or run under "
+                    "the full BotOS gateway.",
+                    symbolic,
+                )
+            else:
+                logger.warning(
+                    "Scheduler delivery: token '%s' has no resolvable platform; "
+                    "cannot deliver without the full gateway",
+                    self._deliver,
+                )
             self._unavailable = True
             return False
 
@@ -155,11 +170,18 @@ class SchedulerDelivery:
 
         channel = self._target.channel or ""
         channel_id = self._target.channel_id or ""
+        thread_id = self._target.thread_id or ""
         # Prefer an explicit "platform:channel_id" target; fall back to the
-        # bare platform token so the router resolves its home channel.
+        # bare platform token so the router resolves its home channel. The
+        # router resolves to ``(platform, channel_id)`` and sends to the chat —
+        # it does not (yet) route to a thread, so a ``thread_id`` narrows the
+        # idempotency key (below) but is not part of the route.
         route = f"{channel}:{channel_id}" if channel_id else channel
+        # Fold the thread into the dedup key so two threads in the same chat do
+        # not collapse to one idempotency entry (which would drop the second
+        # thread's message as a duplicate).
         idem = (
-            f"sched:{self._job_id}:{channel}:{channel_id}:"
+            f"sched:{self._job_id}:{channel}:{channel_id}:{thread_id}:"
             f"{_text_digest(text)}"
         )
 

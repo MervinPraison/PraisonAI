@@ -439,6 +439,7 @@ class AgentScheduler(_BaseAgentScheduler):
         max_retries_override: Optional[int] = None,
         timeout_override: Optional[int] = None,
         max_cost_override: Optional[float] = None,
+        deliver: str = "",
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None
     ) -> 'AgentScheduler':
@@ -473,6 +474,7 @@ class AgentScheduler(_BaseAgentScheduler):
             max_retries_override=max_retries_override,
             timeout_override=timeout_override,
             max_cost_override=max_cost_override,
+            deliver=deliver,
             on_success=on_success,
             on_failure=on_failure,
         )

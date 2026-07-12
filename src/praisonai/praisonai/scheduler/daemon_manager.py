@@ -75,7 +75,8 @@ class DaemonManager:
         interval: str = "hourly",
         max_cost: Optional[float] = None,
         timeout: Optional[int] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        deliver: Optional[str] = None
     ) -> int:
         """
         Start a PraisonAI scheduler as daemon.
@@ -88,6 +89,9 @@ class DaemonManager:
             max_cost: Maximum cost budget
             timeout: Timeout per execution
             max_retries: Maximum retry attempts
+            deliver: Optional delivery target token (e.g. "telegram:123456")
+                forwarded to the daemon child so scheduled results are routed
+                to the chat target instead of being silently dropped.
             
         Returns:
             Process ID
@@ -115,6 +119,9 @@ class DaemonManager:
         
         if max_cost:
             command.extend(["--max-cost", str(max_cost)])
+        
+        if deliver:
+            command.extend(["--deliver", deliver])
         
         display_task = recipe_name or task
         return self.start_daemon(name, display_task, interval, command)
