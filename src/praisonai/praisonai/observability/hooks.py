@@ -9,14 +9,45 @@ import os
 import sys
 import inspect
 import logging
+import threading
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Sinks installed via entry-point discovery for the current run. Torn down in
-# finalize_observability so flush()/close() always runs.
-_installed_sinks: List[Any] = []
+
+@dataclass
+class ObservabilityRun:
+    """Per-run observability handle.
+
+    Holds only the sinks installed for a single run plus the trace emitter that
+    was active before this run took over. Teardown restores that emitter and
+    closes only this run's sinks, so concurrent runs never close each other's
+    sinks or leave the global emitter stuck in a Fanout state.
+    """
+
+    sinks: List[Any] = field(default_factory=list)
+    prev_emitter: Any = None
+    _emitter_swapped: bool = False
+
+
+# Thread-local LIFO stack of the runs started on the current thread. ``init``
+# and ``finalize`` are called separately (init in the generator, finalize in
+# each adapter) but on the same thread per run, so a per-thread stack lets
+# finalize tear down exactly the run it belongs to — even when the void-
+# returning legacy signatures are used. This replaces the previous single
+# process-wide ``_installed_sinks`` list that made concurrent runs trample
+# each other.
+_run_stack = threading.local()
+
+
+def _get_run_stack() -> List[ObservabilityRun]:
+    stack = getattr(_run_stack, "runs", None)
+    if stack is None:
+        stack = []
+        _run_stack.runs = stack
+    return stack
 
 
 class _FanoutSink:
@@ -71,8 +102,12 @@ def _factory_wants_tag(factory: Callable) -> bool:
         return False
 
 
-def _install_discovered_sinks(framework_tag: str) -> None:
-    """Discover, instantiate and wire third-party trace sinks (best-effort)."""
+def _instantiate_discovered_sinks(framework_tag: str) -> List[Any]:
+    """Discover and instantiate third-party trace sinks (best-effort).
+
+    Returns the freshly instantiated sinks without touching any process-wide
+    state, so each run owns its own list.
+    """
     sinks: List[Any] = []
     for factory in discover_observability_sinks():
         try:
@@ -81,24 +116,21 @@ def _install_discovered_sinks(framework_tag: str) -> None:
                 sinks.append(sink)
         except Exception:  # noqa: BLE001 -- a broken plugin must not break a run
             logger.debug("observability sink factory %r failed", factory, exc_info=True)
-
-    if not sinks:
-        return
-
-    try:
-        from praisonaiagents.trace.protocol import TraceEmitter, set_default_emitter
-    except Exception:  # noqa: BLE001 -- core trace API unavailable; skip silently
-        logger.debug("trace protocol unavailable; skipping sink wiring", exc_info=True)
-        return
-
-    _installed_sinks.extend(sinks)
-    set_default_emitter(TraceEmitter(sink=_FanoutSink(sinks), enabled=True))
+    return sinks
 
 
-def init_observability(framework_tag: str, *, tags: Optional[List[str]] = None) -> None:
+def init_observability(
+    framework_tag: str, *, tags: Optional[List[str]] = None
+) -> ObservabilityRun:
     """
     Initialize observability providers (AgentOps, etc.) if available.
-    
+
+    Returns a per-run :class:`ObservabilityRun` handle. The handle is also
+    pushed onto a thread-local stack so a decoupled ``finalize_observability``
+    call (which only receives the framework tag) still tears down exactly this
+    run. Callers may keep the handle and pass it back explicitly for the
+    sanctioned, fully-scoped API.
+
     Args:
         framework_tag: Primary framework tag (e.g., "crewai", "autogen_v4")
         tags: Additional tags to include
@@ -107,32 +139,76 @@ def init_observability(framework_tag: str, *, tags: Optional[List[str]] = None) 
     _init_agentops(framework_tag, tags or [])
 
     # Honour the documented "praisonai.observability_sinks" entry-point group so
-    # third-party TraceSinkProtocol implementations are actually loaded.
-    _install_discovered_sinks(framework_tag)
+    # third-party TraceSinkProtocol implementations are actually loaded — but
+    # scope the sinks and the emitter swap to THIS run only.
+    sinks = _instantiate_discovered_sinks(framework_tag)
+    run = ObservabilityRun(sinks=sinks)
+
+    if sinks:
+        try:
+            from praisonaiagents.trace.protocol import (
+                TraceEmitter,
+                get_default_emitter,
+                set_default_emitter,
+            )
+        except Exception:  # noqa: BLE001 -- core trace API unavailable; skip silently
+            logger.debug("trace protocol unavailable; skipping sink wiring", exc_info=True)
+        else:
+            try:
+                run.prev_emitter = get_default_emitter()
+            except Exception:  # noqa: BLE001 -- older cores may lack the getter
+                run.prev_emitter = None
+            set_default_emitter(TraceEmitter(sink=_FanoutSink(sinks), enabled=True))
+            run._emitter_swapped = True
+
+    _get_run_stack().append(run)
 
     # Future: Add other observability providers here
     # _init_langfuse(framework_tag, tags)
     # _init_wandb(framework_tag, tags)
+    return run
 
 
-def finalize_observability(_framework_tag: str, *, status: str = "Success") -> None:
+def finalize_observability(
+    framework_tag: str,
+    *,
+    status: str = "Success",
+    run: Optional[ObservabilityRun] = None,
+) -> None:
     """
     Close observability providers (AgentOps, etc.) if available.
 
     Symmetric with init_observability — always call at run end so dashboards
     don't show sessions stuck "in progress". Errors here are swallowed because
     telemetry must never crash a user run.
-    
+
     Args:
-        _framework_tag: Framework name for context (reserved for future observability providers)
+        framework_tag: Framework name for context (reserved for future observability providers)
         status: Session status ("Success", "Failure", etc.)
+        run: Explicit per-run handle to tear down. When omitted, the most recent
+            run started on this thread is popped and torn down, preserving the
+            legacy void-returning call pattern while staying concurrency-safe.
     """
     _end_agentops(status)
 
-    # Flush + close any entry-point sinks installed for this run. Each call is
-    # guarded independently so a failing flush() still lets close() release the
-    # sink's resources.
-    for sink in _installed_sinks:
+    if run is None:
+        stack = _get_run_stack()
+        run = stack.pop() if stack else None
+    else:
+        # Explicit handle: remove it from the thread-local stack if present so a
+        # later void-call doesn't tear it down twice.
+        stack = _get_run_stack()
+        try:
+            stack.remove(run)
+        except ValueError:
+            pass
+
+    if run is None:
+        return
+
+    # Flush + close only THIS run's sinks. Each call is guarded independently so
+    # a failing flush() still lets close() release the sink's resources.
+    for sink in run.sinks:
         try:
             sink.flush()
         except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
@@ -141,7 +217,18 @@ def finalize_observability(_framework_tag: str, *, status: str = "Success") -> N
             sink.close()
         except Exception:  # noqa: BLE001
             logger.debug("sink close failed", exc_info=True)
-    _installed_sinks.clear()
+
+    # Restore the emitter that was active before this run swapped it in, so the
+    # global default is never left pointing at a closed Fanout.
+    if run._emitter_swapped:
+        try:
+            from praisonaiagents.trace.protocol import set_default_emitter
+            set_default_emitter(run.prev_emitter)
+        except Exception:  # noqa: BLE001
+            logger.debug("failed to restore previous trace emitter", exc_info=True)
+
+    run.sinks = []
+    run._emitter_swapped = False
 
     # Future: Add other observability providers here
     # _end_langfuse(status)
@@ -198,14 +285,16 @@ def observability_session(
         with observability_session(self.name, tags=tags):
             ... run agents ...
     """
-    init_observability(framework_tag, tags=tags)
+    run = init_observability(framework_tag, tags=tags)
     try:
         yield
     finally:
         # status reflects whether an exception is currently propagating
         status = "Failure" if sys.exc_info()[0] is not None else "Success"
         try:
-            finalize_observability(framework_tag, status=status)
+            # Pass the explicit handle so this run's sinks/emitter are torn down
+            # regardless of any nested runs pushed onto the thread-local stack.
+            finalize_observability(framework_tag, status=status, run=run)
         except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
             logger.exception("finalize_observability failed")
 
