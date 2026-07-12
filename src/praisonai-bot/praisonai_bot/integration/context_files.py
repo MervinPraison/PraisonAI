@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 DEFAULT_CANDIDATES = ["AGENTS.md", "agents.md", ".agents/AGENTS.md", "CLAUDE.md"]
+
+# Tool-argument keys that carry a file path across the various file tools
+# (praisonaiagents ``read_file`` uses ``filepath``; praisonai-code tools use
+# ``path``/``file_path``). The first present, string-valued key wins.
+_PATH_ARG_KEYS = ("filepath", "file_path", "path")
 
 
 def _get_git_root(start: Path) -> Optional[Path]:
@@ -279,3 +284,80 @@ def load_context_files_for_path(
     return PathContextAttacher(
         already_loaded, max_chars=max_chars
     ).attach_for_path(file_path)
+
+
+# Tool names that operate on a file and should trigger subtree-rule discovery.
+_FILE_TOOL_MATCHER = r"^(read_file|edit_file|write_file|read|edit|write|apply_patch|str_replace|multi_edit)$"
+
+
+def _extract_tool_path(tool_input: Any) -> Optional[str]:
+    """Pull the target file path out of a tool's input arguments.
+
+    Returns the first present, non-empty string value among ``_PATH_ARG_KEYS``
+    so it works across the differing file-tool argument conventions.
+    """
+    if not isinstance(tool_input, dict):
+        return None
+    for key in _PATH_ARG_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def build_subtree_context_hook(
+    already_loaded: Optional[str] = None,
+    *,
+    max_chars: int = 8000,
+) -> Callable[[Any], Any]:
+    """Build an ``AFTER_TOOL`` hook that lazily attaches subtree instructions.
+
+    Wires the existing :class:`PathContextAttacher` into the neutral core hook
+    substrate: on each file-touching tool call (``read_file``/``edit_file``/
+    ``write_file`` and friends) it resolves the nearest instruction file for the
+    touched directory and, if not already loaded/emitted this session, returns it
+    as ``additional_context`` so the agent sees locally-relevant rules the first
+    time it works in that subtree.
+
+    The returned callable is session-scoped (its attacher owns the dedup and
+    per-directory cache), so create one hook per session/agent run. Register it
+    on an agent's hook registry for ``HookEvent.AFTER_TOOL`` (optionally with
+    ``matcher=file_tool_matcher()`` to skip non-file tools cheaply).
+
+    Args:
+        already_loaded: Up-front instruction text (used only to seed dedup so
+            files already injected at session start are not re-attached).
+        max_chars: Character budget for the total text emitted across the
+            session. ``0`` disables the budget.
+
+    Returns:
+        A function ``hook(hook_input) -> HookResult | None`` suitable for
+        ``HookRegistry.register_function``. Returns ``None`` (no-op) when the
+        tool is not a file tool or nothing new is discovered.
+    """
+    attacher = PathContextAttacher(already_loaded, max_chars=max_chars)
+
+    def _hook(hook_input: Any):
+        tool_input = getattr(hook_input, "tool_input", None)
+        path = _extract_tool_path(tool_input)
+        if not path:
+            return None
+        try:
+            context = attacher.attach_for_path(path)
+        except OSError:
+            return None
+        if not context:
+            return None
+        try:
+            from praisonaiagents.hooks import HookResult
+        except ImportError:
+            return None
+        return HookResult(decision="allow", additional_context=context)
+
+    _hook.__name__ = "subtree_instruction_injection"
+    return _hook
+
+
+def file_tool_matcher() -> str:
+    """Regex matching file-touching tool names for the subtree-context hook."""
+    return _FILE_TOOL_MATCHER
