@@ -27,13 +27,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 6 | 2209 |
 | ✅ Bots | 7 | 28 | 10828 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 113 | 30427 |
+| ✅ CLI | 5 | 113 | 30435 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
 | ✅ Configuration | 3 | 7 | 2537 |
-| ✅ Context Management | 16 | 34 | 12786 |
+| ✅ Context Management | 16 | 34 | 12963 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -44,8 +44,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1932 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 15982 |
-| ✅ Guardrails | 4 | 4 | 1667 |
+| ✅ Gateway | 7 | 48 | 16009 |
+| ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
 | ✅ Hooks | 2 | 9 | 3819 |
 | ✅ Image | 1 | 11 | 1255 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
-| ✅ Plugins | 8 | 3 | 1644 |
+| ✅ Plugins | 8 | 3 | 1879 |
 | ✅ Prompts | 2 | 7 | 1359 |
 | ✅ Providers | 1 | 55 | 7451 |
 | ✅ Query | 1 | 2 | 736 |
@@ -76,7 +76,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 127 | 35498 |
+| ✅ Tools | 12 | 127 | 35516 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
