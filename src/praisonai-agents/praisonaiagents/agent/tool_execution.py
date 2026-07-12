@@ -753,8 +753,13 @@ class ToolExecutionMixin:
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             if not _is_multimodal_result:
-                from ..tools.trust import wrap_if_external
-                result = wrap_if_external(function_name, result)
+                try:
+                    from ..tools.trust import wrap_if_external
+                    result = wrap_if_external(function_name, result)
+                except Exception:
+                    # Trust module unavailable (partial/broken install) must not
+                    # abort tool execution; fall through with the raw result.
+                    pass
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
