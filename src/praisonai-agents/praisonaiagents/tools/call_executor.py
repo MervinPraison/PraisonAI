@@ -11,14 +11,51 @@ Design principles:
 - Thread-safe with bounded workers
 """
 
+import asyncio
 import concurrent.futures
 import contextvars
+import inspect
 import logging
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Protocol
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ..trace.context_events import copy_context_to_callable
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolProgress:
+    """Incremental progress update emitted by a running tool.
+
+    A tool may accept an optional ``on_progress`` callable and emit these
+    while working, so a slow tool (deep research, media generation, a long
+    build) can stream feedback instead of freezing the turn.
+
+    Attributes:
+        text: Human-readable progress message.
+        id: Optional stable id so a channel can edit a single draft message.
+        replace: If True, this update replaces the prior draft; else appends.
+    """
+    text: str
+    id: Optional[str] = None
+    replace: bool = True
+
+
+@dataclass
+class DeferredToolResult:
+    """A handle returned by a tool that started long-running background work.
+
+    Instead of blocking the whole turn, a tool may return this to signal
+    "started; will resolve later". The execution loop records it as pending
+    work and surfaces the ``note`` to the model immediately.
+
+    Attributes:
+        handle_id: Identifier for the background job (used to resolve later).
+        note: Message shown to the model now, e.g. "queued job 42".
+    """
+    handle_id: str
+    note: str = "started; will resolve later"
 
 
 @dataclass
@@ -32,13 +69,140 @@ class ToolCall:
 
 @dataclass 
 class ToolResult:
-    """Result of executing a single tool call."""
+    """Result of executing a single tool call.
+
+    Carries the tool ``result`` plus optional structured error content,
+    streamed ``progress`` updates, and a ``deferred`` handle when the tool
+    hands back pending background work instead of a final value.
+    """
     function_name: str
     arguments: Dict[str, Any]
     result: Any
     tool_call_id: str
     is_ollama: bool
     error: Optional[Exception] = None
+    progress: List[ToolProgress] = field(default_factory=list)
+    deferred: Optional[DeferredToolResult] = None
+
+    @property
+    def is_deferred(self) -> bool:
+        """True if the tool returned a deferred handle rather than a value."""
+        return self.deferred is not None
+
+    @property
+    def structured_error(self) -> Optional[Dict[str, Any]]:
+        """Structured error content for the model, or None on success.
+
+        Unlike the flattened ``"Error executing tool: ..."`` string, this
+        exposes the error type and message so the model can reason about it.
+        """
+        if self.error is None:
+            return None
+        return {
+            "error": True,
+            "type": type(self.error).__name__,
+            "message": str(self.error),
+            "tool": self.function_name,
+        }
+
+
+# Type alias for an optional per-batch progress emitter.
+OnProgress = Callable[[ToolProgress], None]
+
+
+def _resolve_value(value: Any) -> Any:
+    """Await a coroutine result if a tool (or execute_tool_fn) returned one.
+
+    Native ``async def`` tools are awaited here so callers never see an
+    un-awaited coroutine. If already inside a running loop we fall back to a
+    dedicated loop in a worker thread to avoid nesting.
+    """
+    if not inspect.iscoroutine(value):
+        return value
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+    # Inside a running loop: run the coroutine to completion on its own loop.
+    import concurrent.futures as _futures
+
+    def _runner() -> Any:
+        return asyncio.run(value)
+
+    with _futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_runner).result()
+
+
+def run_single_tool_call(
+    tool_call: ToolCall,
+    execute_tool_fn: Callable[..., Any],
+    on_progress: Optional[OnProgress] = None,
+) -> ToolResult:
+    """Execute one tool call, capturing progress, deferred, async and errors.
+
+    - If ``execute_tool_fn`` accepts an ``on_progress`` kwarg, progress
+      updates are forwarded to the caller and recorded on the result.
+    - Coroutine returns (``async def`` tools) are awaited natively.
+    - A ``DeferredToolResult`` return is recorded without blocking.
+    - Failures populate ``error`` (and structured error) instead of only a
+      flattened string.
+    """
+    collected: List[ToolProgress] = []
+
+    def _emit(update: ToolProgress) -> None:
+        collected.append(update)
+        if on_progress is not None:
+            try:
+                on_progress(update)
+            except Exception as cb_err:  # never let a channel error kill the tool
+                logger.warning(f"on_progress callback failed: {cb_err}")
+
+    try:
+        # Only pass on_progress if execute_tool_fn advertises support for it,
+        # keeping full backward compatibility with existing 3-arg callables.
+        supports_progress = False
+        try:
+            supports_progress = "on_progress" in inspect.signature(execute_tool_fn).parameters
+        except (TypeError, ValueError):
+            supports_progress = False
+
+        if supports_progress:
+            raw = execute_tool_fn(
+                tool_call.function_name,
+                tool_call.arguments,
+                tool_call.tool_call_id,
+                on_progress=_emit,
+            )
+        else:
+            raw = execute_tool_fn(
+                tool_call.function_name,
+                tool_call.arguments,
+                tool_call.tool_call_id,
+            )
+
+        result = _resolve_value(raw)
+
+        deferred = result if isinstance(result, DeferredToolResult) else None
+        return ToolResult(
+            function_name=tool_call.function_name,
+            arguments=tool_call.arguments,
+            result=deferred.note if deferred is not None else result,
+            tool_call_id=tool_call.tool_call_id,
+            is_ollama=tool_call.is_ollama,
+            progress=collected,
+            deferred=deferred,
+        )
+    except Exception as e:
+        logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
+        return ToolResult(
+            function_name=tool_call.function_name,
+            arguments=tool_call.arguments,
+            result=f"Error executing tool: {e}",
+            tool_call_id=tool_call.tool_call_id,
+            is_ollama=tool_call.is_ollama,
+            error=e,
+            progress=collected,
+        )
 
 
 class ToolCallExecutor(Protocol):
@@ -47,7 +211,8 @@ class ToolCallExecutor(Protocol):
     def execute_batch(
         self,
         tool_calls: List[ToolCall],
-        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any]
+        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
+        on_progress: Optional[OnProgress] = None,
     ) -> List[ToolResult]:
         """
         Execute a batch of tool calls and return results in original order.
@@ -55,6 +220,8 @@ class ToolCallExecutor(Protocol):
         Args:
             tool_calls: List of tool calls to execute
             execute_tool_fn: Function to execute individual tools
+            on_progress: Optional callback receiving ToolProgress updates as
+                tools stream incremental progress.
             
         Returns:
             List of ToolResult in same order as input tool_calls
@@ -72,37 +239,14 @@ class SequentialToolCallExecutor:
     def execute_batch(
         self,
         tool_calls: List[ToolCall], 
-        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any]
+        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
+        on_progress: Optional[OnProgress] = None,
     ) -> List[ToolResult]:
         """Execute tool calls sequentially - current behavior."""
-        results = []
-        
-        for tool_call in tool_calls:
-            try:
-                result = execute_tool_fn(
-                    tool_call.function_name,
-                    tool_call.arguments,
-                    tool_call.tool_call_id
-                )
-                results.append(ToolResult(
-                    function_name=tool_call.function_name,
-                    arguments=tool_call.arguments,
-                    result=result,
-                    tool_call_id=tool_call.tool_call_id,
-                    is_ollama=tool_call.is_ollama
-                ))
-            except Exception as e:
-                logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
-                results.append(ToolResult(
-                    function_name=tool_call.function_name,
-                    arguments=tool_call.arguments,
-                    result=f"Error executing tool: {e}",
-                    tool_call_id=tool_call.tool_call_id,
-                    is_ollama=tool_call.is_ollama,
-                    error=e
-                ))
-        
-        return results
+        return [
+            run_single_tool_call(tool_call, execute_tool_fn, on_progress)
+            for tool_call in tool_calls
+        ]
 
 
 class ParallelToolCallExecutor:
@@ -127,7 +271,8 @@ class ParallelToolCallExecutor:
     def execute_batch(
         self,
         tool_calls: List[ToolCall],
-        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any]
+        execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
+        on_progress: Optional[OnProgress] = None,
     ) -> List[ToolResult]:
         """Execute tool calls in parallel using thread pool."""
         if not tool_calls:
@@ -136,7 +281,7 @@ class ParallelToolCallExecutor:
         # Single tool call - no need for parallelism overhead
         if len(tool_calls) == 1:
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
+            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
         
         # G4: Check for path conflicts - fallback to sequential if conflicts detected
         try:
@@ -146,38 +291,16 @@ class ParallelToolCallExecutor:
                 "Path conflict detection unavailable; using sequential execution for safety"
             )
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
+            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
 
         if has_write_conflicts(tool_calls):
             logger.info(f"Path conflicts detected in {len(tool_calls)} tool calls, using sequential execution")
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn)
+            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
         
         def _execute_single_tool(tool_call: ToolCall) -> ToolResult:
-            """Execute a single tool call with error handling."""
-            try:
-                result = execute_tool_fn(
-                    tool_call.function_name,
-                    tool_call.arguments, 
-                    tool_call.tool_call_id
-                )
-                return ToolResult(
-                    function_name=tool_call.function_name,
-                    arguments=tool_call.arguments,
-                    result=result,
-                    tool_call_id=tool_call.tool_call_id,
-                    is_ollama=tool_call.is_ollama
-                )
-            except Exception as e:
-                logger.error(f"Tool execution error for {tool_call.function_name}: {e}")
-                return ToolResult(
-                    function_name=tool_call.function_name,
-                    arguments=tool_call.arguments,
-                    result=f"Error executing tool: {e}",
-                    tool_call_id=tool_call.tool_call_id,
-                    is_ollama=tool_call.is_ollama,
-                    error=e
-                )
+            """Execute a single tool call with progress/deferred/error handling."""
+            return run_single_tool_call(tool_call, execute_tool_fn, on_progress)
         
         # Use ThreadPoolExecutor for sync tools
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -212,3 +335,25 @@ def create_tool_call_executor(parallel: bool = False, max_workers: int = 5) -> T
         return ParallelToolCallExecutor(max_workers=max_workers)
     else:
         return SequentialToolCallExecutor()
+
+
+def defer(note: str = "started; will resolve later",
+          handle_id: Optional[str] = None) -> DeferredToolResult:
+    """Convenience factory for a deferred tool result.
+
+    Example::
+
+        from praisonaiagents.tools import defer, ToolProgress
+
+        @tool
+        def deep_research(topic: str, on_progress=None) -> DeferredToolResult:
+            job = enqueue(topic)
+            if on_progress:
+                on_progress(ToolProgress(f"queued {job.id}"))
+            return defer(note="I'll post the report when it's ready",
+                         handle_id=job.id)
+    """
+    return DeferredToolResult(
+        handle_id=handle_id or uuid.uuid4().hex,
+        note=note,
+    )
