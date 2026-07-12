@@ -1199,9 +1199,16 @@ class DefaultSessionStore:
     def _lineage_key(data: Dict[str, Any]) -> Optional[str]:
         """Return a stable lineage id so reset/compacted continuations of one
         conversation collapse to a single hit. ``None`` if no lineage is known.
+
+        Only *chain* identifiers are used: ``lineage_id``, ``root_session_id``
+        and ``thread_id`` each identify a single continuation chain. We
+        deliberately exclude ``parent_session_id`` — it points at an *immediate*
+        parent, so two independent children forked from the same parent would
+        otherwise share a key and suppress each other in results (they are
+        distinct conversations, not a reset/compaction of one).
         """
         meta = data.get("metadata") or {}
-        for key in ("lineage_id", "root_session_id", "parent_session_id", "thread_id"):
+        for key in ("lineage_id", "root_session_id", "thread_id"):
             val = data.get(key) or meta.get(key)
             if val:
                 return str(val)

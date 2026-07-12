@@ -83,6 +83,55 @@ class TestSqliteSessionStore:
         store.delete_session("d1")
         assert not store.search("quantum")
 
+    def test_partial_index_still_backfills_legacy_json(self, tmp_dir):
+        # Legacy JSON written before any indexing.
+        plain = DefaultSessionStore(session_dir=tmp_dir)
+        plain.add_message("legacy", "user", "legacy topic about terraform")
+
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        # Index a brand-new session first -> index is now non-empty. A COUNT==0
+        # backfill guard would permanently skip the legacy JSON.
+        store.add_message("fresh", "user", "brand new terraform note")
+
+        hits = store.search("terraform")
+        ids = {h.session_id for h in hits}
+        assert "legacy" in ids
+        assert "fresh" in ids
+
+    def test_transcript_replacement_refreshes_index(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        store.add_message("r1", "user", "original content about pelicans")
+        assert store.search("pelicans")
+
+        # Replace the whole transcript via set_chat_history (goes through
+        # _modify_session_locked, NOT _save_session).
+        store.set_chat_history(
+            "r1", [{"role": "user", "content": "replaced content about narwhals"}]
+        )
+        # Stale term must be gone; new term must be found.
+        assert not store.search("pelicans")
+        assert store.search("narwhals")
+
+    def test_sibling_sessions_not_over_deduped(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        # Two independent children forked from the same parent -> distinct
+        # conversations, must both surface (parent_session_id is not a chain id).
+        _seed(
+            store,
+            "childA",
+            [("user", "sibling recall topic alpha branch")],
+            parent_session_id="P1",
+        )
+        _seed(
+            store,
+            "childB",
+            [("user", "sibling recall topic beta branch")],
+            parent_session_id="P1",
+        )
+        hits = store.search("sibling recall topic")
+        ids = {h.session_id for h in hits}
+        assert ids == {"childA", "childB"}
+
 
 class TestDefaultStoreSearchEnhancements:
     def test_bookends_present(self, tmp_dir):

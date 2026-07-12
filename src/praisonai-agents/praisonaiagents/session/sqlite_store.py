@@ -72,6 +72,7 @@ class SqliteSessionStore(DefaultSessionStore):
         self._conn = None
         self._fts_available = False
         self._db_ready = False
+        self._backfilled = False
 
     # ── index lifecycle ───────────────────────────────────────────────
 
@@ -174,16 +175,49 @@ class SqliteSessionStore(DefaultSessionStore):
         except Exception as exc:
             logger.debug("Session de-index failed for %s: %s", session_id, exc)
 
+    def _ensure_backfilled(self) -> None:
+        """Backfill the index from existing JSON transcripts exactly once.
+
+        Guarded by a one-time flag rather than by an empty-index check: a
+        single ``add_message`` on a *new* session could otherwise make the
+        index non-empty and permanently skip backfilling pre-existing JSON
+        transcripts, silently omitting legacy sessions from search results.
+        Only sessions not already present in the index are (re)indexed, so the
+        pass is cheap on a warm index.
+        """
+        if self._backfilled:
+            return
+        with self._db_lock:
+            if self._backfilled:
+                return
+            self._backfilled = True
+            self._reindex_all()
+
+    def _indexed_ids(self) -> set:
+        """Return the set of session_ids already present in the index."""
+        conn = self._connect()
+        if conn is None:
+            return set()
+        try:
+            with self._db_lock:
+                rows = conn.execute("SELECT session_id FROM session_meta").fetchall()
+            return {r[0] for r in rows}
+        except Exception:
+            return set()
+
     def _reindex_all(self) -> None:
-        """One-time backfill of the index from existing JSON transcripts."""
+        """Backfill the index from existing JSON transcripts (skip indexed)."""
         try:
             filenames = os.listdir(self.session_dir)
         except (IOError, OSError):
             return
+        already = self._indexed_ids()
         for filename in filenames:
             if not filename.endswith(".json"):
                 continue
             sid = filename[:-5]
+            if sid in already:
+                continue
             try:
                 session = self._read_session_fresh(sid)
             except Exception:
@@ -196,6 +230,23 @@ class SqliteSessionStore(DefaultSessionStore):
         ok = super()._save_session(session)
         if ok:
             self._index_session(session)
+        return ok
+
+    def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
+        """Refresh the index after any locked read-modify-write.
+
+        Transcript-replacing paths such as ``set_chat_history`` and
+        ``append_compaction_checkpoint`` mutate the persisted JSON through this
+        helper *without* going via ``_save_session``. Overriding here keeps the
+        FTS index in sync with those replacements so search never returns stale
+        or missing content.
+        """
+        ok = super()._modify_session_locked(session_id, mutator, **kwargs)
+        if ok:
+            try:
+                self._index_session(self._read_session_fresh(session_id))
+            except Exception as exc:
+                logger.debug("Post-modify index refresh failed for %s: %s", session_id, exc)
         return ok
 
     def add_message(
@@ -232,14 +283,9 @@ class SqliteSessionStore(DefaultSessionStore):
         conn = self._connect()
         if conn is None:
             return None
-        # Backfill the index on first use if it's empty.
-        try:
-            with self._db_lock:
-                count = conn.execute("SELECT COUNT(*) FROM session_fts").fetchone()[0]
-        except Exception:
-            return None
-        if count == 0:
-            self._reindex_all()
+        # Backfill any pre-existing JSON transcripts into the index exactly
+        # once, so legacy sessions are never silently omitted from results.
+        self._ensure_backfilled()
 
         # Over-fetch candidates so lineage-dedup / automated-demotion can still
         # promote the right interactive sessions into the final ``limit``.
