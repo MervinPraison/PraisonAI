@@ -900,7 +900,20 @@ class ToolExecutionMixin:
                     tool_error=tool_error,
                     execution_time_ms=(_time.time() - _tool_start_time) * 1000
                 )
-                self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
+                after_tool_results = self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
+
+                # Surface any additional_context returned by AFTER_TOOL hooks
+                # back to the model by appending it to the tool result (mirrors
+                # the loop-guard injection pattern below). Without this the
+                # neutral additional_context channel would be silently dropped.
+                extra_context = self._hook_runner.aggregate_context(after_tool_results)
+                if extra_context:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{extra_context}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", extra_context)
+                    else:
+                        result = {"value": result, "_additional_context": extra_context}
             
             # G10 fix: Mark progress after successful tool execution
             # This prevents false doom loop detection when tools succeed

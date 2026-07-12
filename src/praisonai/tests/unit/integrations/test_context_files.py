@@ -298,6 +298,26 @@ def test_file_tool_matcher_matches_expected_tools():
     import re
 
     pattern = file_tool_matcher()
-    for name in ("read_file", "edit_file", "write_file"):
-        assert re.match(pattern, name)
+    for name in (
+        "read_file",
+        "edit_file",
+        "write_file",
+        "list_files",
+        "acp_create_file",
+        "acp_edit_file",
+        "acp_delete_file",
+    ):
+        assert re.match(pattern, name), name
     assert not re.match(pattern, "bash")
+    assert not re.match(pattern, "internet_search")
+
+
+def test_hook_extracts_alternate_path_keys(project):
+    root, nested = project
+    (nested / "AGENTS.md").write_text("SUBTREE RULES")
+
+    for key in ("file_path", "path", "filename", "target_file"):
+        hook = build_subtree_context_hook()
+        result = hook(_tool_event({key: str(nested / "main.py")}))
+        assert result is not None, key
+        assert "SUBTREE RULES" in result.additional_context, key

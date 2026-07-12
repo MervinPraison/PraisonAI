@@ -9,8 +9,9 @@ DEFAULT_CANDIDATES = ["AGENTS.md", "agents.md", ".agents/AGENTS.md", "CLAUDE.md"
 
 # Tool-argument keys that carry a file path across the various file tools
 # (praisonaiagents ``read_file`` uses ``filepath``; praisonai-code tools use
-# ``path``/``file_path``). The first present, string-valued key wins.
-_PATH_ARG_KEYS = ("filepath", "file_path", "path")
+# ``path``/``file_path``; ACP edit tools use ``file_path``). The first present,
+# string-valued key wins.
+_PATH_ARG_KEYS = ("filepath", "file_path", "path", "filename", "target_file")
 
 
 def _get_git_root(start: Path) -> Optional[Path]:
@@ -287,7 +288,15 @@ def load_context_files_for_path(
 
 
 # Tool names that operate on a file and should trigger subtree-rule discovery.
-_FILE_TOOL_MATCHER = r"^(read_file|edit_file|write_file|read|edit|write|apply_patch|str_replace|multi_edit)$"
+# Covers the real interactive tool surface (praisonaiagents ``read_file``/
+# ``write_file`` and the ACP ``acp_create_file``/``acp_edit_file``/
+# ``acp_delete_file`` tools) plus common generic aliases so custom file tools
+# are matched too.
+_FILE_TOOL_MATCHER = (
+    r"^(read_file|write_file|edit_file|list_files"
+    r"|acp_create_file|acp_edit_file|acp_delete_file"
+    r"|read|edit|write|apply_patch|str_replace|multi_edit|search_replace)$"
+)
 
 
 def _extract_tool_path(tool_input: Any) -> Optional[str]:

@@ -329,8 +329,11 @@ class InteractiveCore:
                 else:
                     agent_config["autonomy"] = True
             
+            session_registry = self._build_subtree_hook_registry(project_context)
+            if session_registry is not None:
+                agent_config["hooks"] = session_registry
+
             self._agent = Agent(**agent_config)
-            self._register_subtree_context_hook(self._agent, project_context)
         
         agent = self._agent
         
@@ -409,36 +412,44 @@ class InteractiveCore:
         self._project_context = context
         return context
 
-    def _register_subtree_context_hook(self, agent, already_loaded: str) -> None:
-        """Register an AFTER_TOOL hook for on-demand subtree instruction rules.
+    def _build_subtree_hook_registry(self, already_loaded: str):
+        """Build a session-scoped ``HookRegistry`` for subtree instruction rules.
 
         Complements the up-front (nearest-wins walk-up) project context by
         lazily attaching a subdirectory's instruction file the first time the
-        agent reads/edits a file under it. Skipped when ``--no-context`` is set
-        and silently no-ops if the wrapper helper is unavailable.
+        agent reads/edits a file under it. The hook is registered on a *fresh*
+        registry (never the global default) so its per-session dedup state stays
+        isolated and cannot leak into other agents/sessions.
+
+        Returns the registry to pass as ``Agent(hooks=...)``, or ``None`` when
+        ``--no-context`` is set or the wrapper helper is unavailable (the caller
+        then constructs the agent without a custom registry).
         """
         if getattr(self.config, "no_context", False):
-            return
+            return None
         try:
             from praisonai.integration.context_files import (
                 build_subtree_context_hook,
                 file_tool_matcher,
             )
-            from praisonaiagents.hooks import HookEvent
+            from praisonaiagents.hooks import HookEvent, HookRegistry
         except ImportError:
-            return
+            return None
 
         try:
             budget = getattr(self.config, "context_token_budget", 0) or 0
             hook = build_subtree_context_hook(already_loaded, max_chars=budget)
-            agent._hook_runner.registry.register_function(
+            registry = HookRegistry()
+            registry.register_function(
                 event=HookEvent.AFTER_TOOL,
                 func=hook,
                 matcher=file_tool_matcher(),
                 name="subtree_instruction_injection",
             )
+            return registry
         except Exception as e:  # pragma: no cover - defensive wiring
-            logger.warning(f"Could not register subtree context hook: {e}")
+            logger.warning(f"Could not build subtree context hook: {e}")
+            return None
 
     # ========== Tool Management ==========
     
