@@ -1166,7 +1166,7 @@ def handle_research_command(self, query: str, model: str = None, verbose: bool =
                         tools_list.extend(funcs.values())
                         print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
                     else:
-                        print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
+                        print(f"[yellow]Warning: No tools loaded from {tools_path} (module has no public functions, or local tools loading is disabled — set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable).[/yellow]")
                 except Exception as e:
                     print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
             else:
