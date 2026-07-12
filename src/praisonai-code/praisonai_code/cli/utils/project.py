@@ -78,7 +78,7 @@ def normalize_git_remote(url: str) -> Optional[str]:
         host, path = scp.group(1), scp.group(2)
     else:
         # protocol://[user[:pass]@]host[:port]/path
-        m = re.match(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$', url)
+        m = re.match(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://(?:[^@/]+@)?([^/:]*)(?::\d+)?/(.+)$', url)
         if m:
             host, path = m.group(1), m.group(2)
         else:
@@ -88,9 +88,12 @@ def normalize_git_remote(url: str) -> Optional[str]:
     path = path.strip('/')
     if path.endswith('.git'):
         path = path[:-4]
-    if not host or not path:
+    if not path:
         return None
-    return f"{host}/{path}"
+    # Host-less remotes (e.g. ``file:///srv/repos/project.git`` or a bare local
+    # path) still yield a stable identity from their path alone; only require a
+    # host for network remotes that actually have one.
+    return f"{host}/{path}" if host else path
 
 
 def get_git_remote_identity(path: Optional[str] = None) -> Optional[str]:
@@ -114,11 +117,21 @@ def get_git_root_commit(path: Optional[str] = None) -> Optional[str]:
     """Return the repository's root (first) commit SHA, if the repo has commits."""
     git_root = get_git_root(path)
     cwd = git_root if git_root else (Path(path) if path else Path.cwd())
-    out = _git_output(['rev-list', '--max-parents=0', 'HEAD'], cwd)
+    # Enumerate root commits across *all* refs (not just those reachable from
+    # HEAD) so switching between unmerged orphan branches doesn't change the
+    # selected root commit and silently orphan session history. Choosing the
+    # lexicographically smallest SHA keeps the identity deterministic regardless
+    # of ref ordering or the currently checked-out branch.
+    out = _git_output(['rev-list', '--max-parents=0', '--all'], cwd)
+    if not out:
+        # No refs yet (e.g. detached/unborn); fall back to HEAD's roots if any.
+        out = _git_output(['rev-list', '--max-parents=0', 'HEAD'], cwd)
     if not out:
         return None
-    # A repo may have multiple root commits; the last line is the earliest.
-    return out.splitlines()[-1].strip() or None
+    roots = [line.strip() for line in out.splitlines() if line.strip()]
+    if not roots:
+        return None
+    return min(roots)
 
 
 def _cached_id_path(path: Optional[str] = None) -> Optional[Path]:
@@ -156,11 +169,21 @@ def get_or_create_cached_id(path: Optional[str] = None) -> Optional[str]:
     except OSError:
         return None
     new_id = hashlib.sha256(os.urandom(32)).hexdigest()
+    # Create exclusively so concurrent first-runs don't diverge: only one writer
+    # wins, and any loser re-reads the persisted id rather than returning its own
+    # (unpersisted) value that no later invocation could resolve.
     try:
-        cached_path.write_text(new_id, encoding="utf-8")
+        with open(cached_path, "x", encoding="utf-8") as fh:
+            fh.write(new_id)
+        return new_id
+    except FileExistsError:
+        try:
+            existing = cached_path.read_text(encoding="utf-8").strip()
+            return existing or None
+        except OSError:
+            return None
     except OSError:
         return None
-    return new_id
 
 
 def _short_hash(value: str) -> str:

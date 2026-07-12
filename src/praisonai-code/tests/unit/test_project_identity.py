@@ -67,6 +67,15 @@ def test_normalize_git_remote_invalid_returns_none():
     assert normalize_git_remote("not-a-url") is None
 
 
+def test_normalize_git_remote_hostless_file_url():
+    # Host-less remotes must still yield a stable identity from their path
+    # instead of falling through to root-commit/cached-id/path (Greptile P2).
+    assert normalize_git_remote("file:///srv/repos/project.git") == "srv/repos/project"
+    assert normalize_git_remote("file:///srv/repos/project.git") == normalize_git_remote(
+        "file:///srv/repos/project"
+    )
+
+
 def test_non_git_dir_uses_path_source(tmp_path):
     pid, source = resolve_project_identity(str(tmp_path))
     assert source == "path"
@@ -146,6 +155,49 @@ def test_cached_id_when_no_remote_or_commit(tmp_path):
     # Stable across calls.
     pid2, _ = resolve_project_identity(str(repo))
     assert pid == pid2
+
+
+@requires_git
+def test_root_commit_stable_across_orphan_branches(tmp_path):
+    # Switching between unmerged orphan branches must not change identity
+    # (Greptile P2): root commit is enumerated across all refs, deterministically.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    (repo / "f.txt").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    id_main, src_main = resolve_project_identity(str(repo))
+    assert src_main == "root-commit"
+
+    _git(repo, "checkout", "--orphan", "other")
+    (repo / "g.txt").write_text("y")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "orphan")
+    id_other, src_other = resolve_project_identity(str(repo))
+    assert src_other == "root-commit"
+    assert id_main == id_other
+
+
+@requires_git
+def test_cached_id_loser_reads_persisted_winner(tmp_path, monkeypatch):
+    # Simulate a concurrent first-run losing the exclusive create: it must
+    # return the persisted winner, not its own unpersisted id (Greptile P1).
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+
+    winner, _ = resolve_project_identity(str(repo))
+    cached_file = repo / ".git" / "praisonai-project"
+    persisted = cached_file.read_text().strip()
+
+    from praisonai_code.cli.utils.project import get_or_create_cached_id
+
+    # Now a fresh call must reuse the persisted id, never mint a new one.
+    again = get_or_create_cached_id(str(repo))
+    assert again == persisted
+    later, _ = resolve_project_identity(str(repo))
+    assert later == winner
 
 
 def test_get_project_id_returns_only_hash(tmp_path, monkeypatch):
