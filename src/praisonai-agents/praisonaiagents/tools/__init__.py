@@ -10,6 +10,7 @@ from .base import (
     multimodal_content, text_part, image_part, file_part,
 )
 from .decorator import tool, FunctionTool
+from .call_executor import ToolProgress, DeferredToolResult, defer
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
 from .tools import Tools
 
@@ -400,6 +401,8 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'BaseTool', 'ToolResult', 'ToolValidationError', 'validate_tool',
     'multimodal_content', 'text_part', 'image_part', 'file_part',
     'tool', 'FunctionTool',
+    # Deferred/progress tool-execution protocol (Issue #2925)
+    'ToolProgress', 'DeferredToolResult', 'defer',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'ToolProxy', 'build_tool_namespace',
