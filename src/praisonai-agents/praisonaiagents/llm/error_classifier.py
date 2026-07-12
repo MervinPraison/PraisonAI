@@ -280,9 +280,111 @@ def _calculate_service_backoff(error_str: str, retry_attempt: int = 1) -> float:
     return jittered_backoff(retry_attempt, base=15.0)
 
 
+# Mapping of HTTP status codes to error categories. Provider SDKs (openai,
+# anthropic, litellm, httpx) expose the underlying status on the exception, so
+# we classify by code first — this is stable across providers and does not
+# depend on the wording of the message.
+_STATUS_CODE_CATEGORIES: Dict[int, ErrorCategory] = {
+    400: ErrorCategory.INVALID_REQUEST,
+    401: ErrorCategory.AUTH,
+    403: ErrorCategory.AUTH,
+    404: ErrorCategory.INVALID_REQUEST,
+    408: ErrorCategory.TRANSIENT,
+    413: ErrorCategory.CONTEXT_LIMIT,
+    422: ErrorCategory.INVALID_REQUEST,
+    429: ErrorCategory.RATE_LIMIT,
+    500: ErrorCategory.TRANSIENT,
+    502: ErrorCategory.TRANSIENT,
+    503: ErrorCategory.TRANSIENT,
+    504: ErrorCategory.TRANSIENT,
+    529: ErrorCategory.TRANSIENT,  # Anthropic "overloaded"
+}
+
+# Mapping of provider/stdlib exception class names to error categories. We match
+# on the class name (and its base classes) so that we never need to import the
+# provider SDKs at module load time (keeps the core lightweight and avoids hard
+# dependencies), while still classifying by type rather than message substrings.
+_EXCEPTION_NAME_CATEGORIES: Dict[str, ErrorCategory] = {
+    # openai / anthropic SDK exception classes
+    "ratelimiterror": ErrorCategory.RATE_LIMIT,
+    "authenticationerror": ErrorCategory.AUTH,
+    "permissiondeniederror": ErrorCategory.AUTH,
+    "badrequesterror": ErrorCategory.INVALID_REQUEST,
+    "notfounderror": ErrorCategory.INVALID_REQUEST,
+    "unprocessableentityerror": ErrorCategory.INVALID_REQUEST,
+    "conflicterror": ErrorCategory.TRANSIENT,
+    "internalservererror": ErrorCategory.TRANSIENT,
+    "apiconnectionerror": ErrorCategory.TRANSIENT,
+    "apitimeouterror": ErrorCategory.TRANSIENT,
+    "overloadederror": ErrorCategory.TRANSIENT,
+    "servicunavailableerror": ErrorCategory.TRANSIENT,
+    "serviceunavailableerror": ErrorCategory.TRANSIENT,
+    "contextwindowexceedederror": ErrorCategory.CONTEXT_LIMIT,
+    # litellm exception classes
+    "contentpolicyviolationerror": ErrorCategory.INVALID_REQUEST,
+    "budgetexceedederror": ErrorCategory.RATE_LIMIT,
+    # stdlib / httpx
+    "timeouterror": ErrorCategory.TRANSIENT,
+    "connectionerror": ErrorCategory.TRANSIENT,
+    "connecterror": ErrorCategory.TRANSIENT,
+    "connecttimeout": ErrorCategory.TRANSIENT,
+    "readtimeout": ErrorCategory.TRANSIENT,
+}
+
+
+def _extract_status_code(error: Exception) -> Optional[int]:
+    """Extract an HTTP status code from a provider exception, if present.
+
+    Provider SDKs surface the status code in different attributes; we probe the
+    common ones (``status_code``, ``code``, ``http_status``) and the nested
+    ``response`` object without importing any provider SDK.
+    """
+    for attr in ("status_code", "http_status", "status"):
+        value = getattr(error, attr, None)
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    # ``code`` may be an int status or a string error code — only accept ints
+    code = getattr(error, "code", None)
+    if isinstance(code, int) and 100 <= code <= 599:
+        return code
+    # httpx-style: exception carries a ``response`` with ``status_code``
+    response = getattr(error, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int) and 100 <= status <= 599:
+            return status
+    return None
+
+
+def _classify_by_type_and_code(error: Exception) -> Optional[ErrorCategory]:
+    """Classify an error by exception type and HTTP status code.
+
+    Returns ``None`` when neither the exception class hierarchy nor a status
+    code yields a match, so the caller can fall back to message matching.
+    """
+    # 1. HTTP status code is the most stable signal across providers.
+    status_code = _extract_status_code(error)
+    if status_code is not None and status_code in _STATUS_CODE_CATEGORIES:
+        return _STATUS_CODE_CATEGORIES[status_code]
+
+    # 2. Exception class name (walking the MRO to catch provider subclasses).
+    for cls in type(error).__mro__:
+        name = cls.__name__.lower()
+        if name in _EXCEPTION_NAME_CATEGORIES:
+            return _EXCEPTION_NAME_CATEGORIES[name]
+
+    return None
+
+
 def classify_error(error: Exception) -> ErrorCategory:
     """Classify an error into a category for intelligent handling.
-    
+
+    Classification prefers stable signals — exception type and HTTP status
+    code (including provider error codes) — and only falls back to matching the
+    message text when the type/code are unknown. This makes classification
+    reliable across providers (e.g. a 429 rate limit whose message does not
+    contain the word "rate" is still classified correctly).
+
     Args:
         error: Exception to classify
         
@@ -297,6 +399,12 @@ def classify_error(error: Exception) -> ErrorCategory:
         >>> classify_error(Exception("Invalid API key"))
         ErrorCategory.AUTH
     """
+    # 1. Classify by exception type / status code first (stable across providers).
+    typed = _classify_by_type_and_code(error)
+    if typed is not None:
+        return typed
+
+    # 2. Fall back to message/regex matching for plain/unknown exceptions.
     error_text = f"{type(error).__name__} {error}".lower()
     
     # Check each category's patterns
@@ -376,9 +484,29 @@ def extract_retry_after(error: Exception) -> Optional[float]:
     Returns:
         Delay in seconds if found, None otherwise
     """
+    # 1. Prefer the structured Retry-After header from the provider response.
+    #    Provider SDKs (openai/anthropic/httpx) expose ``response.headers``.
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None) or getattr(error, "headers", None)
+    if headers is not None:
+        try:
+            retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        except (AttributeError, TypeError):
+            retry_after = None
+        if retry_after is not None:
+            try:
+                return min(float(retry_after), 300.0)  # Cap at 5 minutes
+            except (ValueError, TypeError):
+                pass  # Not a plain number (could be an HTTP-date); fall through
+
+    # 2. Some SDKs expose a numeric ``retry_after`` attribute directly.
+    retry_after_attr = getattr(error, "retry_after", None)
+    if isinstance(retry_after_attr, (int, float)):
+        return min(float(retry_after_attr), 300.0)
+
     error_str = str(error)
     
-    # Look for common Retry-After patterns
+    # 3. Fall back to parsing common Retry-After patterns from the message.
     patterns = [
         r"retry.?after[:\s]+(\d+)",
         r"retry[:\s]+(\d+)",

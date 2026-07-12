@@ -110,6 +110,102 @@ class TestErrorClassification:
             assert should_retry(category) is False
 
 
+class TestTypeAndCodeClassification:
+    """Classification by exception type / status code (not message substrings)."""
+
+    def test_status_code_rate_limit_without_keyword(self):
+        """A 429 with a message lacking the word 'rate' is still RATE_LIMIT."""
+        class _ProviderError(Exception):
+            status_code = 429
+
+        error = _ProviderError("Quota temporarily unavailable, slow down")
+        assert classify_error(error) == ErrorCategory.RATE_LIMIT
+
+    def test_status_code_auth(self):
+        class _ProviderError(Exception):
+            status_code = 401
+        assert classify_error(_ProviderError("no descriptive text")) == ErrorCategory.AUTH
+
+    def test_status_code_from_response_object(self):
+        class _Response:
+            status_code = 503
+        class _ProviderError(Exception):
+            response = _Response()
+        assert classify_error(_ProviderError("upstream hiccup")) == ErrorCategory.TRANSIENT
+
+    def test_status_code_413_context_limit(self):
+        class _ProviderError(Exception):
+            status_code = 413
+        assert classify_error(_ProviderError("payload rejected")) == ErrorCategory.CONTEXT_LIMIT
+
+    def test_exception_class_name_rate_limit(self):
+        """Provider SDK class name is matched even without a status code."""
+        class RateLimitError(Exception):
+            pass
+        assert classify_error(RateLimitError("slow down please")) == ErrorCategory.RATE_LIMIT
+
+    def test_exception_subclass_via_mro(self):
+        class AuthenticationError(Exception):
+            pass
+        class ProviderAuthError(AuthenticationError):
+            pass
+        assert classify_error(ProviderAuthError("nope")) == ErrorCategory.AUTH
+
+    def test_stdlib_timeout_error_is_transient(self):
+        assert classify_error(TimeoutError("op timed out")) == ErrorCategory.TRANSIENT
+
+    def test_stdlib_connection_error_is_transient(self):
+        assert classify_error(ConnectionError("reset by peer")) == ErrorCategory.TRANSIENT
+
+    def test_message_fallback_still_works(self):
+        """Plain exceptions with no type/code still classify by message."""
+        assert classify_error(Exception("Rate limit exceeded")) == ErrorCategory.RATE_LIMIT
+
+    def test_string_code_is_ignored(self):
+        """A non-numeric ``code`` attribute must not break classification."""
+        class _ProviderError(Exception):
+            code = "insufficient_quota"
+        # No numeric status/type match -> falls through to message (unknown -> PERMANENT)
+        assert classify_error(_ProviderError("something opaque")) == ErrorCategory.PERMANENT
+
+
+class TestStructuredRetryAfter:
+    """Retry-After extraction from structured headers/attributes."""
+
+    def test_retry_after_from_response_headers(self):
+        class _Response:
+            headers = {"retry-after": "42"}
+        class _ProviderError(Exception):
+            response = _Response()
+        assert extract_retry_after(_ProviderError("rate limited")) == 42.0
+
+    def test_retry_after_from_error_headers(self):
+        class _ProviderError(Exception):
+            headers = {"Retry-After": "15"}
+        assert extract_retry_after(_ProviderError("rate limited")) == 15.0
+
+    def test_retry_after_attribute(self):
+        class _ProviderError(Exception):
+            retry_after = 7
+        assert extract_retry_after(_ProviderError("rate limited")) == 7.0
+
+    def test_structured_header_capped(self):
+        class _Response:
+            headers = {"retry-after": "9999"}
+        class _ProviderError(Exception):
+            response = _Response()
+        assert extract_retry_after(_ProviderError("rate limited")) == 300.0
+
+    def test_http_date_header_falls_back_to_message(self):
+        """A non-numeric Retry-After (HTTP-date) falls back to message parsing."""
+        class _Response:
+            headers = {"retry-after": "Wed, 21 Oct 2025 07:28:00 GMT"}
+        class _ProviderError(Exception):
+            response = _Response()
+        # No numeric header, no message pattern -> None
+        assert extract_retry_after(_ProviderError("please slow down")) is None
+
+
 class TestRetryLogic:
     
     def test_retry_delays(self):
