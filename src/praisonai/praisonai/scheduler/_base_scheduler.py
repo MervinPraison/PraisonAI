@@ -122,6 +122,7 @@ def build_from_yaml(
         max_cost=schedule_config.get('max_cost'),
         on_success=on_success,
         on_failure=on_failure,
+        deliver=schedule_config.get('deliver', ''),
     )
 
     # Store schedule config for later use

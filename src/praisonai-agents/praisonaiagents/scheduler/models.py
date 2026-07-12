@@ -95,6 +95,54 @@ class DeliveryTarget:
             deliver=d.get("deliver", ""),
         )
 
+    @classmethod
+    def parse(cls, token: str) -> Optional["DeliveryTarget"]:
+        """Parse a ``deliver`` token into a :class:`DeliveryTarget`.
+
+        Accepts the same symbolic grammar the delivery router resolves, so a
+        scheduled/interval agent can be told where to send its result from
+        Python, YAML or the CLI without constructing the model by hand:
+
+        - ``""`` / ``None`` → ``None`` (no delivery configured).
+        - ``"telegram"`` → platform only; the router resolves the platform's
+          home channel (``channel="telegram"``, ``deliver="telegram"``).
+        - ``"telegram:123456"`` → explicit channel
+          (``channel="telegram"``, ``channel_id="123456"``).
+        - ``"telegram:123456:789"`` → explicit channel + thread
+          (``thread_id="789"``).
+        - ``"origin"`` / ``"all"`` → routing token preserved in ``deliver`` for
+          the router to resolve (no concrete channel here).
+
+        Args:
+            token: A delivery token string.
+
+        Returns:
+            A :class:`DeliveryTarget`, or ``None`` when the token is empty.
+        """
+        if not token or not str(token).strip():
+            return None
+        token = str(token).strip()
+
+        # Symbolic routing tokens carry no concrete channel here; the router
+        # resolves them (e.g. "origin" needs request context, "all" fans out).
+        if token.lower() in ("origin", "all"):
+            return cls(deliver=token.lower())
+
+        if ":" in token:
+            parts = [p.strip() for p in token.split(":")]
+            channel = parts[0]
+            channel_id = parts[1] if len(parts) > 1 else ""
+            thread_id = parts[2] if len(parts) > 2 and parts[2] else None
+            return cls(
+                channel=channel,
+                channel_id=channel_id,
+                thread_id=thread_id,
+                deliver=token,
+            )
+
+        # Bare platform name → resolve to its home channel via the router.
+        return cls(channel=token, deliver=token)
+
 
 @dataclass
 class RunRecord:
