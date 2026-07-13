@@ -188,3 +188,92 @@ class TestDefaultStoreSearchEnhancements:
         d = hits[0].as_dict()
         assert d["session_id"] == "c1"
         assert "messages" in d
+
+
+class TestIndexedSessionRoute:
+    """Indexed gateway/agent routing lookups (Issue #2956)."""
+
+    def test_get_by_gateway_session_indexed(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "hi")
+        store.set_gateway_info("s1", gateway_session_id="gw-1", agent_id="a-1")
+
+        found = store.get_by_gateway_session("gw-1")
+        assert found is not None
+        assert found.session_id == "s1"
+        assert store.get_by_gateway_session("missing") is None
+
+    def test_get_by_gateway_session_no_scan(self, tmp_dir, monkeypatch):
+        # An indexed lookup must not fall back to an os.listdir scan.
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "hi")
+        store.set_gateway_info("s1", gateway_session_id="gw-1")
+        store._ensure_backfilled()
+
+        import praisonaiagents.session.store as store_mod
+
+        def _boom(*_a, **_k):
+            raise AssertionError("os.listdir must not be called on the hot path")
+
+        monkeypatch.setattr(store_mod.os, "listdir", _boom)
+        found = store.get_by_gateway_session("gw-1")
+        assert found is not None and found.session_id == "s1"
+
+    def test_list_sessions_by_gateway_agent_indexed(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        for sid in ("s1", "s2", "s3"):
+            store.add_message(sid, "user", "hi")
+        store.set_gateway_info("s1", agent_id="a-1")
+        store.set_gateway_info("s2", agent_id="a-1")
+        store.set_gateway_info("s3", agent_id="a-2")
+
+        ids = store.list_sessions_by_gateway_agent("a-1")
+        assert set(ids) == {"s1", "s2"}
+        assert store.list_sessions_by_gateway_agent("a-2") == ["s3"]
+
+    def test_route_backfills_existing_json(self, tmp_dir):
+        # Session with gateway info written via a plain store (no index).
+        plain = DefaultSessionStore(session_dir=tmp_dir)
+        plain.add_message("old", "user", "legacy")
+        plain.set_gateway_info("old", gateway_session_id="gw-old", agent_id="a-old")
+
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        found = store.get_by_gateway_session("gw-old")
+        assert found is not None and found.session_id == "old"
+        assert store.list_sessions_by_gateway_agent("a-old") == ["old"]
+
+    def test_route_cleared_on_delete(self, tmp_dir):
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "hi")
+        store.set_gateway_info("s1", gateway_session_id="gw-1")
+        assert store.get_by_gateway_session("gw-1") is not None
+
+        store.delete_session("s1")
+        assert store.get_by_gateway_session("gw-1") is None
+
+    def test_route_backfills_content_indexed_but_unrouted(self, tmp_dir):
+        # Migration case: a store upgraded from a prior release already has the
+        # content index (session_meta) populated for a gateway session, but the
+        # newly-created session_route table is empty. Backfill must still create
+        # the route row on first read so gateway routing does not silently lose
+        # the session (Greptile P1 regression).
+        import os
+
+        db_path = os.path.join(tmp_dir, "sessions_index.db")
+        store = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        store.add_message("old", "user", "legacy topic")
+        store.set_gateway_info("old", gateway_session_id="gw-old", agent_id="a-old")
+
+        # Simulate an old on-disk index: content indexed, route table empty.
+        conn = store._connect()
+        conn.execute("DELETE FROM session_route")
+        assert conn.execute(
+            "SELECT COUNT(*) FROM session_meta WHERE session_id = ?", ("old",)
+        ).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM session_route").fetchone()[0] == 0
+
+        # Re-open the store fresh (new backfill state) against the same DB/dir.
+        reopened = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        found = reopened.get_by_gateway_session("gw-old")
+        assert found is not None and found.session_id == "old"
+        assert reopened.list_sessions_by_gateway_agent("a-old") == ["old"]
