@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 404 |
+| Python Core Features | 407 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **110** |
+| **Gap Count** | **113** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 97 |
+| P3 (Low) | 100 |
 
 ## Gap Matrix
 
@@ -160,7 +160,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 97 todo)
+### P3_Advanced (180 done, 100 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -203,6 +203,7 @@
 | `GoalConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `GoalEngineer` | ✅ | ❌ | high | ⏳ TODO |
 | `GoalVerificationResult` | ✅ | ❌ | low | ⏳ TODO |
+| `HarnessProfile` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `IndexResult` | ✅ | ❌ | low | ⏳ TODO |
@@ -254,8 +255,10 @@
 | `list\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_memory\_factory` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_profile` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_runtime` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_harness` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_runtime` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
@@ -600,7 +603,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (100 exports)</summary>
+<summary><strong>other</strong> (103 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

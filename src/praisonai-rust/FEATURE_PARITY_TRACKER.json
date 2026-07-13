@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 404,
+    "pythonCoreFeatures": 407,
     "rustFeatures": 667,
-    "gapCount": 122,
-    "parityPercentage": 165.1
+    "gapCount": 125,
+    "parityPercentage": 163.9
   },
   "pythonCoreSDK": {
     "exports": [
@@ -149,6 +149,7 @@
       "HandoffResult",
       "HandoffTimeoutError",
       "HandoffToolPolicy",
+      "HarnessProfile",
       "Heartbeat",
       "HeartbeatConfig",
       "HookPluginProtocol",
@@ -378,6 +379,7 @@
       "register_display_callback",
       "register_memory_adapter",
       "register_memory_factory",
+      "register_profile",
       "register_runtime",
       "register_tool",
       "register_toolset",
@@ -389,6 +391,7 @@
       "resolve_execution",
       "resolve_guardrail_policies",
       "resolve_guardrails",
+      "resolve_harness",
       "resolve_hooks",
       "resolve_knowledge",
       "resolve_memory",
@@ -3916,6 +3919,15 @@
         "category": "other"
       },
       {
+        "feature": "HarnessProfile",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "Heartbeat",
         "python": true,
         "rust": false,
@@ -5221,6 +5233,15 @@
         "category": "other"
       },
       {
+        "feature": "register_profile",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "register_runtime",
         "python": true,
         "rust": false,
@@ -5300,6 +5321,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "resolve_harness",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve_hooks",

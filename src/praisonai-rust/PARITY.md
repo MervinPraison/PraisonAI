@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 404 | **Rust Features:** 667 | **Parity:** 71.3%
+> **Python Features:** 407 | **Rust Features:** 667 | **Parity:** 70.8%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 404 |
+| Python Core Features | 407 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **116** |
+| **Actual Gap Count** | **119** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **71.3%** |
+| **Parity** | **70.8%** |
 
 ## Implemented Features
 
@@ -737,6 +737,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `GoalEngineer`
 - ❌ `GoalVerificationResult`
 - ❌ `HandoffToolPolicy`
+- ❌ `HarnessProfile`
 - ❌ `Heartbeat`
 - ❌ `HeartbeatConfig`
 - ❌ `Include`
@@ -799,9 +800,11 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `parallel_handoffs`
 - ❌ `register_memory_adapter`
 - ❌ `register_memory_factory`
+- ❌ `register_profile`
 - ❌ `register_runtime`
 - ❌ `register_tool`
 - ❌ `register_toolset`
+- ❌ `resolve_harness`
 - ❌ `resolve_runtime`
 - ❌ `resolve_toolset`
 - ❌ `resolve_toolsets`

@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 404,
+    "pythonCoreFeatures": 407,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 110,
+    "gapCount": 113,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 97
+    "priorityP3": 100
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -153,6 +153,7 @@
       "HandoffResult",
       "HandoffTimeoutError",
       "HandoffToolPolicy",
+      "HarnessProfile",
       "Heartbeat",
       "HeartbeatConfig",
       "HookPluginProtocol",
@@ -382,6 +383,7 @@
       "register_display_callback",
       "register_memory_adapter",
       "register_memory_factory",
+      "register_profile",
       "register_runtime",
       "register_tool",
       "register_toolset",
@@ -393,6 +395,7 @@
       "resolve_execution",
       "resolve_guardrail_policies",
       "resolve_guardrails",
+      "resolve_harness",
       "resolve_hooks",
       "resolve_knowledge",
       "resolve_memory",
@@ -693,6 +696,7 @@
         "HandoffDepthError",
         "HandoffError",
         "HandoffTimeoutError",
+        "HarnessProfile",
         "Heartbeat",
         "HeartbeatConfig",
         "IndexResult",
@@ -742,8 +746,10 @@
         "memory",
         "register_memory_adapter",
         "register_memory_factory",
+        "register_profile",
         "register_runtime",
         "register_toolset",
+        "resolve_harness",
         "resolve_runtime",
         "resolve_toolset",
         "resolve_toolsets",
@@ -4996,6 +5002,15 @@
         "category": "other"
       },
       {
+        "feature": "HarnessProfile",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "Heartbeat",
         "python": true,
         "typescript": false,
@@ -6301,6 +6316,15 @@
         "category": "other"
       },
       {
+        "feature": "register_profile",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "register_runtime",
         "python": true,
         "typescript": false,
@@ -6380,6 +6404,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "resolve_harness",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve_hooks",
