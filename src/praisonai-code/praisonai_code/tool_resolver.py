@@ -1048,15 +1048,42 @@ class ToolResolver:
         return tools_dict
 
 
-    def load_functions_from_module(self, module_path: str) -> Dict[str, Callable]:
-        """Public replacement for AgentsGenerator.load_tools_from_module."""
+    def load_functions_from_module(
+        self,
+        module_path: str,
+        *,
+        functions_only: bool = False,
+        skip_private: bool = False,
+        module_name: str = "tools_module",
+    ) -> Dict[str, Callable]:
+        """Public replacement for AgentsGenerator.load_tools_from_module.
+
+        Args:
+            module_path: Path to the user tools module to load.
+            functions_only: If True, only ``inspect.isfunction`` members are
+                accepted (excludes callable class instances). Defaults to False
+                to preserve the broader ``isfunction or callable`` behaviour.
+            skip_private: If True, members whose name starts with ``_`` are
+                skipped. Defaults to False.
+            module_name: Name assigned to the loaded module by the safe loader.
+        """
         from praisonai_code._safe_loader import load_user_module
         # module_path is an explicit caller-provided path; allow absolute files
         # outside CWD (still gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
-        module = load_user_module(module_path, name="tools_module", allow_outside_cwd=True)
-        return {} if module is None else {
+        module = load_user_module(module_path, name=module_name, allow_outside_cwd=True)
+        if module is None:
+            return {}
+
+        def _accept(name: str, obj: object) -> bool:
+            if skip_private and name.startswith('_'):
+                return False
+            if functions_only:
+                return inspect.isfunction(obj)
+            return inspect.isfunction(obj) or callable(obj)
+
+        return {
             name: obj for name, obj in inspect.getmembers(module)
-            if inspect.isfunction(obj) or callable(obj)
+            if _accept(name, obj)
         }
 
 

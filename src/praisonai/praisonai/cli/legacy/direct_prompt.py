@@ -54,17 +54,18 @@ def _rewrite_query(self, query: str, rewrite_tools: str = None, verbose: bool = 
             if os.path.isfile(rewrite_tools):
                 # Load from file
                 try:
-                    import inspect
-                    from praisonai_code._safe_loader import load_user_module
-                    module = load_user_module(rewrite_tools, name="rewrite_tools_module", allow_outside_cwd=True)
-                    if module is not None:
-                        for name, obj in inspect.getmembers(module):
-                            if inspect.isfunction(obj) and not name.startswith('_'):
-                                rewrite_tools_list.append(obj)
-                        if rewrite_tools_list:
-                            print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
+                    from praisonai_code.tool_resolver import ToolResolver
+                    funcs = ToolResolver().load_functions_from_module(
+                        rewrite_tools,
+                        functions_only=True,
+                        skip_private=True,
+                        module_name="rewrite_tools_module",
+                    )
+                    if funcs:
+                        rewrite_tools_list.extend(funcs.values())
+                        print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
                     else:
-                        print(f"[yellow]Warning: Rewrite tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
+                        print(f"[yellow]Warning: No rewrite tools loaded from {rewrite_tools} (module has no public functions, or local tools loading is disabled — set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable).[/yellow]")
                 except Exception as e:
                     print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
             else:
@@ -149,17 +150,18 @@ def _expand_prompt(self, prompt: str, expand_tools: str = None, verbose: bool = 
             if os.path.isfile(expand_tools):
                 # Load from file
                 try:
-                    import inspect
-                    from praisonai_code._safe_loader import load_user_module
-                    module = load_user_module(expand_tools, name="expand_tools_module", allow_outside_cwd=True)
-                    if module is not None:
-                        for name, obj in inspect.getmembers(module):
-                            if inspect.isfunction(obj) and not name.startswith('_'):
-                                expand_tools_list.append(obj)
-                        if expand_tools_list:
-                            print(f"[cyan]Loaded {len(expand_tools_list)} tools for prompt expander[/cyan]")
+                    from praisonai_code.tool_resolver import ToolResolver
+                    funcs = ToolResolver().load_functions_from_module(
+                        expand_tools,
+                        functions_only=True,
+                        skip_private=True,
+                        module_name="expand_tools_module",
+                    )
+                    if funcs:
+                        expand_tools_list.extend(funcs.values())
+                        print(f"[cyan]Loaded {len(expand_tools_list)} tools for prompt expander[/cyan]")
                     else:
-                        print(f"[yellow]Warning: Expand tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
+                        print(f"[yellow]Warning: No expand tools loaded from {expand_tools} (module has no public functions, or local tools loading is disabled — set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable).[/yellow]")
                 except Exception as e:
                     print(f"[yellow]Warning: Failed to load expand tools: {e}[/yellow]")
             else:
@@ -237,17 +239,17 @@ def _load_tools(self, tools_path: str) -> list:
     if os.path.isfile(tools_path):
         # Load from file
         try:
-            import inspect
-            from praisonai_code._safe_loader import load_user_module
-            module = load_user_module(tools_path, name="tools_module", allow_outside_cwd=True)
-            if module is not None:
-                for name, obj in inspect.getmembers(module):
-                    if inspect.isfunction(obj) and not name.startswith('_'):
-                        tools_list.append(obj)
-                if tools_list:
-                    print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+            from praisonai_code.tool_resolver import ToolResolver
+            funcs = ToolResolver().load_functions_from_module(
+                tools_path,
+                functions_only=True,
+                skip_private=True,
+            )
+            if funcs:
+                tools_list.extend(funcs.values())
+                print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
             else:
-                print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
+                print(f"[yellow]Warning: No tools loaded from {tools_path} (module has no public functions, or local tools loading is disabled — set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable).[/yellow]")
         except Exception as e:
             print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
     else:

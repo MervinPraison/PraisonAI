@@ -152,18 +152,30 @@ class TestCLIToolResolverSmoke:
             assert result == []
 
     def test_load_tools_file_path_bypass(self):
-        """Test that file paths bypass the ToolResolver and use file loading."""
+        """Test that file paths use file loading, not name-based resolution.
+
+        As of #2935 the file-loading path is consolidated onto
+        ``ToolResolver.load_functions_from_module`` (which internally uses the
+        safe loader). The resolver is therefore instantiated for file paths,
+        but name-based ``resolve`` must NOT be invoked.
+        """
         cli = PraisonAI()
-        
+
         # Mock os.path.isfile to return True for file path test
         with patch('os.path.isfile', return_value=True):
             with patch("praisonai.tool_resolver.ToolResolver") as MockResolver:
-                # Also need to mock the file loading parts
-                with patch('praisonai._safe_loader.load_user_module', return_value=None):
-                    result = cli._load_tools("/path/to/tools.py")
-                
-                # ToolResolver should NOT be called for file paths
-                MockResolver.assert_not_called()
+                mock_instance = Mock()
+                MockResolver.return_value = mock_instance
+                # Simulate loading disabled / no functions found.
+                mock_instance.load_functions_from_module.return_value = {}
+
+                result = cli._load_tools("/path/to/tools.py")
+
+                # File loading goes through load_functions_from_module,
+                # NOT name-based resolve().
+                mock_instance.load_functions_from_module.assert_called_once()
+                mock_instance.resolve.assert_not_called()
+                assert result == []
 
     def test_load_tools_empty_input(self):
         """Test handling of empty or None input."""
