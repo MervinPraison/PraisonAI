@@ -142,6 +142,9 @@ class CommandRegistry:
         self.register("resume", {"description": "Resume a saved session: /resume <id>", "builtin": True})
         self.register("retry", {"description": "Retry your last message", "builtin": True})
         self.register("reasoning", {"description": "Toggle whether extended-thinking output is shown", "builtin": True})
+        # Consent-first automation suggestions & blueprints (accept/dismiss in chat)
+        self.register("automations", {"description": "List and accept/dismiss suggested automations", "builtin": True})
+        self.register("blueprint", {"description": "Create an automation from a template: /blueprint <name> [slot=value ...]", "builtin": True})
     
     def register(
         self, 

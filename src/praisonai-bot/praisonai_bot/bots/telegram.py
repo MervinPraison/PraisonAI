@@ -49,6 +49,7 @@ from ._commands import (
     build_command_access_policy,
     get_command_registry
 )
+from . import _automations
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -346,6 +347,36 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         # Register the pairing handler
         registry.register("pair", handle_pairing_callback)
+
+        # Register handler for automation-suggestion Accept/Dismiss taps.
+        # Callback shape: ``sug:accept:<id>`` / ``sug:dismiss:<id>`` — the
+        # registry strips the ``sug`` namespace and hands us ``accept:<id>``.
+        async def handle_suggestion_callback(ctx):
+            """Resolve a suggestion Accept/Dismiss inline-button tap."""
+            payload = ctx.platform_data.get("decoded_payload", {})
+            value = payload.get("value", "")
+            action, sug_id = _automations.parse_callback(value)
+            query = ctx.platform_data.get("query")
+            if action is None or not sug_id:
+                return None
+
+            if not self._command_policy.can_run(ctx.user_id, "automations"):
+                if query:
+                    await query.edit_message_text(
+                        text=f"{query.message.text}\n\n⛔ You are not permitted to manage automations"
+                    )
+                return "Permission denied"
+
+            if action == "accept":
+                result = _automations.accept_suggestion(sug_id)
+            else:
+                result = _automations.dismiss_suggestion(sug_id)
+
+            if query and query.message:
+                await query.edit_message_text(text=f"{query.message.text}\n\n{result}")
+            return f"Suggestion {action}"
+
+        registry.register("sug", handle_suggestion_callback)
 
     async def _handle_approve_callback(self, ctx, cmd_args: str, query) -> Optional[str]:
         """Resolve a `/approve <approval_id> <decision>` button tap.
@@ -1073,6 +1104,47 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             response = handle_reasoning_command(self._session, user_id, self._agent)
             await update.message.reply_text(response)
 
+        async def handle_automations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "automations"):
+                await update.message.reply_text("⛔ You are not permitted to run /automations")
+                return
+            items = _automations.list_suggestions()
+            await update.message.reply_text(
+                _automations.format_automations_header(len(items))
+            )
+            # One message per suggestion so each carries its own Accept/Dismiss
+            # inline keyboard (reusing the existing callback-query path).
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            for item in items:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(label, callback_data=cb)
+                    for label, cb in item["buttons"]
+                ]])
+                await update.message.reply_text(item["text"], reply_markup=keyboard)
+
+        async def handle_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.text:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "blueprint"):
+                await update.message.reply_text("⛔ You are not permitted to run /blueprint")
+                return
+            parts = update.message.text.split(maxsplit=2)
+            # /blueprint <name> [slot=value ...]
+            name = parts[1] if len(parts) > 1 else ""
+            args = parts[2] if len(parts) > 2 else ""
+            response = _automations.create_from_blueprint(name, args)
+            await update.message.reply_text(response)
+
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
@@ -1088,6 +1160,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("resume", handle_resume))
         self._application.add_handler(CommandHandler("retry", handle_retry))
         self._application.add_handler(CommandHandler("reasoning", handle_reasoning))
+        self._application.add_handler(CommandHandler("automations", handle_automations))
+        self._application.add_handler(CommandHandler("blueprint", handle_blueprint))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
