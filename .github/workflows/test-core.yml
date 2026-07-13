@@ -93,6 +93,13 @@ jobs:
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
+          - shard: train
+            workdir: src/praisonai-train
+            paths: >-
+              tests/unit/train/
+            extra_ignore: ""
+            pythonpath: >-
+              ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
@@ -101,7 +108,6 @@ jobs:
               tests/unit/mcp_server/
               tests/unit/mcp/
               tests/unit/knowledge/
-              tests/unit/train/
               tests/unit/llm/
               tests/unit/doctor/
               tests/unit/code/

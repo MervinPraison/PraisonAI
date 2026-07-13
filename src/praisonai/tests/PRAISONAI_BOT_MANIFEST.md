@@ -70,7 +70,7 @@ Console script: `praisonai-bot`
 - `cli/features/serve.py` (HTTP agents/mcp/a2a serve — not gateway recipe)
 - `scheduler/run_policy.py` (optional safety gate for unattended runs)
 - `jobs/*` (async runs API — lazy `praisonai` + recipe deps; UI bridge only)
-- Framework adapters, train, deploy
+- Framework adapters, deploy (train extracted to `praisonai-train` in C10)
 
 ## Install matrix
 

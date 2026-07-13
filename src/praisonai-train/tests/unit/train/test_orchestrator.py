@@ -14,7 +14,7 @@ class TestAgentTrainer:
     
     def test_create_trainer_with_agent(self):
         """Test creating trainer with an agent."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         
         mock_agent = Mock()
         mock_agent.chat = Mock(return_value="Agent response")
@@ -27,7 +27,7 @@ class TestAgentTrainer:
     
     def test_create_trainer_with_custom_iterations(self):
         """Test creating trainer with custom iteration count."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         
         mock_agent = Mock()
         trainer = AgentTrainer(agent=mock_agent, iterations=5)
@@ -36,7 +36,7 @@ class TestAgentTrainer:
     
     def test_create_trainer_human_mode(self):
         """Test creating trainer in human-in-the-loop mode."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         
         mock_agent = Mock()
         trainer = AgentTrainer(agent=mock_agent, human_mode=True)
@@ -45,7 +45,7 @@ class TestAgentTrainer:
     
     def test_trainer_generates_session_id(self):
         """Test that trainer generates unique session ID."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         
         mock_agent = Mock()
         trainer1 = AgentTrainer(agent=mock_agent)
@@ -56,8 +56,8 @@ class TestAgentTrainer:
     
     def test_add_scenario(self):
         """Test adding training scenarios."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
         
         mock_agent = Mock()
         trainer = AgentTrainer(agent=mock_agent)
@@ -73,7 +73,7 @@ class TestAgentTrainer:
     
     def test_add_scenario_from_dict(self):
         """Test adding scenario from dictionary."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         
         mock_agent = Mock()
         trainer = AgentTrainer(agent=mock_agent)
@@ -87,12 +87,12 @@ class TestAgentTrainer:
         assert len(trainer.scenarios) == 1
         assert trainer.scenarios[0].input_text == "Explain Python"
     
-    @patch("praisonai.train.agents.orchestrator.TrainingGrader")
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_run_llm_mode_single_iteration(self, mock_grader_class):
         """Test running single iteration in LLM mode."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
         
         # Setup mocks
         mock_agent = Mock()
@@ -123,12 +123,12 @@ class TestAgentTrainer:
         assert len(report.iterations) == 1
         assert report.iterations[0].score == 8.0
     
-    @patch("praisonai.train.agents.orchestrator.TrainingGrader")
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_run_llm_mode_multiple_iterations(self, mock_grader_class):
         """Test running multiple iterations shows improvement."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
         
         mock_agent = Mock()
         call_count = [0]
@@ -174,8 +174,8 @@ class TestAgentTrainer:
     @patch("builtins.input")
     def test_run_human_mode_prompts_for_feedback(self, mock_input):
         """Test that human mode prompts for feedback."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
         
         mock_agent = Mock()
         mock_agent.chat = Mock(return_value="Agent response")
@@ -201,7 +201,7 @@ class TestAgentTrainer:
     
     def test_run_without_scenarios_raises(self):
         """Test that running without scenarios raises error."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
         import pytest
         
         mock_agent = Mock()
@@ -210,12 +210,12 @@ class TestAgentTrainer:
         with pytest.raises(ValueError, match="No scenarios"):
             trainer.run()
     
-    @patch("praisonai.train.agents.orchestrator.TrainingGrader")
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_run_saves_to_storage(self, mock_grader_class):
         """Test that run saves iterations to storage."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
         import json
         
         mock_agent = Mock()
@@ -254,12 +254,12 @@ class TestAgentTrainer:
 class TestAgentTrainerWithAgents:
     """Tests for AgentTrainer with multi-agent (Agents class)."""
     
-    @patch("praisonai.train.agents.orchestrator.TrainingGrader")
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_trainer_works_with_agents_class(self, mock_grader_class):
         """Test trainer works with Agents (multi-agent) class."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
         
         # Mock Agents class (has start() method but NOT chat())
         mock_agents = Mock(spec=['start'])  # Only has start, not chat
@@ -293,12 +293,12 @@ class TestAgentTrainerWithAgents:
 class TestAgentTrainerCallable:
     """Tests for AgentTrainer with callable functions."""
     
-    @patch("praisonai.train.agents.orchestrator.TrainingGrader")
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_trainer_works_with_callable(self, mock_grader_class):
         """Test trainer works with a callable function."""
-        from praisonai.train.agents.orchestrator import AgentTrainer
-        from praisonai.train.agents.models import TrainingScenario
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
         
         def my_func(prompt):
             return f"Response to: {prompt}"

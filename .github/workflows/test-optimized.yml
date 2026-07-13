@@ -187,10 +187,34 @@ jobs:
         print('bot command modules import ok', bot_cmd.app, gw_cmd.app)
         "
 
+    - name: Standalone praisonai-train smoke (C10)
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-train-standalone
+        /tmp/praisonai-train-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-train
+        /tmp/praisonai-train-standalone/bin/python -c "
+        import sys
+        from praisonai_train._version import __version__ as pkg_version
+        import praisonai_train
+        assert praisonai_train.__version__ == pkg_version
+        trainer_cls = praisonai_train.AgentTrainer
+        scenario_cls = praisonai_train.TrainingScenario
+        assert trainer_cls.__module__.startswith('praisonai_train.')
+        for heavy in ('torch', 'unsloth', 'trl', 'datasets'):
+            assert heavy not in sys.modules, f'{heavy} imported eagerly'
+        print('train standalone ok', praisonai_train.__version__, trainer_cls.__name__)
+        "
+        /tmp/praisonai-train-standalone/bin/praisonai-train --help
+        /tmp/praisonai-train-standalone/bin/python -c "
+        import praisonai_train.cli.commands.train as train_cmd
+        print('train command module imports ok', train_cmd.app)
+        "
+        bash "$GITHUB_WORKSPACE/scripts/check_c10_train_imports.sh"
+
     - name: Audit hybrid module imports (C8 full stack)
       run: |
         set -euo pipefail
-        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai
+        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai
         python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary

@@ -3,10 +3,11 @@
 """Backward-compatible shim for the LLM fine-tuning entry point.
 
 The canonical fine-tuning implementation lives in
-:mod:`praisonai.train.llm.trainer` (served by the ``praisonai.train`` package).
-This top-level module is retained only as a thin re-export so that any legacy
-reference to ``praisonai/train.py`` (e.g. ``python path/to/train.py train``)
-keeps working. There is a single owner: ``praisonai.train.llm.trainer``.
+:mod:`praisonai_train.train.llm.trainer` (C10; ``praisonai.train`` is an
+``alias_package`` shim to it). This top-level module is retained only as a
+thin re-export so that any legacy reference to ``praisonai/train.py``
+(e.g. ``python path/to/train.py train``) keeps working. There is a single
+owner: ``praisonai_train.train.llm.trainer``.
 
 Note: because ``praisonai.train`` resolves to the package, this file is only
 reachable when executed directly as a script, not via ``import``.

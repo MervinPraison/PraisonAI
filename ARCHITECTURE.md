@@ -1,9 +1,9 @@
 # PraisonAI Architecture
 
-> **Last updated:** 2026-07-03 (C9 — four-tier package model)
+> **Last updated:** 2026-07-14 (C10 — five-package tiered model)
 >
 > Strategic architecture document for PraisonAI — a multi-agent AI framework.
-> Covers **Python four-tier package model (C7.1 + C9)**, system design, runtime
+> Covers **Python tiered package model (C7.1 + C9 + C10)**, system design, runtime
 > architecture, data contracts, reliability, observability, and the road map.
 
 ---
@@ -11,7 +11,7 @@
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)
-2. [Python Four-Tier Package Model (C7.1 + C9)](#2-python-four-tier-package-model-c71--c9)
+2. [Python Tiered Package Model (C7.1 + C9 + C10)](#2-python-tiered-package-model-c71--c9--c10)
 3. [System Overview](#3-system-overview)
 4. [Layered Architecture](#4-layered-architecture)
 5. [Core Data Contracts](#5-core-data-contracts)
@@ -21,7 +21,7 @@
 9. [Implementation Roadmap](#9-implementation-roadmap)
 10. [Success Metrics](#10-success-metrics)
 
-**Related boundary docs:** [`src/praisonai/tests/C7.1_BOUNDARIES.md`](src/praisonai/tests/C7.1_BOUNDARIES.md) · [`src/praisonai/tests/C9.1_BOUNDARIES.md`](src/praisonai/tests/C9.1_BOUNDARIES.md) · [`src/praisonai/tests/C7_VERIFICATION.md`](src/praisonai/tests/C7_VERIFICATION.md) · [`src/praisonai/tests/C9_VERIFICATION.md`](src/praisonai/tests/C9_VERIFICATION.md) · [`src/praisonai-agents/AGENTS.md`](src/praisonai-agents/AGENTS.md) §2.4
+**Related boundary docs:** [`src/praisonai/tests/C7.1_BOUNDARIES.md`](src/praisonai/tests/C7.1_BOUNDARIES.md) · [`src/praisonai/tests/C9.1_BOUNDARIES.md`](src/praisonai/tests/C9.1_BOUNDARIES.md) · [`src/praisonai/tests/PRAISONAI_TRAIN_MANIFEST.md`](src/praisonai/tests/PRAISONAI_TRAIN_MANIFEST.md) · [`src/praisonai/tests/C7_VERIFICATION.md`](src/praisonai/tests/C7_VERIFICATION.md) · [`src/praisonai/tests/C9_VERIFICATION.md`](src/praisonai/tests/C9_VERIFICATION.md) · [`src/praisonai-agents/AGENTS.md`](src/praisonai-agents/AGENTS.md) §2.4
 
 ---
 
@@ -51,13 +51,15 @@ Orchestration + Observability** core to unlock adoption and trust:
 
 ---
 
-## 2. Python Four-Tier Package Model (C7.1 + C9)
+## 2. Python Tiered Package Model (C7.1 + C9 + C10)
 
-**Release:** v4.6.110+ · `praisonaiagents` · `praisonai-code` · `praisonai-bot` · `praisonai`
+**Release:** v4.6.110+ · `praisonaiagents` · `praisonai-code` · `praisonai-bot` · `praisonai-train` · `praisonai`
 
-The Python monorepo publishes four tiers with strict dependency direction. C7
-delivered a standalone agentic hot path; C7.1 formalised code/wrapper ownership;
-C9 extracted bots, gateway, and channel CLI into `praisonai-bot`.
+The Python monorepo publishes five packages in three tiers with strict dependency
+direction. C7 delivered a standalone agentic hot path; C7.1 formalised
+code/wrapper ownership; C9 extracted bots, gateway, and channel CLI into
+`praisonai-bot`; C10 extracted LLM fine-tuning and agent training into
+`praisonai-train`.
 
 ```mermaid
 flowchart TB
@@ -65,35 +67,41 @@ flowchart TB
     Agents["praisonaiagents<br/>Agent, tools, memory, hooks, protocols"]
   end
 
-  subgraph tier2 [Tier 2 — Terminal + Bot]
+  subgraph tier2 [Tier 2 — Terminal + Bot + Train]
     Code["praisonai-code<br/>run, chat, code, Typer, runtime, LLM"]
     Bot["praisonai-bot<br/>bots, gateway, channel CLI, OS daemon"]
+    Train["praisonai-train<br/>LLM fine-tuning, agent training"]
   end
 
   subgraph tier3 [Tier 3 — Wrapper]
-    Wrapper["praisonai<br/>framework_adapters, train, serve, dashboard"]
+    Wrapper["praisonai<br/>framework_adapters, serve, dashboard"]
   end
 
   Agents --> Code
   Agents --> Bot
+  Agents --> Train
   Agents --> Wrapper
   Code -.->|"lazy _bot_bridge"| Bot
+  Code -.->|"lazy _train_bridge"| Train
   Code -.->|"lazy _wrapper_bridge"| Wrapper
   Bot -.->|"lazy _code_bridge / _wrapper_bridge"| Code
   Bot -.->|"lazy _wrapper_bridge"| Wrapper
+  Train -.->|"lazy _code_bridge / _wrapper_bridge"| Code
 ```
 
-**PyPI publish order:** `praisonaiagents` → `praisonai-code` + `praisonai-bot` → `praisonai`
+**PyPI publish order:** `praisonaiagents` → `praisonai-code` + `praisonai-bot` + `praisonai-train` → `praisonai`
 
-**Backward compatibility:** `praisonai.bots`, `praisonai.gateway`, and related CLI
-paths remain as `alias_package` shims to `praisonai_bot.*`.
+**Backward compatibility:** `praisonai.bots`, `praisonai.gateway`, `praisonai.train`,
+and related CLI paths remain as `alias_package` shims to `praisonai_bot.*` /
+`praisonai_train.*`.
 
 | Tier | Package | Owns | Must not depend on |
 |------|---------|------|-------------------|
-| 1 | `src/praisonai-agents/` | Agent, tools, memory, hooks, `frameworks/` protocols | `praisonai`, `praisonai-code`, `praisonai-bot` |
+| 1 | `src/praisonai-agents/` | Agent, tools, memory, hooks, `frameworks/` protocols | `praisonai`, `praisonai-code`, `praisonai-bot`, `praisonai-train` |
 | 2a | `src/praisonai-code/` | `run`/`chat`/`code`, Typer, runtime, LLM, tool resolution | **`praisonai` as a PyPI dependency** (optional lazy imports via `_wrapper_bridge` only) |
 | 2b | `src/praisonai-bot/` | Bots, gateway, channel CLI, OS daemon, gateway scheduler tick | **`praisonai` as a PyPI dependency** (optional lazy `_wrapper_bridge` for jobs/UI) |
-| 3 | `src/praisonai/` | `framework_adapters/`, train, serve, dashboard, async jobs API | — |
+| 2c | `src/praisonai-train/` | LLM fine-tuning (Unsloth), agent training, `train` CLI, conda env setup | **`praisonai` as a PyPI dependency** (lazy `_code_bridge` for legacy dispatch) |
+| 3 | `src/praisonai/` | `framework_adapters/`, serve, dashboard, async jobs API | — |
 
 **Config kernel:** Phase 0 `praisonai/common/` was skipped; shared config lives in
 `praisonai_code/cli/configuration/` and is reached by the bot tier via lazy
