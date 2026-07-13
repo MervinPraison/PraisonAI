@@ -528,5 +528,10 @@ class MemoryCoreMixin:
             # different signature that would otherwise shadow this via the MRO.
             quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
-        # Use sync version in thread to avoid blocking event loop
-        return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id, **kwargs)
+        # Use sync version in thread to avoid blocking event loop. Call the mixin's
+        # own store_long_term explicitly: a subclass (e.g. Memory) may override
+        # store_long_term with an incompatible signature (completeness/relevance/...),
+        # which would otherwise bind quality_score/user_id to the wrong parameters.
+        return await asyncio.to_thread(
+            MemoryCoreMixin.store_long_term, self, content, metadata, quality_score, user_id, **kwargs
+        )
