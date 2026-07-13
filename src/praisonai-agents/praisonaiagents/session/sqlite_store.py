@@ -115,6 +115,7 @@ class SqliteSessionStore(DefaultSessionStore):
                 "CREATE TABLE IF NOT EXISTS session_meta ("
                 "session_id TEXT PRIMARY KEY, updated_at TEXT)"
             )
+            self._init_route_schema(conn)
             return True
         except Exception as exc:
             logger.info("FTS5 not available (%s); using LIKE fallback index.", exc)
@@ -127,10 +128,37 @@ class SqliteSessionStore(DefaultSessionStore):
                     "CREATE TABLE IF NOT EXISTS session_meta ("
                     "session_id TEXT PRIMARY KEY, updated_at TEXT)"
                 )
+                self._init_route_schema(conn)
                 return False
             except Exception:
                 self._conn = None
                 raise
+
+    @staticmethod
+    def _init_route_schema(conn) -> None:
+        """Create the indexed gateway/agent routing table.
+
+        Maps ``gateway_session_id`` and ``agent_id`` to a ``session_id`` so the
+        gateway hot-path lookups (``get_by_gateway_session`` /
+        ``list_sessions_by_gateway_agent``) become O(1)/O(log n) index reads
+        instead of an ``os.listdir`` + JSON-parse of every stored session
+        (Issue #2956).
+        """
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_route ("
+            "  session_id TEXT PRIMARY KEY,"
+            "  gateway_session_id TEXT,"
+            "  agent_id TEXT"
+            ")"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_route_gateway "
+            "ON session_route(gateway_session_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_route_agent "
+            "ON session_route(agent_id)"
+        )
 
     @staticmethod
     def _flatten(session: SessionData) -> str:
@@ -149,6 +177,8 @@ class SqliteSessionStore(DefaultSessionStore):
             return
         content = self._flatten(session)
         sid = session.session_id
+        gateway_session_id = getattr(session, "gateway_session_id", None)
+        agent_id = getattr(session, "agent_id", None)
         try:
             with self._db_lock:
                 conn.execute("DELETE FROM session_fts WHERE session_id = ?", (sid,))
@@ -161,6 +191,19 @@ class SqliteSessionStore(DefaultSessionStore):
                     "VALUES (?, ?)",
                     (sid, session.updated_at),
                 )
+                # Keep the gateway/agent routing index in sync so inbound
+                # routing is an indexed lookup, not a full-directory scan.
+                if gateway_session_id or agent_id:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO session_route "
+                        "(session_id, gateway_session_id, agent_id) "
+                        "VALUES (?, ?, ?)",
+                        (sid, gateway_session_id, agent_id),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM session_route WHERE session_id = ?", (sid,)
+                    )
         except Exception as exc:  # never let indexing break a write
             logger.debug("Session index update failed for %s: %s", sid, exc)
 
@@ -172,6 +215,7 @@ class SqliteSessionStore(DefaultSessionStore):
             with self._db_lock:
                 conn.execute("DELETE FROM session_fts WHERE session_id = ?", (session_id,))
                 conn.execute("DELETE FROM session_meta WHERE session_id = ?", (session_id,))
+                conn.execute("DELETE FROM session_route WHERE session_id = ?", (session_id,))
         except Exception as exc:
             logger.debug("Session de-index failed for %s: %s", session_id, exc)
 
@@ -320,6 +364,60 @@ class SqliteSessionStore(DefaultSessionStore):
         if not terms:
             return '""'
         return " OR ".join('"%s"' % t for t in terms)
+
+    # ── gateway/agent routing: indexed key → session lookup ───────────
+
+    def get_by_gateway_session(self, gateway_session_id: str) -> Optional[SessionData]:
+        """Resolve a session by ``gateway_session_id`` via the indexed route.
+
+        Overrides the parent's O(N) ``os.listdir`` + JSON-parse-every-file scan
+        with a single indexed ``SELECT`` on ``session_route`` so inbound routing
+        latency is independent of the number of stored sessions (Issue #2956).
+        Falls back to the parent scan if the index is unavailable.
+        """
+        conn = self._connect()
+        if conn is None:
+            return super().get_by_gateway_session(gateway_session_id)
+        self._ensure_backfilled()
+        try:
+            with self._db_lock:
+                row = conn.execute(
+                    "SELECT session_id FROM session_route "
+                    "WHERE gateway_session_id = ?",
+                    (gateway_session_id,),
+                ).fetchone()
+        except Exception as exc:
+            logger.debug("Route lookup failed (%s); falling back to scan.", exc)
+            return super().get_by_gateway_session(gateway_session_id)
+        if row is None:
+            return None
+        try:
+            return self._read_session_fresh(row[0])
+        except Exception:
+            return None
+
+    def list_sessions_by_gateway_agent(self, agent_id: str, limit: int = 50) -> List[str]:
+        """List session IDs for a gateway agent via the indexed route.
+
+        Overrides the parent's full-directory scan with an indexed ``SELECT``
+        on ``session_route`` (Issue #2956). Falls back to the parent scan if the
+        index is unavailable.
+        """
+        conn = self._connect()
+        if conn is None:
+            return super().list_sessions_by_gateway_agent(agent_id, limit)
+        self._ensure_backfilled()
+        try:
+            with self._db_lock:
+                rows = conn.execute(
+                    "SELECT session_id FROM session_route WHERE agent_id = ? "
+                    "LIMIT ?",
+                    (agent_id, limit),
+                ).fetchall()
+        except Exception as exc:
+            logger.debug("Route lookup failed (%s); falling back to scan.", exc)
+            return super().list_sessions_by_gateway_agent(agent_id, limit)
+        return [r[0] for r in rows]
 
     def search(
         self,
