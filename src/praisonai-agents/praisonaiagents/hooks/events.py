@@ -203,7 +203,7 @@ class OnErrorInput(HookInput):
 class OnRetryInput(HookInput):
     """Input for OnRetry hooks fired during tool execution retries."""
     tool_name: str = ""
-    attempt: int = 1
+    attempt: int = 1  # Current attempt number (1-based)
     delay_ms: int = 0
     error: str = ""
     max_attempts: int = 0
@@ -214,7 +214,6 @@ class OnRetryInput(HookInput):
     error_message: str = ""
     operation: str = ""  # tool_call, llm_request, etc.
     delay_seconds: float = 0.0  # Delay before retry
-    attempt: int = 0  # Current attempt number (0-based)
     
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
@@ -230,8 +229,7 @@ class OnRetryInput(HookInput):
             "max_retries": self.max_retries,
             "error_message": self.error_message,
             "operation": self.operation,
-            "delay_seconds": self.delay_seconds,
-            "attempt": self.attempt
+            "delay_seconds": self.delay_seconds
         })
         return base
 
