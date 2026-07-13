@@ -117,6 +117,49 @@ class ConnectRecoveryStep(str, Enum):
     DO_NOT_RETRY = "do_not_retry"
 
 
+# Connect-error codes that are terminal for an auto-reconnecting client: the
+# gateway will never accept the same client until an operator intervenes
+# (re-auth, re-pair, upgrade), so a reconnect loop must pause rather than
+# hammer the server with backoff forever. Everything else is treated as
+# transient/recoverable (back off and retry).
+_NON_RECOVERABLE_CONNECT_CODES = frozenset({
+    ConnectErrorCode.AUTH_REQUIRED,
+    ConnectErrorCode.AUTH_UNAUTHORIZED,
+    ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+    ConnectErrorCode.PAIRING_REQUIRED,
+    ConnectErrorCode.AGENT_NOT_FOUND,
+    ConnectErrorCode.ORIGIN_NOT_ALLOWED,
+    ConnectErrorCode.CONFIGURATION_ERROR,
+})
+
+
+def is_recoverable(code: "ConnectErrorCode | str") -> bool:
+    """Classify a connect-error code as recoverable (transient) or terminal.
+
+    A single source of truth shared by the bundled gateway client and any
+    alternative client so terminal-versus-transient handling stays consistent.
+
+    Args:
+        code: A :class:`ConnectErrorCode` or its string value.
+
+    Returns:
+        ``True`` when an auto-reconnecting client should back off and retry
+        (e.g. ``RATE_LIMITED``, or an unknown/future code — fail open to
+        retry). ``False`` for terminal auth/pairing/protocol/origin/config
+        failures (and ``AGENT_NOT_FOUND``, which the server emits with a
+        do-not-retry recovery step) where reconnecting will not help until
+        an operator intervenes.
+    """
+    if not isinstance(code, ConnectErrorCode):
+        try:
+            code = ConnectErrorCode(code)
+        except ValueError:
+            # Unknown/future codes: fail open so a new terminal code does not
+            # silently strand a client — better to retry than to stop wrongly.
+            return True
+    return code not in _NON_RECOVERABLE_CONNECT_CODES
+
+
 class EventType(str, Enum):
     """Standard gateway event types."""
     
