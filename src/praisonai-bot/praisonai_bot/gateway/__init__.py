@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .server import WebSocketGateway, GatewaySession
-    from .client import GatewayClient, BackoffConfig, GatewayConnectError
+    from .client import GatewayClient, BackoffConfig, GatewayConnectError, PayloadTooLarge
     from .rate_limiter import AuthRateLimiter
     from .pairing import PairingStore
     from .exec_approval import ExecApprovalManager, get_exec_approval_manager
@@ -33,6 +33,9 @@ def __getattr__(name: str):
     if name == "GatewayConnectError":
         from .client import GatewayConnectError
         return GatewayConnectError
+    if name == "PayloadTooLarge":
+        from .client import PayloadTooLarge
+        return PayloadTooLarge
     # Security / approval primitives
     if name == "AuthRateLimiter":
         from .rate_limiter import AuthRateLimiter
@@ -63,6 +66,7 @@ __all__ = [
     "GatewayClient",
     "BackoffConfig",
     "GatewayConnectError",
+    "PayloadTooLarge",
     "AuthRateLimiter",
     "PairingStore",
     "ExecApprovalManager",

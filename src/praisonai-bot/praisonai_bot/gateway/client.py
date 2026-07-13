@@ -22,12 +22,20 @@ from praisonaiagents.gateway import (
     GatewayEvent,
     EventType,
     ConnectErrorCode,
+    HelloResult,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
     is_recoverable,
 )
 
 logger = logging.getLogger(__name__)
+
+# Default capability tokens the bundled client advertises during the handshake.
+DEFAULT_CAPABILITIES = ("streaming", "ack")
+
+
+class PayloadTooLarge(Exception):
+    """Raised when an outbound frame exceeds the server-advertised max_payload."""
 
 
 class GatewayConnectError(Exception):
@@ -114,6 +122,7 @@ class GatewayClient:
         reconnect: bool = True,
         backoff: Optional[BackoffConfig] = None,
         max_reconnect_attempts: Optional[int] = None,
+        capabilities: Optional[List[str]] = None,
     ):
         """Initialize the gateway client.
         
@@ -124,6 +133,9 @@ class GatewayClient:
             reconnect: Whether to auto-reconnect on disconnect
             backoff: Backoff configuration
             max_reconnect_attempts: Max reconnection attempts (None = infinite)
+            capabilities: Capability tokens to advertise during the ``hello``
+                handshake (e.g. ``["streaming", "ack"]``). Defaults to
+                :data:`DEFAULT_CAPABILITIES`.
         """
         self.url = url
         self.agent_id = agent_id
@@ -131,6 +143,10 @@ class GatewayClient:
         self.reconnect = reconnect
         self.backoff = backoff or BackoffConfig()
         self.max_reconnect_attempts = max_reconnect_attempts
+        self.capabilities: List[str] = (
+            list(capabilities) if capabilities is not None
+            else list(DEFAULT_CAPABILITIES)
+        )
         
         self._ws: Optional[WebSocketClientProtocol] = None
         self._state = ConnectionState.DISCONNECTED
@@ -147,6 +163,13 @@ class GatewayClient:
         # honoured once then cleared so it does not shortcut the exponential
         # sequence on subsequent attempts.
         self._retry_after: Optional[float] = None
+        
+        # Negotiated handshake manifest (populated from the server's hello_ok).
+        # Empty until a modern gateway is reached; a legacy gateway leaves these
+        # as their permissive defaults.
+        self._features: Dict[str, List[str]] = {}
+        self._policy: Dict[str, int] = {}
+        self._negotiated: bool = False
         
         # Callbacks
         self.on_gap: Optional[Callable[[int, int], None]] = None
@@ -168,6 +191,44 @@ class GatewayClient:
     def is_connected(self) -> bool:
         """Whether the client is currently connected."""
         return self._state == ConnectionState.CONNECTED
+    
+    @property
+    def features(self) -> Dict[str, List[str]]:
+        """Negotiated feature manifest (``{"methods": [...], "events": [...]}``).
+        
+        Empty when connected to a legacy gateway that only speaks the ``join``
+        handshake. Callers should gate optional behaviour on the advertised
+        event/method set rather than probing-by-failure.
+        """
+        return self._features
+    
+    @property
+    def policy(self) -> Dict[str, int]:
+        """Negotiated transport policy limits.
+        
+        Keys include ``max_payload``, ``max_buffered_bytes``,
+        ``max_queued_frames`` and ``heartbeat_ms`` when advertised. Empty for a
+        legacy gateway.
+        """
+        return self._policy
+    
+    @property
+    def heartbeat_ms(self) -> Optional[int]:
+        """Server-advertised heartbeat interval in milliseconds, if any."""
+        value = self._policy.get("heartbeat_ms")
+        return int(value) if value is not None else None
+    
+    def supports_event(self, event: Union[str, EventType]) -> bool:
+        """Whether the negotiated manifest advertises the given event.
+        
+        Returns ``True`` for legacy gateways (no manifest) so callers keep the
+        previous permissive behaviour and do not silently disable everything.
+        """
+        events = self._features.get("events")
+        if not events:
+            return True
+        value = event.value if isinstance(event, EventType) else event
+        return value in events
     
     def _set_state(self, state: str) -> None:
         """Set connection state and notify callback."""
@@ -287,23 +348,97 @@ class GatewayClient:
         # Connect to WebSocket
         self._ws = await websockets.connect(connect_url)
         
-        # Send join message with protocol version
+        # Resume fields shared by both handshake paths.
+        resume_fields: Dict[str, Any] = {}
+        if self._session_id:
+            resume_fields["session_id"] = self._session_id
+        if self._cursor > 0:
+            resume_fields["since"] = self._cursor
+        
+        # Modern path: send the capability-aware hello frame and let the
+        # gateway advertise its features/policy so we can self-configure.
+        hello_msg = {
+            "type": "hello",
+            "agent_id": self.agent_id,
+            "protocol_min": MIN_PROTOCOL_VERSION,
+            "protocol_max": PROTOCOL_VERSION,
+            "capabilities": list(self.capabilities),
+            **resume_fields,
+        }
+        await self._ws.send(json.dumps(hello_msg))
+        
+        # Wait for handshake response with timeout
+        try:
+            response = await asyncio.wait_for(self._ws.recv(), timeout=10.0)
+        except asyncio.TimeoutError:
+            raise ConnectionError("Handshake timed out")
+        data = json.loads(response)
+        reply_type = data.get("type")
+        
+        if reply_type == "hello_ok":
+            self._adopt_hello(data)
+        
+        elif reply_type == "hello_error":
+            error_code = data.get("code")
+            error_msg = data.get("message", "Unknown error")
+            if error_code in ("protocol_unsupported", "version_unsupported"):
+                raise ValueError(f"Protocol version unsupported: {error_msg}")
+            raise ConnectionError(f"Handshake failed: {error_msg}")
+        
+        elif reply_type == "error":
+            error_code = data.get("code")
+            error_msg = data.get("message", "Unknown error")
+            if error_code == "version_unsupported":
+                raise ValueError(f"Protocol version unsupported: {error_msg}")
+            # A bare "error" reply to hello means an older gateway that does not
+            # speak the hello frame; fall back to the legacy join handshake.
+            await self._legacy_join(resume_fields)
+        
+        elif reply_type == "joined":
+            # Older gateway answered the hello frame with a bare joined reply.
+            self._adopt_legacy_join(data)
+        
+        else:
+            raise ConnectionError(f"Unexpected handshake reply: {reply_type}")
+    
+    def _adopt_hello(self, data: Dict[str, Any]) -> None:
+        """Adopt a negotiated ``hello_ok`` manifest (features + policy)."""
+        hello = HelloResult(
+            protocol=data.get("protocol", PROTOCOL_VERSION),
+            features=data.get("features", {}) or {},
+            policy=data.get("policy", {}) or {},
+            session_id=data.get("session_id"),
+            resumed=data.get("resumed", False),
+            cursor=data.get("cursor", 0),
+        )
+        self._session_id = hello.session_id
+        self._cursor = hello.cursor
+        self._sequence = data.get("sequence", 0)
+        self._expected_sequence = self._sequence + 1
+        self._protocol_version = hello.protocol
+        self._features = hello.features
+        self._policy = hello.policy
+        self._negotiated = True
+        
+        self._set_state(ConnectionState.CONNECTED)
+        logger.info(
+            f"Connected to gateway (session={self._session_id}, "
+            f"protocol=v{self._protocol_version}, resumed={hello.resumed}, "
+            f"features={self._features}, policy={self._policy})"
+        )
+    
+    async def _legacy_join(self, resume_fields: Dict[str, Any]) -> None:
+        """Compatibility fallback: perform the legacy ``join`` handshake."""
+        logger.info("Gateway did not accept hello; falling back to legacy join")
         join_msg = {
             "type": "join",
             "agent_id": self.agent_id,
             "min_version": MIN_PROTOCOL_VERSION,
             "max_version": PROTOCOL_VERSION,
+            **resume_fields,
         }
-        
-        # Include session/cursor for reconnection
-        if self._session_id:
-            join_msg["session_id"] = self._session_id
-        if self._cursor > 0:
-            join_msg["since"] = self._cursor
-        
         await self._ws.send(json.dumps(join_msg))
         
-        # Wait for join response with timeout
         try:
             response = await asyncio.wait_for(self._ws.recv(), timeout=10.0)
         except asyncio.TimeoutError:
@@ -350,19 +485,27 @@ class GatewayClient:
             raise ConnectionError(f"Join failed: {error_msg}")
         
         elif data.get("type") == "joined":
-            # Store session info
-            self._session_id = data.get("session_id")
-            self._cursor = data.get("cursor", 0)
-            self._sequence = data.get("sequence", 0)
-            self._expected_sequence = self._sequence + 1
-            self._protocol_version = data.get("protocol_version", PROTOCOL_VERSION)
-            
-            self._set_state(ConnectionState.CONNECTED)
-            
-            logger.info(
-                f"Connected to gateway (session={self._session_id}, "
-                f"protocol=v{self._protocol_version}, resumed={data.get('resumed', False)})"
-            )
+            self._adopt_legacy_join(data)
+        else:
+            raise ConnectionError(f"Unexpected join reply: {data.get('type')}")
+    
+    def _adopt_legacy_join(self, data: Dict[str, Any]) -> None:
+        """Adopt a bare legacy ``joined`` reply (no features/policy manifest)."""
+        self._session_id = data.get("session_id")
+        self._cursor = data.get("cursor", 0)
+        self._sequence = data.get("sequence", 0)
+        self._expected_sequence = self._sequence + 1
+        self._protocol_version = data.get("protocol_version", PROTOCOL_VERSION)
+        # Legacy gateway advertises no manifest; keep permissive defaults.
+        self._features = {}
+        self._policy = {}
+        self._negotiated = False
+        
+        self._set_state(ConnectionState.CONNECTED)
+        logger.info(
+            f"Connected to gateway via legacy join (session={self._session_id}, "
+            f"protocol=v{self._protocol_version}, resumed={data.get('resumed', False)})"
+        )
     
     async def _receive_loop(self) -> None:
         """Receive messages from WebSocket."""
@@ -460,12 +603,24 @@ class GatewayClient:
             raise ConnectionError("Not connected to gateway")
         
         if isinstance(message, dict):
-            await self._ws.send(json.dumps(message))
+            payload = json.dumps(message)
         else:
-            await self._ws.send(json.dumps({
+            payload = json.dumps({
                 "type": "message",
                 "content": message
-            }))
+            })
+        
+        # Self-guard against the server-advertised max_payload so oversized
+        # frames fail locally with a clear error instead of being rejected
+        # (or silently dropped) by the gateway.
+        max_payload = self._policy.get("max_payload")
+        if max_payload and len(payload.encode("utf-8")) > max_payload:
+            raise PayloadTooLarge(
+                f"Outbound frame exceeds server max_payload "
+                f"({len(payload.encode('utf-8'))} > {max_payload} bytes)"
+            )
+        
+        await self._ws.send(payload)
     
     async def events(self) -> AsyncIterator[GatewayEvent]:
         """Iterate over received events.
