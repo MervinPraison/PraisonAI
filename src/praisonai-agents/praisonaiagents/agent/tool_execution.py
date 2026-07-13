@@ -18,7 +18,6 @@ import threading
 import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
-from ..tools.trust import wrap_if_external
 from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -277,6 +276,7 @@ def build_tool_result_message_pair(
 def _fence_external_text(function_name: str, text: str) -> str:
     """Apply the external-content prompt-injection fence to a text string."""
     try:
+        from ..tools.trust import wrap_if_external
         wrapped = wrap_if_external(function_name, text)
         return wrapped if isinstance(wrapped, str) else text
     except Exception:
@@ -753,7 +753,13 @@ class ToolExecutionMixin:
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             if not _is_multimodal_result:
-                result = wrap_if_external(function_name, result)
+                try:
+                    from ..tools.trust import wrap_if_external
+                    result = wrap_if_external(function_name, result)
+                except Exception:
+                    # Trust module unavailable (partial/broken install) must not
+                    # abort tool execution; fall through with the raw result.
+                    pass
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
