@@ -46,11 +46,17 @@ class EditTools:
     """Tools for file editing and patching operations."""
     
     def __init__(self, workspace=None, post_edit_diagnostics: str = "auto",
-                 post_edit_format: str = "off", formatters: Optional[dict] = None):
+                 post_edit_format: str = "off", formatters: Optional[dict] = None,
+                 root: Optional[str] = None):
         """Initialize EditTools with optional workspace containment.
         
         Args:
             workspace: Optional Workspace instance for path containment
+            root: Optional base directory that confines all path resolution when
+                no ``workspace`` is supplied. Defaults to the current working
+                directory. Any path resolving outside this root is rejected,
+                closing the "read any host file (e.g. /etc/passwd)" gap in the
+                no-workspace fallback.
             post_edit_diagnostics: When to run a lightweight, language-appropriate
                 check on a file after a successful edit/patch and append the
                 results to the tool output. One of:
@@ -83,6 +89,7 @@ class EditTools:
                 built-in defaults.
         """
         self._workspace = workspace
+        self._root = os.path.abspath(os.path.expanduser(root)) if root else None
         self._file_cache = {}  # Cache for staleness checking
         mode = (post_edit_diagnostics or "auto")
         if isinstance(mode, str):
@@ -100,15 +107,33 @@ class EditTools:
         self._formatters = formatters or {}
     
     def _validate_path(self, filepath: str) -> str:
-        """Validate and resolve a file path within workspace constraints."""
+        """Validate and resolve a file path within workspace constraints.
+
+        When an explicit ``workspace`` is configured, resolution is delegated to
+        it.  Otherwise the fallback confines resolution to a base directory
+        (mirroring ``file_tools.py``) so an absolute path like ``/etc/passwd`` —
+        which never contains the literal ``..`` — cannot escape the workspace
+        and read arbitrary host files.  The base defaults to the current working
+        directory and can be overridden via the ``root`` constructor argument.
+        """
         if self._workspace is not None:
             return str(self._workspace.resolve(filepath))
-        
-        # Fallback to basic validation
+
+        # Fallback: confine to a base directory rather than merely rejecting the
+        # literal '..' substring, which a plain absolute path never contains.
         filepath = os.path.expanduser(filepath)
         if '..' in filepath:
             raise ValueError(f"Path traversal detected: {filepath}")
-        return os.path.abspath(filepath)
+
+        base = self._root if self._root is not None else os.path.abspath(os.getcwd())
+        normalized = os.path.normpath(filepath)
+        if not os.path.isabs(normalized):
+            normalized = os.path.join(base, normalized)
+        absolute = os.path.realpath(normalized)
+        real_base = os.path.realpath(base)
+        if os.path.commonpath([absolute, real_base]) != real_base:
+            raise ValueError(f"Path traversal detected: {filepath} escapes workspace {real_base}")
+        return absolute
     
     def _detect_line_ending(self, content: str) -> str:
         """Detect the line ending style of the content.
@@ -1369,7 +1394,8 @@ def search_files(directory: str, pattern: str,
 
 def create_edit_tools(workspace=None, post_edit_diagnostics: str = "auto",
                       post_edit_format: str = "off",
-                      formatters: Optional[dict] = None) -> EditTools:
+                      formatters: Optional[dict] = None,
+                      root: Optional[str] = None) -> EditTools:
     """Create EditTools instance with optional workspace containment.
     
     Args:
@@ -1381,9 +1407,12 @@ def create_edit_tools(workspace=None, post_edit_diagnostics: str = "auto",
             backward compatibility.
         formatters: Optional ext -> ``(tool_name, argv_template)`` override map;
             see ``EditTools.__init__`` for details.
+        root: Optional base directory confining path resolution when no
+            ``workspace`` is supplied; see ``EditTools.__init__`` for details.
         
     Returns:
         EditTools instance configured with workspace
     """
     return EditTools(workspace=workspace, post_edit_diagnostics=post_edit_diagnostics,
-                     post_edit_format=post_edit_format, formatters=formatters)
+                     post_edit_format=post_edit_format, formatters=formatters,
+                     root=root)

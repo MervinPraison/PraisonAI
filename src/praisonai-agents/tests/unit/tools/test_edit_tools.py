@@ -24,6 +24,14 @@ def _auto_approve():
         reset_yaml_approved_tools(token)
 
 
+@pytest.fixture(autouse=True)
+def _chdir_tmp(tmp_path, monkeypatch):
+    """Run each test from within its ``tmp_path`` so the default cwd-confined
+    ``_validate_path`` (which now rejects reads/writes outside the workspace)
+    permits the temporary files these tests create."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def tools():
     return EditTools()
@@ -992,3 +1000,61 @@ class TestConcurrency:
         assert lock_a is not lock_b
         # Same path returns the same lock object (shared across callers).
         assert lock_a is _file_locks.get_lock(tools._validate_path(str(a)))
+
+
+class TestWorkspaceContainment:
+    """Fallback path validator must confine resolution to a base directory.
+
+    Regression coverage for the "read any host file (e.g. /etc/passwd) with no
+    workspace boundary" gap: with no explicit workspace, an absolute path
+    outside the working directory must be rejected rather than resolved.
+    """
+
+    def test_read_file_rejects_outside_cwd_absolute_path(self, tools):
+        # No workspace configured (default instance) -> confined to cwd.
+        content, meta = tools.read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_search_files_rejects_outside_cwd_absolute_path(self, tools):
+        import json
+
+        result = json.loads(tools.search_files("/etc", "root", "*"))
+        assert "error" in result
+        assert "Path traversal detected" in result["error"]
+
+    def test_edit_file_rejects_outside_cwd_absolute_path(self, tools):
+        result = tools.edit_file("/etc/passwd", "root", "pwned")
+        assert "Path traversal detected" in result
+
+    def test_module_level_read_file_rejects_outside_cwd(self):
+        from praisonaiagents.tools.edit_tools import read_file
+
+        content, meta = read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_read_within_cwd_still_works(self, tools, tmp_path):
+        # A path inside the confined workspace (cwd == tmp_path here) resolves.
+        p = tmp_path / "inside.txt"
+        _write(p, "hello\n")
+        content, meta = tools.read_file(str(p))
+        assert content == "hello\n"
+        assert meta
+
+    def test_explicit_root_confines_resolution(self, tmp_path):
+        # A caller-supplied root confines resolution to that directory even when
+        # the process cwd differs.
+        root = tmp_path / "root"
+        root.mkdir()
+        inside = root / "ok.txt"
+        _write(inside, "ok\n")
+        editor = EditTools(root=str(root))
+
+        content, meta = editor.read_file(str(inside))
+        assert content == "ok\n"
+        assert meta
+
+        content, meta = editor.read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
