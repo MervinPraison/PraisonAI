@@ -24,7 +24,7 @@ class TestMCPToolRunnerConcurrency:
                 item = runner.queue.get()
                 if item is None:
                     break
-                response_queue, tool_name, _arguments = item
+                response_queue, _kind, tool_name, _arguments = item
                 if tool_name == "slow_tool":
                     time.sleep(0.05)
                     response_queue.put((True, "slow-result"))
