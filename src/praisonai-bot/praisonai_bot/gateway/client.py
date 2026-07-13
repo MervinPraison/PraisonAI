@@ -21,11 +21,46 @@ except ImportError:
 from praisonaiagents.gateway import (
     GatewayEvent,
     EventType,
+    ConnectErrorCode,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
+    is_recoverable,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class GatewayConnectError(Exception):
+    """Terminal connect rejection: reconnecting will not help.
+
+    Raised when the gateway rejects the handshake with a non-recoverable
+    :class:`ConnectErrorCode` (revoked token, wrong secret, unpaired device,
+    unsupported protocol, ...). The reconnect loop stops instead of hammering
+    a gateway that will never accept the client, and surfaces the server's
+    machine-readable recovery guidance (``code``/``next_step``) so operators
+    see *why* the connection was abandoned.
+
+    Attributes:
+        code: The structured :class:`ConnectErrorCode` from the server.
+        next_step: The server's recommended recovery step (``next_step`` wire
+            field, e.g. ``"reauthenticate"``), if provided.
+        message: Human-readable error message for display.
+    """
+
+    def __init__(
+        self,
+        code: ConnectErrorCode,
+        next_step: Optional[str] = None,
+        message: Optional[str] = None,
+    ):
+        self.code = code
+        self.next_step = next_step
+        self.message = message or ""
+        super().__init__(
+            f"Gateway rejected connection (code={code.value}"
+            + (f", next_step={next_step}" if next_step else "")
+            + (f"): {self.message}" if self.message else ")")
+        )
 
 
 @dataclass
@@ -108,10 +143,21 @@ class GatewayClient:
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
         self._receive_task: Optional[asyncio.Task] = None
+        # Server-supplied backoff floor (seconds) for the next reconnect delay,
+        # honoured once then cleared so it does not shortcut the exponential
+        # sequence on subsequent attempts.
+        self._retry_after: Optional[float] = None
         
         # Callbacks
         self.on_gap: Optional[Callable[[int, int], None]] = None
         self.on_state_change: Optional[Callable[[str], None]] = None
+        # Invoked when the reconnect loop stops on a terminal (non-recoverable)
+        # connect failure. Receives (code, next_step) so callers can surface an
+        # actionable reason and drive re-auth / re-pair instead of the client
+        # silently looping forever.
+        self.on_reconnect_paused: Optional[
+            Callable[[ConnectErrorCode, Optional[str]], None]
+        ] = None
     
     @property
     def state(self) -> str:
@@ -131,14 +177,28 @@ class GatewayClient:
                 self.on_state_change(state)
     
     def _calculate_backoff(self) -> float:
-        """Calculate next backoff delay with jitter."""
+        """Calculate next backoff delay with jitter.
+
+        When the server supplied a ``retry_after`` hint on the last rejection,
+        it is honoured as a lower bound on the delay while preserving the
+        exponential sequence: the hint delays the next attempt without
+        resetting or shortcutting backoff. The hint is consumed once.
+        """
         delay = min(
             self.backoff.initial * (self.backoff.multiplier ** self._reconnect_attempts),
             self.backoff.max
         )
         # Add jitter
         jitter = delay * self.backoff.jitter * (2 * random.random() - 1)
-        return max(0, delay + jitter)
+        delay = max(0, delay + jitter)
+
+        # Honour a server-requested backoff floor once, then clear it so it
+        # does not pin every subsequent attempt.
+        if self._retry_after is not None:
+            delay = max(delay, self._retry_after)
+            self._retry_after = None
+
+        return delay
     
     async def connect(self) -> None:
         """Start the connection loop as a background task.
@@ -173,6 +233,19 @@ class GatewayClient:
                 # Wait for disconnect or stop
                 await self._receive_task
                 
+            except GatewayConnectError as e:
+                # Terminal connect rejection (auth/pairing/protocol/config):
+                # the gateway will never accept this client until an operator
+                # intervenes, so stop the loop instead of hammering it forever.
+                logger.error(
+                    f"Connection abandoned: {e} "
+                    f"(reconnect paused; not retrying)"
+                )
+                self._running = False
+                self._set_state(ConnectionState.DISCONNECTED)
+                if self.on_reconnect_paused:
+                    self.on_reconnect_paused(e.code, e.next_step)
+                return
             except ValueError as e:
                 # Protocol version mismatch is a permanent error
                 logger.error(f"Connection failed permanently: {e}")
@@ -234,14 +307,44 @@ class GatewayClient:
             raise ConnectionError("Join handshake timed out")
         data = json.loads(response)
         
-        if data.get("type") == "error":
+        if data.get("type") in ("error", "hello_error"):
             error_code = data.get("code")
             error_msg = data.get("message", "Unknown error")
-            
-            if error_code == "version_unsupported":
+            next_step = data.get("next_step") or data.get("next")
+
+            # Record a server-supplied backoff floor for the next reconnect,
+            # regardless of terminal/transient (a terminal path ignores it).
+            retry_after = data.get("retry_after_seconds")
+            if retry_after is not None:
+                try:
+                    self._retry_after = max(0.0, float(retry_after))
+                except (TypeError, ValueError):
+                    self._retry_after = None
+
+            # Legacy string codes kept for backward compatibility.
+            if error_code in ("version_unsupported", "protocol_unsupported"):
                 raise ValueError(f"Protocol version unsupported: {error_msg}")
-            else:
+
+            # Structured connect-error code: branch terminal vs transient using
+            # the shared core classifier so a revoked token / wrong secret /
+            # unpaired device stops the loop with an actionable reason instead
+            # of reconnecting forever.
+            if error_code is not None:
+                try:
+                    code = ConnectErrorCode(error_code)
+                except ValueError:
+                    # Unknown/future code: treat as transient (retry).
+                    raise ConnectionError(f"Join failed: {error_msg}")
+
+                if not is_recoverable(code):
+                    raise GatewayConnectError(code, next_step, error_msg)
+
+                # Recoverable → let the loop back off and retry (honouring any
+                # retry_after floor recorded above).
                 raise ConnectionError(f"Join failed: {error_msg}")
+
+            # No structured code at all: transient by default.
+            raise ConnectionError(f"Join failed: {error_msg}")
         
         elif data.get("type") == "joined":
             # Store session info
