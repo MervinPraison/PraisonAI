@@ -52,6 +52,41 @@
         "quiet": { "type": "boolean" }
       }
     },
-    "telemetry": { "type": "boolean" }
+    "telemetry": { "type": "boolean" },
+    "model_allowlist": {
+      "type": "array",
+      "description": "Allowed model identifiers. Enforceable when supplied by a managed source.",
+      "items": { "type": "string" }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "Permission policy (rules for auto-running tools). Enforceable when supplied by a managed source.",
+      "additionalProperties": true
+    },
+    "managed": {
+      "type": "object",
+      "description": "Optional centrally-managed / remote config + policy source. Fully opt-in; when absent, resolution is local-only. Also configurable via PRAISONAI_MANAGED_CONFIG_URL / PRAISONAI_MANAGED_CONFIG_DIR.",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Remote URL to fetch managed config from (short timeout, cached, fail-soft to last good copy or local-only when offline)."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Managed/enterprise directory (populated by MDM/config-management) containing config.yaml|yml|json."
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Fetch timeout in seconds (default 3). Never blocks a run on the network.",
+          "default": 3
+        },
+        "enforce": {
+          "type": "boolean",
+          "description": "When true (default), policy keys (permissions, model_allowlist) are enforced above local config; other keys remain overridable defaults below local config. When false, the whole managed source is advisory.",
+          "default": true
+        }
+      }
+    }
   }
 }
