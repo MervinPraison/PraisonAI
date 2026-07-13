@@ -61,7 +61,8 @@ class AgentScheduler(_BaseAgentScheduler):
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None,
         timeout: Optional[int] = None,
-        max_cost: Optional[float] = 1.00
+        max_cost: Optional[float] = 1.00,
+        deliver: str = ""
     ):
         """
         Initialize agent scheduler.
@@ -74,6 +75,11 @@ class AgentScheduler(_BaseAgentScheduler):
             on_failure: Callback function on failed execution
             timeout: Maximum execution time per run in seconds (None = no limit)
             max_cost: Maximum total cost in USD (default: $1.00 for safety)
+            deliver: Optional delivery target token (e.g. ``"telegram:123456"``).
+                When set, each successful result is routed to the resolved chat
+                target through the shared ``DeliveryRouter`` — same rate
+                limiting, idempotency dedup and dead-target self-heal the
+                gateway provides — without the full gateway.
         """
         self.agent = agent
         self.task = task
@@ -82,6 +88,10 @@ class AgentScheduler(_BaseAgentScheduler):
         self.on_failure = on_failure
         self.timeout = timeout
         self.max_cost = max_cost
+        # Fall back to a ``deliver`` recorded in the config dict (e.g. from
+        # ``from_blueprint`` / YAML) so a target set there is honoured too.
+        self.deliver = deliver or (self.config.get("deliver", "") if self.config else "")
+        self._delivery = None
         
         self.is_running = False
         self._stop_event = threading.Event()
@@ -253,7 +263,12 @@ class AgentScheduler(_BaseAgentScheduler):
                     self._total_cost, self.max_cost,
                 )
                 success = True
-                
+
+                # Deliver the result to the configured chat target (if any)
+                # through the shared resilient router. Best-effort — a delivery
+                # failure must not fail the run or block the callback.
+                self._deliver_result(result)
+
                 if self.on_success:
                     try:
                         self.on_success(result)
@@ -303,7 +318,9 @@ class AgentScheduler(_BaseAgentScheduler):
         try:
             result = self._executor.execute(self.task)
             logger.debug(f"One-time execution successful: {result}")
-            
+
+            self._deliver_result(result)
+
             if self.on_success:
                 try:
                     self.on_success(result)
@@ -314,6 +331,26 @@ class AgentScheduler(_BaseAgentScheduler):
         except Exception as e:
             logger.error(f"One-time execution failed: {e}")
             raise
+
+    def _deliver_result(self, result: Any) -> None:
+        """Route a successful result to the configured chat target.
+
+        No-op when no ``deliver`` target is set. The delivery target is
+        resolved and sent through the shared ``DeliveryRouter`` (rate limiting,
+        idempotency dedup, dead-target self-heal), reusing the same machinery
+        the gateway uses — without requiring the full gateway. Never raises: a
+        delivery problem must not tear down the scheduler.
+        """
+        if not self.deliver:
+            return
+        try:
+            if self._delivery is None:
+                from praisonai.scheduler._delivery import SchedulerDelivery
+                job_id = self.config.get("agent_id", "") if self.config else ""
+                self._delivery = SchedulerDelivery(self.deliver, job_id=job_id)
+            self._delivery.deliver(str(result))
+        except Exception as e:
+            logger.error(f"Scheduler delivery error: {e}")
     
     @classmethod
     def from_yaml(
@@ -402,6 +439,7 @@ class AgentScheduler(_BaseAgentScheduler):
         max_retries_override: Optional[int] = None,
         timeout_override: Optional[int] = None,
         max_cost_override: Optional[float] = None,
+        deliver: str = "",
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None
     ) -> 'AgentScheduler':
@@ -436,6 +474,7 @@ class AgentScheduler(_BaseAgentScheduler):
             max_retries_override=max_retries_override,
             timeout_override=timeout_override,
             max_cost_override=max_cost_override,
+            deliver=deliver,
             on_success=on_success,
             on_failure=on_failure,
         )
@@ -540,10 +579,12 @@ class AgentScheduler(_BaseAgentScheduler):
         scheduler = cls(
             agent=agent,
             task=prompt,
+            config=config,
             timeout=timeout,
             max_cost=max_cost,
             on_success=on_success,
             on_failure=on_failure,
+            deliver=config.get("deliver", ""),
         )
 
         scheduler._blueprint_name = blueprint_name

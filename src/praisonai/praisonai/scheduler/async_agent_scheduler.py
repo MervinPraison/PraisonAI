@@ -115,7 +115,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None,
         timeout: Optional[int] = None,
-        max_cost: Optional[float] = 1.00
+        max_cost: Optional[float] = 1.00,
+        deliver: str = ""
     ):
         """
         Initialize async agent scheduler.
@@ -128,6 +129,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             on_failure: Callback function on failed execution
             timeout: Maximum execution time per run in seconds (None = no limit)
             max_cost: Maximum total cost in USD (default: $1.00 for safety)
+            deliver: Optional delivery target token (e.g. ``"telegram:123456"``)
+                routed to the resolved chat target on each successful run.
         """
         self.agent = agent
         self.task = task
@@ -136,6 +139,8 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self.on_failure = on_failure
         self.timeout = timeout
         self.max_cost = max_cost
+        self.deliver = deliver or (self.config.get("deliver", "") if self.config else "")
+        self._delivery = None
         self._total_cost = 0.0
         
         self.is_running = False
@@ -151,6 +156,24 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self._stop_event: Optional[asyncio.Event] = None
         self._stats_lock: Optional[asyncio.Lock] = None
         self._bound_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _deliver_result(self, result: Any) -> None:
+        """Route a successful result to the configured chat target.
+
+        No-op when no ``deliver`` target is set. Reuses the shared
+        ``DeliveryRouter`` (rate limiting, idempotency dedup, dead-target
+        self-heal) without the full gateway. Never raises.
+        """
+        if not self.deliver:
+            return
+        try:
+            if self._delivery is None:
+                from praisonai.scheduler._delivery import SchedulerDelivery
+                job_id = self.config.get("agent_id", "") if self.config else ""
+                self._delivery = SchedulerDelivery(self.deliver, job_id=job_id)
+            self._delivery.deliver(str(result))
+        except Exception as e:
+            logger.error(f"Scheduler delivery error: {e}")
 
     def _ensure_async_primitives(self) -> None:
         """Create async primitives if they don't exist yet.
@@ -410,6 +433,11 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                     self._total_cost, self.max_cost,
                 )
                 
+                # Deliver to the configured chat target (if any) off the event
+                # loop, since the shared delivery helper uses the sync bridge.
+                if self.deliver:
+                    await asyncio.to_thread(self._deliver_result, result)
+
                 safe_call(self.on_success, result)
                 await asyncio.to_thread(self._update_state_if_daemon)
                 return
@@ -451,6 +479,14 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         try:
             result = await self._executor.execute(self.task)
             logger.info(f"One-time async execution successful: {result}")
+
+            # Deliver to the configured chat target (if any) off the event loop,
+            # since the shared delivery helper uses the sync bridge. Mirrors the
+            # scheduled-loop success path so a one-time async run is not silently
+            # undelivered.
+            if self.deliver:
+                await asyncio.to_thread(self._deliver_result, result)
+
             return result
         except Exception as e:
             logger.error(f"One-time async execution failed: {e}")
@@ -527,6 +563,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         max_retries_override: Optional[int] = None,
         timeout_override: Optional[int] = None,
         max_cost_override: Optional[float] = None,
+        deliver: str = "",
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None
     ) -> 'AsyncAgentScheduler':
@@ -561,6 +598,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             max_retries_override=max_retries_override,
             timeout_override=timeout_override,
             max_cost_override=max_cost_override,
+            deliver=deliver,
             on_success=on_success,
             on_failure=on_failure,
         )

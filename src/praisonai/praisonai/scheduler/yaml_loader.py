@@ -89,13 +89,19 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     # Extract schedule configuration (optional)
     schedule_section = config.get('schedule', {})
     
-    # Set defaults for schedule if not provided
+    # Set defaults for schedule if not provided. ``every`` is accepted as an
+    # alias for ``interval`` so the terser scheduler-block form validates too.
     schedule_config = {
-        'interval': schedule_section.get('interval', 'hourly'),
+        'interval': schedule_section.get(
+            'interval', schedule_section.get('every', 'hourly')
+        ),
         'max_retries': schedule_section.get('max_retries', 3),
         'run_immediately': schedule_section.get('run_immediately', False),
         'timeout': schedule_section.get('timeout'),  # Optional timeout in seconds
         'max_cost': schedule_section.get('max_cost', 1.00),  # Default $1.00 budget limit for safety
+        # Optional delivery target token (e.g. "telegram:123456"); routed to
+        # the resolved chat target on each successful run when set.
+        'deliver': schedule_section.get('deliver', ''),
     }
     
     logger.info(f"Loaded agent '{agent_config.get('name', 'Unknown')}' with schedule interval '{schedule_config['interval']}'")

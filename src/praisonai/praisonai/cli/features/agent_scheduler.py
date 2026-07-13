@@ -94,6 +94,7 @@ class AgentSchedulerHandler:
         max_retries = getattr(args, 'schedule_max_retries', None) or 3
         timeout = getattr(args, 'timeout', None)
         max_cost = getattr(args, 'max_cost', None)
+        deliver = getattr(args, 'schedule_deliver', None) or ''
         
         # Check if name already exists
         existing = state_manager.load_state(name)
@@ -121,7 +122,8 @@ class AgentSchedulerHandler:
             interval=interval,
             max_cost=max_cost,
             timeout=timeout,
-            max_retries=max_retries
+            max_retries=max_retries,
+            deliver=deliver
         )
         
         # Save state
@@ -134,6 +136,7 @@ class AgentSchedulerHandler:
             "timeout": timeout,
             "max_cost": max_cost,
             "max_retries": max_retries,
+            "deliver": deliver,
             "status": "running",
             "started_at": datetime.now().isoformat(),
             "executions": 0,
@@ -370,10 +373,12 @@ class AgentSchedulerHandler:
         new_pid = daemon_manager.start_scheduler_daemon(
             name=name,
             task=state['task'],
+            recipe_name=state.get('recipe_name'),
             interval=state['interval'],
             max_cost=state.get('max_cost'),
             timeout=state.get('timeout'),
-            max_retries=state.get('max_retries', 3)
+            max_retries=state.get('max_retries', 3),
+            deliver=state.get('deliver', '')
         )
         
         state['pid'] = new_pid
@@ -557,6 +562,7 @@ class AgentSchedulerHandler:
         max_retries_override = getattr(args, 'schedule_max_retries', None) or 3
         timeout_override = getattr(args, 'timeout', None)
         max_cost_override = getattr(args, 'max_cost', None)
+        deliver_override = getattr(args, 'schedule_deliver', None) or ''
         verbose = getattr(args, 'verbose', False)
         
         # Set up logging - only show logs if verbose
@@ -630,9 +636,14 @@ class AgentSchedulerHandler:
                     agent=agent,
                     task=task,
                     timeout=timeout_override,
-                    max_cost=max_cost_override
+                    max_cost=max_cost_override,
+                    deliver=deliver_override
                 )
-            
+
+            # A CLI --deliver overrides any target resolved from YAML/recipe.
+            if deliver_override:
+                scheduler.deliver = deliver_override
+
             # Get configuration
             interval = interval_override
             max_retries = max_retries_override
@@ -754,6 +765,16 @@ schedule:
             help='Override maximum retry attempts (default: from YAML or 3)'
         )
         
+        schedule_parser.add_argument(
+            '--deliver', '-d',
+            dest='schedule_deliver',
+            type=str,
+            help=(
+                "Deliver each result to a chat target "
+                "(e.g. 'telegram:123456', 'telegram', 'telegram:123:thread')"
+            ),
+        )
+
         schedule_parser.add_argument(
             '--verbose', '-v',
             action='store_true',

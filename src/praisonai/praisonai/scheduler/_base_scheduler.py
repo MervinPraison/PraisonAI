@@ -122,6 +122,7 @@ def build_from_yaml(
         max_cost=schedule_config.get('max_cost'),
         on_success=on_success,
         on_failure=on_failure,
+        deliver=schedule_config.get('deliver', ''),
     )
 
     # Store schedule config for later use
@@ -141,6 +142,7 @@ def build_from_recipe(
     max_retries_override: Optional[int] = None,
     timeout_override: Optional[int] = None,
     max_cost_override: Optional[float] = None,
+    deliver: str = "",
     on_success: Optional[Callable] = None,
     on_failure: Optional[Callable] = None,
 ) -> "_BaseAgentScheduler":
@@ -182,6 +184,9 @@ def build_from_recipe(
         max_retries = max_retries_override if max_retries_override is not None else sched_config.max_retries
         timeout = timeout_override or sched_config.timeout_sec
         max_cost = max_cost_override if max_cost_override is not None else sched_config.max_cost_usd
+        # An explicit ``deliver=`` argument wins; otherwise fall back to a
+        # target declared on the recipe's schedule config, if any.
+        deliver = deliver or getattr(sched_config, 'deliver', '') or ''
 
     # Create the executor-agent wrapper (sync or async variant)
     agent = agent_cls(resolved)
@@ -195,6 +200,7 @@ def build_from_recipe(
         max_cost=max_cost,
         on_success=on_success,
         on_failure=on_failure,
+        deliver=deliver,
     )
 
     # Store recipe metadata and schedule config
@@ -206,6 +212,7 @@ def build_from_recipe(
         'run_immediately': False,
         'timeout': timeout,
         'max_cost': max_cost,
+        'deliver': deliver,
     }
 
     return scheduler
