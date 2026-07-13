@@ -1,6 +1,7 @@
 import logging
 from praisonaiagents._logging import get_logger
 import os
+import copy
 import warnings
 import re
 import inspect
@@ -2027,18 +2028,34 @@ Now provide your final answer using this result. Summarize the information natur
         if isinstance(content, list):
             for block in reversed(content):
                 if isinstance(block, dict) and block.get("type") == "text":
-                    if "cache_control" not in block:
-                        block["cache_control"] = {"type": "ephemeral"}
+                    if "cache_control" in block:
+                        # Already marked: no new breakpoint was applied.
+                        return False
+                    block["cache_control"] = {"type": "ephemeral"}
                     return True
         return False
+
+    @staticmethod
+    def _count_cache_markers(messages: list) -> int:
+        """Count existing ``cache_control`` markers across message content."""
+        count = 0
+        for message in messages:
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "cache_control" in block:
+                        count += 1
+        return count
 
     def _mark_history_prefix(self, messages: list, history_start: int, preserve_recent: int = 2) -> None:
         """Mark the end of the stable history prefix with a cache breakpoint.
 
         Leaves the most recent ``preserve_recent`` messages (the volatile tail)
         uncached and places a single breakpoint on the last stable message.
-        Respects the provider 4-breakpoint budget: the system block already
-        consumes one, so at most one additional breakpoint is added here.
+        Respects the provider 4-breakpoint budget by counting markers already
+        present (e.g. the system block, or markers in caller-supplied history)
+        before adding a new one. To avoid mutating caller-owned history dicts,
+        the boundary message is replaced with a shallow copy before marking.
         """
         history_len = len(messages) - history_start
         if history_len <= preserve_recent:
@@ -2046,7 +2063,16 @@ Now provide your final answer using this result. Summarize the information natur
         boundary_index = len(messages) - preserve_recent - 1
         if boundary_index <= history_start - 1:
             return
-        self._mark_message_cache_control(messages[boundary_index])
+        # Respect the provider 4-breakpoint budget, accounting for any markers
+        # already present in the system block or caller-supplied history.
+        if self._count_cache_markers(messages) >= 4:
+            return
+        # Copy the boundary message so marking does not mutate the caller's
+        # history, which may be reused for OpenAI/Gemini (which reject
+        # Anthropic cache metadata).
+        boundary = copy.deepcopy(messages[boundary_index])
+        if self._mark_message_cache_control(boundary):
+            messages[boundary_index] = boundary
 
     def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None, tools=None):
         """Build messages list for LLM completion. Works for both sync and async.
