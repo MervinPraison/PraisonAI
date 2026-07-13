@@ -135,6 +135,64 @@ class TestGatewayAuthEnforcement:
             assert_external_bind_safe(config)
 
 
+class TestLoopbackAuthBypassDefault:
+    """Test loopback auth bypass is permissive-by-default on loopback binds (#2945)."""
+
+    def _bypass(self, bind_host, client_host, headers=None, allow_env=None):
+        from praisonai_bot.gateway.server import _should_bypass_loopback_auth
+
+        return _should_bypass_loopback_auth(
+            bind_host, client_host, headers or {}, allow_env=allow_env
+        )
+
+    def test_loopback_bind_permissive_by_default(self):
+        """Fresh loopback bind allows local requests without an explicit env flag."""
+        assert self._bypass("127.0.0.1", "127.0.0.1", allow_env="") is True
+        assert self._bypass("localhost", "127.0.0.1", allow_env="") is True
+        assert self._bypass("::1", "::1", allow_env="") is True
+
+    def test_external_bind_strict_by_default(self):
+        """External binds stay strict — no bypass even from a localhost client."""
+        assert self._bypass("0.0.0.0", "127.0.0.1", allow_env="") is False
+        assert self._bypass("192.168.1.10", "127.0.0.1", allow_env="") is False
+
+    def test_explicit_true_forces_bypass_on_external_bind(self):
+        """ALLOW_LOOPBACK_BYPASS=true keeps legacy force-enable behaviour."""
+        assert self._bypass("0.0.0.0", "127.0.0.1", allow_env="true") is True
+        assert self._bypass("0.0.0.0", "127.0.0.1", allow_env="1") is True
+
+    def test_explicit_false_disables_bypass_on_loopback_bind(self):
+        """ALLOW_LOOPBACK_BYPASS=false opts back into strict auth on loopback."""
+        assert self._bypass("127.0.0.1", "127.0.0.1", allow_env="false") is False
+        assert self._bypass("127.0.0.1", "127.0.0.1", allow_env="0") is False
+
+    def test_non_local_client_never_bypasses(self):
+        """A remote client on a loopback-bound gateway still requires auth."""
+        assert self._bypass("127.0.0.1", "192.168.1.5", allow_env="") is False
+
+    def test_proxy_headers_block_bypass(self):
+        """Requests carrying proxy headers can't inherit loopback trust."""
+        for header in ("x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"):
+            assert (
+                self._bypass("127.0.0.1", "127.0.0.1", {header: "1.2.3.4"}, allow_env="")
+                is False
+            )
+
+    def test_missing_client_host_blocks_bypass(self):
+        assert self._bypass("127.0.0.1", None, allow_env="") is False
+
+    def test_env_var_default_read(self, monkeypatch):
+        """When allow_env is not passed, the env var drives the decision."""
+        from praisonai_bot.gateway.server import _should_bypass_loopback_auth
+
+        monkeypatch.delenv("ALLOW_LOOPBACK_BYPASS", raising=False)
+        assert _should_bypass_loopback_auth("127.0.0.1", "127.0.0.1", {}) is True
+        assert _should_bypass_loopback_auth("0.0.0.0", "127.0.0.1", {}) is False
+
+        monkeypatch.setenv("ALLOW_LOOPBACK_BYPASS", "false")
+        assert _should_bypass_loopback_auth("127.0.0.1", "127.0.0.1", {}) is False
+
+
 class TestAuthTokenFingerprinting:
     """Test auth token fingerprinting for safe logging."""
     

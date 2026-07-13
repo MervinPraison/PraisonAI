@@ -153,6 +153,58 @@ def _delivery_text_digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+def _should_bypass_loopback_auth(
+    bind_host: Optional[str],
+    client_host: Optional[str],
+    request_headers,
+    *,
+    allow_env: Optional[str] = None,
+) -> bool:
+    """Decide whether a request qualifies for the loopback dev auth bypass.
+
+    Permissive by default when the gateway is bound to a loopback interface
+    (``127.0.0.1``/``localhost``/``::1``), matching the "loopback permissive,
+    external strict" design intent (#1506): a fresh ``python app.py`` on
+    localhost should serve the dashboard and APIs in the browser without
+    copying a token. Externally bound gateways (``0.0.0.0``, LAN IPs) stay
+    strict and always require auth.
+
+    The bypass additionally requires the request to originate from localhost
+    with no proxy headers present, so a proxied/forwarded request can never
+    inherit loopback trust.
+
+    ``ALLOW_LOOPBACK_BYPASS`` (passed via ``allow_env``) is an explicit
+    override:
+      - ``true``/``1``/``yes`` force-enables the bypass regardless of bind host
+      - ``false``/``0``/``no`` force-disables it even on a loopback bind
+
+    Args:
+        bind_host: Interface the gateway is bound to.
+        client_host: Remote address of the incoming request.
+        request_headers: Mapping-like request headers (supports ``in``).
+        allow_env: Value of ``ALLOW_LOOPBACK_BYPASS`` (defaults to the env var).
+    """
+    from .origin_check import is_loopback
+
+    if allow_env is None:
+        allow_env = os.environ.get("ALLOW_LOOPBACK_BYPASS", "")
+    allow_env = (allow_env or "").strip().lower()
+
+    if allow_env in ("false", "0", "no"):
+        return False
+    if allow_env not in ("true", "1", "yes"):
+        # Not explicitly set: default to permissive only when the gateway
+        # itself is bound to a loopback interface.
+        if not is_loopback(bind_host or ""):
+            return False
+
+    if not client_host or client_host not in ("127.0.0.1", "::1", "localhost"):
+        return False
+    # Reject if proxy headers are present (indicates request went through proxy)
+    proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
+    return not any(header in request_headers for header in proxy_headers)
+
+
 class _ClientConn:
     """Per-connection outbound delivery with a bounded buffer.
 
@@ -943,21 +995,29 @@ class WebSocketGateway:
         def _loopback_bypass_active(request) -> bool:
             """Whether the development loopback auth bypass applies to ``request``.
 
-            Only true when ``ALLOW_LOOPBACK_BYPASS`` is explicitly enabled, the
-            request originates from localhost, and no proxy headers are present.
+            Permissive by default when the gateway is bound to a loopback
+            interface (``127.0.0.1``/``localhost``/``::1``), matching the
+            "loopback permissive, external strict" design intent (#1506): a
+            fresh ``python app.py`` on localhost should serve the dashboard and
+            APIs in the browser without copying a token. Externally bound
+            gateways (``0.0.0.0``, LAN IPs) stay strict and always require auth.
+
+            The bypass additionally requires the request to originate from
+            localhost with no proxy headers present, so a proxied/forwarded
+            request can never inherit loopback trust.
+
+            ``ALLOW_LOOPBACK_BYPASS`` still acts as an explicit override:
+              - ``true``/``1``/``yes`` force-enables the bypass (legacy behaviour)
+              - ``false``/``0``/``no`` force-disables it even on a loopback bind
+                (opt-in strict auth for local development)
+
             Used by both ``_check_auth`` (auth bypass) and scope resolution so
             the two stay consistent — a loopback request that bypasses auth is
             also granted all operator scopes.
             """
-            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
-            if not allow_loopback:
-                return False
+            bind_host = getattr(self.config, "bind_host", None) or self.config.host
             client_host = getattr(request.client, 'host', None) if request.client else None
-            if not client_host or client_host not in ('127.0.0.1', '::1', 'localhost'):
-                return False
-            # Reject if proxy headers are present (indicates request went through proxy)
-            proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
-            return not any(header in request.headers for header in proxy_headers)
+            return _should_bypass_loopback_auth(bind_host, client_host, request.headers)
 
         async def ready(request):
             """GET /ready — readiness probe for load balancers / orchestrators.
