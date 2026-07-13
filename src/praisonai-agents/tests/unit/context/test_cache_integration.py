@@ -56,7 +56,7 @@ def test_tool_sorting():
 def test_cache_optimized_context():
     """Test cache-optimized context building API structure."""
     try:
-        from praisonaiagents.memory.memory import Memory
+        from praisonaiagents.memory.memory import Memory, CACHE_BOUNDARY
         
         # Create a basic memory instance for API testing
         config = {}
@@ -65,23 +65,32 @@ def test_cache_optimized_context():
         # Mock the underlying methods to avoid database dependencies in unit test
         memory.build_context_for_task = lambda task_descr, **kwargs: "test context"
         
-        # Test cache-optimized context building
+        # Test cache-optimized context building with boundary enabled
         result = memory.build_cache_optimized_context(
             task_descr="test task",
             include_cache_boundary=True
         )
         
-        if isinstance(result, dict) and 'stable_prefix' in result and 'cache_boundary' in result:
-            # Verify the cache boundary is now empty (our fix)
-            if result['cache_boundary'] == "":
-                print("✓ Cache-optimized context building works (cache boundary properly empty)")
-                return True
-            else:
-                print(f"✗ Cache boundary should be empty but got: '{result['cache_boundary']}'")
-                return False
-        else:
+        if not (isinstance(result, dict) and 'stable_prefix' in result and 'cache_boundary' in result):
             print(f"✗ Cache-optimized context building failed. Got: {result}")
             return False
+        
+        # When enabled, the boundary must equal the stable, non-empty marker
+        if result['cache_boundary'] != CACHE_BOUNDARY:
+            print(f"✗ Cache boundary should equal CACHE_BOUNDARY but got: '{result['cache_boundary']}'")
+            return False
+        
+        # When disabled, the boundary must be empty (no-op contract)
+        result_disabled = memory.build_cache_optimized_context(
+            task_descr="test task",
+            include_cache_boundary=False
+        )
+        if result_disabled.get('cache_boundary') != "":
+            print(f"✗ Cache boundary should be empty when disabled but got: '{result_disabled.get('cache_boundary')}'")
+            return False
+        
+        print("✓ Cache-optimized context building works (boundary present when enabled, empty when disabled)")
+        return True
     except Exception as e:
         print(f"✗ Cache-optimized context test failed: {e}")
         return False

@@ -28,10 +28,11 @@ logger = get_logger(__name__, extra_data={"subsystem": "memory"})
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
 
-# Cache boundary constants for prompt prefix caching optimization
-# NOTE: This is a placeholder - current implementation does not provide
-# functional prompt caching as it requires structured API metadata
-CACHE_BOUNDARY = ""
+# Cache boundary marker for prompt prefix caching optimization.
+# Inserted between the stable prefix and the dynamic suffix so prompt-cache-aware
+# providers can distinguish the cacheable prefix from the per-turn tail. The value
+# must remain stable across turns for the same agent session (no timestamps/ids).
+CACHE_BOUNDARY = "--- CACHE_BOUNDARY ---"
 
 
 
