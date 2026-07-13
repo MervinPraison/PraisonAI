@@ -68,6 +68,45 @@ class TestNormalisation:
         assert "A prompt" in out
         assert "user: hi" in out
 
+    def test_normalize_prompt_with_binary_content(self):
+        import base64
+        data = base64.b64encode(b"1234567890").decode()
+        result = SimpleNamespace(
+            description=None,
+            messages=[
+                SimpleNamespace(
+                    role="user",
+                    content=SimpleNamespace(text=None, data=data, mimeType="image/png"),
+                )
+            ],
+        )
+        out = res.normalize_prompt_result(result)
+        assert "binary resource" in out
+        assert "image/png" in out
+        assert "SimpleNamespace" not in out
+
+    def test_normalize_prompt_with_embedded_resource(self):
+        embedded = SimpleNamespace(text="embedded text", blob=None)
+        result = SimpleNamespace(
+            description=None,
+            messages=[
+                SimpleNamespace(
+                    role="assistant",
+                    content=SimpleNamespace(text=None, resource=embedded),
+                )
+            ],
+        )
+        out = res.normalize_prompt_result(result)
+        assert "assistant: embedded text" in out
+
+    def test_normalize_image_content_item(self):
+        import base64
+        data = base64.b64encode(b"abc").decode()
+        item = SimpleNamespace(text=None, data=data, mimeType="audio/wav")
+        out = res._normalize_content_item(item)
+        assert "audio/wav" in out
+        assert "binary resource" in out
+
     def test_prompts_to_dicts_argument_hints(self):
         prompt = SimpleNamespace(
             name="greet",
@@ -136,6 +175,24 @@ class TestSyntheticTools:
         prompt = SimpleNamespace(name="p", description="d", arguments=[])
         mcp = _make_mcp(prompts=[prompt])
         assert mcp.get_prompts()[0]["name"] == "p"
+
+
+    def test_server_tool_name_collision_skips_synthetic(self):
+        # A server tool named 'read_mcp_resource' must take precedence: no
+        # synthetic callable with that name is created, keeping callable and
+        # OpenAI schema consistent (no orphaned schema the LLM can't call).
+        server_tool = SimpleNamespace(
+            name="read_mcp_resource", description="server tool", inputSchema=None
+        )
+        resource = SimpleNamespace(
+            uri="docs://readme", name="readme", description="d", mimeType="text/plain"
+        )
+        mcp = _make_mcp(resources=[resource], tools=[server_tool])
+        synthetic = mcp._generate_resource_tools()
+        synthetic_names = [t.__name__ for t in synthetic]
+        assert "read_mcp_resource" not in synthetic_names
+        # Other synthetic tools without collisions still register.
+        assert "list_mcp_resources" in synthetic_names
 
 
 class TestOpenAISchema:

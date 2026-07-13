@@ -30,16 +30,24 @@ def _normalize_content_item(item):
     if text is not None:
         return _truncate(text)
 
-    # Binary blob content
-    blob = getattr(item, "blob", None)
-    if blob is not None:
+    # Binary content: resource blobs use ``blob``; image/audio content blocks
+    # use ``data``. Both are base64-encoded strings with a ``mimeType``.
+    binary = getattr(item, "blob", None)
+    if binary is None:
+        binary = getattr(item, "data", None)
+    if binary is not None:
         mime = getattr(item, "mimeType", None) or "application/octet-stream"
         try:
-            raw = base64.b64decode(blob) if isinstance(blob, str) else blob
+            raw = base64.b64decode(binary) if isinstance(binary, str) else binary
             size = len(raw)
         except Exception:
-            size = len(blob) if hasattr(blob, "__len__") else 0
+            size = len(binary) if hasattr(binary, "__len__") else 0
         return f"[binary resource: {mime}, {size} bytes]"
+
+    # Embedded resource content wraps a nested resource under ``resource``.
+    embedded = getattr(item, "resource", None)
+    if embedded is not None:
+        return _normalize_content_item(embedded)
 
     return _truncate(str(item))
 
@@ -80,9 +88,16 @@ def normalize_prompt_result(result):
         role = getattr(message, "role", "user")
         content = getattr(message, "content", None)
         text = getattr(content, "text", None)
-        if text is None and content is not None:
-            text = str(content)
-        lines.append(f"{role}: {_truncate(text or '')}")
+        if text is not None:
+            rendered = _truncate(text)
+        elif content is not None:
+            # Non-text content (image/audio/blob/embedded resource): reuse the
+            # resource content normaliser so binary payloads become size/mime
+            # summaries instead of raw object reprs.
+            rendered = _normalize_content_item(content)
+        else:
+            rendered = ""
+        lines.append(f"{role}: {rendered}")
 
     if lines:
         return "\n".join(lines)

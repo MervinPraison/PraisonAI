@@ -508,7 +508,16 @@ class MCP:
 
         from . import resources as _res
 
-        synthetic: List[Callable] = []
+        # Server tools take precedence over synthetic helpers: if a server
+        # already exposes a tool whose name collides with a synthetic one, skip
+        # creating the synthetic callable so the callable and its OpenAI schema
+        # stay consistent (avoids the LLM seeing one but being able to call the
+        # other).
+        server_tool_names = {
+            getattr(t, "name", None) for t in getattr(runner, "tools", []) or []
+        }
+
+        candidates: List[Callable] = []
         has_resources = bool(runner.resources or runner.resource_templates)
         has_prompts = bool(runner.prompts)
 
@@ -527,7 +536,7 @@ class MCP:
                 """Read a resource from the MCP server by its URI."""
                 return runner.read_resource(uri)
 
-            synthetic.extend(
+            candidates.extend(
                 [list_mcp_resources, list_mcp_resource_templates, read_mcp_resource]
             )
 
@@ -540,8 +549,11 @@ class MCP:
                 """Fetch an MCP prompt template rendered with the given arguments."""
                 return runner.get_prompt(name, arguments or {})
 
-            synthetic.extend([list_mcp_prompts, get_mcp_prompt])
+            candidates.extend([list_mcp_prompts, get_mcp_prompt])
 
+        synthetic: List[Callable] = [
+            fn for fn in candidates if fn.__name__ not in server_tool_names
+        ]
         return synthetic
 
     def _create_tool_wrapper(self, tool):
