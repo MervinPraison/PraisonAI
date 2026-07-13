@@ -174,6 +174,32 @@ class AutonomyConfig:
                 f"Invalid budget_action: {self.budget_action!r}. "
                 "Must be 'pause' or 'stop'."
             )
+        if self.max_budget_usd is not None:
+            if isinstance(self.max_budget_usd, bool) or not isinstance(
+                self.max_budget_usd, (int, float)
+            ):
+                raise ValueError(
+                    f"Invalid max_budget_usd: {self.max_budget_usd!r}. "
+                    "Must be a non-negative number or None."
+                )
+            if self.max_budget_usd < 0:
+                raise ValueError(
+                    f"Invalid max_budget_usd: {self.max_budget_usd!r}. "
+                    "Must be non-negative."
+                )
+        if self.max_tokens is not None:
+            if isinstance(self.max_tokens, bool) or not isinstance(
+                self.max_tokens, int
+            ):
+                raise ValueError(
+                    f"Invalid max_tokens: {self.max_tokens!r}. "
+                    "Must be a non-negative integer or None."
+                )
+            if self.max_tokens < 0:
+                raise ValueError(
+                    f"Invalid max_tokens: {self.max_tokens!r}. "
+                    "Must be non-negative."
+                )
     
     @property
     def effective_track_changes(self) -> bool:

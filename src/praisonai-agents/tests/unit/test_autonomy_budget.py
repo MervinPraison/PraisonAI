@@ -148,7 +148,22 @@ def test_budget_pause_is_recoverable(mock_stage, mock_chat):
     mock_chat.return_value = "partial progress, still working"
     agent = _make_agent(max_budget_usd=1.0, budget_action="pause")
 
-    with patch.object(type(agent), "_run_spend", lambda self: (5.0, 0)):
+    # Spend is measured relative to the loop-start baseline; the loop takes one
+    # snapshot at start (baseline) then one per iteration. Returning a growing
+    # sequence lets this run cross the $1.00 cap on its own (not prior usage).
+    def spend_seq(values):
+        it = iter(values)
+        last = {"v": values[-1]}
+
+        def _next(self):
+            try:
+                last["v"] = next(it)
+            except StopIteration:
+                pass
+            return (last["v"], 0)
+        return _next
+
+    with patch.object(type(agent), "_run_spend", spend_seq([0.0, 2.0])):
         result = agent.run_autonomous("Do something")
 
     assert result.completion_reason == TerminationReason.BUDGET_EXHAUSTED
@@ -219,3 +234,61 @@ async def test_async_usd_cap_halts_run(mock_stage):
 
     assert result.completion_reason == TerminationReason.BUDGET_EXHAUSTED
     assert result.iterations == 3
+
+
+# ---------------------------------------------------------------------------
+# Invalid cap validation (reviewer P1)
+# ---------------------------------------------------------------------------
+
+def test_config_rejects_non_numeric_budget():
+    from praisonaiagents.agent.autonomy import AutonomyConfig
+    with pytest.raises(ValueError):
+        AutonomyConfig(max_budget_usd="100")
+
+
+def test_config_rejects_negative_budget():
+    from praisonaiagents.agent.autonomy import AutonomyConfig
+    with pytest.raises(ValueError):
+        AutonomyConfig(max_budget_usd=-1.0)
+
+
+def test_config_rejects_non_int_tokens():
+    from praisonaiagents.agent.autonomy import AutonomyConfig
+    with pytest.raises(ValueError):
+        AutonomyConfig(max_tokens="100")
+
+
+def test_config_rejects_negative_tokens():
+    from praisonaiagents.agent.autonomy import AutonomyConfig
+    with pytest.raises(ValueError):
+        AutonomyConfig(max_tokens=-5)
+
+
+def test_config_from_dict_rejects_invalid_budget():
+    from praisonaiagents.agent.autonomy import AutonomyConfig
+    with pytest.raises(ValueError):
+        AutonomyConfig.from_dict({"max_tokens": "100"})
+
+
+# ---------------------------------------------------------------------------
+# Agent reuse: prior lifetime spend must NOT count against a new run (reviewer P1)
+# ---------------------------------------------------------------------------
+
+@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
+def test_prior_spend_does_not_trip_new_run(mock_stage, mock_chat):
+    """A reused Agent with high lifetime spend must not instantly exhaust.
+
+    The run measures spend relative to a baseline snapshot at loop start, so
+    pre-existing lifetime spend (e.g. from an earlier chat) is excluded.
+    """
+    mock_chat.return_value = "The task is done."
+    agent = _make_agent(max_budget_usd=1.0)
+
+    # Lifetime spend already at $50 before this run; it stays flat during the
+    # run (no new cost), so this run's spend is $0 and must NOT trip the cap.
+    with patch.object(type(agent), "_run_spend", lambda self: (50.0, 0)):
+        result = agent.run_autonomous("Do something")
+
+    assert result.completion_reason != TerminationReason.BUDGET_EXHAUSTED
+    assert result.success is True
