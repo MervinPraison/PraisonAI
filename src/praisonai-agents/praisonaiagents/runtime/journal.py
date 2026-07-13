@@ -217,7 +217,10 @@ class RunJournal:
         """Register ``run_id`` as ``running`` (idempotent).
 
         Re-opening an existing run (e.g. on resume) preserves its journal and
-        keeps status ``running`` without clobbering ``created_at``.
+        keeps status ``running`` without clobbering ``created_at``. A newly
+        supplied ``checkpoint_id`` is bound on reopen (so a run that crashed
+        before ``set_checkpoint`` can still resume from a caller-supplied
+        checkpoint); a ``None`` reopen preserves any existing binding.
         """
         now = time.time()
         with self._lock:
@@ -229,6 +232,7 @@ class RunJournal:
                 ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     status='running',
+                    checkpoint_id=COALESCE(excluded.checkpoint_id, checkpoint_id),
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -377,19 +381,39 @@ class RunJournal:
                     continue
         return idx
 
-    def assert_replay_order(self, run_id: str, expected_kinds: List[str]) -> None:
+    def assert_replay_order(
+        self, run_id: str, expected: List[Any]
+    ) -> None:
         """Determinism guardrail: fail loud if replay diverges from the journal.
 
-        During replay the loop must reproduce the recorded sequence of event
-        kinds. If it diverges (e.g. a corrupted journal, or a non-deterministic
-        control-flow read of wall-clock/RNG), raise rather than silently taking
-        a different — and unrecorded — path.
+        During replay the loop must reproduce the recorded sequence of steps.
+        Because the memoised :meth:`replay_index` lookup is keyed by
+        ``(seq, kind)``, this guard compares the full ``(seq, kind)`` sequence —
+        not just the bare kinds — so a replay that reproduces the same *shape*
+        at different ``seq`` values (a divergent step order) still fails loud
+        rather than silently reusing or skipping the wrong recorded step.
+
+        Args:
+            run_id: The run being replayed.
+            expected: The steps the replay produced, as either ``(seq, kind)``
+                tuples (preferred, position-aware) or bare ``kind`` strings
+                (compared against the recorded kinds for backward
+                compatibility).
         """
-        recorded = [ev.kind for ev in self.events(run_id)]
-        if recorded != list(expected_kinds):
+        recorded_events = self.events(run_id)
+        expected_list = list(expected)
+        # Position-aware comparison when the caller supplies (seq, kind) tuples;
+        # fall back to kind-only comparison for the simpler string form.
+        if expected_list and not isinstance(expected_list[0], str):
+            recorded: List[Any] = [(ev.seq, ev.kind) for ev in recorded_events]
+            expected_norm: List[Any] = [tuple(e) for e in expected_list]
+        else:
+            recorded = [ev.kind for ev in recorded_events]
+            expected_norm = expected_list
+        if recorded != expected_norm:
             raise RuntimeError(
                 f"replay divergence for run {run_id!r}: journal recorded "
-                f"{recorded!r} but replay produced {list(expected_kinds)!r}"
+                f"{recorded!r} but replay produced {expected_norm!r}"
             )
 
     def close(self) -> None:

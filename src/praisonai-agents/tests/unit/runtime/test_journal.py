@@ -155,6 +155,50 @@ def test_replay_divergence_fails_loud(journal):
         journal.assert_replay_order("r1", [KIND_MODEL_DECISION, KIND_TOOL_RESULT])
 
 
+def test_replay_order_is_position_aware(journal):
+    """A (seq, kind) replay diverging only in *position* fails loud even when
+    the bare kind sequence matches — because replay lookup is keyed by
+    (seq, kind), a same-shape/wrong-seq path must not pass the guard."""
+    journal.open_run("r1")
+    journal.append(JournalEvent("r1", 0, KIND_MODEL_DECISION, {"text": "d0"}))
+    journal.append(JournalEvent("r1", 0, KIND_TOOL_RESULT, {"result": 0}))
+    journal.append(JournalEvent("r1", 1, KIND_MODEL_DECISION, {"text": "d1"}))
+    journal.append(JournalEvent("r1", 1, KIND_TOOL_RESULT, {"result": 1}))
+
+    # Correct (seq, kind) sequence passes.
+    journal.assert_replay_order(
+        "r1",
+        [(0, KIND_MODEL_DECISION), (0, KIND_TOOL_RESULT),
+         (1, KIND_MODEL_DECISION), (1, KIND_TOOL_RESULT)],
+    )
+
+    # Same kind shape but wrong seq positions fails loud.
+    with pytest.raises(RuntimeError, match="replay divergence"):
+        journal.assert_replay_order(
+            "r1",
+            [(0, KIND_MODEL_DECISION), (1, KIND_TOOL_RESULT),
+             (0, KIND_MODEL_DECISION), (1, KIND_TOOL_RESULT)],
+        )
+
+
+def test_reopen_binds_new_checkpoint(journal):
+    """A run that crashed before set_checkpoint (checkpoint_id=None) can be
+    re-opened with a caller-supplied checkpoint_id, which is then bound so
+    run_meta can restore the workspace."""
+    journal.open_run("r1")
+    assert journal.run_meta("r1").checkpoint_id is None
+
+    journal.open_run("r1", checkpoint_id="cp-99")  # resume with new checkpoint
+    assert journal.run_meta("r1").checkpoint_id == "cp-99"
+
+
+def test_reopen_without_checkpoint_preserves_existing(journal):
+    """A None reopen must not clobber an existing checkpoint binding."""
+    journal.open_run("r1", checkpoint_id="cp-1")
+    journal.open_run("r1")  # resume, no new checkpoint supplied
+    assert journal.run_meta("r1").checkpoint_id == "cp-1"
+
+
 def test_durable_off_is_zero_overhead():
     """durable=False (default) means no journal is instantiated at all — the
     seam is opt-in; a caller simply never constructs a RunJournal."""
