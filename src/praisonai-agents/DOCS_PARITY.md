@@ -18,22 +18,22 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 44 | 13641 |
+| ✅ Agent | 21 | 44 | 13648 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2258 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 8 | 2301 |
+| ✅ Auto Generation | 5 | 9 | 2580 |
 | ✅ Autonomy | 3 | 6 | 2209 |
-| ✅ Bots | 7 | 28 | 10828 |
+| ✅ Bots | 7 | 28 | 10906 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 113 | 30547 |
+| ✅ CLI | 5 | 116 | 31187 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
-| ✅ Configuration | 3 | 7 | 2537 |
-| ✅ Context Management | 16 | 34 | 12963 |
+| ✅ Configuration | 3 | 7 | 2541 |
+| ✅ Context Management | 16 | 34 | 12971 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -42,7 +42,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
-| ✅ Files | 2 | 6 | 1940 |
+| ✅ Files | 2 | 6 | 1944 |
 | ✅ Flow | 1 | 3 | 777 |
 | ✅ Gateway | 7 | 48 | 16068 |
 | ✅ Guardrails | 4 | 4 | 1673 |
@@ -52,7 +52,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 13 | 4055 |
 | ✅ LLM | 3 | 14 | 4763 |
 | ✅ Loops | 4 | 4 | 1082 |
-| ✅ MCP | 1 | 52 | 11235 |
+| ✅ MCP | 1 | 53 | 11633 |
 | ✅ Memory | 6 | 17 | 6434 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1879 |
-| ✅ Prompts | 2 | 7 | 1359 |
+| ✅ Prompts | 2 | 7 | 1362 |
 | ✅ Providers | 1 | 55 | 7451 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
@@ -70,13 +70,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2559 |
-| ✅ Security | 1 | 3 | 2859 |
-| ✅ Sessions | 4 | 13 | 4921 |
+| ✅ Security | 1 | 3 | 2863 |
+| ✅ Sessions | 4 | 13 | 4971 |
 | ✅ Skills | 6 | 13 | 4830 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 127 | 35537 |
+| ✅ Tools | 12 | 130 | 36454 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
