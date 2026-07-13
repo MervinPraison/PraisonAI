@@ -194,25 +194,57 @@ class RuntimeProfileRegistry:
             name: Family/profile identifier.
             profile: The ``RuntimeProfile`` to register.
             override: When False, raise if ``name`` already exists.
+
+        The reserved ``default`` profile can never be replaced by a
+        prompt-altering profile: unconfigured agents resolve it for unknown
+        model families, so allowing an override would change prompts for
+        callers who never opted in. A ``default`` that stays behaviour-neutral
+        (no prompt overrides) is still accepted for idempotent re-registration.
         """
         if not isinstance(profile, RuntimeProfile):
             raise TypeError("profile must be a RuntimeProfile instance")
+        if name == DEFAULT_PROFILE_NAME and not profile.is_prompt_neutral:
+            raise ValueError(
+                "The reserved 'default' profile must stay prompt-neutral "
+                "(no system_prompt_prefix/suffix); it is applied to agents "
+                "that never opted in, so overriding its prompt would break "
+                "backward compatibility."
+            )
         self._ensure_builtin()
         with self._lock:
             if not override and name in self._profiles:
                 raise ValueError(f"Profile '{name}' is already registered")
             self._profiles[name] = profile
 
-    def resolve(self, model: Optional[str] = None, name: Optional[str] = None) -> RuntimeProfile:
+    def resolve(
+        self,
+        model: Optional[str] = None,
+        name: Optional[str] = None,
+        require: bool = False,
+    ) -> RuntimeProfile:
         """Resolve a profile by explicit ``name`` or by ``model`` family.
 
         Falls back to the behaviour-neutral ``default`` profile when no match is
-        found, guaranteeing backward compatibility.
+        found, guaranteeing backward compatibility for implicit model-family
+        resolution.
+
+        When ``require`` is True and an explicit ``name`` does not match a
+        registered profile, a ``KeyError`` is raised instead of silently
+        falling back to ``default`` — so an explicitly-configured profile name
+        with a typo surfaces to the caller rather than being dropped.
         """
         self._ensure_builtin()
         key = name or resolve_model_family(model)
         with self._lock:
-            return self._profiles.get(key) or self._profiles[DEFAULT_PROFILE_NAME]
+            profile = self._profiles.get(key)
+            if profile is not None:
+                return profile
+            if require and name:
+                raise KeyError(
+                    f"Runtime profile '{name}' is not registered; "
+                    f"available profiles: {sorted(self._profiles)}"
+                )
+            return self._profiles[DEFAULT_PROFILE_NAME]
 
     def list_profiles(self) -> List[str]:
         """List all registered profile names."""
@@ -235,13 +267,19 @@ def register_profile(name: str, profile: RuntimeProfile, override: bool = True) 
     _global_registry.register(name, profile, override=override)
 
 
-def resolve_profile(model: Optional[str] = None, name: Optional[str] = None) -> RuntimeProfile:
+def resolve_profile(
+    model: Optional[str] = None,
+    name: Optional[str] = None,
+    require: bool = False,
+) -> RuntimeProfile:
     """Resolve a runtime profile by model family (or explicit name).
 
     With no matching profile this returns the ``default`` profile, whose
-    ``apply_system_prompt`` is a pure no-op.
+    ``apply_system_prompt`` is a pure no-op. Pass ``require=True`` to raise a
+    ``KeyError`` when an explicit ``name`` is not registered (used for
+    explicitly-configured profiles so typos fail loudly).
     """
-    return _global_registry.resolve(model=model, name=name)
+    return _global_registry.resolve(model=model, name=name, require=require)
 
 
 def list_profiles() -> List[str]:

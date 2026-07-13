@@ -14,6 +14,19 @@ from praisonaiagents.runtime.profiles import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_registry():
+    """Reset the global profile registry before and after each test.
+
+    Prevents profiles registered by one test (e.g. ``global-test``) from
+    leaking into later tests and causing order-dependent results.
+    """
+    from praisonaiagents.runtime.profiles import _global_registry
+    _global_registry.clear()
+    yield
+    _global_registry.clear()
+
+
 class TestResolveModelFamily:
     def test_none_and_empty(self):
         assert resolve_model_family(None) == DEFAULT_PROFILE_NAME
@@ -31,6 +44,7 @@ class TestResolveModelFamily:
         assert resolve_model_family("gpt-4o") == "openai"
         assert resolve_model_family("openai/gpt-4o-mini") == "openai"
         assert resolve_model_family("o1-preview") == "openai"
+        assert resolve_model_family("o3-mini") == "openai"
 
     def test_unknown_defaults(self):
         assert resolve_model_family("some-random-model") == DEFAULT_PROFILE_NAME
@@ -130,13 +144,47 @@ class TestRegistry:
         assert reg.resolve(name="nope").name == DEFAULT_PROFILE_NAME
 
     def test_global_register_profile(self):
-        from praisonaiagents.runtime.profiles import _global_registry
+        # Cleanup handled by the autouse _reset_global_registry fixture.
         register_profile("global-test", RuntimeProfile(name="global-test", system_prompt_prefix="G"))
-        try:
-            assert resolve_profile(name="global-test").name == "global-test"
-        finally:
-            with _global_registry._lock:
-                _global_registry._profiles.pop("global-test", None)
+        assert resolve_profile(name="global-test").name == "global-test"
+
+    def test_default_cannot_be_overridden_with_prompt(self):
+        reg = RuntimeProfileRegistry()
+        with pytest.raises(ValueError):
+            reg.register(
+                DEFAULT_PROFILE_NAME,
+                RuntimeProfile(name=DEFAULT_PROFILE_NAME, system_prompt_prefix="INJECTED"),
+            )
+
+    def test_default_neutral_reregister_allowed(self):
+        reg = RuntimeProfileRegistry()
+        # A prompt-neutral default (e.g. carrying only an edit format) is fine.
+        reg.register(
+            DEFAULT_PROFILE_NAME,
+            RuntimeProfile(name=DEFAULT_PROFILE_NAME, preferred_edit_format="patch"),
+        )
+        assert reg.resolve(name=DEFAULT_PROFILE_NAME).preferred_edit_format == "patch"
+
+    def test_global_default_cannot_be_overridden_with_prompt(self):
+        with pytest.raises(ValueError):
+            register_profile(
+                DEFAULT_PROFILE_NAME,
+                RuntimeProfile(name=DEFAULT_PROFILE_NAME, system_prompt_suffix="X"),
+            )
+
+    def test_resolve_require_raises_on_unknown_name(self):
+        reg = RuntimeProfileRegistry()
+        with pytest.raises(KeyError):
+            reg.resolve(name="does-not-exist", require=True)
+
+    def test_resolve_require_returns_registered(self):
+        reg = RuntimeProfileRegistry()
+        reg.register("known", RuntimeProfile(name="known"))
+        assert reg.resolve(name="known", require=True).name == "known"
+
+    def test_global_resolve_require_raises(self):
+        with pytest.raises(KeyError):
+            resolve_profile(name="totally-unknown", require=True)
 
 
 class TestBackwardCompatibility:

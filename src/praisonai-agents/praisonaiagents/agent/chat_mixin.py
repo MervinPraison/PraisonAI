@@ -106,6 +106,13 @@ class ChatMixin:
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
+                # The base prompt is cached BEFORE the profile override; apply
+                # the (opt-in) runtime profile here too so a configured profile
+                # affects every turn, not just the first (cache-miss) one. This
+                # is a no-op for the default/family profiles.
+                profile = self._resolve_runtime_profile()
+                if profile is not None:
+                    return profile.apply_system_prompt(cached_prompt)
                 return cached_prompt
         else:
             cache_key = None  # Don't cache when memory is enabled
@@ -318,7 +325,9 @@ Your Goal: {self.goal}"""
 
         model = self.llm if isinstance(self.llm, str) else str(self.llm) if self.llm else None
         if isinstance(configured, str):
-            return resolve_profile(model=model, name=configured)
+            # Explicit name: require a match so a typo raises loudly instead of
+            # silently resolving the behaviour-neutral default profile.
+            return resolve_profile(model=model, name=configured, require=True)
 
         # Implicit path (no explicit config): resolve by model family. This must
         # never break prompt construction, so swallow any unexpected error and

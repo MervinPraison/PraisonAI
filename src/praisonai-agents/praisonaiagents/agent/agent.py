@@ -2320,6 +2320,9 @@ Your Goal: {self.goal}
             
             # Sandbox config
             'sandbox': getattr(self, '_sandbox_config', None),
+
+            # Model-aware runtime profile (preserve across channel clones)
+            'runtime_profile': getattr(self, 'runtime_profile', None),
         }
         
         # Handle deprecated parameters for backward compatibility
