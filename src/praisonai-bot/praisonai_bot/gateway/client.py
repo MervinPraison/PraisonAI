@@ -215,9 +215,26 @@ class GatewayClient:
     @property
     def heartbeat_ms(self) -> Optional[int]:
         """Server-advertised heartbeat interval in milliseconds, if any."""
-        value = self._policy.get("heartbeat_ms")
-        return int(value) if value is not None else None
+        return self._coerce_limit(self._policy.get("heartbeat_ms"))
     
+    @staticmethod
+    def _coerce_limit(value: Any) -> Optional[int]:
+        """Coerce a negotiated numeric policy value to a non-negative int.
+
+        Gateways (or intervening proxies) may serialise policy limits as
+        strings or floats. Return ``None`` when the value is absent or cannot
+        be interpreted as a number so callers treat the limit as unadvertised
+        rather than crashing with a ``TypeError`` on comparison.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def supports_event(self, event: Union[str, EventType]) -> bool:
         """Whether the negotiated manifest advertises the given event.
         
@@ -612,13 +629,16 @@ class GatewayClient:
         
         # Self-guard against the server-advertised max_payload so oversized
         # frames fail locally with a clear error instead of being rejected
-        # (or silently dropped) by the gateway.
-        max_payload = self._policy.get("max_payload")
-        if max_payload and len(payload.encode("utf-8")) > max_payload:
-            raise PayloadTooLarge(
-                f"Outbound frame exceeds server max_payload "
-                f"({len(payload.encode('utf-8'))} > {max_payload} bytes)"
-            )
+        # (or silently dropped) by the gateway. A limit of 0 is honoured as a
+        # real "reject everything" bound; ``None`` means unbounded/unadvertised.
+        max_payload = self._coerce_limit(self._policy.get("max_payload"))
+        if max_payload is not None:
+            payload_size = len(payload.encode("utf-8"))
+            if payload_size > max_payload:
+                raise PayloadTooLarge(
+                    f"Outbound frame exceeds server max_payload "
+                    f"({payload_size} > {max_payload} bytes)"
+                )
         
         await self._ws.send(payload)
     
