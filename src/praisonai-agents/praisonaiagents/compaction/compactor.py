@@ -88,25 +88,41 @@ class ContextCompactor:
         self._used_previous_summary: bool = False
     
     def estimate_tokens(self, text: str) -> int:
-        """Estimate token count for text."""
-        # Rough estimate: ~4 chars per token
-        return len(text) // 4
-    
+        """
+        Estimate token count for text.
+
+        Uses an accurate tokeniser (tiktoken) when available via
+        ``context.tokens``; falls back to a character heuristic otherwise.
+        """
+        if not text:
+            return 0
+        try:
+            from ..context.tokens import estimate_tokens_accurate
+            return estimate_tokens_accurate(text, getattr(self.config, "model", None) or "gpt-4")
+        except Exception:
+            return max(1, len(text) // 4)
+
     def count_message_tokens(self, message: Dict[str, Any]) -> int:
-        """Count tokens in a message."""
+        """Count tokens in a message, including tool_calls payloads."""
+        total = 0
         content = message.get("content", "")
         if isinstance(content, str):
-            return self.estimate_tokens(content)
+            total += self.estimate_tokens(content)
         elif isinstance(content, list):
             # Handle multi-part content
-            total = 0
             for part in content:
                 if isinstance(part, dict):
                     total += self.estimate_tokens(str(part.get("text", "")))
                 else:
                     total += self.estimate_tokens(str(part))
-            return total
-        return 0
+
+        # Count tool_calls (function name + arguments) which are otherwise ignored
+        for tool_call in (message.get("tool_calls") or []):
+            if isinstance(tool_call, dict):
+                func = tool_call.get("function", {})
+                total += self.estimate_tokens(str(func))
+
+        return total
     
     def count_total_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """Count total tokens in messages."""
@@ -465,6 +481,43 @@ class ContextCompactor:
         result.extend(recent)
         return result
     
+    def clear_tool_results(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        keep_recent: int = 6,
+        placeholder: str = "[tool result cleared to save context; re-fetch if needed]"
+    ) -> List[Dict[str, Any]]:
+        """
+        Clear old, re-fetchable tool result contents while keeping tool_calls intact.
+
+        Replaces the content of older ``tool`` messages with a short placeholder
+        so the model still knows the call happened (and with what args, via the
+        assistant ``tool_calls``), but the verbose output no longer consumes the
+        window. The most recent ``keep_recent`` tool results are preserved.
+
+        Args:
+            messages: Conversation messages
+            keep_recent: Number of most recent tool results to keep verbatim
+            placeholder: Replacement content for cleared tool results
+
+        Returns:
+            New message list with old tool results cleared
+        """
+        tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        to_clear = set(tool_idxs[:-keep_recent]) if len(tool_idxs) > keep_recent else set()
+
+        out = []
+        for i, m in enumerate(messages):
+            if (
+                i in to_clear
+                and isinstance(m.get("content"), str)
+                and m["content"] != placeholder
+            ):
+                m = {**m, "content": placeholder}
+            out.append(m)
+        return out
+
     def _llm_summarize(self, messages: List[Dict[str, Any]], focus_topic: str = "") -> List[Dict[str, Any]]:
         """
         Use LLM to summarize older messages with iterative support.

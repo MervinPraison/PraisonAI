@@ -47,6 +47,13 @@ class CompactionConfig:
     preserve_system: bool = True  # Always keep system messages
     preserve_recent: int = 5  # Keep last N messages
     auto_compact: bool = True  # Automatically compact when needed
+    model: Optional[str] = None  # Model name for accurate token counting
+
+    # In-loop context management (runs between tool iterations)
+    in_loop_compaction: bool = True  # Enable clear-then-compact inside tool loops
+    clear_threshold_pct: float = 0.5  # Clear re-fetchable tool results above this % of window
+    compact_threshold_pct: float = 0.8  # Summarise dialogue above this % of window
+    keep_recent_tool_results: int = 6  # Tool results preserved verbatim on a clear pass
     compaction_prefix: str = COMPACTION_PREFIX  # Override for custom framing
     structured_template: bool = True  # Emit Active Task / Remaining Work sections
     iterative_update: bool = True  # Merge previous summary on re-compaction
