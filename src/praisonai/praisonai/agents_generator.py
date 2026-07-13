@@ -182,6 +182,26 @@ def _resolve_tool_timeout_workers():
     return workers
 
 
+def _looks_like_framework_tool(tool) -> bool:
+    """Whether ``tool`` is a framework tool object carrying a typed schema.
+
+    CrewAI / LangChain ``BaseTool`` instances and praisonai ``@tool`` objects
+    expose ``name``/``description`` plus an ``args_schema`` (or a dedicated
+    ``_run``/``run`` execution method). Such metadata is what the downstream
+    framework uses to advertise the tool to the LLM, so it must survive
+    timeout-wrapping. A bare function or a plain class returns False.
+    """
+    if isinstance(tool, type):
+        return False
+    has_schema = any(
+        hasattr(tool, attr) for attr in ("args_schema", "name", "description")
+    )
+    has_exec_method = any(
+        callable(getattr(tool, m, None)) for m in ("_run", "run")
+    )
+    return has_schema and has_exec_method
+
+
 def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
@@ -197,56 +217,88 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     a JSON string, so a tool's declared return-type contract is never silently
     downgraded; the framework adapter decides how to surface the timeout.
     """
-    if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
+    if timeout_seconds is None or timeout_seconds <= 0:
         return tool
-    
+
     import asyncio
     import concurrent.futures
     import functools
     import inspect
-    
-    if inspect.iscoroutinefunction(tool):
-        @functools.wraps(tool)
-        async def _async_wrapped(*args, **kwargs):
-            try:
-                return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
-            except asyncio.TimeoutError:
-                # asyncio.wait_for cancels the underlying task, so no work leaks.
-                raise ToolTimeoutError(
-                    tool_name=getattr(tool, "__name__", repr(tool)),
-                    timeout_seconds=timeout_seconds,
-                    background_work_may_continue=False,
-                )
-        return _async_wrapped
 
-    @functools.wraps(tool)
-    def _sync_wrapped(*args, **kwargs):
-        executor = executor_factory()
-        future = executor.submit(tool, *args, **kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError:
-            # Best-effort cancel; only effective if the future has not started.
-            # A started sync call cannot be interrupted, so warn operators that
-            # the worker may keep running (and its side effects may still occur).
-            cancelled = future.cancel()
-            if not cancelled and on_leaked is not None:
-                # The worker is stuck and OS-owned; let the generator recycle
-                # the pool so new submissions are not permanently queued behind
-                # leaked threads.
-                on_leaked()
-            logger.warning(
-                "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
-                "executing in the background.",
-                getattr(tool, "__name__", repr(tool)),
-                timeout_seconds, cancelled,
-            )
-            raise ToolTimeoutError(
-                tool_name=getattr(tool, "__name__", repr(tool)),
-                timeout_seconds=timeout_seconds,
-                background_work_may_continue=not cancelled,
-            )
-    return _sync_wrapped
+    def _wrap_callable(fn):
+        """Return a timeout-enforcing wrapper around a bare callable."""
+        if not callable(fn):
+            return fn
+
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def _async_wrapped(*args, **kwargs):
+                try:
+                    return await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout_seconds)
+                except asyncio.TimeoutError:
+                    # asyncio.wait_for cancels the underlying task, so no work leaks.
+                    raise ToolTimeoutError(
+                        tool_name=getattr(fn, "__name__", repr(fn)),
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
+            return _async_wrapped
+
+        @functools.wraps(fn)
+        def _sync_wrapped(*args, **kwargs):
+            executor = executor_factory()
+            future = executor.submit(fn, *args, **kwargs)
+            try:
+                return future.result(timeout=timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                # Best-effort cancel; only effective if the future has not started.
+                # A started sync call cannot be interrupted, so warn operators that
+                # the worker may keep running (and its side effects may still occur).
+                cancelled = future.cancel()
+                if not cancelled and on_leaked is not None:
+                    # The worker is stuck and OS-owned; let the generator recycle
+                    # the pool so new submissions are not permanently queued behind
+                    # leaked threads.
+                    on_leaked()
+                logger.warning(
+                    "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
+                    "executing in the background.",
+                    getattr(fn, "__name__", repr(fn)),
+                    timeout_seconds, cancelled,
+                )
+                raise ToolTimeoutError(
+                    tool_name=getattr(fn, "__name__", repr(fn)),
+                    timeout_seconds=timeout_seconds,
+                    background_work_may_continue=not cancelled,
+                )
+        return _sync_wrapped
+
+    # Framework tool object (CrewAI/LangChain BaseTool, praisonai @tool). These
+    # carry name / description / args_schema that the downstream framework needs
+    # to advertise the tool to the LLM. Replacing them with a bare function
+    # (functools.wraps copies only __name__/__doc__ etc., NOT args_schema) makes
+    # the framework infer a (*args, **kwargs) schema and the LLM emits malformed
+    # tool_calls. Instead, wrap only the execution method IN PLACE so the object
+    # — and its schema — survive.
+    if not callable(tool) or _looks_like_framework_tool(tool):
+        for method_name in ("_run", "run"):
+            method = getattr(tool, method_name, None)
+            if callable(method):
+                wrapped = _wrap_callable(method)
+                if wrapped is method:
+                    continue
+                try:
+                    object.__setattr__(tool, method_name, wrapped)  # bypass pydantic frozen
+                    return tool
+                except (AttributeError, TypeError):
+                    break  # fall through to callable wrapping below
+        # No patchable execution method or non-callable object; return as-is so
+        # we never silently drop a tool object we couldn't safely wrap.
+        if not callable(tool):
+            return tool
+
+    # Plain callable — safe to wrap as a function.
+    return _wrap_callable(tool)
 
 
 def noop(*args, **kwargs):

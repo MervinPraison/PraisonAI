@@ -328,6 +328,68 @@ def _save_output(self, prompt: str, result: str):
     
     print(f"[green]✅ Output saved to: {filepath}[/green]")
 
+def _run_direct_prompt_via_adapter(self, prompt):
+    """Run a one-shot direct prompt through the FrameworkAdapterRegistry.
+
+    This keeps default framework selection in a single place (the registry's
+    priority + entry-point discovery) and routes execution through the adapter
+    contract so telemetry suppression, ``_resolve_llm`` normalisation and
+    ``expected_output`` handling all apply — none of which the previous
+    hardcoded ``from crewai import ...`` / ``from autogen import ...`` chain did.
+    """
+    from praisonai.framework_adapters.registry import get_default_registry
+
+    registry = get_default_registry()
+    try:
+        framework = registry.pick_default()
+    except RuntimeError as e:
+        print(f"[red]ERROR: {e}[/red]")
+        sys.exit(1)
+
+    adapter = registry.create(framework)
+    # AutoGen exposes a family router that resolves to a concrete version.
+    if hasattr(adapter, "resolve"):
+        adapter = adapter.resolve(config={})
+
+    llm = getattr(getattr(self, "args", None), "llm", None)
+    config_list = getattr(self, "config_list", None) or [{"model": llm or "gpt-4o"}]
+    # Preserve the full first config entry so credentials/endpoint fields
+    # (base_url, api_key, api_type, ...) that the adapter's _resolve_llm and the
+    # AutoGen config_list depend on survive. Only the explicit --llm override
+    # replaces the model; a missing model falls back to a sane default.
+    llm_config = [dict(config_list[0])]
+    if llm:
+        llm_config[0]["model"] = llm
+    llm_config[0].setdefault("model", "gpt-4o")
+
+    # Canonical one-shot config shape shared with the YAML path; the adapter's
+    # spec builder turns this into agents/tasks with a proper expected_output.
+    config = {
+        "roles": {
+            "director": {
+                "role": "Assistant",
+                "goal": "Complete the given task",
+                "backstory": "You are a helpful AI assistant",
+                "tasks": {
+                    "direct_task": {
+                        "description": prompt,
+                        "expected_output": "A complete response to the task.",
+                    }
+                },
+                "tools": [],
+            }
+        }
+    }
+
+    return adapter.run(
+        config,
+        llm_config,
+        prompt,
+        tools_dict={},
+        cli_config=vars(self.args) if hasattr(self, "args") and self.args else None,
+    )
+
+
 def handle_direct_prompt(self, prompt):
     """
     Handle direct prompt by creating a single agent and running it.
@@ -1245,47 +1307,13 @@ Now, {final_instruction.lower()}:"""
                 print(json.dumps({"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0, "model": "unknown", "request_count": 0}))
         
         return result
-    elif _availability_flag("CREWAI_AVAILABLE"):
-        from crewai import Agent, Task, Crew
-        agent_config = {
-            "name": "DirectAgent",
-            "role": "Assistant",
-            "goal": "Complete the given task",
-            "backstory": "You are a helpful AI assistant"
-        }
-        
-        # Add llm if specified
-        if hasattr(self, 'args') and self.args.llm:
-            agent_config["llm"] = self.args.llm
-        
-        agent = Agent(**agent_config)
-        task = Task(
-            description=prompt,
-            agent=agent
-        )
-        crew = Crew(
-            agents=[agent],
-            tasks=[task]
-        )
-        return crew.kickoff()
-    elif _availability_flag("AUTOGEN_AVAILABLE"):
-        # Lazy import autogen only when needed
-        autogen = _get_autogen()
-        config_list = self.config_list
-        # Add llm if specified
-        if hasattr(self, 'args') and self.args.llm:
-            config_list[0]['model'] = self.args.llm
-            
-        assistant = autogen.AssistantAgent(
-            name="DirectAgent",
-            llm_config={"config_list": config_list}
-        )
-        user_proxy = autogen.UserProxyAgent(
-            name="UserProxy",
-            code_execution_config={"work_dir": "coding"}
-        )
-        user_proxy.initiate_chat(assistant, message=prompt)
-        return "Task completed"
+    elif _availability_flag("CREWAI_AVAILABLE") or _availability_flag("AUTOGEN_AVAILABLE"):
+        # Route non-praisonai frameworks through the FrameworkAdapterRegistry so
+        # the single source of truth for selection (priority + entry-point
+        # plugins) and the full adapter contract (scoped_telemetry_disable,
+        # _resolve_llm, expected_output, cli_config/callbacks) apply here too —
+        # instead of a hardcoded chain that bypassed every adapter.
+        return _run_direct_prompt_via_adapter(self, prompt)
     else:
         print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
         print("\npip install \"praisonai-frameworks\\[crewai]\"  # For CrewAI")
