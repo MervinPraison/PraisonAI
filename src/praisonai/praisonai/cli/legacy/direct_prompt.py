@@ -587,7 +587,29 @@ def handle_direct_prompt(self, prompt):
                         agent_config["tools"] = existing_tools
                     else:
                         agent_config["tools"] = tools_list
-            
+
+            # Auto-discover project-local .praisonai/tools/*.py (additive; mirrors
+            # the agents/commands convention). Explicit --tools above take
+            # precedence; discovery is gated by PRAISONAI_ALLOW_LOCAL_TOOLS and
+            # skipped when --no-tools is set.
+            if not getattr(self.args, 'no_tools', False):
+                try:
+                    from praisonai_code.cli.features.custom_definitions import (
+                        discover_project_tools,
+                    )
+                    project_tools = discover_project_tools()
+                except Exception:
+                    project_tools = []
+                if project_tools:
+                    existing_tools = agent_config.get('tools', [])
+                    if not isinstance(existing_tools, list):
+                        existing_tools = [existing_tools] if existing_tools else []
+                    seen = {id(t) for t in existing_tools}
+                    existing_tools.extend(
+                        t for t in project_tools if id(t) not in seen
+                    )
+                    agent_config["tools"] = existing_tools
+
             # Load toolsets if specified (--toolset flag)
             if getattr(self.args, 'toolset', None):
                 toolset_names = [name.strip() for name in self.args.toolset.split(',') if name.strip()]

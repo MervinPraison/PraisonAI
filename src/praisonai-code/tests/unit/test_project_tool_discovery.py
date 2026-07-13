@@ -1,0 +1,131 @@
+"""Tests for zero-ceremony project-local tool discovery.
+
+Covers the wrapper convention that auto-loads ``.praisonai/tools/*.py`` on
+``praisonai run``, mirroring the existing ``agents/`` and ``commands/``
+discovery. Loading is gated by ``PRAISONAI_ALLOW_LOCAL_TOOLS``.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from praisonai_code.cli.features.custom_definitions import (
+    CustomDefinitionsDiscovery,
+    discover_project_tools,
+)
+
+
+GREET_TOOL = '''\
+def greet(name: str) -> str:
+    """Return a friendly greeting."""
+    return f"Hello, {name}!"
+
+
+def _private_helper():
+    return 1
+'''
+
+DECORATED_TOOL = '''\
+from praisonaiagents import tool
+
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+
+def helper():
+    """Plain callable dropped when a @tool exists in the same module."""
+    return "helper"
+'''
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    """Create a project with a .praisonai/tools/ dir and cwd into it."""
+    tools_dir = tmp_path / ".praisonai" / "tools"
+    tools_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    # No git root: keep the walk-up bounded to this tmp tree.
+    monkeypatch.setattr(
+        "praisonai_code.cli.features.custom_definitions.get_git_root",
+        lambda: tmp_path,
+    )
+    return tools_dir
+
+
+class TestToolDiscovery:
+    def test_discovers_plain_callable_namespaced(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        discovery = CustomDefinitionsDiscovery()
+        tools = discovery.list_tools()
+
+        names = {t.name for t in tools}
+        assert "greet.greet" in names
+        # Private helpers are excluded.
+        assert "greet._private_helper" not in names
+        # Namespaced by module filename.
+        greet = discovery.get_tool("greet.greet")
+        assert greet is not None
+        assert greet.source == "project"
+
+    def test_discover_project_tools_returns_callables(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        callables = discover_project_tools()
+        assert len(callables) == 1
+        assert callables[0]("Ada") == "Hello, Ada!"
+
+    def test_gate_blocks_discovery_when_env_unset(self, project, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        assert discover_project_tools() == []
+
+    def test_decorated_tool_preferred_over_plain_helper(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "mixed.py").write_text(DECORATED_TOOL)
+
+        discovery = CustomDefinitionsDiscovery()
+        names = {t.name for t in discovery.list_tools()}
+        # The @tool-decorated function wins; the plain helper is dropped.
+        assert "mixed.add" in names
+        assert "mixed.helper" not in names
+
+    def test_underscore_modules_skipped(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "_ignored.py").write_text(GREET_TOOL)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        discovery = CustomDefinitionsDiscovery()
+        names = {t.name for t in discovery.list_tools()}
+        assert "greet.greet" in names
+        assert not any(n.startswith("_ignored") for n in names)
+
+    def test_no_tools_dir_is_noop(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.get_git_root",
+            lambda: tmp_path,
+        )
+        assert discover_project_tools() == []
+
+
+class TestAgentsCommandsUnaffected:
+    def test_agents_still_discovered_alongside_tools(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        agents_dir = project.parent / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "helper.md").write_text(
+            "---\nrole: Helper\n---\nYou are a helper.\n"
+        )
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        discovery = CustomDefinitionsDiscovery()
+        assert discovery.get_agent("helper") is not None
+        assert discovery.get_tool("greet.greet") is not None

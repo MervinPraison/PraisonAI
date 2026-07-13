@@ -8,9 +8,12 @@ Project scaffolding command for the `.praisonai/` convention.
       config.yaml            # sensible defaults (model, output mode)
       agents/assistant.md    # working starter agent (frontmatter + body)
       commands/review.md     # working starter command using $ARGUMENTS / @file
+      tools/example.py       # commented @tool example, auto-discovered on run
 
 The scaffolded files are immediately discoverable and runnable via
 `praisonai run --agent assistant ...` and `praisonai run --command review ...`.
+Tools dropped in `.praisonai/tools/*.py` are auto-loaded on every `run`
+(gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
 """
 
 from pathlib import Path
@@ -61,6 +64,29 @@ If a file path is provided, here are its contents:
 
 @$ARGUMENTS
 """
+
+STARTER_TOOL_PY = '''\
+"""Project-local tools for this .praisonai/ project.
+
+Every public callable in this directory is auto-discovered and made available
+to the agent on `praisonai run` — no --tools flag required. Decorate a function
+with @tool for a rich schema, or just define a plain function.
+
+Loading executes this file, so it is gated by the PRAISONAI_ALLOW_LOCAL_TOOLS
+opt-in (set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable local tool loading).
+Uncomment the example below to try it:
+
+    praisonai run "use the greet tool to greet Ada"
+"""
+
+# from praisonaiagents import tool
+#
+#
+# @tool
+# def greet(name: str) -> str:
+#     """Return a friendly greeting for the given name."""
+#     return f"Hello, {name}!"
+'''
 
 
 def _any_provider_credential() -> bool:
@@ -136,6 +162,7 @@ def init(
         (base / "config.yaml", STARTER_CONFIG.format(model=scaffold_model)),
         (base / "agents" / "assistant.md", STARTER_AGENT_MD.format(model=scaffold_model)),
         (base / "commands" / "review.md", STARTER_COMMAND_MD),
+        (base / "tools" / "example.py", STARTER_TOOL_PY),
     ]
 
     written = []
