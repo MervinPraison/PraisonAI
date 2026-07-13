@@ -111,6 +111,9 @@ def is_env_auto_approve() -> bool:
 def set_yaml_approved_tools(tools: List[str]) -> contextvars.Token:
     return get_approval_registry().set_yaml_approved_tools(tools)
 
+def add_yaml_approved_tools(tools: List[str]) -> contextvars.Token:
+    return get_approval_registry().add_yaml_approved_tools(tools)
+
 def reset_yaml_approved_tools(token: contextvars.Token) -> None:
     get_approval_registry().reset_yaml_approved_tools(token)
 

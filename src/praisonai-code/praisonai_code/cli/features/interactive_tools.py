@@ -6,6 +6,7 @@ in interactive modes (TUI and `praison "prompt"`).
 
 Tool Groups:
 - `acp`: ACP-powered file operations (create, edit, delete, execute)
+- `edit`: Targeted/fuzzy atomic edits (edit_file, apply_patch) from core
 - `lsp`: LSP-powered code intelligence (symbols, definitions, references)
 - `basic`: Basic file tools (read, list, search)
 - `interactive`: Union of all groups (default)
@@ -42,6 +43,10 @@ TOOL_GROUPS = {
         "acp_delete_file",
         "acp_execute_command",
     ],
+    "edit": [
+        "edit_file",
+        "apply_patch",
+    ],
     "lsp": [
         "lsp_list_symbols",
         "lsp_find_definition",
@@ -61,6 +66,7 @@ TOOL_GROUPS = {
 # Default interactive group includes all
 TOOL_GROUPS["interactive"] = (
     TOOL_GROUPS["acp"] + 
+    TOOL_GROUPS["edit"] + 
     TOOL_GROUPS["lsp"] + 
     TOOL_GROUPS["basic"]
 )
@@ -71,6 +77,7 @@ class ToolConfig:
     """Configuration for tool loading."""
     workspace: str = field(default_factory=os.getcwd)
     enable_acp: bool = True
+    enable_edit: bool = True
     enable_lsp: bool = True
     enable_basic: bool = True
     approval_mode: str = "auto"  # auto (full privileges), manual, scoped
@@ -88,6 +95,8 @@ class ToolConfig:
             disabled = [g.strip().lower() for g in disable_str.split(",")]
             if "acp" in disabled:
                 config.enable_acp = False
+            if "edit" in disabled:
+                config.enable_edit = False
             if "lsp" in disabled:
                 config.enable_lsp = False
             if "basic" in disabled:
@@ -137,6 +146,8 @@ def resolve_tool_groups(
         tool_names = set()
         if config.enable_acp:
             tool_names.update(TOOL_GROUPS["acp"])
+        if config.enable_edit:
+            tool_names.update(TOOL_GROUPS["edit"])
         if config.enable_lsp:
             tool_names.update(TOOL_GROUPS["lsp"])
         if config.enable_basic:
@@ -190,6 +201,133 @@ def _load_basic_tools() -> Dict[str, Callable]:
     except ImportError:
         logger.debug("web_crawl not available")
     
+    return tools
+
+
+def _load_edit_tools(config: ToolConfig) -> Dict[str, Callable]:
+    """Lazy load the targeted/fuzzy edit engine from praisonaiagents.
+
+    Wires the existing core ``edit_file`` (5-strategy fuzzy match ladder,
+    SHA-256 staleness guard via ``expected_hash``, BOM/CRLF preservation,
+    post-edit LSP/linter diagnostics) and ``apply_patch`` (atomic multi-file
+    Add/Update/Delete with rollback) into the default interactive toolset,
+    replacing whole-file rewrites as the primary edit path.
+
+    The tools are bound to the workspace so relative paths resolve inside it,
+    matching the containment used by the ACP/basic file tools.
+    """
+    tools: Dict[str, Callable] = {}
+
+    try:
+        from praisonaiagents.tools.edit_tools import EditTools
+    except ImportError as e:
+        logger.debug(f"Edit tools not available: {e}")
+        return tools
+
+    # Fail closed on workspace containment: the fallback path inside the core
+    # engine (workspace=None) only rejects ``..`` traversal and still accepts
+    # absolute paths (e.g. ``/etc/hosts``). Combined with auto-approval that
+    # would let an edit escape the configured workspace, so if containment is
+    # unavailable we simply do not expose the edit tools.
+    try:
+        from pathlib import Path
+        from praisonaiagents.workspace import Workspace  # type: ignore
+        workspace = Workspace(root=Path(config.workspace))
+    except Exception as e:
+        logger.warning(
+            f"Edit tools disabled: workspace containment unavailable: {e}"
+        )
+        return tools
+
+    engine = EditTools(workspace=workspace)
+
+    # The core edit engine marks edit_file/apply_patch as high-risk and routes
+    # them through the approval registry. In the interactive "auto" approval
+    # mode the agent runs with full privileges (matching the ACP tools), so
+    # register these as context-approved to avoid a blocking console prompt.
+    # Manual/scoped modes leave the normal approval flow (with diff preview)
+    # in place.
+    #
+    # Merge into the existing YAML-approved set rather than replacing it:
+    # ``set_yaml_approved_tools`` overwrites the whole context-local set, which
+    # would clobber previously approved workflow tools. ``add_yaml_approved_tools``
+    # unions ``edit_file``/``apply_patch`` into the current context set so no
+    # existing approval is dropped. Approvals are context-local (a contextvar),
+    # so they do not leak across independent agent/task contexts.
+    if config.approval_mode == "auto":
+        try:
+            from praisonaiagents.approval import add_yaml_approved_tools
+            add_yaml_approved_tools(["edit_file", "apply_patch"])
+        except ImportError:
+            # Older core without the non-clobbering merge helper: fall back but
+            # preserve every tool already approved in this context (not just the
+            # interactive-group ones) by reading the current set directly from
+            # the registry's context-local store before merging.
+            try:
+                from praisonaiagents.approval import (
+                    get_approval_registry,
+                    set_yaml_approved_tools,
+                )
+                registry = get_approval_registry()
+                try:
+                    current = set(registry._yaml_approved_tools.get())
+                except (LookupError, AttributeError):
+                    current = set()
+                merged = current | {"edit_file", "apply_patch"}
+                set_yaml_approved_tools(sorted(merged))
+            except Exception as e:
+                logger.debug(f"Could not auto-approve edit tools: {e}")
+        except Exception as e:
+            logger.debug(f"Could not auto-approve edit tools: {e}")
+
+    def edit_file(filepath: str, old_string: str, new_string: str,
+                  replace_all: bool = False, expected_hash: Optional[str] = None,
+                  force: bool = False) -> str:
+        """Edit a file with a targeted, fuzzy, atomic find-and-replace.
+
+        Prefer this over whole-file rewrites: emit only the ``old_string`` you
+        want replaced and its ``new_string``. Uses a 5-strategy fuzzy match
+        ladder and preserves line endings/BOM. If the file changed since you
+        read it, pass ``expected_hash`` (from a prior read) for an
+        optimistic-concurrency staleness guard — on mismatch, read the file
+        again before editing rather than overwriting.
+
+        Args:
+            filepath: Path to the file to edit (relative to workspace).
+            old_string: Exact text to find and replace.
+            new_string: Replacement text.
+            replace_all: Replace all occurrences (default: first only).
+            expected_hash: Optional SHA256 of expected content (staleness guard).
+            force: Bypass the staleness guard for an intentional blind write.
+
+        Returns:
+            Success message with unified diff (and any diagnostics), or an
+            error describing the mismatch/ambiguity to self-correct.
+        """
+        return engine.edit_file(filepath, old_string, new_string,
+                                replace_all, expected_hash, force)
+
+    def apply_patch(patch: str, force: bool = False) -> str:
+        """Apply a structured multi-file patch atomically (Add/Update/Delete).
+
+        Use for coordinated edits across multiple files. Staged temp-file
+        writes with full rollback on any failure.
+
+        Args:
+            patch: Structured patch text with ``*** Add File:``,
+                ``*** Update File:`` and ``*** Delete File:`` sections.
+            force: Bypass the staleness guard on Update operations.
+
+        Returns:
+            Combined success message with diffs, or an error description.
+        """
+        return engine.apply_patch(patch, force)
+
+    tools["edit_file"] = edit_file
+    tools["apply_patch"] = apply_patch
+
+    logger.debug(f"Loaded {len(tools)} edit tools")
+
     return tools
 
 
@@ -358,6 +496,11 @@ def get_interactive_tools(
         basic_tools = _load_basic_tools()
         all_tools.update(basic_tools)
     
+    # Load targeted/fuzzy edit tools (no runtime needed)
+    if config.enable_edit and not (disable and "edit" in disable):
+        edit_tools = _load_edit_tools(config)
+        all_tools.update(edit_tools)
+    
     # Load ACP tools (requires runtime)
     if config.enable_acp and not (disable and "acp" in disable):
         acp_tools = _load_acp_tools(config)
@@ -420,9 +563,12 @@ def print_tool_summary(tools: List[Callable]) -> None:
     """Print a summary of loaded tools (for debugging)."""
     acp_count = sum(1 for t in tools if t.__name__.startswith("acp_"))
     lsp_count = sum(1 for t in tools if t.__name__.startswith("lsp_"))
-    basic_count = len(tools) - acp_count - lsp_count
+    edit_names = set(TOOL_GROUPS["edit"])
+    edit_count = sum(1 for t in tools if t.__name__ in edit_names)
+    basic_count = len(tools) - acp_count - lsp_count - edit_count
     
     print(f"Interactive tools loaded: {len(tools)} total")
     print(f"  - ACP tools: {acp_count}")
+    print(f"  - Edit tools: {edit_count}")
     print(f"  - LSP tools: {lsp_count}")
     print(f"  - Basic tools: {basic_count}")
