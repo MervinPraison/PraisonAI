@@ -13,6 +13,16 @@ Nothing is ever auto-created here — the engine only materialises a scheduled
 job on an explicit ``accept``. ``MAX_PENDING_CAP`` and dedup are enforced by the
 underlying store, so the chat layer inherits safe-by-default behaviour.
 
+Scope note: the underlying ``SuggestionStore`` is a single, global,
+single-tenant store (``~/.praisonai/suggestions.json``) with no per-user field
+on :class:`~praisonaiagents.scheduler.suggestion_store.Suggestion`. Suggestions
+are therefore shared across everyone who can reach the gateway — exactly like
+the ``praisonai schedule`` CLI. Access is gated by ``CommandAccessPolicy`` (the
+``automations`` permission is re-checked on every accept/dismiss tap); restrict
+that policy to admins for multi-user bots. Per-user scoping would require a core
+data-model change to ``Suggestion``/``SuggestionStore`` and is intentionally out
+of scope for this wrapper wiring.
+
 Callback contract (reused by every platform's inline-keyboard path):
     ``sug:accept:<id>``   → accept a suggestion (materialises exactly one job)
     ``sug:dismiss:<id>``  → dismiss a suggestion (latches the dedup key)

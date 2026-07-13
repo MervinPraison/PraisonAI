@@ -1160,8 +1160,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("resume", handle_resume))
         self._application.add_handler(CommandHandler("retry", handle_retry))
         self._application.add_handler(CommandHandler("reasoning", handle_reasoning))
-        self._application.add_handler(CommandHandler("automations", handle_automations))
-        self._application.add_handler(CommandHandler("blueprint", handle_blueprint))
+        # ``automations`` / ``blueprint`` are generic names, so let an existing
+        # custom @bot.on_command handler of the same name win instead of being
+        # shadowed by these built-ins (the custom loop below registers it).
+        if "automations" not in self._command_handlers:
+            self._application.add_handler(CommandHandler("automations", handle_automations))
+        if "blueprint" not in self._command_handlers:
+            self._application.add_handler(CommandHandler("blueprint", handle_blueprint))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
