@@ -19,6 +19,8 @@ def create_subagent_tool(
     default_llm: Optional[str] = None,
     default_permission_mode: Optional[str] = None,
     on_job_complete: Optional[Callable[[Any], None]] = None,
+    agent_resolver: Optional[Callable[[str], Any]] = None,
+    resolvable_agents: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Create a subagent tool for task delegation.
@@ -32,6 +34,19 @@ def create_subagent_tool(
         max_depth: Maximum nesting depth for subagents
         default_llm: Default LLM model for subagents (Claude Code parity)
         default_permission_mode: Default permission mode for subagents (Claude Code parity)
+        agent_resolver: Optional callback that, given a named-agent name,
+            returns a ready-to-run ``Agent`` instance (honouring that agent's
+            own model/tools/permission). When provided and the caller supplies
+            an ``agent_name`` that resolves, the named agent runs the sub-task
+            instead of the generic ``agent_factory`` spawn. This is the seam
+            the wrapper populates from its ``.praisonai/agents`` discovery so a
+            primary agent can delegate to user-defined named agents by name.
+            Backward-compatible: ``None`` (the default) preserves the prior
+            generic-spawn behaviour exactly.
+        resolvable_agents: Optional ``{name: description}`` map of the named
+            agents ``agent_resolver`` can resolve. Used only to enrich the
+            tool description so the model knows which named agents it may
+            delegate to (and what each one is for).
         on_job_complete: Optional callback invoked with the terminal
             ``JobInfo`` when a ``background=True`` subagent that carries a
             ``deliver`` target finishes. This is the observable completion
@@ -75,6 +90,27 @@ def create_subagent_tool(
         try:
             _depth_state.current_depth = parent_depth + 1
 
+            # Build prompt with context (shared by both execution paths).
+            prompt = task
+            if context:
+                prompt = f"Context: {context}\n\nTask: {task}"
+
+            # Prefer a named-agent resolver when the caller targets a specific
+            # agent by name. The resolved agent honours its own definition
+            # (model/tools/permission), so we do not override its llm/tools.
+            if agent_resolver and agent_name:
+                resolved = agent_resolver(agent_name)
+                if resolved is not None:
+                    result = resolved.chat(prompt)
+                    return {
+                        "success": True,
+                        "output": result,
+                        "agent_name": agent_name,
+                        "task": task,
+                        "llm": effective_llm,
+                        "permission_mode": effective_permission_mode,
+                    }
+
             # If we have an agent factory, use it
             if agent_factory:
                 subagent = agent_factory(
@@ -82,11 +118,6 @@ def create_subagent_tool(
                     tools=tools,
                     llm=effective_llm,
                 )
-
-                # Build prompt with context
-                prompt = task
-                if context:
-                    prompt = f"Context: {context}\n\nTask: {task}"
 
                 # Execute the subagent
                 result = subagent.chat(prompt)
@@ -331,14 +362,26 @@ def create_subagent_tool(
 
     spawn_subagent._subagent_result = subagent_result  # type: ignore[attr-defined]
 
+    description = (
+        "Spawn a subagent to handle a specific task. Use this when a task "
+        "is complex and would benefit from dedicated focus, or when you need "
+        "specialized capabilities. The subagent will execute the task and "
+        "return the result."
+    )
+    if resolvable_agents:
+        listed = "\n".join(
+            f"- {name}: {desc}" if desc else f"- {name}"
+            for name, desc in resolvable_agents.items()
+        )
+        description += (
+            "\n\nYou can delegate to these named agents by passing their name "
+            "as agent_name (each runs under its own model/tools/permissions):\n"
+            f"{listed}"
+        )
+
     return {
         "name": "spawn_subagent",
-        "description": (
-            "Spawn a subagent to handle a specific task. Use this when a task "
-            "is complex and would benefit from dedicated focus, or when you need "
-            "specialized capabilities. The subagent will execute the task and "
-            "return the result."
-        ),
+        "description": description,
         "function": spawn_subagent,
         "parameters": {
             "type": "object",

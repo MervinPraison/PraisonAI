@@ -711,11 +711,126 @@ def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
 
     # Translate declarative permission/mode block into a flat permission
     # config that maps onto the Agent's existing approval/permission engine.
-    permission_config = resolve_permission_config(agent.permission, agent.mode)
+    # ``mode: subagent`` is a delegatability marker (not a permission mode) and
+    # must be ignored here so it is never rejected as an unknown mode.
+    permission_mode = agent.mode
+    if permission_mode and str(permission_mode).strip().lower() == "subagent":
+        permission_mode = None
+    permission_config = resolve_permission_config(agent.permission, permission_mode)
     if permission_config:
         config["permissions"] = permission_config
 
     return config
+
+
+def _agent_config_from_definition(agent: CustomAgent) -> Dict[str, Any]:
+    """Build an ``Agent(**config)`` kwargs dict from a discovered definition.
+
+    Mirrors :func:`load_agent_from_name` but works from an already-resolved
+    ``CustomAgent`` so the same frontmatter (model/tools/permission/mode) is
+    honoured when the agent is instantiated as a delegation target.
+    """
+    config: Dict[str, Any] = {"name": agent.name}
+
+    if agent.model:
+        config["llm"] = agent.model
+    if agent.role:
+        config["role"] = agent.role
+    if agent.goal:
+        config["goal"] = agent.goal
+    if agent.instructions:
+        config["instructions"] = agent.instructions
+    if agent.system_prompt:
+        config["backstory"] = agent.system_prompt
+    if agent.tools:
+        config["tools"] = agent.tools
+
+    # ``mode: subagent`` is a delegatability marker, not a permission mode, so
+    # it must not be fed to resolve_permission_config (which would reject it as
+    # an unknown mode). Treat it as "no permission mode" here.
+    permission_mode = agent.mode
+    if permission_mode and str(permission_mode).strip().lower() == "subagent":
+        permission_mode = None
+
+    permission_config = resolve_permission_config(agent.permission, permission_mode)
+    if permission_config:
+        config["permissions"] = permission_config
+
+    return config
+
+
+def list_delegatable_agents(
+    allow_list: Optional[List[str]] = None,
+) -> List[CustomAgent]:
+    """Return discovered agents that may be offered as delegation targets.
+
+    An agent is delegatable when it is either explicitly named in
+    ``allow_list`` (e.g. from ``--subagents a,b,c``) or, when no allow-list is
+    given, when its frontmatter marks it with ``mode: subagent``.
+
+    Args:
+        allow_list: Optional explicit list of agent names to expose. When
+            provided it takes precedence over the ``mode: subagent`` marker so
+            a user can opt any named agent in from the CLI without editing it.
+
+    Returns:
+        The matching ``CustomAgent`` definitions.
+    """
+    discovery = CustomDefinitionsDiscovery()
+    agents = discovery.list_agents()
+
+    if allow_list:
+        wanted = {name.strip() for name in allow_list if name and name.strip()}
+        return [a for a in agents if a.name in wanted]
+
+    return [
+        a
+        for a in agents
+        if a.mode and str(a.mode).strip().lower() == "subagent"
+    ]
+
+
+def build_subagent_resolver(
+    allow_list: Optional[List[str]] = None,
+) -> Tuple[Optional[Any], Dict[str, str]]:
+    """Build a named-agent resolver for ``create_subagent_tool``.
+
+    Bridges the wrapper's ``.praisonai/agents`` discovery to the core
+    delegation seam: returns a ``resolver(name) -> Agent`` callback plus a
+    ``{name: description}`` map for the tool description. The resolver lazily
+    imports and instantiates the core ``Agent`` from each definition's
+    frontmatter so no agents are constructed unless actually delegated to.
+
+    Args:
+        allow_list: Optional explicit list of delegatable agent names. When
+            omitted, agents marked ``mode: subagent`` are used.
+
+    Returns:
+        A ``(resolver, descriptions)`` tuple. ``resolver`` is ``None`` when
+        there are no delegatable agents (so callers can skip wiring the tool).
+    """
+    delegatable = list_delegatable_agents(allow_list)
+    if not delegatable:
+        return None, {}
+
+    configs = {a.name: _agent_config_from_definition(a) for a in delegatable}
+    descriptions = {
+        a.name: (a.description if hasattr(a, "description") else None)
+        or a.goal
+        or a.role
+        or ""
+        for a in delegatable
+    }
+
+    def resolver(name: str) -> Optional[Any]:
+        config = configs.get(name)
+        if config is None:
+            return None
+        from praisonaiagents import Agent
+
+        return Agent(**dict(config))
+
+    return resolver, descriptions
 
 
 def _env_flag(name: str) -> bool:
