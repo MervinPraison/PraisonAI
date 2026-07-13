@@ -114,11 +114,12 @@ Your Goal: {self.goal}"""
                         include_cache_boundary=True
                     )
                     memory_context = cache_result.get('stable_prefix', '')
-                    cache_boundary = cache_result.get('cache_boundary', '')
                     if memory_context:
                         system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
-                        if cache_boundary:
-                            system_prompt += cache_boundary
+                        # Note: the cache boundary marker is intentionally NOT
+                        # appended to the prompt text. No provider currently
+                        # consumes it as structured cache metadata, so injecting
+                        # the raw sentinel would only pollute the system prompt.
                         # Display memory info to user if verbose
                         if self.verbose:
                             self._display_memory_info()
