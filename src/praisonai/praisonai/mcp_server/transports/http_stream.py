@@ -212,12 +212,14 @@ class HTTPStreamTransport:
             if not is_valid:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401), None
 
-            # api_key is None for the env-key path (all scopes); otherwise use the
-            # key's configured scopes. Default to wildcard when unset.
-            if api_key is None or not getattr(api_key, "scopes", None):
+            # api_key is None only for the env-key path, which is wildcard by
+            # construction. For a resolved key, honor its configured scopes
+            # exactly — an explicit empty list is a deliberate no-permission
+            # grant and must NOT be widened to wildcard (privilege escalation).
+            if api_key is None:
                 granted = ["*"]
             else:
-                granted = list(api_key.scopes)
+                granted = list(getattr(api_key, "scopes", None) or [])
             return None, granted
         
         async def mcp_post(request: Request) -> Response:
@@ -379,10 +381,18 @@ class HTTPStreamTransport:
         async def mcp_delete(request: Request) -> Response:
             """Handle DELETE requests (session termination)."""
             # Check authentication first to prevent information disclosure
-            auth_error, _ = _check_auth(request)
+            auth_error, granted_scopes = _check_auth(request)
             if auth_error is not None:
                 return auth_error
-            
+
+            # Enforce scope on the administrative session-termination action.
+            # When auth is configured (granted_scopes is a list), a non-wildcard
+            # key must carry the 'admin' scope; otherwise a read-only key could
+            # terminate arbitrary sessions. No-auth mode (None) is unaffected.
+            scope_error = self._enforce_termination_scope(granted_scopes)
+            if scope_error is not None:
+                return scope_error
+
             if not self.allow_client_termination:
                 return Response(status_code=405)
             
@@ -464,3 +474,52 @@ class HTTPStreamTransport:
             del self._sessions[sid]
             if sid in self._event_history:
                 del self._event_history[sid]
+
+    def _enforce_termination_scope(self, granted_scopes: Optional[list]) -> Optional[Any]:
+        """Enforce the scope required to terminate a session via DELETE.
+
+        Session termination is an administrative, state-changing action. When
+        auth is configured (``granted_scopes`` is a list), a non-wildcard key
+        must carry the ``admin`` scope. Returns a 403 JSON-RPC-style error
+        response when the requirement is not met, otherwise ``None``.
+
+        No-auth mode (``granted_scopes is None``) is a no-op ("allow all"),
+        preserving backward compatibility.
+        """
+        # No auth configured: enforcement disabled.
+        if granted_scopes is None:
+            return None
+
+        # Wildcard grant satisfies every requirement.
+        if "*" in granted_scopes:
+            return None
+
+        if "admin" in granted_scopes:
+            return None
+
+        from starlette.responses import JSONResponse
+
+        challenge = 'Bearer realm="{realm}", scope="admin", error="insufficient_scope"'.format(
+            realm=getattr(self.server, "name", "mcp")
+        )
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32001,
+                    "message": "insufficient_scope",
+                    "data": {
+                        "required_scopes": ["admin"],
+                        "granted_scopes": list(granted_scopes),
+                        "missing_scopes": ["admin"],
+                        "error": "insufficient_scope",
+                    },
+                },
+            },
+            status_code=403,
+            headers={
+                "WWW-Authenticate": challenge,
+                "MCP-Protocol-Version": PROTOCOL_VERSION,
+            },
+        )

@@ -281,7 +281,9 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         Expected format:
             [{"key": "<raw-key>", "name": "monitor", "scopes": ["tools:read"]}, ...]
 
-        A key without ``scopes`` (or with ``["*"]``) is treated as wildcard.
+        A key with the ``scopes`` field omitted (or set to ``["*"]``) is treated
+        as wildcard. An explicit empty list (``"scopes": []``) is honored as a
+        no-permission key and is NOT promoted to wildcard.
         """
         from .auth.api_key import APIKeyAuth
 
@@ -296,10 +298,14 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             raw_key = entry.get("key")
             if not raw_key:
                 raise ValueError("each key entry requires a non-empty 'key' field")
+            # Only default to wildcard when 'scopes' is omitted entirely. An
+            # explicit empty list is a deliberate no-permission grant and must
+            # NOT be widened to wildcard (privilege escalation).
+            scopes = entry.get("scopes", ["*"])
             auth.add_key(
                 raw_key,
                 name=entry.get("name"),
-                scopes=entry.get("scopes") or ["*"],
+                scopes=scopes,
             )
         return auth
     
