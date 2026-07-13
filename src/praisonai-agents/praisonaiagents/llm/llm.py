@@ -451,7 +451,9 @@ Respond with ONLY a valid JSON tool call in this format:
         self._in_loop_compaction = extra_settings.get('in_loop_compaction', True)
         self._clear_threshold_pct = extra_settings.get('clear_threshold_pct', 0.5)
         self._compact_threshold_pct = extra_settings.get('compact_threshold_pct', 0.8)
+        self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
         self._loop_compactor = None  # Lazily created on first in-loop management call
+        self._loop_compactor_model = None  # Model the cached compactor was built for
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -2322,7 +2324,10 @@ Now provide your final answer using this result. Summarize the information natur
 
             budget = self._resolve_context_window()
             compactor = getattr(self, "_loop_compactor", None)
-            if compactor is None:
+            # Rebuild the compactor when it is missing or the active model changed
+            # (e.g. auth/model failover) so budgets and the tokenizer model stay
+            # aligned with the current provider window.
+            if compactor is None or getattr(self, "_loop_compactor_model", None) != self.model:
                 clear_pct = getattr(self, "_clear_threshold_pct", 0.5)
                 compact_pct = getattr(self, "_compact_threshold_pct", 0.8)
                 config = CompactionConfig(
@@ -2332,12 +2337,14 @@ Now provide your final answer using this result. Summarize the information natur
                     in_loop_compaction=True,
                     clear_threshold_pct=clear_pct,
                     compact_threshold_pct=compact_pct,
+                    keep_recent_tool_results=getattr(self, "_keep_recent_tool_results", 6),
                 )
                 compactor = ContextCompactor(
                     config=config,
                     strategy=CompactionStrategy.SUMMARIZE,
                 )
                 self._loop_compactor = compactor
+                self._loop_compactor_model = self.model
 
             clear_at = int(budget * compactor.config.clear_threshold_pct)
             compact_at = int(budget * compactor.config.compact_threshold_pct)
@@ -5443,6 +5450,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'execute_tool_fn', 'stream_callback', 'emit_events',  # Callbacks
             'console',  # Rich console
             'max_tool_calls_per_turn', 'parallel_tool_calls',  # Tool execution settings
+            'in_loop_compaction', 'clear_threshold_pct', 'compact_threshold_pct',  # In-loop context management
+            'keep_recent_tool_results',  # In-loop context management
         ]
         for param in internal_params:
             params.pop(param, None)
