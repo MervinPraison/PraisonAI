@@ -250,3 +250,30 @@ class TestIndexedSessionRoute:
 
         store.delete_session("s1")
         assert store.get_by_gateway_session("gw-1") is None
+
+    def test_route_backfills_content_indexed_but_unrouted(self, tmp_dir):
+        # Migration case: a store upgraded from a prior release already has the
+        # content index (session_meta) populated for a gateway session, but the
+        # newly-created session_route table is empty. Backfill must still create
+        # the route row on first read so gateway routing does not silently lose
+        # the session (Greptile P1 regression).
+        import os
+
+        db_path = os.path.join(tmp_dir, "sessions_index.db")
+        store = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        store.add_message("old", "user", "legacy topic")
+        store.set_gateway_info("old", gateway_session_id="gw-old", agent_id="a-old")
+
+        # Simulate an old on-disk index: content indexed, route table empty.
+        conn = store._connect()
+        conn.execute("DELETE FROM session_route")
+        assert conn.execute(
+            "SELECT COUNT(*) FROM session_meta WHERE session_id = ?", ("old",)
+        ).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM session_route").fetchone()[0] == 0
+
+        # Re-open the store fresh (new backfill state) against the same DB/dir.
+        reopened = SqliteSessionStore(session_dir=tmp_dir, db_path=db_path)
+        found = reopened.get_by_gateway_session("gw-old")
+        assert found is not None and found.session_id == "old"
+        assert reopened.list_sessions_by_gateway_agent("a-old") == ["old"]

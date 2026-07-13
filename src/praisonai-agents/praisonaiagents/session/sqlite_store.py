@@ -238,14 +238,32 @@ class SqliteSessionStore(DefaultSessionStore):
             self._reindex_all()
 
     def _indexed_ids(self) -> set:
-        """Return the set of session_ids already present in the index."""
+        """Return the set of session_ids already fully indexed.
+
+        A session counts as indexed only if it is present in *both* the content
+        index (``session_meta``) *and* the routing index (``session_route``).
+        This closes a migration gap: an existing store upgraded from a prior
+        release (content index populated, ``session_route`` created empty) would
+        otherwise have its already-content-indexed sessions skipped by backfill,
+        leaving ``session_route`` empty and breaking gateway routing. Requiring a
+        route row forces those sessions to be re-indexed so their route rows are
+        populated. Backfill runs at most once (guarded by ``_backfilled``), so
+        this stays a cheap one-time pass.
+        """
         conn = self._connect()
         if conn is None:
             return set()
         try:
             with self._db_lock:
-                rows = conn.execute("SELECT session_id FROM session_meta").fetchall()
-            return {r[0] for r in rows}
+                meta_rows = conn.execute(
+                    "SELECT session_id FROM session_meta"
+                ).fetchall()
+                route_rows = conn.execute(
+                    "SELECT session_id FROM session_route"
+                ).fetchall()
+            meta_ids = {r[0] for r in meta_rows}
+            route_ids = {r[0] for r in route_rows}
+            return meta_ids & route_ids
         except Exception:
             return set()
 
