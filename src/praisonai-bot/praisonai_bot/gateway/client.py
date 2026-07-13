@@ -231,9 +231,10 @@ class GatewayClient:
         if isinstance(value, bool):
             return None
         try:
-            return int(value)
+            coerced = int(value)
         except (TypeError, ValueError):
             return None
+        return coerced if coerced >= 0 else None
 
     def supports_event(self, event: Union[str, EventType]) -> bool:
         """Whether the negotiated manifest advertises the given event.
@@ -396,11 +397,11 @@ class GatewayClient:
             self._adopt_hello(data)
         
         elif reply_type == "hello_error":
-            error_code = data.get("code")
-            error_msg = data.get("message", "Unknown error")
-            if error_code in ("protocol_unsupported", "version_unsupported"):
-                raise ValueError(f"Protocol version unsupported: {error_msg}")
-            raise ConnectionError(f"Handshake failed: {error_msg}")
+            # Modern gateway rejected the hello: classify terminal vs transient
+            # using the shared connect-error code so a revoked token / wrong
+            # secret / unpaired device stops the loop with an actionable reason
+            # instead of reconnecting forever.
+            self._raise_for_connect_error(data, context="Handshake")
         
         elif reply_type == "error":
             error_code = data.get("code")
@@ -463,48 +464,58 @@ class GatewayClient:
         data = json.loads(response)
         
         if data.get("type") in ("error", "hello_error"):
-            error_code = data.get("code")
-            error_msg = data.get("message", "Unknown error")
-            next_step = data.get("next_step") or data.get("next")
-
-            # Record a server-supplied backoff floor for the next reconnect,
-            # regardless of terminal/transient (a terminal path ignores it).
-            retry_after = data.get("retry_after_seconds")
-            if retry_after is not None:
-                try:
-                    self._retry_after = max(0.0, float(retry_after))
-                except (TypeError, ValueError):
-                    self._retry_after = None
-
-            # Legacy string codes kept for backward compatibility.
-            if error_code in ("version_unsupported", "protocol_unsupported"):
-                raise ValueError(f"Protocol version unsupported: {error_msg}")
-
-            # Structured connect-error code: branch terminal vs transient using
-            # the shared core classifier so a revoked token / wrong secret /
-            # unpaired device stops the loop with an actionable reason instead
-            # of reconnecting forever.
-            if error_code is not None:
-                try:
-                    code = ConnectErrorCode(error_code)
-                except ValueError:
-                    # Unknown/future code: treat as transient (retry).
-                    raise ConnectionError(f"Join failed: {error_msg}")
-
-                if not is_recoverable(code):
-                    raise GatewayConnectError(code, next_step, error_msg)
-
-                # Recoverable → let the loop back off and retry (honouring any
-                # retry_after floor recorded above).
-                raise ConnectionError(f"Join failed: {error_msg}")
-
-            # No structured code at all: transient by default.
-            raise ConnectionError(f"Join failed: {error_msg}")
-        
+            self._raise_for_connect_error(data, context="Join")
         elif data.get("type") == "joined":
             self._adopt_legacy_join(data)
         else:
             raise ConnectionError(f"Unexpected join reply: {data.get('type')}")
+    
+    def _raise_for_connect_error(self, data: Dict[str, Any], *, context: str) -> None:
+        """Classify a handshake rejection and raise the right error.
+
+        Terminal (non-recoverable) connect-error codes raise
+        :class:`GatewayConnectError` so the reconnect loop stops with the
+        server's structured ``code``/``next_step``. Transient codes (or an
+        unknown/absent code) raise :class:`ConnectionError` so the loop backs
+        off and retries, honouring any server-supplied ``retry_after`` floor.
+        """
+        error_code = data.get("code")
+        error_msg = data.get("message", "Unknown error")
+        next_step = data.get("next_step") or data.get("next")
+
+        # Record a server-supplied backoff floor for the next reconnect,
+        # regardless of terminal/transient (a terminal path ignores it).
+        retry_after = data.get("retry_after_seconds")
+        if retry_after is not None:
+            try:
+                self._retry_after = max(0.0, float(retry_after))
+            except (TypeError, ValueError):
+                self._retry_after = None
+
+        # Legacy string codes kept for backward compatibility.
+        if error_code in ("version_unsupported", "protocol_unsupported"):
+            raise ValueError(f"Protocol version unsupported: {error_msg}")
+
+        # Structured connect-error code: branch terminal vs transient using
+        # the shared core classifier so a revoked token / wrong secret /
+        # unpaired device stops the loop with an actionable reason instead
+        # of reconnecting forever.
+        if error_code is not None:
+            try:
+                code = ConnectErrorCode(error_code)
+            except ValueError:
+                # Unknown/future code: treat as transient (retry).
+                raise ConnectionError(f"{context} failed: {error_msg}")
+
+            if not is_recoverable(code):
+                raise GatewayConnectError(code, next_step, error_msg)
+
+            # Recoverable → let the loop back off and retry (honouring any
+            # retry_after floor recorded above).
+            raise ConnectionError(f"{context} failed: {error_msg}")
+
+        # No structured code at all: transient by default.
+        raise ConnectionError(f"{context} failed: {error_msg}")
     
     def _adopt_legacy_join(self, data: Dict[str, Any]) -> None:
         """Adopt a bare legacy ``joined`` reply (no features/policy manifest)."""
