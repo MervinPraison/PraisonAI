@@ -5,6 +5,7 @@ Manages context window by compacting messages when needed.
 """
 
 import re
+import threading
 from typing import List, Dict, Any, Optional, Callable, Awaitable, Tuple
 import asyncio
 
@@ -12,6 +13,54 @@ from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
 from .strategy import CompactionStrategy
 from .result import CompactionResult
 from .protocols import ToolResultPrunerProtocol, MessageFormatterProtocol, SummaryBuilderProtocol
+
+
+# Cache for the one-time offline-safe tiktoken probe (see estimate_tokens).
+# None = not yet probed; True/False = probe result. Guarded by a lock so a
+# single worker thread performs the probe even under concurrent compaction.
+_ACCURATE_TOKENISER_STATE: Optional[bool] = None
+_ACCURATE_TOKENISER_LOCK = threading.Lock()
+# Seconds to wait for tiktoken's first init. A local (cached) vocab loads well
+# under this; a network download does not, so we fall back without blocking.
+_ACCURATE_TOKENISER_PROBE_TIMEOUT = 2.0
+
+
+def _accurate_tokeniser_available() -> bool:
+    """Return True if tiktoken can tokenise offline without a blocking download.
+
+    tiktoken fetches its BPE vocab from the network on first use, which can hang
+    on network-isolated hosts (e.g. CI). We probe exactly once in a short-lived
+    daemon thread: if the accurate tokeniser initialises within the timeout it is
+    used thereafter; otherwise we cache a permanent fallback to the heuristic.
+    """
+    global _ACCURATE_TOKENISER_STATE
+    if _ACCURATE_TOKENISER_STATE is not None:
+        return _ACCURATE_TOKENISER_STATE
+
+    with _ACCURATE_TOKENISER_LOCK:
+        if _ACCURATE_TOKENISER_STATE is not None:
+            return _ACCURATE_TOKENISER_STATE
+
+        result: List[bool] = []
+
+        def _probe() -> None:
+            try:
+                from ..context.tokens import estimate_tokens_accurate
+                # Force real tokeniser init; heuristic fallback returns >0 too,
+                # but a network download would block here (bounded by the thread
+                # timeout below rather than hanging the caller).
+                estimate_tokens_accurate("probe", "gpt-4")
+                result.append(True)
+            except Exception:
+                result.append(False)
+
+        probe_thread = threading.Thread(target=_probe, daemon=True)
+        probe_thread.start()
+        probe_thread.join(_ACCURATE_TOKENISER_PROBE_TIMEOUT)
+
+        # Timed out (likely a network download) or probe reported unavailable.
+        _ACCURATE_TOKENISER_STATE = bool(result and result[0])
+        return _ACCURATE_TOKENISER_STATE
 
 
 class ContextCompactor:
@@ -91,16 +140,27 @@ class ContextCompactor:
         """
         Estimate token count for text.
 
-        Uses an accurate tokeniser (tiktoken) when available via
-        ``context.tokens``; falls back to a character heuristic otherwise.
+        Uses an accurate tokeniser (tiktoken) when it is available **offline**;
+        otherwise falls back to a fast character heuristic.
+
+        tiktoken downloads its BPE vocabulary from the network on first use, and
+        that download can block indefinitely on network-isolated hosts (e.g. CI).
+        To keep token counting fast and offline-safe, the accurate path is probed
+        exactly once in a short-lived worker thread: if the tokeniser is already
+        available locally it is used, otherwise we permanently fall back to the
+        heuristic without ever blocking the hot path.
         """
         if not text:
             return 0
-        try:
-            from ..context.tokens import estimate_tokens_accurate
-            return estimate_tokens_accurate(text, getattr(self.config, "model", None) or "gpt-4")
-        except Exception:
-            return max(1, len(text) // 4)
+        if _accurate_tokeniser_available():
+            try:
+                from ..context.tokens import estimate_tokens_accurate
+                return estimate_tokens_accurate(
+                    text, getattr(self.config, "model", None) or "gpt-4"
+                )
+            except Exception:
+                pass
+        return max(1, len(text) // 4)
 
     def count_message_tokens(self, message: Dict[str, Any]) -> int:
         """Count tokens in a message, including tool_calls payloads."""
