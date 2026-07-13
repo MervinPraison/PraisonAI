@@ -157,6 +157,64 @@ class ToolsetRegistry:
                     unique_tools.append(tool)
             return unique_tools
     
+    def resolve_toolset_for_model(
+        self, name: str, model: Optional[str] = None
+    ) -> List[str]:
+        """Resolve a toolset, honouring the model-family preferred edit format.
+
+        Behaves exactly like :meth:`resolve_toolset` but, when the resolved
+        harness profile expresses a preferred edit primitive (e.g.
+        ``apply_patch`` vs ``edit_file``) and both primitives are present, the
+        preferred one is advertised first. Both remain available, so unknown
+        models (default profile) reproduce the current ordering byte-for-byte.
+
+        Args:
+            name: Toolset name to resolve.
+            model: Active model id used to resolve the harness profile.
+
+        Returns:
+            List of unique tool names, edit primitives ordered by preference.
+        """
+        tools = self.resolve_toolset(name)
+        if not model:
+            return tools
+        return self._apply_preferred_edit_order(tools, model)
+
+    @staticmethod
+    def _apply_preferred_edit_order(tools: List[str], model: str) -> List[str]:
+        """Reorder edit primitives so the model's preferred one is advertised first.
+
+        Resolves the harness profile for ``model`` and, when it expresses a
+        preferred edit primitive present alongside another edit primitive,
+        moves the preferred one ahead while preserving every other tool's
+        position. Never raises; any resolution error leaves ``tools`` unchanged
+        (behaviour-preserving default).
+        """
+        try:
+            from .model_harness import resolve_harness
+            preferred = resolve_harness(model).preferred_edit_format
+        except Exception:
+            preferred = None
+        if not preferred or preferred not in tools:
+            return tools
+        edit_primitives = {"edit_file", "apply_patch"}
+        if not any(t in edit_primitives and t != preferred for t in tools):
+            return tools
+        reordered = []
+        inserted = False
+        for tool in tools:
+            if tool in edit_primitives:
+                if not inserted:
+                    reordered.append(preferred)
+                    reordered.extend(
+                        t for t in tools if t in edit_primitives and t != preferred
+                    )
+                    inserted = True
+                # skip other edit primitives; already added
+                continue
+            reordered.append(tool)
+        return reordered
+
     def resolve_toolsets(self, names: List[str]) -> List[str]:
         """Resolve multiple toolset names to a flat list of tool names.
         
@@ -179,6 +237,28 @@ class ToolsetRegistry:
                     seen.add(tool)
                     unique_tools.append(tool)
             return unique_tools
+
+    def resolve_toolsets_for_model(
+        self, names: List[str], model: Optional[str] = None
+    ) -> List[str]:
+        """Resolve multiple toolsets, honouring the model's preferred edit format.
+
+        Identical to :meth:`resolve_toolsets` but, when ``model`` resolves to a
+        harness profile expressing a preferred edit primitive and both edit
+        primitives are present, the preferred one is advertised first. Falsy or
+        unknown models reproduce :meth:`resolve_toolsets` byte-for-byte.
+
+        Args:
+            names: List of toolset names to resolve.
+            model: Active model id used to resolve the harness profile.
+
+        Returns:
+            List of unique tool names, edit primitives ordered by preference.
+        """
+        tools = self.resolve_toolsets(names)
+        if not model:
+            return tools
+        return self._apply_preferred_edit_order(tools, model)
     
     def _resolve_toolset_recursive(self, name: str, visited: Set[str]) -> List[str]:
         """Recursive helper for toolset resolution with cycle detection."""
@@ -359,6 +439,23 @@ def resolve_toolsets(names: List[str]) -> List[str]:
         List of unique tool names from all toolsets
     """
     return get_toolset_registry().resolve_toolsets(names)
+
+
+def resolve_toolsets_for_model(
+    names: List[str], model: Optional[str] = None
+) -> List[str]:
+    """Resolve multiple toolsets, honouring the model's preferred edit format.
+
+    Falsy / unknown models reproduce :func:`resolve_toolsets` byte-for-byte.
+
+    Args:
+        names: List of toolset names to resolve.
+        model: Active model id used to resolve the harness profile.
+
+    Returns:
+        List of unique tool names, edit primitives ordered by preference.
+    """
+    return get_toolset_registry().resolve_toolsets_for_model(names, model)
 
 
 def list_toolsets() -> List[str]:
