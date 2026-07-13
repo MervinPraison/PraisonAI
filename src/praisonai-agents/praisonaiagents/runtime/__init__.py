@@ -87,10 +87,10 @@ __all__ = [
     "RunJournal",
     "JournalEvent",
     "RunMeta",
-    # Opt-in runtime profiles (system-prompt tuning)
-    "RuntimeProfile",
-    "RuntimeProfileProtocol",
-    "RuntimeProfileRegistry",
+    # Opt-in prompt profiles (system-prompt tuning)
+    "PromptProfile",
+    "PromptProfileProtocol",
+    "PromptProfileRegistry",
     "register_profile",
     "resolve_profile",
     "list_profiles",
@@ -171,13 +171,13 @@ _LAZY_GROUPS = {
         'JournalEvent': ('praisonaiagents.runtime.journal', 'JournalEvent'),
         'RunMeta': ('praisonaiagents.runtime.journal', 'RunMeta'),
     },
-    'profiles': {
-        'RuntimeProfile': ('praisonaiagents.runtime.profiles', 'RuntimeProfile'),
-        'RuntimeProfileProtocol': ('praisonaiagents.runtime.profiles', 'RuntimeProfileProtocol'),
-        'RuntimeProfileRegistry': ('praisonaiagents.runtime.profiles', 'RuntimeProfileRegistry'),
-        'register_profile': ('praisonaiagents.runtime.profiles', 'register_profile'),
-        'resolve_profile': ('praisonaiagents.runtime.profiles', 'resolve_profile'),
-        'list_profiles': ('praisonaiagents.runtime.profiles', 'list_profiles'),
+    'prompt_profiles': {
+        'PromptProfile': ('praisonaiagents.runtime.prompt_profiles', 'PromptProfile'),
+        'PromptProfileProtocol': ('praisonaiagents.runtime.prompt_profiles', 'PromptProfileProtocol'),
+        'PromptProfileRegistry': ('praisonaiagents.runtime.prompt_profiles', 'PromptProfileRegistry'),
+        'register_profile': ('praisonaiagents.runtime.prompt_profiles', 'register_profile'),
+        'resolve_profile': ('praisonaiagents.runtime.prompt_profiles', 'resolve_profile'),
+        'list_profiles': ('praisonaiagents.runtime.prompt_profiles', 'list_profiles'),
     },
 }
 

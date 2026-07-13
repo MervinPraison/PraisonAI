@@ -1,11 +1,11 @@
-"""Tests for opt-in runtime profiles."""
+"""Tests for opt-in prompt profiles."""
 
 import pytest
 
-from praisonaiagents.runtime.profiles import (
-    RuntimeProfile,
-    RuntimeProfileProtocol,
-    RuntimeProfileRegistry,
+from praisonaiagents.runtime.prompt_profiles import (
+    PromptProfile,
+    PromptProfileProtocol,
+    PromptProfileRegistry,
     resolve_profile,
     register_profile,
     list_profiles,
@@ -20,25 +20,25 @@ def _reset_global_registry():
     Prevents profiles registered by one test (e.g. ``global-test``) from
     leaking into later tests and causing order-dependent results.
     """
-    from praisonaiagents.runtime.profiles import _global_registry
+    from praisonaiagents.runtime.prompt_profiles import _global_registry
     _global_registry.clear()
     yield
     _global_registry.clear()
 
 
-class TestRuntimeProfile:
+class TestPromptProfile:
     def test_default_is_prompt_neutral(self):
-        p = RuntimeProfile()
+        p = PromptProfile()
         assert p.is_prompt_neutral is True
         assert p.name == DEFAULT_PROFILE_NAME
 
     def test_default_apply_is_noop(self):
-        p = RuntimeProfile()
+        p = PromptProfile()
         prompt = "You are a helpful assistant."
         assert p.apply_system_prompt(prompt) == prompt
 
     def test_prefix_and_suffix_applied(self):
-        p = RuntimeProfile(
+        p = PromptProfile(
             name="custom",
             system_prompt_prefix="PREFIX",
             system_prompt_suffix="SUFFIX",
@@ -48,33 +48,33 @@ class TestRuntimeProfile:
         assert result == "PREFIX\n\nBODY\n\nSUFFIX"
 
     def test_prefix_only(self):
-        p = RuntimeProfile(system_prompt_prefix="PREFIX")
+        p = PromptProfile(system_prompt_prefix="PREFIX")
         assert p.apply_system_prompt("BODY") == "PREFIX\n\nBODY"
 
     def test_suffix_only(self):
-        p = RuntimeProfile(system_prompt_suffix="SUFFIX")
+        p = PromptProfile(system_prompt_suffix="SUFFIX")
         assert p.apply_system_prompt("BODY") == "BODY\n\nSUFFIX"
 
     def test_apply_handles_none(self):
-        p = RuntimeProfile(system_prompt_prefix="X")
+        p = PromptProfile(system_prompt_prefix="X")
         assert p.apply_system_prompt(None) is None
 
     def test_protocol_conformance(self):
-        p = RuntimeProfile()
-        assert isinstance(p, RuntimeProfileProtocol)
+        p = PromptProfile()
+        assert isinstance(p, PromptProfileProtocol)
 
     def test_from_dict_valid(self):
-        p = RuntimeProfile.from_dict({"name": "x", "system_prompt_prefix": "P"})
+        p = PromptProfile.from_dict({"name": "x", "system_prompt_prefix": "P"})
         assert p.name == "x"
         assert p.system_prompt_prefix == "P"
 
     def test_from_dict_rejects_unknown_key(self):
         with pytest.raises(ValueError):
-            RuntimeProfile.from_dict({"systemPromptPrefix": "typo"})
+            PromptProfile.from_dict({"systemPromptPrefix": "typo"})
 
     def test_from_dict_rejects_non_mapping(self):
         with pytest.raises(TypeError):
-            RuntimeProfile.from_dict("not-a-dict")
+            PromptProfile.from_dict("not-a-dict")
 
 
 class TestResolveProfile:
@@ -85,7 +85,7 @@ class TestResolveProfile:
         assert resolve_profile().name == DEFAULT_PROFILE_NAME
 
     def test_resolve_by_explicit_name(self):
-        register_profile("myfam", RuntimeProfile(name="myfam", system_prompt_prefix="P"))
+        register_profile("myfam", PromptProfile(name="myfam", system_prompt_prefix="P"))
         assert resolve_profile(name="myfam").name == "myfam"
 
     def test_list_profiles_contains_default(self):
@@ -94,59 +94,59 @@ class TestResolveProfile:
 
 class TestRegistry:
     def test_register_and_resolve(self):
-        reg = RuntimeProfileRegistry()
-        profile = RuntimeProfile(name="myfam", system_prompt_suffix="X")
+        reg = PromptProfileRegistry()
+        profile = PromptProfile(name="myfam", system_prompt_suffix="X")
         reg.register("myfam", profile)
         assert reg.resolve(name="myfam") is profile
 
     def test_register_no_override_raises(self):
-        reg = RuntimeProfileRegistry()
-        reg.register("a", RuntimeProfile(name="a"))
+        reg = PromptProfileRegistry()
+        reg.register("a", PromptProfile(name="a"))
         with pytest.raises(ValueError):
-            reg.register("a", RuntimeProfile(name="a"), override=False)
+            reg.register("a", PromptProfile(name="a"), override=False)
 
     def test_register_rejects_non_profile(self):
-        reg = RuntimeProfileRegistry()
+        reg = PromptProfileRegistry()
         with pytest.raises(TypeError):
             reg.register("bad", object())
 
     def test_resolve_unknown_returns_default(self):
-        reg = RuntimeProfileRegistry()
+        reg = PromptProfileRegistry()
         assert reg.resolve(name="nope").name == DEFAULT_PROFILE_NAME
 
     def test_global_register_profile(self):
         # Cleanup handled by the autouse _reset_global_registry fixture.
-        register_profile("global-test", RuntimeProfile(name="global-test", system_prompt_prefix="G"))
+        register_profile("global-test", PromptProfile(name="global-test", system_prompt_prefix="G"))
         assert resolve_profile(name="global-test").name == "global-test"
 
     def test_default_cannot_be_overridden_with_prompt(self):
-        reg = RuntimeProfileRegistry()
+        reg = PromptProfileRegistry()
         with pytest.raises(ValueError):
             reg.register(
                 DEFAULT_PROFILE_NAME,
-                RuntimeProfile(name=DEFAULT_PROFILE_NAME, system_prompt_prefix="INJECTED"),
+                PromptProfile(name=DEFAULT_PROFILE_NAME, system_prompt_prefix="INJECTED"),
             )
 
     def test_default_neutral_reregister_allowed(self):
-        reg = RuntimeProfileRegistry()
-        reg.register(DEFAULT_PROFILE_NAME, RuntimeProfile(name=DEFAULT_PROFILE_NAME))
+        reg = PromptProfileRegistry()
+        reg.register(DEFAULT_PROFILE_NAME, PromptProfile(name=DEFAULT_PROFILE_NAME))
         assert reg.resolve(name=DEFAULT_PROFILE_NAME).is_prompt_neutral is True
 
     def test_global_default_cannot_be_overridden_with_prompt(self):
         with pytest.raises(ValueError):
             register_profile(
                 DEFAULT_PROFILE_NAME,
-                RuntimeProfile(name=DEFAULT_PROFILE_NAME, system_prompt_suffix="X"),
+                PromptProfile(name=DEFAULT_PROFILE_NAME, system_prompt_suffix="X"),
             )
 
     def test_resolve_require_raises_on_unknown_name(self):
-        reg = RuntimeProfileRegistry()
+        reg = PromptProfileRegistry()
         with pytest.raises(KeyError):
             reg.resolve(name="does-not-exist", require=True)
 
     def test_resolve_require_returns_registered(self):
-        reg = RuntimeProfileRegistry()
-        reg.register("known", RuntimeProfile(name="known"))
+        reg = PromptProfileRegistry()
+        reg.register("known", PromptProfile(name="known"))
         assert reg.resolve(name="known", require=True).name == "known"
 
     def test_global_resolve_require_raises(self):
@@ -154,8 +154,8 @@ class TestRegistry:
             resolve_profile(name="totally-unknown", require=True)
 
     def test_clear_resets_to_default_only(self):
-        reg = RuntimeProfileRegistry()
-        reg.register("extra", RuntimeProfile(name="extra", system_prompt_prefix="P"))
+        reg = PromptProfileRegistry()
+        reg.register("extra", PromptProfile(name="extra", system_prompt_prefix="P"))
         reg.clear()
         assert reg.list_profiles() == [DEFAULT_PROFILE_NAME]
 

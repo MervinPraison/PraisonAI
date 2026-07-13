@@ -1,6 +1,6 @@
-"""Opt-in runtime profiles for PraisonAI Agents.
+"""Opt-in prompt profiles for PraisonAI Agents.
 
-A ``RuntimeProfile`` lets a caller adjust the assembled system prompt
+A ``PromptProfile`` lets a caller adjust the assembled system prompt
 (segment-level, so caching, rules and memory injection are preserved) without
 subclassing the Agent. It is fully opt-in: with no profile configured the
 generated prompt is byte-for-byte unchanged.
@@ -9,7 +9,7 @@ Design follows AGENTS.md and mirrors ``runtime/registry.py``:
 - Core protocol only (no heavy implementations)
 - Thread-safe registration with a global registry
 - Entry-point discovery for third-party profiles
-  (``praisonaiagents.runtime_profiles``)
+  (``praisonaiagents.prompt_profiles``)
 - The reserved ``default`` profile is a pure no-op and can never be replaced by
   a prompt-altering profile, so unconfigured agents stay backward compatible.
 """
@@ -19,9 +19,9 @@ from dataclasses import dataclass, fields
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 __all__ = [
-    "RuntimeProfile",
-    "RuntimeProfileProtocol",
-    "RuntimeProfileRegistry",
+    "PromptProfile",
+    "PromptProfileProtocol",
+    "PromptProfileRegistry",
     "register_profile",
     "resolve_profile",
     "list_profiles",
@@ -31,8 +31,8 @@ DEFAULT_PROFILE_NAME = "default"
 
 
 @runtime_checkable
-class RuntimeProfileProtocol(Protocol):
-    """Protocol for an opt-in runtime profile.
+class PromptProfileProtocol(Protocol):
+    """Protocol for an opt-in prompt profile.
 
     A profile adjusts the assembled system prompt at the segment level, so
     caching, rules and memory injection are preserved.
@@ -50,8 +50,8 @@ class RuntimeProfileProtocol(Protocol):
 
 
 @dataclass
-class RuntimeProfile:
-    """Data-driven runtime profile.
+class PromptProfile:
+    """Data-driven prompt profile.
 
     Attributes:
         name: Profile identifier (e.g. ``"default"`` or a custom name).
@@ -69,20 +69,20 @@ class RuntimeProfile:
         return not self.system_prompt_prefix and not self.system_prompt_suffix
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RuntimeProfile":
+    def from_dict(cls, data: Dict[str, Any]) -> "PromptProfile":
         """Build a profile from a config dict, validating keys.
 
-        Unlike ``RuntimeProfile(**data)``, this raises a clear ``ValueError``
+        Unlike ``PromptProfile(**data)``, this raises a clear ``ValueError``
         listing unknown keys so an explicitly-configured profile with a typo is
         surfaced to the caller instead of being silently dropped.
         """
         if not isinstance(data, dict):
-            raise TypeError("runtime_profile dict must be a mapping")
+            raise TypeError("prompt_profile dict must be a mapping")
         allowed = {f.name for f in fields(cls)}
         unknown = set(data) - allowed
         if unknown:
             raise ValueError(
-                "Unknown runtime_profile key(s): "
+                "Unknown prompt_profile key(s): "
                 f"{sorted(unknown)}; allowed keys are {sorted(allowed)}"
             )
         return cls(**data)
@@ -103,29 +103,29 @@ class RuntimeProfile:
         return result
 
 
-class RuntimeProfileRegistry:
-    """Thread-safe registry of runtime profiles keyed by name."""
+class PromptProfileRegistry:
+    """Thread-safe registry of prompt profiles keyed by name."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._profiles: Dict[str, RuntimeProfile] = {
-            DEFAULT_PROFILE_NAME: RuntimeProfile(name=DEFAULT_PROFILE_NAME),
+        self._profiles: Dict[str, PromptProfile] = {
+            DEFAULT_PROFILE_NAME: PromptProfile(name=DEFAULT_PROFILE_NAME),
         }
 
-    def register(self, name: str, profile: RuntimeProfile, override: bool = True) -> None:
+    def register(self, name: str, profile: PromptProfile, override: bool = True) -> None:
         """Register (or replace) a profile.
 
         Args:
             name: Profile identifier.
-            profile: The ``RuntimeProfile`` to register.
+            profile: The ``PromptProfile`` to register.
             override: When False, raise if ``name`` already exists.
 
         The reserved ``default`` profile can never be replaced by a
         prompt-altering profile: unconfigured agents resolve it, so allowing an
         override would change prompts for callers who never opted in.
         """
-        if not isinstance(profile, RuntimeProfile):
-            raise TypeError("profile must be a RuntimeProfile instance")
+        if not isinstance(profile, PromptProfile):
+            raise TypeError("profile must be a PromptProfile instance")
         if name == DEFAULT_PROFILE_NAME and not profile.is_prompt_neutral:
             raise ValueError(
                 "The reserved 'default' profile must stay prompt-neutral "
@@ -138,7 +138,7 @@ class RuntimeProfileRegistry:
                 raise ValueError(f"Profile '{name}' is already registered")
             self._profiles[name] = profile
 
-    def resolve(self, name: Optional[str] = None, require: bool = False) -> RuntimeProfile:
+    def resolve(self, name: Optional[str] = None, require: bool = False) -> PromptProfile:
         """Resolve a profile by name.
 
         Falls back to the behaviour-neutral ``default`` profile when no match is
@@ -154,7 +154,7 @@ class RuntimeProfileRegistry:
                     return profile
                 if require:
                     raise KeyError(
-                        f"Runtime profile '{name}' is not registered; "
+                        f"Prompt profile '{name}' is not registered; "
                         f"available profiles: {sorted(self._profiles)}"
                     )
             return self._profiles[DEFAULT_PROFILE_NAME]
@@ -168,20 +168,20 @@ class RuntimeProfileRegistry:
         """Reset to just the built-in ``default`` profile (primarily for tests)."""
         with self._lock:
             self._profiles = {
-                DEFAULT_PROFILE_NAME: RuntimeProfile(name=DEFAULT_PROFILE_NAME),
+                DEFAULT_PROFILE_NAME: PromptProfile(name=DEFAULT_PROFILE_NAME),
             }
 
 
-_global_registry = RuntimeProfileRegistry()
+_global_registry = PromptProfileRegistry()
 
 
-def register_profile(name: str, profile: RuntimeProfile, override: bool = True) -> None:
-    """Register a runtime profile with the global registry."""
+def register_profile(name: str, profile: PromptProfile, override: bool = True) -> None:
+    """Register a prompt profile with the global registry."""
     _global_registry.register(name, profile, override=override)
 
 
-def resolve_profile(name: Optional[str] = None, require: bool = False) -> RuntimeProfile:
-    """Resolve a runtime profile by name from the global registry.
+def resolve_profile(name: Optional[str] = None, require: bool = False) -> PromptProfile:
+    """Resolve a prompt profile by name from the global registry.
 
     With no matching profile this returns the ``default`` profile, whose
     ``apply_system_prompt`` is a pure no-op. Pass ``require=True`` to raise a
@@ -192,15 +192,15 @@ def resolve_profile(name: Optional[str] = None, require: bool = False) -> Runtim
 
 
 def list_profiles() -> List[str]:
-    """List all registered runtime profile names."""
+    """List all registered prompt profile names."""
     return _global_registry.list_profiles()
 
 
 def _discover_entry_point_profiles() -> None:
     """Discover third-party profiles via the entry-point group.
 
-    Entry points in group ``praisonaiagents.runtime_profiles`` should load to a
-    ``RuntimeProfile`` instance or a zero-arg factory returning one. Discovery
+    Entry points in group ``praisonaiagents.prompt_profiles`` should load to a
+    ``PromptProfile`` instance or a zero-arg factory returning one. Discovery
     is best-effort; individual plugin failures are logged at debug level and
     skipped so a broken plugin never breaks agent construction.
     """
@@ -208,9 +208,9 @@ def _discover_entry_point_profiles() -> None:
     try:
         from importlib.metadata import entry_points
 
-        eps = entry_points(group="praisonaiagents.runtime_profiles")
+        eps = entry_points(group="praisonaiagents.prompt_profiles")
     except Exception as e:  # entry_points unavailable or errored
-        logging.debug("Runtime profile entry-point discovery skipped: %s", e)
+        logging.debug("Prompt profile entry-point discovery skipped: %s", e)
         return
 
     for ep in eps:
@@ -221,11 +221,11 @@ def _discover_entry_point_profiles() -> None:
             if ep.name == DEFAULT_PROFILE_NAME:
                 continue
             obj = ep.load()
-            profile = obj() if callable(obj) and not isinstance(obj, RuntimeProfile) else obj
-            if isinstance(profile, RuntimeProfile):
+            profile = obj() if callable(obj) and not isinstance(obj, PromptProfile) else obj
+            if isinstance(profile, PromptProfile):
                 _global_registry.register(ep.name, profile)
         except Exception as e:
-            logging.debug("Runtime profile plugin '%s' failed to load: %s", ep.name, e)
+            logging.debug("Prompt profile plugin '%s' failed to load: %s", ep.name, e)
             continue
 
 

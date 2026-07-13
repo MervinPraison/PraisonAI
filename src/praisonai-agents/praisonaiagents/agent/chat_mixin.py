@@ -107,10 +107,10 @@ class ChatMixin:
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
                 # The base prompt is cached BEFORE the profile override; apply
-                # the (opt-in) runtime profile here too so a configured profile
+                # the (opt-in) prompt profile here too so a configured profile
                 # affects every turn, not just the first (cache-miss) one. This
                 # is a no-op when no profile is configured.
-                profile = self._resolve_runtime_profile()
+                profile = self._resolve_prompt_profile()
                 if profile is not None:
                     return profile.apply_system_prompt(cached_prompt)
                 return cached_prompt
@@ -285,40 +285,40 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
-        # Apply the opt-in runtime profile override. When no profile is
-        # configured, _resolve_runtime_profile returns None and the generated
+        # Apply the opt-in prompt profile override. When no profile is
+        # configured, _resolve_prompt_profile returns None and the generated
         # prompt is byte-for-byte identical to before.
-        profile = self._resolve_runtime_profile()
+        profile = self._resolve_prompt_profile()
         if profile is not None:
             system_prompt = profile.apply_system_prompt(system_prompt)
 
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
-    def _resolve_runtime_profile(self):
-        """Resolve the opt-in runtime profile for this agent.
+    def _resolve_prompt_profile(self):
+        """Resolve the opt-in prompt profile for this agent.
 
-        Honours an explicit ``runtime_profile`` set on the agent
-        (str/dict/RuntimeProfile). Returns None when nothing is configured
+        Honours an explicit ``prompt_profile`` set on the agent
+        (str/dict/PromptProfile). Returns None when nothing is configured
         (``None``/``False``), keeping the generated prompt identical to today.
         Misconfiguration (unknown dict key or unregistered name) fails loudly so
         a user's typo isn't silently dropped.
         """
-        from ..runtime.profiles import RuntimeProfile, resolve_profile
+        from ..runtime.prompt_profiles import PromptProfile, resolve_profile
 
-        configured = getattr(self, "runtime_profile", None)
+        configured = getattr(self, "prompt_profile", None)
         if not configured:
             return None
-        if isinstance(configured, RuntimeProfile):
+        if isinstance(configured, PromptProfile):
             return configured
         if isinstance(configured, dict):
-            return RuntimeProfile.from_dict(configured)
+            return PromptProfile.from_dict(configured)
         if isinstance(configured, str):
             # Explicit name: require a match so a typo raises loudly instead of
             # silently resolving the behaviour-neutral default profile.
             return resolve_profile(name=configured, require=True)
         raise TypeError(
-            "runtime_profile must be a str, dict, or RuntimeProfile; "
+            "prompt_profile must be a str, dict, or PromptProfile; "
             f"got {type(configured).__name__}"
         )
 

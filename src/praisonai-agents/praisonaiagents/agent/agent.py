@@ -534,7 +534,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
         retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
-        runtime_profile: Optional[Union[bool, str, Dict[str, Any], Any]] = None,  # Opt-in runtime profile (system-prompt prefix/suffix tuning; name/dict/RuntimeProfile)
+        prompt_profile: Optional[Union[bool, str, Dict[str, Any], Any]] = None,  # Opt-in prompt profile (system-prompt prefix/suffix tuning; name/dict/PromptProfile)
     ):
         """Initialize an Agent instance.
 
@@ -1541,8 +1541,8 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
-        # Opt-in runtime profile (system-prompt tuning). None/False => no-op.
-        self.runtime_profile = runtime_profile
+        # Opt-in prompt profile (system-prompt tuning). None/False => no-op.
+        self.prompt_profile = prompt_profile
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         self._llm_instance = None
@@ -2320,8 +2320,8 @@ Your Goal: {self.goal}
             # Sandbox config
             'sandbox': getattr(self, '_sandbox_config', None),
 
-            # Model-aware runtime profile (preserve across channel clones)
-            'runtime_profile': getattr(self, 'runtime_profile', None),
+            # Opt-in prompt profile (preserve across channel clones)
+            'prompt_profile': getattr(self, 'prompt_profile', None),
         }
         
         # Handle deprecated parameters for backward compatibility
