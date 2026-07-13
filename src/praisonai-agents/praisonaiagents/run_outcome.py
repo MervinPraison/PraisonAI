@@ -9,6 +9,7 @@ values that enable exhaustive error handling and structured metadata.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal, Optional, Dict, Any
 
 
@@ -20,6 +21,57 @@ RunStatus = Literal[
     "cancelled",      # Execution was cancelled (external signal)
     "invalid_output"  # Output validation failed (may be retryable)
 ]
+
+
+class TerminationReason(str, Enum):
+    """Typed terminal reasons for an autonomous run.
+
+    String *values* are identical to the free strings historically emitted by
+    ``run_autonomous``/``AutonomyResult.completion_reason`` so existing callers
+    that string-match keep working (``TerminationReason.GOAL_MET == "goal"``).
+
+    Subclassing ``str`` keeps equality/serialisation backward compatible; the
+    new ``BUDGET_EXHAUSTED`` value is the spend kill-switch terminal state.
+    """
+    GOAL_MET = "goal"
+    TOOL_COMPLETION = "tool_completion"
+    PROMISE = "promise"
+    NO_TOOL_CALLS = "no_tool_calls"
+    MAX_ITERATIONS = "max_iterations"
+    TIMEOUT = "timeout"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    DOOM_LOOP = "doom_loop"
+    NEEDS_HELP = "needs_help"
+    INTERRUPTED = "interrupted"
+    CANCELLED = "cancelled"
+    ERROR = "error"
+
+
+# Map a TerminationReason to the closed AgentRunOutcome RunStatus vocabulary so
+# autonomous runs and task validation share one terminal terminology.
+_TERMINATION_TO_RUN_STATUS: Dict[str, RunStatus] = {
+    TerminationReason.GOAL_MET.value: "success",
+    TerminationReason.TOOL_COMPLETION.value: "success",
+    TerminationReason.PROMISE.value: "success",
+    TerminationReason.NO_TOOL_CALLS.value: "success",
+    TerminationReason.MAX_ITERATIONS.value: "failure",
+    TerminationReason.TIMEOUT.value: "timeout",
+    TerminationReason.BUDGET_EXHAUSTED.value: "failure",
+    TerminationReason.DOOM_LOOP.value: "failure",
+    TerminationReason.NEEDS_HELP.value: "failure",
+    TerminationReason.INTERRUPTED.value: "cancelled",
+    TerminationReason.CANCELLED.value: "cancelled",
+    TerminationReason.ERROR.value: "failure",
+}
+
+
+def termination_to_run_status(reason: Any) -> RunStatus:
+    """Map a ``TerminationReason`` (or its string value) to a ``RunStatus``.
+
+    Unknown reasons fall back to ``"failure"``.
+    """
+    key = reason.value if isinstance(reason, TerminationReason) else str(reason)
+    return _TERMINATION_TO_RUN_STATUS.get(key, "failure")
 
 
 @dataclass
@@ -265,4 +317,10 @@ def validate_decision_string(decision_str: str) -> RunStatus:
 
 
 # Backward compatibility export
-__all__ = ["AgentRunOutcome", "RunStatus", "validate_decision_string"]
+__all__ = [
+    "AgentRunOutcome",
+    "RunStatus",
+    "TerminationReason",
+    "termination_to_run_status",
+    "validate_decision_string",
+]

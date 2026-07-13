@@ -150,6 +150,8 @@ _LAZY_IMPORTS = {
     # Run outcomes - typed validation and agent execution results
     'AgentRunOutcome': ('praisonaiagents.run_outcome', 'AgentRunOutcome'),
     'RunStatus': ('praisonaiagents.run_outcome', 'RunStatus'),
+    'TerminationReason': ('praisonaiagents.run_outcome', 'TerminationReason'),
+    'termination_to_run_status': ('praisonaiagents.run_outcome', 'termination_to_run_status'),
     'validate_decision_string': ('praisonaiagents.run_outcome', 'validate_decision_string'),
     
     # Main display utilities (imports rich)
