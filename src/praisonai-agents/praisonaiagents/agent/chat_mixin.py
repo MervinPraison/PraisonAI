@@ -109,7 +109,7 @@ class ChatMixin:
                 # The base prompt is cached BEFORE the profile override; apply
                 # the (opt-in) runtime profile here too so a configured profile
                 # affects every turn, not just the first (cache-miss) one. This
-                # is a no-op for the default/family profiles.
+                # is a no-op when no profile is configured.
                 profile = self._resolve_runtime_profile()
                 if profile is not None:
                     return profile.apply_system_prompt(cached_prompt)
@@ -285,59 +285,42 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
-        # Apply model-aware runtime profile overrides (opt-in). When no profile
-        # is configured for the active model family, the resolved profile is the
-        # behaviour-neutral "default" whose apply_system_prompt is a no-op, so
-        # the generated prompt is byte-for-byte identical to before.
-        # An explicitly-configured profile (str/dict/RuntimeProfile) must fail
-        # loudly on misconfiguration; only the implicit family-resolution path is
-        # best-effort and swallowed so the run loop is never affected.
+        # Apply the opt-in runtime profile override. When no profile is
+        # configured, _resolve_runtime_profile returns None and the generated
+        # prompt is byte-for-byte identical to before.
         profile = self._resolve_runtime_profile()
         if profile is not None:
-            # apply_system_prompt is a pure no-op unless the profile declares
-            # prompt overrides, so the default/family profiles leave the
-            # generated prompt byte-for-byte identical.
             system_prompt = profile.apply_system_prompt(system_prompt)
 
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
     def _resolve_runtime_profile(self):
-        """Resolve the model-aware runtime profile for this agent.
+        """Resolve the opt-in runtime profile for this agent.
 
-        Honours an explicit ``runtime_profile`` set on the agent (bool/str/dict/
-        RuntimeProfile); otherwise resolves by model family. Returns the
-        behaviour-neutral ``default`` profile when nothing matches or the feature
-        is disabled, keeping output identical to today.
+        Honours an explicit ``runtime_profile`` set on the agent
+        (str/dict/RuntimeProfile). Returns None when nothing is configured
+        (``None``/``False``), keeping the generated prompt identical to today.
+        Misconfiguration (unknown dict key or unregistered name) fails loudly so
+        a user's typo isn't silently dropped.
         """
         from ..runtime.profiles import RuntimeProfile, resolve_profile
 
         configured = getattr(self, "runtime_profile", None)
-
-        # Explicit configuration: validate eagerly and let errors surface so a
-        # user's typo isn't silently dropped.
-        if configured is False:
+        if not configured:
             return None
         if isinstance(configured, RuntimeProfile):
             return configured
         if isinstance(configured, dict):
             return RuntimeProfile.from_dict(configured)
-
-        model = self.llm if isinstance(self.llm, str) else str(self.llm) if self.llm else None
         if isinstance(configured, str):
             # Explicit name: require a match so a typo raises loudly instead of
             # silently resolving the behaviour-neutral default profile.
-            return resolve_profile(model=model, name=configured, require=True)
-
-        # Implicit path (no explicit config): resolve by model family. This must
-        # never break prompt construction, so swallow any unexpected error and
-        # fall back to today's behaviour.
-        try:
-            return resolve_profile(model=model)
-        except Exception as e:
-            import logging
-            logging.debug(f"Runtime profile resolution failed: {e}", exc_info=True)
-            return None
+            return resolve_profile(name=configured, require=True)
+        raise TypeError(
+            "runtime_profile must be a str, dict, or RuntimeProfile; "
+            f"got {type(configured).__name__}"
+        )
 
     def _build_response_format(self, schema_model):
         """Build response_format dict for native structured output.

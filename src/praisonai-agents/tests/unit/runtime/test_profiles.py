@@ -1,4 +1,4 @@
-"""Tests for model-aware runtime profiles."""
+"""Tests for opt-in runtime profiles."""
 
 import pytest
 
@@ -6,7 +6,6 @@ from praisonaiagents.runtime.profiles import (
     RuntimeProfile,
     RuntimeProfileProtocol,
     RuntimeProfileRegistry,
-    resolve_model_family,
     resolve_profile,
     register_profile,
     list_profiles,
@@ -27,47 +26,15 @@ def _reset_global_registry():
     _global_registry.clear()
 
 
-class TestResolveModelFamily:
-    def test_none_and_empty(self):
-        assert resolve_model_family(None) == DEFAULT_PROFILE_NAME
-        assert resolve_model_family("") == DEFAULT_PROFILE_NAME
-
-    def test_anthropic(self):
-        assert resolve_model_family("claude-3-5-sonnet") == "anthropic"
-        assert resolve_model_family("anthropic/claude-3-opus") == "anthropic"
-
-    def test_gemini(self):
-        assert resolve_model_family("gemini-1.5-pro") == "gemini"
-        assert resolve_model_family("google/gemini-2.0-flash") == "gemini"
-
-    def test_openai(self):
-        assert resolve_model_family("gpt-4o") == "openai"
-        assert resolve_model_family("openai/gpt-4o-mini") == "openai"
-        assert resolve_model_family("o1-preview") == "openai"
-        assert resolve_model_family("o3-mini") == "openai"
-
-    def test_unknown_defaults(self):
-        assert resolve_model_family("some-random-model") == DEFAULT_PROFILE_NAME
-
-
 class TestRuntimeProfile:
-    def test_default_is_default(self):
+    def test_default_is_prompt_neutral(self):
         p = RuntimeProfile()
-        assert p.is_default is True
+        assert p.is_prompt_neutral is True
         assert p.name == DEFAULT_PROFILE_NAME
 
     def test_default_apply_is_noop(self):
         p = RuntimeProfile()
         prompt = "You are a helpful assistant."
-        assert p.apply_system_prompt(prompt) == prompt
-
-    def test_family_profile_without_text_is_prompt_neutral(self):
-        # Built-in family profiles carry only preferred_edit_format, no prompt
-        # text -> prompt-neutral -> byte-for-byte identical prompt output.
-        p = RuntimeProfile(name="anthropic", preferred_edit_format="string-replace")
-        assert p.is_prompt_neutral is True
-        assert p.is_default is False  # carries an edit format
-        prompt = "hello"
         assert p.apply_system_prompt(prompt) == prompt
 
     def test_prefix_and_suffix_applied(self):
@@ -76,9 +43,17 @@ class TestRuntimeProfile:
             system_prompt_prefix="PREFIX",
             system_prompt_suffix="SUFFIX",
         )
-        assert p.is_default is False
+        assert p.is_prompt_neutral is False
         result = p.apply_system_prompt("BODY")
         assert result == "PREFIX\n\nBODY\n\nSUFFIX"
+
+    def test_prefix_only(self):
+        p = RuntimeProfile(system_prompt_prefix="PREFIX")
+        assert p.apply_system_prompt("BODY") == "PREFIX\n\nBODY"
+
+    def test_suffix_only(self):
+        p = RuntimeProfile(system_prompt_suffix="SUFFIX")
+        assert p.apply_system_prompt("BODY") == "BODY\n\nSUFFIX"
 
     def test_apply_handles_none(self):
         p = RuntimeProfile(system_prompt_prefix="X")
@@ -97,28 +72,24 @@ class TestRuntimeProfile:
         with pytest.raises(ValueError):
             RuntimeProfile.from_dict({"systemPromptPrefix": "typo"})
 
+    def test_from_dict_rejects_non_mapping(self):
+        with pytest.raises(TypeError):
+            RuntimeProfile.from_dict("not-a-dict")
+
 
 class TestResolveProfile:
-    def test_resolve_by_model(self):
-        assert resolve_profile(model="claude-3-5-sonnet").name == "anthropic"
-        assert resolve_profile(model="gpt-4o").name == "openai"
-        assert resolve_profile(model="gemini-1.5-pro").name == "gemini"
-
     def test_resolve_unknown_falls_back_default(self):
-        assert resolve_profile(model="unknown-model").name == DEFAULT_PROFILE_NAME
+        assert resolve_profile(name="unknown").name == DEFAULT_PROFILE_NAME
+
+    def test_resolve_none_returns_default(self):
+        assert resolve_profile().name == DEFAULT_PROFILE_NAME
 
     def test_resolve_by_explicit_name(self):
-        assert resolve_profile(name="anthropic").name == "anthropic"
+        register_profile("myfam", RuntimeProfile(name="myfam", system_prompt_prefix="P"))
+        assert resolve_profile(name="myfam").name == "myfam"
 
-    def test_builtin_family_profiles_preferred_edit_format(self):
-        assert resolve_profile(model="claude-3-opus").preferred_edit_format == "string-replace"
-        assert resolve_profile(model="gpt-4o").preferred_edit_format == "patch"
-        assert resolve_profile(model="gemini-2.0-flash").preferred_edit_format == "whole-file"
-
-    def test_list_profiles_contains_builtins(self):
-        names = list_profiles()
-        for expected in ("default", "anthropic", "openai", "gemini"):
-            assert expected in names
+    def test_list_profiles_contains_default(self):
+        assert DEFAULT_PROFILE_NAME in list_profiles()
 
 
 class TestRegistry:
@@ -158,12 +129,8 @@ class TestRegistry:
 
     def test_default_neutral_reregister_allowed(self):
         reg = RuntimeProfileRegistry()
-        # A prompt-neutral default (e.g. carrying only an edit format) is fine.
-        reg.register(
-            DEFAULT_PROFILE_NAME,
-            RuntimeProfile(name=DEFAULT_PROFILE_NAME, preferred_edit_format="patch"),
-        )
-        assert reg.resolve(name=DEFAULT_PROFILE_NAME).preferred_edit_format == "patch"
+        reg.register(DEFAULT_PROFILE_NAME, RuntimeProfile(name=DEFAULT_PROFILE_NAME))
+        assert reg.resolve(name=DEFAULT_PROFILE_NAME).is_prompt_neutral is True
 
     def test_global_default_cannot_be_overridden_with_prompt(self):
         with pytest.raises(ValueError):
@@ -186,11 +153,17 @@ class TestRegistry:
         with pytest.raises(KeyError):
             resolve_profile(name="totally-unknown", require=True)
 
+    def test_clear_resets_to_default_only(self):
+        reg = RuntimeProfileRegistry()
+        reg.register("extra", RuntimeProfile(name="extra", system_prompt_prefix="P"))
+        reg.clear()
+        assert reg.list_profiles() == [DEFAULT_PROFILE_NAME]
+
 
 class TestBackwardCompatibility:
     def test_default_profile_produces_identical_prompt(self):
         # With the default profile active, apply is a pure no-op.
         prompt = "Backstory\n\nYour Role: X\n\nYour Goal: Y"
-        p = resolve_profile(model=None)
+        p = resolve_profile()
         assert p.name == DEFAULT_PROFILE_NAME
         assert p.apply_system_prompt(prompt) == prompt

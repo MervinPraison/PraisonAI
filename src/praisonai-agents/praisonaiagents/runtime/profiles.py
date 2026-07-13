@@ -1,22 +1,21 @@
-"""Model-aware runtime profiles for PraisonAI Agents.
+"""Opt-in runtime profiles for PraisonAI Agents.
 
-This module provides an opt-in, protocol-driven registry that maps a model
-family (resolved from a model id/provider) to a ``RuntimeProfile``: optional
-system-prompt segment overrides and a preferred edit-tool format, plus room for
-family-specific knobs.
+A ``RuntimeProfile`` lets a caller adjust the assembled system prompt
+(segment-level, so caching, rules and memory injection are preserved) without
+subclassing the Agent. It is fully opt-in: with no profile configured the
+generated prompt is byte-for-byte unchanged.
 
 Design follows AGENTS.md and mirrors ``runtime/registry.py``:
-- Core protocol only (no heavy implementations at module level)
+- Core protocol only (no heavy implementations)
 - Thread-safe registration with a global registry
-- Built-in, data-driven default profiles (tuning needs no code changes)
 - Entry-point discovery for third-party profiles
   (``praisonaiagents.runtime_profiles``)
-- Backward compatible: the ``default`` profile is a pure no-op, so with no
-  profile configured the generated prompt and advertised tools are unchanged.
+- The reserved ``default`` profile is a pure no-op and can never be replaced by
+  a prompt-altering profile, so unconfigured agents stay backward compatible.
 """
 
 import threading
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 __all__ = [
@@ -26,7 +25,6 @@ __all__ = [
     "register_profile",
     "resolve_profile",
     "list_profiles",
-    "resolve_model_family",
 ]
 
 DEFAULT_PROFILE_NAME = "default"
@@ -34,15 +32,13 @@ DEFAULT_PROFILE_NAME = "default"
 
 @runtime_checkable
 class RuntimeProfileProtocol(Protocol):
-    """Protocol for a model-aware runtime profile.
+    """Protocol for an opt-in runtime profile.
 
-    A profile can adjust the assembled system prompt (segment-level, so caching,
-    rules and memory injection are preserved) and declare a preferred edit-tool
-    format used when materialising built-in coding tools.
+    A profile adjusts the assembled system prompt at the segment level, so
+    caching, rules and memory injection are preserved.
     """
 
     name: str
-    preferred_edit_format: Optional[str]
 
     def apply_system_prompt(self, system_prompt: str) -> str:
         """Return the (possibly) adjusted system prompt.
@@ -55,36 +51,22 @@ class RuntimeProfileProtocol(Protocol):
 
 @dataclass
 class RuntimeProfile:
-    """Data-driven runtime profile for a model family.
+    """Data-driven runtime profile.
 
     Attributes:
-        name: Profile / family identifier (e.g. ``"anthropic"``, ``"default"``).
+        name: Profile identifier (e.g. ``"default"`` or a custom name).
         system_prompt_prefix: Optional text prepended to the assembled prompt.
         system_prompt_suffix: Optional text appended to the assembled prompt.
-        preferred_edit_format: Preferred built-in edit-tool format, e.g.
-            ``"patch"`` (apply_patch), ``"string-replace"`` (edit_file), or
-            ``"whole-file"`` (write_file). ``None`` keeps today's defaults.
-        extras: Free-form family-specific knobs for future tuning.
     """
 
     name: str = DEFAULT_PROFILE_NAME
     system_prompt_prefix: Optional[str] = None
     system_prompt_suffix: Optional[str] = None
-    preferred_edit_format: Optional[str] = None
-    extras: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_prompt_neutral(self) -> bool:
         """True when the profile does not alter the assembled system prompt."""
         return not self.system_prompt_prefix and not self.system_prompt_suffix
-
-    @property
-    def is_default(self) -> bool:
-        """True when this profile does not change any behaviour at all.
-
-        (No prompt overrides and no preferred edit-tool format.)
-        """
-        return self.is_prompt_neutral and self.preferred_edit_format is None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RuntimeProfile":
@@ -108,12 +90,10 @@ class RuntimeProfile:
     def apply_system_prompt(self, system_prompt: str) -> str:
         """Apply prefix/suffix overrides to an already-assembled prompt.
 
-        The ``default`` profile (and any profile with no overrides) returns the
-        input unchanged, guaranteeing byte-for-byte identical output to today.
+        A prompt-neutral profile (including ``default``) returns the input
+        unchanged, guaranteeing byte-for-byte identical output to today.
         """
-        if system_prompt is None:
-            return system_prompt
-        if self.is_prompt_neutral:
+        if system_prompt is None or self.is_prompt_neutral:
             return system_prompt
         result = system_prompt
         if self.system_prompt_prefix:
@@ -123,83 +103,26 @@ class RuntimeProfile:
         return result
 
 
-def _get_builtin_profiles() -> Dict[str, RuntimeProfile]:
-    """Built-in, data-driven profiles.
-
-    Only the ``default`` profile is behaviour-neutral. Family profiles are
-    opt-in (resolved only when the caller passes a matching model) and carry a
-    preferred edit format without changing prompt text unless configured.
-    """
-    return {
-        DEFAULT_PROFILE_NAME: RuntimeProfile(name=DEFAULT_PROFILE_NAME),
-        "anthropic": RuntimeProfile(
-            name="anthropic",
-            preferred_edit_format="string-replace",
-        ),
-        "openai": RuntimeProfile(
-            name="openai",
-            preferred_edit_format="patch",
-        ),
-        "gemini": RuntimeProfile(
-            name="gemini",
-            preferred_edit_format="whole-file",
-        ),
-    }
-
-
-def resolve_model_family(model: Optional[str]) -> str:
-    """Resolve a coarse model family from a model id/provider string.
-
-    Mirrors the narrow branching in ``llm/llm.py`` (Anthropic / Gemini / OpenAI)
-    without importing it, so this module stays lightweight and core.
-    Unknown models resolve to ``"default"``.
-    """
-    if not model or not isinstance(model, str):
-        return DEFAULT_PROFILE_NAME
-
-    m = model.lower()
-    provider = m.split("/", 1)[0] if "/" in m else ""
-
-    if provider == "anthropic" or "claude" in m:
-        return "anthropic"
-    if provider in {"gemini", "google"} or m.startswith("gemini"):
-        return "gemini"
-    if provider == "openai" or m.startswith("gpt") or m.startswith("o1") or m.startswith("o3"):
-        return "openai"
-    return DEFAULT_PROFILE_NAME
-
-
 class RuntimeProfileRegistry:
-    """Thread-safe registry of runtime profiles keyed by family/name."""
+    """Thread-safe registry of runtime profiles keyed by name."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._profiles: Dict[str, RuntimeProfile] = {}
-        self._builtin_initialized = False
-
-    def _ensure_builtin(self) -> None:
-        if self._builtin_initialized:
-            return
-        with self._lock:
-            if self._builtin_initialized:
-                return
-            for name, profile in _get_builtin_profiles().items():
-                self._profiles.setdefault(name, profile)
-            self._builtin_initialized = True
+        self._profiles: Dict[str, RuntimeProfile] = {
+            DEFAULT_PROFILE_NAME: RuntimeProfile(name=DEFAULT_PROFILE_NAME),
+        }
 
     def register(self, name: str, profile: RuntimeProfile, override: bool = True) -> None:
         """Register (or replace) a profile.
 
         Args:
-            name: Family/profile identifier.
+            name: Profile identifier.
             profile: The ``RuntimeProfile`` to register.
             override: When False, raise if ``name`` already exists.
 
         The reserved ``default`` profile can never be replaced by a
-        prompt-altering profile: unconfigured agents resolve it for unknown
-        model families, so allowing an override would change prompts for
-        callers who never opted in. A ``default`` that stays behaviour-neutral
-        (no prompt overrides) is still accepted for idempotent re-registration.
+        prompt-altering profile: unconfigured agents resolve it, so allowing an
+        override would change prompts for callers who never opted in.
         """
         if not isinstance(profile, RuntimeProfile):
             raise TypeError("profile must be a RuntimeProfile instance")
@@ -210,53 +133,43 @@ class RuntimeProfileRegistry:
                 "that never opted in, so overriding its prompt would break "
                 "backward compatibility."
             )
-        self._ensure_builtin()
         with self._lock:
             if not override and name in self._profiles:
                 raise ValueError(f"Profile '{name}' is already registered")
             self._profiles[name] = profile
 
-    def resolve(
-        self,
-        model: Optional[str] = None,
-        name: Optional[str] = None,
-        require: bool = False,
-    ) -> RuntimeProfile:
-        """Resolve a profile by explicit ``name`` or by ``model`` family.
+    def resolve(self, name: Optional[str] = None, require: bool = False) -> RuntimeProfile:
+        """Resolve a profile by name.
 
         Falls back to the behaviour-neutral ``default`` profile when no match is
-        found, guaranteeing backward compatibility for implicit model-family
-        resolution.
-
-        When ``require`` is True and an explicit ``name`` does not match a
-        registered profile, a ``KeyError`` is raised instead of silently
-        falling back to ``default`` — so an explicitly-configured profile name
-        with a typo surfaces to the caller rather than being dropped.
+        found. When ``require`` is True and ``name`` does not match a registered
+        profile, a ``KeyError`` is raised instead — so an explicitly-configured
+        profile name with a typo surfaces to the caller rather than being
+        silently dropped.
         """
-        self._ensure_builtin()
-        key = name or resolve_model_family(model)
         with self._lock:
-            profile = self._profiles.get(key)
-            if profile is not None:
-                return profile
-            if require and name:
-                raise KeyError(
-                    f"Runtime profile '{name}' is not registered; "
-                    f"available profiles: {sorted(self._profiles)}"
-                )
+            if name:
+                profile = self._profiles.get(name)
+                if profile is not None:
+                    return profile
+                if require:
+                    raise KeyError(
+                        f"Runtime profile '{name}' is not registered; "
+                        f"available profiles: {sorted(self._profiles)}"
+                    )
             return self._profiles[DEFAULT_PROFILE_NAME]
 
     def list_profiles(self) -> List[str]:
         """List all registered profile names."""
-        self._ensure_builtin()
         with self._lock:
             return sorted(self._profiles.keys())
 
     def clear(self) -> None:
-        """Clear all profiles (primarily for tests)."""
+        """Reset to just the built-in ``default`` profile (primarily for tests)."""
         with self._lock:
-            self._profiles.clear()
-            self._builtin_initialized = False
+            self._profiles = {
+                DEFAULT_PROFILE_NAME: RuntimeProfile(name=DEFAULT_PROFILE_NAME),
+            }
 
 
 _global_registry = RuntimeProfileRegistry()
@@ -267,19 +180,15 @@ def register_profile(name: str, profile: RuntimeProfile, override: bool = True) 
     _global_registry.register(name, profile, override=override)
 
 
-def resolve_profile(
-    model: Optional[str] = None,
-    name: Optional[str] = None,
-    require: bool = False,
-) -> RuntimeProfile:
-    """Resolve a runtime profile by model family (or explicit name).
+def resolve_profile(name: Optional[str] = None, require: bool = False) -> RuntimeProfile:
+    """Resolve a runtime profile by name from the global registry.
 
     With no matching profile this returns the ``default`` profile, whose
     ``apply_system_prompt`` is a pure no-op. Pass ``require=True`` to raise a
-    ``KeyError`` when an explicit ``name`` is not registered (used for
-    explicitly-configured profiles so typos fail loudly).
+    ``KeyError`` when ``name`` is not registered (used for explicitly-configured
+    profiles so typos fail loudly).
     """
-    return _global_registry.resolve(model=model, name=name, require=require)
+    return _global_registry.resolve(name=name, require=require)
 
 
 def list_profiles() -> List[str]:
@@ -291,30 +200,33 @@ def _discover_entry_point_profiles() -> None:
     """Discover third-party profiles via the entry-point group.
 
     Entry points in group ``praisonaiagents.runtime_profiles`` should load to a
-    ``RuntimeProfile`` instance or a zero-arg factory returning one.
+    ``RuntimeProfile`` instance or a zero-arg factory returning one. Discovery
+    is best-effort; individual plugin failures are logged at debug level and
+    skipped so a broken plugin never breaks agent construction.
     """
+    import logging
     try:
         from importlib.metadata import entry_points
 
         eps = entry_points(group="praisonaiagents.runtime_profiles")
-        for ep in eps:
-            try:
-                # Never let a plugin silently override the behaviour-neutral
-                # ``default`` profile: unconfigured agents resolve it for unknown
-                # model families, so overriding it would change prompts for users
-                # who never opted in. Reserved names are protected.
-                if ep.name == DEFAULT_PROFILE_NAME:
-                    continue
-                obj = ep.load()
-                profile = obj() if callable(obj) and not isinstance(obj, RuntimeProfile) else obj
-                if isinstance(profile, RuntimeProfile):
-                    _global_registry.register(ep.name, profile)
-            except Exception:
-                # Plugins are optional; ignore individual discovery failures.
+    except Exception as e:  # entry_points unavailable or errored
+        logging.debug("Runtime profile entry-point discovery skipped: %s", e)
+        return
+
+    for ep in eps:
+        try:
+            # Never let a plugin silently override the behaviour-neutral
+            # ``default`` profile: unconfigured agents resolve it, so overriding
+            # it would change prompts for users who never opted in.
+            if ep.name == DEFAULT_PROFILE_NAME:
                 continue
-    except Exception:
-        # entry_points unavailable or errored; discovery is best-effort.
-        pass
+            obj = ep.load()
+            profile = obj() if callable(obj) and not isinstance(obj, RuntimeProfile) else obj
+            if isinstance(profile, RuntimeProfile):
+                _global_registry.register(ep.name, profile)
+        except Exception as e:
+            logging.debug("Runtime profile plugin '%s' failed to load: %s", ep.name, e)
+            continue
 
 
 _discover_entry_point_profiles()

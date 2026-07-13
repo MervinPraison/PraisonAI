@@ -534,7 +534,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
         retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
-        runtime_profile: Optional[Union[bool, str, Dict[str, Any], Any]] = None,  # Model-aware runtime profile (system-prompt/edit-format tuning per model family)
+        runtime_profile: Optional[Union[bool, str, Dict[str, Any], Any]] = None,  # Opt-in runtime profile (system-prompt prefix/suffix tuning; name/dict/RuntimeProfile)
     ):
         """Initialize an Agent instance.
 
@@ -1541,8 +1541,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
-        # Model-aware runtime profile (opt-in; None means resolve by model family,
-        # which defaults to behaviour-neutral output unless a profile is registered)
+        # Opt-in runtime profile (system-prompt tuning). None/False => no-op.
         self.runtime_profile = runtime_profile
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False

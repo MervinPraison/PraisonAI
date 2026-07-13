@@ -87,14 +87,13 @@ __all__ = [
     "RunJournal",
     "JournalEvent",
     "RunMeta",
-    # Model-aware runtime profiles
+    # Opt-in runtime profiles (system-prompt tuning)
     "RuntimeProfile",
     "RuntimeProfileProtocol",
     "RuntimeProfileRegistry",
     "register_profile",
     "resolve_profile",
     "list_profiles",
-    "resolve_model_family",
 ]
 
 # Grouped lazy imports for efficient loading
@@ -179,7 +178,6 @@ _LAZY_GROUPS = {
         'register_profile': ('praisonaiagents.runtime.profiles', 'register_profile'),
         'resolve_profile': ('praisonaiagents.runtime.profiles', 'resolve_profile'),
         'list_profiles': ('praisonaiagents.runtime.profiles', 'list_profiles'),
-        'resolve_model_family': ('praisonaiagents.runtime.profiles', 'resolve_model_family'),
     },
 }
 
