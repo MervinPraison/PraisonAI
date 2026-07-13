@@ -1058,3 +1058,42 @@ class TestWorkspaceContainment:
         content, meta = editor.read_file("/etc/passwd")
         assert meta == ""
         assert "Path traversal detected" in content
+
+    def test_boundary_stable_across_chdir(self, tmp_path, monkeypatch):
+        # The fallback base is pinned at construction, so a later os.chdir must
+        # not move the containment boundary of a long-lived instance.
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        secret = outside / "secret.txt"
+        _write(secret, "top secret\n")
+
+        monkeypatch.chdir(workdir)
+        editor = EditTools()  # base pinned to workdir
+
+        # After chdir into the 'outside' dir, a relative read must still resolve
+        # against the pinned base (workdir), not the new cwd - so the secret in
+        # the new cwd is never read (it resolves to a non-existent path inside
+        # the pinned base).
+        monkeypatch.chdir(outside)
+        content, meta = editor.read_file("secret.txt")
+        assert meta == ""
+        assert "top secret" not in content
+
+        # An absolute path into the new cwd is likewise rejected as escaping the
+        # pinned base.
+        content, meta = editor.read_file(str(secret))
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_valid_name_with_double_dots_allowed(self, tmp_path, monkeypatch):
+        # A legitimate in-workspace filename that merely contains '..' must not
+        # be rejected by a naive substring check.
+        monkeypatch.chdir(tmp_path)
+        p = tmp_path / "v1..2.md"
+        _write(p, "notes\n")
+        editor = EditTools()
+        content, meta = editor.read_file(str(p))
+        assert content == "notes\n"
+        assert meta

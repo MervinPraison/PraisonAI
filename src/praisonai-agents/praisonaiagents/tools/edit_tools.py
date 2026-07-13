@@ -89,7 +89,15 @@ class EditTools:
                 built-in defaults.
         """
         self._workspace = workspace
-        self._root = os.path.abspath(os.path.expanduser(root)) if root else None
+        # Pin the fallback base at construction time so a later process-wide
+        # os.chdir() cannot silently move the containment boundary of a
+        # long-lived instance (or the module-level default helpers). An explicit
+        # ``root`` takes precedence; otherwise capture the current working
+        # directory now rather than re-reading it on every call.
+        if root:
+            self._root = os.path.realpath(os.path.expanduser(root))
+        else:
+            self._root = os.path.realpath(os.getcwd())
         self._file_cache = {}  # Cache for staleness checking
         mode = (post_edit_diagnostics or "auto")
         if isinstance(mode, str):
@@ -113,25 +121,26 @@ class EditTools:
         it.  Otherwise the fallback confines resolution to a base directory
         (mirroring ``file_tools.py``) so an absolute path like ``/etc/passwd`` —
         which never contains the literal ``..`` — cannot escape the workspace
-        and read arbitrary host files.  The base defaults to the current working
-        directory and can be overridden via the ``root`` constructor argument.
+        and read arbitrary host files.  The base is pinned at construction time
+        (current working directory by default, overridable via the ``root``
+        constructor argument) so it cannot drift with later ``os.chdir`` calls.
+
+        Containment is enforced purely via ``realpath`` + ``commonpath`` rather
+        than a naive ``..`` substring check, so legitimate in-workspace names
+        that merely contain ``..`` (e.g. ``v1..2.md``) are accepted while any
+        path that actually resolves outside the base is rejected.
         """
         if self._workspace is not None:
             return str(self._workspace.resolve(filepath))
 
-        # Fallback: confine to a base directory rather than merely rejecting the
-        # literal '..' substring, which a plain absolute path never contains.
+        # Fallback: confine to the base directory pinned at construction time.
         filepath = os.path.expanduser(filepath)
-        if '..' in filepath:
-            raise ValueError(f"Path traversal detected: {filepath}")
-
-        base = self._root if self._root is not None else os.path.abspath(os.getcwd())
+        real_base = os.path.realpath(self._root)
         normalized = os.path.normpath(filepath)
         if not os.path.isabs(normalized):
-            normalized = os.path.join(base, normalized)
+            normalized = os.path.join(real_base, normalized)
         absolute = os.path.realpath(normalized)
-        real_base = os.path.realpath(base)
-        if os.path.commonpath([absolute, real_base]) != real_base:
+        if absolute != real_base and os.path.commonpath([absolute, real_base]) != real_base:
             raise ValueError(f"Path traversal detected: {filepath} escapes workspace {real_base}")
         return absolute
     
