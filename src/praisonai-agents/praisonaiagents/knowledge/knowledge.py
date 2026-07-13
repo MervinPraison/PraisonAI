@@ -215,12 +215,18 @@ class Knowledge:
         try:
             adapter = get_knowledge_adapter(adapter_name, config=self.config, verbose=self._verbose)
         except Exception as e:
-            self._log(f"Failed to initialize '{adapter_name}': {e}")
+            logger.warning(
+                f"Knowledge provider '{adapter_name}' failed to initialize ({e}); "
+                f"falling back to a different backend. Retrieval quality may be reduced."
+            )
             adapter = None
         
         if adapter is None:
             # Fallback to first available adapter
-            self._log(f"Provider '{adapter_name}' not available, trying fallbacks")
+            logger.warning(
+                f"Knowledge provider '{adapter_name}' not available; trying fallback backends. "
+                f"Retrieval quality may be reduced."
+            )
             fallback_result = get_first_available_knowledge_adapter(
                 preferences=["sqlite", "mem0"],
                 config=self.config,

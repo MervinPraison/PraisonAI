@@ -178,6 +178,58 @@ class TestProtocolCompliance:
             assert hasattr(Mem0Adapter, method), f"Missing method: {method}"
 
 
+class TestAdapterVerboseKwarg:
+    """Regression tests for issue #2972.
+
+    Adapter constructors must accept the ``verbose`` keyword (and extra kwargs)
+    passed by ``Knowledge.memory`` via the registry. Previously, ``Mem0Adapter``
+    and ``MongoDBKnowledgeAdapter`` raised ``TypeError`` on ``verbose``, which was
+    silently swallowed and degraded configured semantic search to SQLite keyword
+    matching.
+    """
+
+    def test_mem0_adapter_accepts_verbose(self):
+        """Mem0Adapter.__init__ must accept verbose without raising."""
+        from praisonaiagents.knowledge.adapters.mem0_adapter import Mem0Adapter
+
+        adapter = Mem0Adapter(config={}, verbose=5)
+        assert isinstance(adapter, Mem0Adapter)
+
+    def test_mongodb_adapter_signature_accepts_verbose(self):
+        """MongoDBKnowledgeAdapter.__init__ must declare a verbose parameter."""
+        import inspect
+        from praisonaiagents.knowledge.adapters.mongodb_adapter import (
+            MongoDBKnowledgeAdapter,
+        )
+
+        params = inspect.signature(MongoDBKnowledgeAdapter.__init__).parameters
+        assert "verbose" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
+    def test_registry_constructs_mem0_with_verbose(self):
+        """Registry should construct mem0 adapter with verbose, not fall back."""
+        from praisonaiagents.knowledge.adapters import get_knowledge_adapter
+
+        adapter = get_knowledge_adapter("mem0", config={}, verbose=1)
+        assert type(adapter).__name__ == "Mem0Adapter"
+
+    def test_knowledge_mem0_provider_not_silently_degraded(self):
+        """Knowledge configured for mem0 must not silently fall back to SQLite.
+
+        A ``verbose`` TypeError in the adapter constructor previously caused a
+        silent degradation to ``SQLiteKnowledgeAdapter``. With the fix, the
+        configured provider must be constructed (or, if mem0 is unavailable in
+        the environment, at least not degraded because of a constructor-signature
+        mismatch).
+        """
+        pytest.importorskip("mem0")
+        from praisonaiagents.knowledge import Knowledge
+
+        k = Knowledge(config={"vector_store": {"provider": "mem0", "config": {}}})
+        assert type(k.memory).__name__ == "Mem0Adapter"
+
+
 class TestChromaKnowledgeAdapterWhereFilters:
     """Tests for ChromaKnowledgeAdapter where-filter formatting."""
 
