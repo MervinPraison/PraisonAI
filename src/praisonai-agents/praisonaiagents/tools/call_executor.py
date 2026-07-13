@@ -24,6 +24,14 @@ from ..trace.context_events import copy_context_to_callable
 logger = logging.getLogger(__name__)
 
 
+class ToolTimeoutError(Exception):
+    """Raised when a tool call exceeds its configured ``timeout_ms``."""
+
+
+class ToolCancelledError(Exception):
+    """Raised when a tool call is aborted via the cancel token."""
+
+
 @dataclass
 class ToolProgress:
     """Incremental progress update emitted by a running tool.
@@ -89,6 +97,7 @@ class ToolResult:
     error: Optional[Exception] = None
     progress: List[ToolProgress] = field(default_factory=list)
     deferred: Optional[DeferredToolResult] = None
+    error_kind: str = "error"
 
     @property
     def is_deferred(self) -> bool:
@@ -100,12 +109,15 @@ class ToolResult:
         """Structured error content for the model, or None on success.
 
         Unlike the flattened ``"Error executing tool: ..."`` string, this
-        exposes the error type and message so the model can reason about it.
+        exposes a discriminated error ``kind`` (``timeout`` / ``cancelled`` /
+        ``error``) plus type and message so the model can reason about whether
+        to retry, choose another tool, or report the failure.
         """
         if self.error is None:
             return None
         return {
             "error": True,
+            "kind": self.error_kind,
             "type": type(self.error).__name__,
             "message": str(self.error),
             "tool": self.function_name,
@@ -148,10 +160,32 @@ def _resolve_value(value: Any) -> Any:
         return pool.submit(_runner).result()
 
 
+def _cancel_requested(cancel_token: Any) -> bool:
+    """Best-effort check whether a cancel token has been signalled.
+
+    Supports ``threading.Event``-like tokens (``.is_set()``) and
+    ``InterruptController``-like tokens (``.is_cancelled`` / ``.cancelled``)
+    without importing a concrete type, keeping the executor decoupled.
+    """
+    if cancel_token is None:
+        return False
+    for attr in ("is_set", "is_cancelled", "cancelled"):
+        flag = getattr(cancel_token, attr, None)
+        if flag is None:
+            continue
+        try:
+            return bool(flag() if callable(flag) else flag)
+        except Exception:
+            return False
+    return False
+
+
 def run_single_tool_call(
     tool_call: ToolCall,
     execute_tool_fn: Callable[..., Any],
     on_progress: Optional[OnProgress] = None,
+    timeout_ms: Optional[int] = None,
+    cancel_token: Any = None,
 ) -> ToolResult:
     """Execute one tool call, capturing progress, deferred, async and errors.
 
@@ -159,9 +193,71 @@ def run_single_tool_call(
       updates are forwarded to the caller and recorded on the result.
     - Coroutine returns (``async def`` tools) are awaited natively.
     - A ``DeferredToolResult`` return is recorded without blocking.
+    - When ``timeout_ms`` is set the tool runs on a dedicated worker and is
+      abandoned on expiry, returning a typed ``timeout`` result instead of
+      hanging the turn.
+    - When ``cancel_token`` is already signalled the call is short-circuited
+      with a typed ``cancelled`` result.
     - Failures populate ``error`` (and structured error) instead of only a
       flattened string.
     """
+    if _cancel_requested(cancel_token):
+        err = ToolCancelledError(f"Tool '{tool_call.function_name}' cancelled before execution")
+        return ToolResult(
+            function_name=tool_call.function_name,
+            arguments=tool_call.arguments,
+            result={"error": "cancelled", "tool": tool_call.function_name},
+            tool_call_id=tool_call.tool_call_id,
+            is_ollama=tool_call.is_ollama,
+            error=err,
+            error_kind="cancelled",
+        )
+
+    timeout_s = (timeout_ms / 1000.0) if timeout_ms and timeout_ms > 0 else None
+    if timeout_s is None:
+        return _run_tool_body(tool_call, execute_tool_fn, on_progress)
+
+    # Bounded execution: run on a dedicated worker so a hung tool cannot block
+    # the turn indefinitely. Python threads cannot be force-killed, so on
+    # expiry the worker is abandoned (daemon pool) and a typed timeout result
+    # is returned to the model.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = pool.submit(
+        copy_context_to_callable(_run_tool_body),
+        tool_call,
+        execute_tool_fn,
+        on_progress,
+    )
+    try:
+        result = fut.result(timeout=timeout_s)
+        pool.shutdown(wait=False)
+        return result
+    except concurrent.futures.TimeoutError:
+        # Abandon the worker without waiting; do not block the turn.
+        pool.shutdown(wait=False)
+        logger.error(
+            f"Tool '{tool_call.function_name}' timed out after {timeout_ms}ms"
+        )
+        err = ToolTimeoutError(
+            f"Tool '{tool_call.function_name}' timed out after {timeout_ms}ms"
+        )
+        return ToolResult(
+            function_name=tool_call.function_name,
+            arguments=tool_call.arguments,
+            result={"error": "timeout", "timeout_ms": timeout_ms, "tool": tool_call.function_name},
+            tool_call_id=tool_call.tool_call_id,
+            is_ollama=tool_call.is_ollama,
+            error=err,
+            error_kind="timeout",
+        )
+
+
+def _run_tool_body(
+    tool_call: ToolCall,
+    execute_tool_fn: Callable[..., Any],
+    on_progress: Optional[OnProgress] = None,
+) -> ToolResult:
+    """Execute the tool body without timeout/cancel wrapping."""
     collected: List[ToolProgress] = []
 
     def _emit(update: ToolProgress) -> None:
@@ -234,6 +330,8 @@ class ToolCallExecutor(Protocol):
         tool_calls: List[ToolCall],
         execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
         on_progress: Optional[OnProgress] = None,
+        timeout_ms: Optional[int] = None,
+        cancel_token: Any = None,
     ) -> List[ToolResult]:
         """
         Execute a batch of tool calls and return results in original order.
@@ -243,6 +341,10 @@ class ToolCallExecutor(Protocol):
             execute_tool_fn: Function to execute individual tools
             on_progress: Optional callback receiving ToolProgress updates as
                 tools stream incremental progress.
+            timeout_ms: Optional per-tool timeout in milliseconds; a tool that
+                exceeds it is abandoned and returns a typed timeout result.
+            cancel_token: Optional cancel token; a signalled token short-
+                circuits pending calls with a typed cancelled result.
             
         Returns:
             List of ToolResult in same order as input tool_calls
@@ -262,10 +364,15 @@ class SequentialToolCallExecutor:
         tool_calls: List[ToolCall], 
         execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
         on_progress: Optional[OnProgress] = None,
+        timeout_ms: Optional[int] = None,
+        cancel_token: Any = None,
     ) -> List[ToolResult]:
         """Execute tool calls sequentially - current behavior."""
         return [
-            run_single_tool_call(tool_call, execute_tool_fn, on_progress)
+            run_single_tool_call(
+                tool_call, execute_tool_fn, on_progress,
+                timeout_ms=timeout_ms, cancel_token=cancel_token,
+            )
             for tool_call in tool_calls
         ]
 
@@ -294,6 +401,8 @@ class ParallelToolCallExecutor:
         tool_calls: List[ToolCall],
         execute_tool_fn: Callable[[str, Dict[str, Any], Optional[str]], Any],
         on_progress: Optional[OnProgress] = None,
+        timeout_ms: Optional[int] = None,
+        cancel_token: Any = None,
     ) -> List[ToolResult]:
         """Execute tool calls in parallel using thread pool."""
         if not tool_calls:
@@ -302,7 +411,10 @@ class ParallelToolCallExecutor:
         # Single tool call - no need for parallelism overhead
         if len(tool_calls) == 1:
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
+            return sequential_executor.execute_batch(
+                tool_calls, execute_tool_fn, on_progress,
+                timeout_ms=timeout_ms, cancel_token=cancel_token,
+            )
         
         # G4: Check for path conflicts - fallback to sequential if conflicts detected
         try:
@@ -312,18 +424,29 @@ class ParallelToolCallExecutor:
                 "Path conflict detection unavailable; using sequential execution for safety"
             )
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
+            return sequential_executor.execute_batch(
+                tool_calls, execute_tool_fn, on_progress,
+                timeout_ms=timeout_ms, cancel_token=cancel_token,
+            )
 
         if has_write_conflicts(tool_calls):
             logger.info(f"Path conflicts detected in {len(tool_calls)} tool calls, using sequential execution")
             sequential_executor = SequentialToolCallExecutor()
-            return sequential_executor.execute_batch(tool_calls, execute_tool_fn, on_progress)
+            return sequential_executor.execute_batch(
+                tool_calls, execute_tool_fn, on_progress,
+                timeout_ms=timeout_ms, cancel_token=cancel_token,
+            )
         
         def _execute_single_tool(tool_call: ToolCall) -> ToolResult:
             """Execute a single tool call with progress/deferred/error handling."""
-            return run_single_tool_call(tool_call, execute_tool_fn, on_progress)
+            return run_single_tool_call(
+                tool_call, execute_tool_fn, on_progress,
+                timeout_ms=timeout_ms, cancel_token=cancel_token,
+            )
         
-        # Use ThreadPoolExecutor for sync tools
+        # Use ThreadPoolExecutor for sync tools. Per-tool timeout/cancellation
+        # is enforced inside run_single_tool_call, so a hung tool resolves to a
+        # typed timeout result rather than blocking collection indefinitely.
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all tool calls with context propagation
             future_to_index = {
