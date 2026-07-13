@@ -976,20 +976,22 @@ class ToolExecutionMixin:
         # these effects or recurse into another review.
         if getattr(self, "_in_skill_review", False):
             return response
+        # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, AfterAgentInput
-        after_agent_input = AfterAgentInput(
-            session_id=getattr(self, '_session_id', 'default'),
-            cwd=os.getcwd(),
-            event_name=HookEvent.AFTER_AGENT,
-            timestamp=str(time.time()),
-            agent_name=self.name,
-            prompt=prompt if isinstance(prompt, str) else str(prompt),
-            response=response or "",
-            tools_used=tools_used or [],
-            total_tokens=0,
-            execution_time_ms=(time.time() - start_time) * 1000
-        )
-        self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+        if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
+            after_agent_input = AfterAgentInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.AFTER_AGENT,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                prompt=prompt if isinstance(prompt, str) else str(prompt),
+                response=response or "",
+                tools_used=tools_used or [],
+                total_tokens=0,
+                execution_time_ms=(time.time() - start_time) * 1000
+            )
+            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
         
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
         if response:
