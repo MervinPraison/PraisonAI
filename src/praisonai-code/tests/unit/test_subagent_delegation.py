@@ -110,3 +110,35 @@ class TestBuildSubagentResolver:
         )
         resolver, _ = build_subagent_resolver(None)
         assert resolver("does-not-exist") is None
+
+    def test_resolver_instantiates_permission_bearing_agent(self, monkeypatch):
+        """A delegated agent carrying a ``permissions`` block must construct.
+
+        ``permissions`` is a declarative block, not an ``Agent`` kwarg, so the
+        resolver must translate it into an ``approval`` config instead of
+        passing it straight to ``Agent(...)`` (which would raise TypeError).
+        """
+        agent = _make_agent("planner", mode="read-only")
+        # ``read-only`` is only a delegatability-eligible marker when named in
+        # the allow-list, so opt it in explicitly.
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions."
+            "CustomDefinitionsDiscovery.list_agents",
+            lambda self: [agent],
+        )
+        resolver, _ = build_subagent_resolver(["planner"])
+        assert resolver is not None
+
+        captured = {}
+
+        def _fake_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        import praisonaiagents
+
+        monkeypatch.setattr(praisonaiagents, "Agent", _fake_agent)
+        instance = resolver("planner")
+        assert instance is not None
+        assert "permissions" not in captured
+        assert "approval" in captured

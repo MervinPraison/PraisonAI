@@ -828,7 +828,28 @@ def build_subagent_resolver(
             return None
         from praisonaiagents import Agent
 
-        return Agent(**dict(config))
+        # ``permissions`` is a declarative block, not an ``Agent`` kwarg. Mirror
+        # the primary-run path (_run_custom_agent) and convert it into an
+        # ``approval`` config so the delegated agent runs under its own
+        # restrictions instead of failing at construction.
+        agent_config = dict(config)
+        agent_permissions = agent_config.pop("permissions", None) or {}
+        if agent_permissions:
+            from praisonai_code.cli.features._approval_bridge import (
+                resolve_approval_config,
+            )
+
+            has_ask_rules = any(
+                str(action).strip().lower() == "ask"
+                for action in agent_permissions.values()
+            )
+            agent_config["approval"] = resolve_approval_config(
+                "console",
+                non_interactive=not has_ask_rules,
+                permissions_config=agent_permissions,
+            )
+
+        return Agent(**agent_config)
 
     return resolver, descriptions
 
