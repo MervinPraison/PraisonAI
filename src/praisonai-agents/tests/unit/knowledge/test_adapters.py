@@ -229,6 +229,57 @@ class TestAdapterVerboseKwarg:
         k = Knowledge(config={"vector_store": {"provider": "mem0", "config": {}}})
         assert type(k.memory).__name__ == "Mem0Adapter"
 
+    def test_default_knowledge_does_not_warn_on_expected_fallback(self, caplog):
+        """Default ``Knowledge()`` must not log a warning when falling back.
+
+        When no provider is explicitly configured, ``mem0`` is only an implicit
+        default. Falling back to SQLite (e.g. mem0 not installed) is the expected
+        path and must not emit misleading ``logger.warning`` output about reduced
+        retrieval quality (PR #2982 review).
+        """
+        import logging
+        from praisonaiagents.knowledge import Knowledge
+
+        with caplog.at_level(logging.WARNING, logger="praisonaiagents.knowledge.knowledge"):
+            _ = Knowledge().memory
+
+        degradation_warnings = [
+            r.message for r in caplog.records
+            if r.levelno >= logging.WARNING and "Retrieval quality may be reduced" in r.message
+        ]
+        assert degradation_warnings == [], (
+            f"Default Knowledge() should not warn about degraded retrieval: "
+            f"{degradation_warnings}"
+        )
+
+    def test_explicit_provider_warns_on_fallback(self, caplog):
+        """Explicitly configured provider must warn loudly if it degrades.
+
+        This is the whole point of issue #2972: a user who asks for a semantic
+        backend should get a visible warning when it silently degrades. Uses
+        ``chroma`` which is an optional dependency; when unavailable the adapter
+        fails and Knowledge falls back, which must produce a visible warning.
+        """
+        pytest.importorskip("praisonaiagents.knowledge")
+        try:
+            import chromadb  # noqa: F401
+            pytest.skip("chromadb installed; explicit chroma provider would not fall back")
+        except ImportError:
+            pass
+
+        import logging
+        from praisonaiagents.knowledge import Knowledge
+
+        k = Knowledge(config={"vector_store": {"provider": "chroma", "config": {}}})
+        with caplog.at_level(logging.WARNING, logger="praisonaiagents.knowledge.knowledge"):
+            _ = k.memory
+
+        warned = any(
+            r.levelno >= logging.WARNING and "Retrieval quality may be reduced" in r.message
+            for r in caplog.records
+        )
+        assert warned, "Explicitly configured provider should warn on fallback"
+
 
 class TestChromaKnowledgeAdapterWhereFilters:
     """Tests for ChromaKnowledgeAdapter where-filter formatting."""

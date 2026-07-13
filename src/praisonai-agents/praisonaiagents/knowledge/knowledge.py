@@ -197,7 +197,14 @@ class Knowledge:
         # Import registry functions
         from .adapters import get_knowledge_adapter, get_first_available_knowledge_adapter
         
-        # Determine provider preference
+        # Determine provider preference. Distinguish an explicit user choice from
+        # the implicit default so fallback diagnostics are only loud when a
+        # configured backend degrades (see issue #2972 / PR #2982 review).
+        # ``self.config`` is always merged with defaults, so use the raw
+        # user-supplied ``_config`` to detect whether the provider was chosen.
+        provider_explicit = bool(
+            (self._config or {}).get("vector_store", {}).get("provider")
+        )
         provider = self.config.get("vector_store", {}).get("provider", "mem0")
         self._log(f"Requested knowledge provider: {provider}")
         
@@ -215,18 +222,30 @@ class Knowledge:
         try:
             adapter = get_knowledge_adapter(adapter_name, config=self.config, verbose=self._verbose)
         except Exception as e:
-            logger.warning(
-                f"Knowledge provider '{adapter_name}' failed to initialize ({e}); "
-                f"falling back to a different backend. Retrieval quality may be reduced."
-            )
+            if provider_explicit:
+                logger.warning(
+                    f"Knowledge provider '{adapter_name}' failed to initialize ({e}); "
+                    f"falling back to a different backend. Retrieval quality may be reduced."
+                )
+            else:
+                self._log(
+                    f"Default knowledge provider '{adapter_name}' unavailable ({e}); "
+                    f"falling back to a different backend."
+                )
             adapter = None
         
         if adapter is None:
             # Fallback to first available adapter
-            logger.warning(
-                f"Knowledge provider '{adapter_name}' not available; trying fallback backends. "
-                f"Retrieval quality may be reduced."
-            )
+            if provider_explicit:
+                logger.warning(
+                    f"Knowledge provider '{adapter_name}' not available; trying fallback backends. "
+                    f"Retrieval quality may be reduced."
+                )
+            else:
+                self._log(
+                    f"Default knowledge provider '{adapter_name}' not available; "
+                    f"trying fallback backends."
+                )
             fallback_result = get_first_available_knowledge_adapter(
                 preferences=["sqlite", "mem0"],
                 config=self.config,
