@@ -86,12 +86,32 @@ class GoalLoopMixin:
     # -- judge gate ------------------------------------------------------------
 
     def _goal_continuation_prompt(self, state: "GoalState") -> str:
-        """Return a cache-preserving, user-role continuation nudge."""
+        """Return a self-contained continuation nudge.
+
+        Restates the goal (and acceptance criteria, if any) so the loop keeps
+        working even when history-clearing configs (``clear_context=True``)
+        strip the earlier turns, which would otherwise leave the model with no
+        idea what task to continue.
+        """
         reason = state.last_reason or "the goal is not yet met"
-        return (
+        lines = [
             "The goal is not complete yet. Keep working with your tools until "
-            f"the acceptance criteria are met. Reason it is not done: {reason}"
-        )
+            "the acceptance criteria are met.",
+            f"GOAL: {state.goal}",
+        ]
+        criteria = state.criteria
+        if criteria is not None:
+            if criteria.outcome:
+                lines.append(f"DEFINITION OF DONE: {criteria.outcome}")
+            if criteria.verification:
+                lines.append(f"VERIFICATION: {criteria.verification}")
+            if criteria.constraints:
+                lines.append(
+                    "CONSTRAINTS (never violate): "
+                    + "; ".join(criteria.constraints)
+                )
+        lines.append(f"Reason it is not done yet: {reason}")
+        return "\n".join(lines)
 
     def _goal_gate(self, response: str) -> Optional[Tuple[str, str]]:
         """Evaluate the goal judge after an autonomous iteration.
@@ -142,6 +162,35 @@ class GoalLoopMixin:
 
     # -- public API ------------------------------------------------------------
 
+    def _resume_or_new_goal_state(
+        self,
+        goal: str,
+        criteria: Optional["GoalCriteria"],
+        max_turns: int,
+        resume: bool,
+    ) -> "GoalState":
+        """Resume a persisted paused state for the same goal, else start fresh."""
+        from .models import GoalState
+
+        if resume:
+            saved = self._load_goal_state()
+            if (
+                saved is not None
+                and saved.status == "paused"
+                and saved.goal == goal
+            ):
+                # Resume the paused run in place (keep turns_used/verdict).
+                saved.status = "active"
+                if criteria is not None:
+                    saved.criteria = criteria
+                saved.max_turns = max_turns
+                saved.consecutive_parse_failures = 0
+                self._goal_state = saved
+                return saved
+        state = GoalState(goal=goal, criteria=criteria, max_turns=max_turns)
+        self._goal_state = state
+        return state
+
     def run_goal(
         self,
         task: str,
@@ -150,6 +199,7 @@ class GoalLoopMixin:
         criteria: Optional["GoalCriteria"] = None,
         max_turns: int = 20,
         judge_model: Optional[str] = None,
+        resume: bool = True,
         **kwargs: Any,
     ):
         """Run a goal-gated autonomous loop.
@@ -164,20 +214,22 @@ class GoalLoopMixin:
             criteria: Optional structured :class:`GoalCriteria`.
             max_turns: Judged iterations before a recoverable pause.
             judge_model: Independent judge model (defaults to gpt-4o-mini).
+            resume: When ``True`` (default), a previously persisted ``paused``
+                run for the same goal is resumed (turns are not reset) instead
+                of restarting at ``turns_used=0``.
 
         Returns:
             :class:`~praisonaiagents.agent.autonomy.AutonomyResult`.
         """
-        from .models import GoalState
-
         self._ensure_goal_autonomy()
-        self._goal_state = GoalState(
-            goal=goal, criteria=criteria, max_turns=max_turns
-        )
+        self._resume_or_new_goal_state(goal, criteria, max_turns, resume)
         self._goal_judge_model = judge_model
         try:
             return self.run_autonomous(task, **kwargs)
         finally:
+            # Persist a terminal/paused state before clearing so a later call
+            # can resume it; do not clobber the store on the way out.
+            self._persist_goal_state()
             self._goal_state = None
             self._goal_judge_model = None
 
@@ -194,18 +246,16 @@ class GoalLoopMixin:
         criteria: Optional["GoalCriteria"] = None,
         max_turns: int = 20,
         judge_model: Optional[str] = None,
+        resume: bool = True,
         **kwargs: Any,
     ):
         """Async variant of :meth:`run_goal`."""
-        from .models import GoalState
-
         self._ensure_goal_autonomy()
-        self._goal_state = GoalState(
-            goal=goal, criteria=criteria, max_turns=max_turns
-        )
+        self._resume_or_new_goal_state(goal, criteria, max_turns, resume)
         self._goal_judge_model = judge_model
         try:
             return await self.run_autonomous_async(task, **kwargs)
         finally:
+            self._persist_goal_state()
             self._goal_state = None
             self._goal_judge_model = None

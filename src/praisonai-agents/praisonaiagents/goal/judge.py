@@ -22,7 +22,6 @@ Reuses :class:`~praisonaiagents.eval.judge.Judge` for its lazy litellm loader
 
 import json
 import os
-import re
 from typing import Optional, Tuple, TYPE_CHECKING
 
 from praisonaiagents._logging import get_logger
@@ -86,28 +85,79 @@ def _build_goal_judge_prompt(state: "GoalState", transcript_tail: str) -> str:
     return "\n".join(lines)
 
 
+def _iter_json_objects(text: str):
+    """Yield candidate JSON object substrings via brace-depth scanning.
+
+    Unlike a greedy ``\\{.*\\}`` match, this finds each balanced top-level
+    ``{...}`` block, so a valid verdict followed by a second object or a
+    brace-containing note still parses. String literals (and escapes) are
+    respected so braces inside JSON strings do not break balancing.
+    """
+    depth = 0
+    start = -1
+    in_str = False
+    escaped = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start != -1:
+                    yield text[start : i + 1]
+                    start = -1
+
+
+def _verdict_from_data(data: dict) -> Optional[Tuple[str, str]]:
+    """Extract ``(verdict, reason)`` from a parsed judge dict, if present."""
+    if "verdict" in data:
+        verdict = str(data.get("verdict", "")).strip().lower()
+        if verdict not in _VALID_VERDICTS:
+            return None
+        return verdict, str(data.get("reason", "")).strip()
+    if "done" in data:
+        verdict = "done" if bool(data.get("done")) else "continue"
+        return verdict, str(data.get("reason", "")).strip()
+    return None
+
+
 def _parse_verdict(raw: str) -> Tuple[str, str]:
     """Parse a judge response into ``(verdict, reason)``.
 
     Accepts the canonical ``{"verdict","reason"}`` shape and a legacy
-    ``{"done": bool}`` shape. Raises ``ValueError`` if nothing parseable.
+    ``{"done": bool}`` shape. Scans for each balanced JSON object and returns
+    the first one carrying a valid verdict, so trailing notes or a second JSON
+    object after a usable verdict do not defeat parsing. Raises ``ValueError``
+    if nothing parseable is found.
     """
     text = str(raw or "")
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    found_object = False
+    for candidate in _iter_json_objects(text):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        found_object = True
+        result = _verdict_from_data(data)
+        if result is not None:
+            return result
+    if not found_object:
         raise ValueError("no JSON object in judge response")
-    data = json.loads(match.group(0))
-    if "verdict" in data:
-        verdict = str(data.get("verdict", "")).strip().lower()
-        if verdict not in _VALID_VERDICTS:
-            raise ValueError(f"invalid verdict: {verdict!r}")
-        reason = str(data.get("reason", "")).strip()
-        return verdict, reason
-    if "done" in data:
-        verdict = "done" if bool(data.get("done")) else "continue"
-        reason = str(data.get("reason", "")).strip()
-        return verdict, reason
-    raise ValueError("judge response missing 'verdict'/'done'")
+    raise ValueError("judge response missing valid 'verdict'/'done'")
 
 
 def judge_goal(

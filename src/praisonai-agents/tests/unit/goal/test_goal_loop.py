@@ -83,6 +83,24 @@ class TestParseVerdict:
         with pytest.raises(ValueError):
             _parse_verdict('{"verdict": "maybe"}')
 
+    def test_parse_verdict_followed_by_second_object(self):
+        # Regression: greedy {.*} matched both objects and failed to parse.
+        raw = '{"verdict": "done", "reason": "ok"}\n{"note": "extra {stuff}"}'
+        verdict, reason = _parse_verdict(raw)
+        assert verdict == "done"
+        assert reason == "ok"
+
+    def test_parse_verdict_followed_by_braced_note(self):
+        raw = '{"verdict":"done","reason":"ok"} see log {timestamp}'
+        verdict, _ = _parse_verdict(raw)
+        assert verdict == "done"
+
+    def test_parse_braces_inside_reason_string(self):
+        raw = '{"verdict": "continue", "reason": "needs {curly} handling"}'
+        verdict, reason = _parse_verdict(raw)
+        assert verdict == "continue"
+        assert reason == "needs {curly} handling"
+
 
 class TestBuildPrompt:
     def test_prompt_includes_constraints(self):
@@ -102,6 +120,27 @@ class TestBuildPrompt:
         state = GoalState(goal="Just do it")
         prompt = _build_goal_judge_prompt(state, "output")
         assert "Just do it" in prompt
+
+
+class TestContinuationPrompt:
+    def test_continuation_restates_goal_and_criteria(self):
+        # Regression: the nudge must be self-contained so history-clearing
+        # configs do not lose the task/goal on continuation.
+        agent = _make_agent()
+        agent._goal_state = GoalState(
+            goal="Ship the feature",
+            criteria=GoalCriteria(
+                outcome="Feature merged",
+                verification="PR is merged",
+                constraints=["no force-push"],
+            ),
+            last_reason="tests still failing",
+        )
+        nudge = agent._goal_continuation_prompt(agent._goal_state)
+        assert "Ship the feature" in nudge
+        assert "Feature merged" in nudge
+        assert "no force-push" in nudge
+        assert "tests still failing" in nudge
 
 
 # =============================================================================

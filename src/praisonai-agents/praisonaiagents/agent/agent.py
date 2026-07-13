@@ -4168,8 +4168,14 @@ Summary:"""
             judge_model: Optional independent judge model for the goal loop
             
         Returns:
-            EvaluationLoopResult with iteration history and final score
-            
+            EvaluationLoopResult with iteration history and final score.
+
+            NOTE: when ``goal`` is provided this delegates to the tool-using
+            goal loop and returns an
+            :class:`~praisonaiagents.agent.autonomy.AutonomyResult` instead
+            (``success``/``output``/``completion_reason``), which is a
+            different shape from the default ``EvaluationLoopResult``.
+
         Example:
             ```python
             agent = Agent(name="analyzer", instructions="Analyze systems")
@@ -4183,8 +4189,14 @@ Summary:"""
             ```
         """
         if goal is not None:
+            # Prefer explicit structured criteria; otherwise fold the string
+            # ``criteria`` into a GoalCriteria so it is not silently dropped.
+            effective_criteria = goal_criteria
+            if effective_criteria is None and criteria:
+                from ..goal.models import GoalCriteria
+                effective_criteria = GoalCriteria(outcome=criteria)
             return self.run_goal(
-                prompt, goal, criteria=goal_criteria,
+                prompt, goal, criteria=effective_criteria,
                 max_turns=max_iterations, judge_model=judge_model,
             )
         from ..eval.loop import EvaluationLoop
