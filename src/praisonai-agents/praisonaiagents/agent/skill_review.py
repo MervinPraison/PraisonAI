@@ -160,3 +160,31 @@ class SkillReviewMixin:
         finally:
             self._restore_chat_history(history_len)
             self._in_skill_review = False
+
+    def _schedule_self_improvement(self, run_review):
+        """Enqueue the guarded skill-review pass on the core background runner.
+
+        The reply has already been returned to the caller by the time this is
+        called; the review turn (a full extra LLM round-trip) runs off the hot
+        path on the shared :class:`BackgroundJobManager` so a long-lived
+        gateway/bot agent never pays its latency on the user-visible path
+        (issue #2985). Best-effort: if the runner cannot be reached the review
+        falls back to running inline so behaviour is never silently dropped.
+
+        Args:
+            run_review: A zero-arg callable that performs the guarded review
+                (already bound to the captured trajectory).
+        """
+        try:
+            from ..background.job_manager import get_job_manager
+            name, session_id = self._skill_review_log_context()
+            get_job_manager().start_job(
+                run_review,
+                job_id=f"self-improve:{session_id or name or 'default'}",
+            )
+        except Exception as e:  # pragma: no cover - defensive fallback
+            logger.debug(
+                "Backgrounding skill review failed (%s); running inline", e,
+                exc_info=True,
+            )
+            run_review()
