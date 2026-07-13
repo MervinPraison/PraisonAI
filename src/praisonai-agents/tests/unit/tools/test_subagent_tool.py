@@ -255,6 +255,100 @@ class TestSubagentTool:
         assert captured["tools"] == ["read_file"]
         assert captured["llm"] == "gpt-4o-mini"
 
+    def test_agent_resolver_runs_named_agent(self):
+        """A named agent resolved via agent_resolver runs the sub-task."""
+        class NamedAgent:
+            def __init__(self, name):
+                self.name = name
+
+            def chat(self, prompt):
+                return f"{self.name} handled: {prompt}"
+
+        resolved = {"researcher": NamedAgent("researcher")}
+        tool = create_subagent_tool(
+            agent_resolver=lambda name: resolved.get(name),
+        )
+        func = tool["function"]
+
+        result = func(task="Investigate X", agent_name="researcher")
+
+        assert result["success"] is True
+        assert result["agent_name"] == "researcher"
+        assert "researcher handled" in result["output"]
+        assert "Investigate X" in result["output"]
+
+    def test_agent_resolver_falls_back_to_factory(self):
+        """When the resolver returns None, the generic factory path is used."""
+        class FactoryAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+
+            def chat(self, prompt):
+                return f"factory: {prompt}"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: FactoryAgent(**kwargs),
+            agent_resolver=lambda name: None,
+        )
+        func = tool["function"]
+
+        result = func(task="Do work", agent_name="unknown")
+
+        assert result["success"] is True
+        assert "factory" in result["output"]
+
+    def test_agent_resolver_ignored_without_agent_name(self):
+        """No agent_name means the resolver is not consulted."""
+        calls = []
+
+        def resolver(name):
+            calls.append(name)
+            return None
+
+        tool = create_subagent_tool(agent_resolver=resolver)
+        func = tool["function"]
+
+        result = func(task="Generic task")
+
+        assert result["success"] is True
+        assert calls == []
+
+    def test_resolvable_agents_listed_in_description(self):
+        """resolvable_agents enrich the tool description with names + descs."""
+        tool = create_subagent_tool(
+            agent_resolver=lambda name: None,
+            resolvable_agents={
+                "researcher": "Finds information",
+                "reviewer": "Audits code",
+            },
+        )
+
+        description = tool["description"]
+        assert "researcher" in description
+        assert "Finds information" in description
+        assert "reviewer" in description
+        assert "Audits code" in description
+
+    def test_agent_resolver_honours_allowed_agents(self):
+        """allowed_agents still gates a named delegation before resolving."""
+        class NamedAgent:
+            def __init__(self, name):
+                self.name = name
+
+            def chat(self, prompt):
+                return "ran"
+
+        tool = create_subagent_tool(
+            agent_resolver=lambda name: NamedAgent(name),
+            allowed_agents=["researcher"],
+        )
+        func = tool["function"]
+
+        result = func(task="task", agent_name="hacker")
+
+        assert result["success"] is False
+        assert "not in allowed" in result["error"]
+
 
     def test_subagent_deliver_echoed_and_origin_captured(self):
         """deliver is echoed on the handle and origin is captured on the job."""

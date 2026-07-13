@@ -613,6 +613,7 @@ def run_main(
     no_save: bool = typer.Option(False, "--no-save", help="Don't auto-save session after execution"),
     # Custom definitions
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent"),
+    subagents: Optional[str] = typer.Option(None, "--subagents", help="Comma-separated named agents (.praisonai/agents/*.md) the running agent may delegate to. Omit to expose agents marked 'mode: subagent'."),
     command: Optional[str] = typer.Option(None, "--command", help="Execute a named custom command"),
     # Reasoning effort
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
@@ -779,6 +780,7 @@ def run_main(
             fork=fork,
             no_save=no_save,
             thinking_budget=thinking_budget,
+            subagents=subagents,
         )
         return
     
@@ -1482,6 +1484,46 @@ def _run_from_file_profiled(
     profiler.print_report()
 
 
+def _wire_subagent_delegation(
+    agent_config: Dict[str, Any],
+    subagents: Optional[str],
+) -> None:
+    """Attach a `spawn_subagent` tool that can delegate to named agents.
+
+    Resolves delegatable ``.praisonai/agents/*.md`` definitions into a
+    core ``create_subagent_tool`` resolver and appends the tool to
+    ``agent_config['tools']``. No-op when there are no delegatable agents so
+    the default run is unchanged.
+
+    ``subagents`` is the raw ``--subagents`` string (comma-separated names);
+    when None, agents marked ``mode: subagent`` are exposed instead.
+    """
+    allow_list = None
+    if subagents:
+        allow_list = [name.strip() for name in subagents.split(",") if name.strip()]
+
+    try:
+        from praisonai_code.cli.features.custom_definitions import (
+            build_subagent_resolver,
+        )
+
+        resolver, descriptions = build_subagent_resolver(allow_list)
+    except Exception:
+        return
+
+    if resolver is None:
+        return
+
+    from praisonaiagents.tools.subagent_tool import create_subagent_tool
+
+    tool = create_subagent_tool(
+        agent_resolver=resolver,
+        allowed_agents=list(descriptions.keys()),
+        resolvable_agents=descriptions,
+    )
+    agent_config["tools"] = list(agent_config.get("tools") or []) + [tool]
+
+
 def _run_custom_agent(
     agent_config: Dict[str, Any],
     prompt: str,
@@ -1503,6 +1545,7 @@ def _run_custom_agent(
     fork: bool = False,
     no_save: bool = False,
     thinking_budget: Optional[int] = None,
+    subagents: Optional[str] = None,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
@@ -1513,6 +1556,13 @@ def _run_custom_agent(
         # Override model if specified
         if model:
             agent_config["llm"] = model
+
+        # Offer discovered named agents as delegation targets. The primary
+        # agent can then call spawn_subagent(agent_name="researcher", ...) to
+        # hand a sub-task to a user-defined .praisonai/agents/*.md agent, which
+        # runs under its own model/tools/permissions. An explicit --subagents
+        # allow-list wins; otherwise agents marked `mode: subagent` are used.
+        _wire_subagent_delegation(agent_config, subagents)
         
         # Add verbose flag
         if verbose:
