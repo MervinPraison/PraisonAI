@@ -2136,11 +2136,19 @@ Your Goal: {self.goal}
                 self._self_improve = True
                 self._self_improve_policy = None
                 self._self_improve_mode = "background"
-            elif mode in ("inline", "blocking", "sync"):
+            elif mode in ("inline", "blocking", "sync", "true", "on", "yes", "1"):
                 self._self_improve = True
                 self._self_improve_policy = None
             else:
-                self._self_improve = bool(self_improve)
+                # Falsy ("false"/"off"/"no"/"0"/""), or an unrecognised value
+                # (e.g. a typo like "backround"): default to disabled rather
+                # than silently enabling an extra review turn on every reply.
+                if mode not in ("false", "off", "no", "0", ""):
+                    logger.warning(
+                        "Unknown self_improve mode %r; disabling self-improvement. "
+                        "Use 'inline', 'background', or a bool.", self_improve,
+                    )
+                self._self_improve = False
                 self._self_improve_policy = None
         elif self_improve is True or self_improve is False or self_improve is None:
             self._self_improve = bool(self_improve)

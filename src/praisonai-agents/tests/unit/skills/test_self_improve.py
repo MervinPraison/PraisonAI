@@ -267,3 +267,57 @@ def test_schedule_self_improvement_falls_back_inline_on_failure(monkeypatch):
     )
     agent._schedule_self_improvement(lambda: ran.append(True))
     assert ran == [True]
+
+
+# ---------------------------------------------------------------------------
+# Safe string parsing: falsy / unknown values must NOT enable review (P2)
+# ---------------------------------------------------------------------------
+
+
+def test_self_improve_falsy_strings_disable():
+    for value in ("false", "off", "no", "0", "", "False", "OFF"):
+        agent = Agent(instructions="x", self_improve=value)
+        assert agent._self_improve is False, value
+        assert agent._self_improve_mode == "inline"
+
+
+def test_self_improve_unknown_string_disables():
+    # A typo like "backround" must not silently enable inline review.
+    agent = Agent(instructions="x", self_improve="backround")
+    assert agent._self_improve is False
+    assert agent._self_improve_mode == "inline"
+
+
+def test_self_improve_truthy_strings_enable_inline():
+    for value in ("true", "on", "yes", "1", "blocking", "sync"):
+        agent = Agent(instructions="x", self_improve=value)
+        assert agent._self_improve is True, value
+        assert agent._self_improve_mode == "inline"
+
+
+# ---------------------------------------------------------------------------
+# Background scheduling uses a unique job id per invocation (P1)
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_self_improvement_uses_unique_job_ids(monkeypatch):
+    agent = Agent(instructions="x", self_improve="background")
+    agent._session_id = "sess"
+    job_ids = []
+
+    class _FakeManager:
+        def start_job(self, func, job_id=None):
+            job_ids.append(job_id)
+            return job_id
+
+    monkeypatch.setattr(
+        "praisonaiagents.background.job_manager.get_job_manager",
+        lambda: _FakeManager(),
+    )
+    agent._schedule_self_improvement(lambda: None)
+    agent._schedule_self_improvement(lambda: None)
+
+    assert len(job_ids) == 2
+    # Both scoped to the session but distinct so neither replaces the other.
+    assert all(jid.startswith("self-improve:sess:") for jid in job_ids)
+    assert job_ids[0] != job_ids[1]
