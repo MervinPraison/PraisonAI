@@ -31,6 +31,7 @@ from praisonai_bot.gateway.client import (
         ConnectErrorCode.AUTH_UNAUTHORIZED,
         ConnectErrorCode.PROTOCOL_UNSUPPORTED,
         ConnectErrorCode.PAIRING_REQUIRED,
+        ConnectErrorCode.AGENT_NOT_FOUND,
         ConnectErrorCode.ORIGIN_NOT_ALLOWED,
         ConnectErrorCode.CONFIGURATION_ERROR,
     ],
@@ -41,7 +42,7 @@ def test_terminal_codes_are_not_recoverable(code):
 
 @pytest.mark.parametrize(
     "code",
-    [ConnectErrorCode.RATE_LIMITED, ConnectErrorCode.AGENT_NOT_FOUND],
+    [ConnectErrorCode.RATE_LIMITED],
 )
 def test_transient_codes_are_recoverable(code):
     assert is_recoverable(code) is True
@@ -108,6 +109,25 @@ async def test_terminal_auth_error_raises_gateway_connect_error(monkeypatch):
 
     assert exc_info.value.code == ConnectErrorCode.AUTH_UNAUTHORIZED
     assert exc_info.value.next_step == "reauthenticate"
+
+
+@pytest.mark.asyncio
+async def test_agent_not_found_raises_gateway_connect_error(monkeypatch):
+    # Server emits AGENT_NOT_FOUND with a do-not-retry step, so it is terminal.
+    client = _client_with_response(
+        monkeypatch,
+        {
+            "type": "hello_error",
+            "code": "agent_not_found",
+            "message": "Agent not found: a1",
+            "next_step": "do_not_retry",
+        },
+    )
+
+    with pytest.raises(GatewayConnectError) as exc_info:
+        await client._connect_once()
+
+    assert exc_info.value.code == ConnectErrorCode.AGENT_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -196,3 +216,21 @@ def test_retry_after_does_not_shortcut_larger_backoff():
 
     # Exponential sequence preserved; small floor does not reduce it.
     assert delay == 64.0
+
+
+@pytest.mark.asyncio
+async def test_connect_clears_stale_retry_after(monkeypatch):
+    # A retry_after left over from a previous loop must not pin a fresh
+    # connect() on the same client instance.
+    client = GatewayClient(url="ws://test", agent_id="a1")
+    client._retry_after = 99.0
+
+    async def _never_ending_loop():
+        return None
+
+    monkeypatch.setattr(client, "_connection_loop", _never_ending_loop)
+
+    await client.connect()
+
+    assert client._retry_after is None
+    await client.disconnect()

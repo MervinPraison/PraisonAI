@@ -216,6 +216,9 @@ class GatewayClient:
         
         self._running = True
         self._reconnect_attempts = 0
+        # Discard any backoff floor left over from a previous connection loop
+        # so a stale server retry_after does not pin an unrelated reconnect.
+        self._retry_after = None
         self._connect_task = asyncio.create_task(self._connection_loop())
     
     async def _connection_loop(self) -> None:
