@@ -271,3 +271,31 @@ class SteeringMixin:
                     return f"\n[USER GUIDANCE]: {content}\nPlease consider this feedback as you continue."
         
         return None
+
+    def _drain_steering_messages(self) -> List[str]:
+        """
+        Drain all pending steering messages for mid-run injection.
+
+        Unlike ``_check_steering_messages`` (which is rate-limited and returns a
+        single formatted string for pre-turn use), this returns every pending
+        steering message's raw content so it can be injected as ``user``
+        messages between tool iterations of an in-flight run.
+
+        Returns:
+            List of steering message contents (may be empty). Never raises.
+        """
+        steering = getattr(self, "_message_steering", None)
+        if steering is None:
+            return []
+        notes: List[str] = []
+        try:
+            while steering.has_pending_messages():
+                msg = steering._message_queue.dequeue(timeout=0)
+                if msg is None:
+                    break
+                content = getattr(msg, "content", msg)
+                if content:
+                    notes.append(str(content))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Draining steering messages failed: {e}")
+        return notes
