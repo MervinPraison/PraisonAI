@@ -9,7 +9,39 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from praisonaiagents.session.store import DefaultSessionStore
-from ..utils.project import get_project_id, get_project_name, get_project_sessions_dir
+from ..utils.project import (
+    get_legacy_project_id,
+    get_project_id,
+    get_project_name,
+    get_project_sessions_dir,
+)
+
+
+def _migrate_legacy_sessions(new_dir: Path, legacy_dir: Path) -> None:
+    """Copy pre-existing path-scoped sessions into the new identity directory.
+
+    When the project id resolver switches from the legacy resolved-path hash to
+    a git-aware identity, previously created sessions live under the old
+    ``projects/<legacy_hash>`` directory. Transparently migrate them (copy, not
+    move, so nothing is lost if both ids ever resolve concurrently) so
+    ``--continue``/``session list``/``session resume`` keep working after a repo
+    gains a remote/commit or is relocated (Issue #2917). Best-effort.
+    """
+    try:
+        if not legacy_dir.exists() or legacy_dir == new_dir:
+            return
+        import shutil
+
+        new_dir.mkdir(parents=True, exist_ok=True)
+        for entry in legacy_dir.iterdir():
+            if not entry.is_file():
+                continue
+            target = new_dir / entry.name
+            if target.exists():
+                continue
+            shutil.copy2(entry, target)
+    except Exception:
+        pass
 
 
 class ProjectSessionStore(DefaultSessionStore):
@@ -33,7 +65,21 @@ class ProjectSessionStore(DefaultSessionStore):
         
         # Use project-specific session directory
         project_session_dir = get_project_sessions_dir(project_path)
-        
+
+        # Discoverability for pre-existing path-scoped sessions: if the resolved
+        # (git-aware) id differs from the legacy resolved-path hash and only the
+        # legacy directory holds sessions, migrate them so no history is lost
+        # (Issue #2917).
+        try:
+            legacy_id = get_legacy_project_id(project_path)
+            if legacy_id != self.project_id:
+                from praisonaiagents.paths import get_sessions_dir
+
+                legacy_dir = get_sessions_dir() / f"projects/{legacy_id}"
+                _migrate_legacy_sessions(Path(project_session_dir), legacy_dir)
+        except Exception:
+            pass
+
         super().__init__(
             session_dir=str(project_session_dir),
             **kwargs
