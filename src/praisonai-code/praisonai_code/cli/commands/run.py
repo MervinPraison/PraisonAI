@@ -333,6 +333,49 @@ def _resolve_tools_arg(value: Optional[str], verbose: bool = False) -> list:
     return resolved
 
 
+def _auto_discover_project_tools(existing: list, verbose: bool = False) -> list:
+    """Return auto-discovered ``.praisonai/tools/*.py`` callables to append.
+
+    Mirrors the agents/commands convention: project-local tools are loaded from
+    ``.praisonai/tools/`` (user-global + project walk-up) with no ``--tools``
+    flag. Loading executes user code and is gated by the shared
+    ``PRAISONAI_ALLOW_LOCAL_TOOLS`` opt-in, so this returns an empty list when
+    the opt-in is not set.
+
+    Discovery is additive: explicit ``--tools`` items already in ``existing``
+    take precedence and are not re-added (dedup by callable identity).
+    """
+    try:
+        from praisonai_code.cli.features.custom_definitions import (
+            discover_project_tools,
+        )
+    except Exception:
+        return []
+
+    try:
+        discovered = discover_project_tools()
+    except Exception:
+        return []
+
+    if not discovered:
+        return []
+
+    seen = {id(t) for t in existing}
+    merged: list = []
+    for tool in discovered:
+        if id(tool) in seen:
+            continue
+        seen.add(id(tool))
+        merged.append(tool)
+
+    if merged and verbose:
+        from ..output import get_output_controller
+        get_output_controller().print_info(
+            f"Loaded {len(merged)} project tool(s) from .praisonai/tools/"
+        )
+    return merged
+
+
 def _permissions_from_config(config) -> Optional[dict]:
     """Convert a resolved ``permissions`` config section to a pattern->action dict.
 
@@ -1238,6 +1281,12 @@ def _run_prompt(
                 toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
                 if toolset_names:
                     selected_tools.extend(_resolve_toolsets(toolset_names))
+            # Auto-discover project-local .praisonai/tools/*.py (additive;
+            # explicit --tools take precedence). Gated by the shared
+            # PRAISONAI_ALLOW_LOCAL_TOOLS opt-in in the safe loader.
+            selected_tools.extend(
+                _auto_discover_project_tools(selected_tools, verbose=verbose)
+            )
             if selected_tools:
                 agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
 
