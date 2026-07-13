@@ -46,6 +46,7 @@ class HTTPStreamTransport:
         cors_origins: Optional[list] = None,
         allowed_origins: Optional[list] = None,
         api_key: Optional[str] = None,
+        api_key_auth: Optional[Any] = None,
         session_ttl: int = 3600,
         allow_client_termination: bool = True,
         response_mode: str = "batch",
@@ -62,7 +63,9 @@ class HTTPStreamTransport:
             endpoint: MCP endpoint path
             cors_origins: CORS allowed origins
             allowed_origins: Origins allowed for security validation (None = localhost only)
-            api_key: Optional API key for authentication
+            api_key: Optional API key for authentication (single wildcard-scoped key)
+            api_key_auth: Optional APIKeyAuth instance for per-key scope enforcement.
+                Takes precedence over api_key when provided.
             session_ttl: Session TTL in seconds
             allow_client_termination: Allow client to terminate session via DELETE
             response_mode: Default response mode ("batch" or "stream")
@@ -91,6 +94,15 @@ class HTTPStreamTransport:
             # Validate provided origins to reject wildcards
             self.cors_origins = [origin for origin in cors_origins if origin != "*"]
         self.api_key = api_key
+        # Scope-aware auth. Prefer an explicit APIKeyAuth (per-key scopes);
+        # otherwise wrap the scalar api_key as a single wildcard-scoped key so
+        # scope enforcement is driven off the same code path. When neither is
+        # provided, auth (and scope enforcement) is disabled — "allow all".
+        self.api_key_auth = api_key_auth
+        if self.api_key_auth is None and api_key:
+            from ..auth.api_key import APIKeyAuth
+            self.api_key_auth = APIKeyAuth(allow_env_key=False)
+            self.api_key_auth.add_key(api_key, name="default", scopes=["*"])
         self.session_ttl = session_ttl
         self.max_sessions = int(os.getenv("PRAISONAI_MCP_MAX_SESSIONS", "1000"))
         self.allow_client_termination = allow_client_termination
@@ -110,9 +122,10 @@ class HTTPStreamTransport:
         else:
             self.allowed_origins = allowed_origins
 
-        if host not in ("127.0.0.1", "localhost", "::1") and not self.api_key:
+        if host not in ("127.0.0.1", "localhost", "::1") and self.api_key_auth is None:
             raise ValueError(
-                "api_key is required when MCP HTTP-stream binds to a non-localhost address"
+                "api_key (or api_key_auth) is required when MCP HTTP-stream binds "
+                "to a non-localhost address"
             )
         
         # Session storage
@@ -181,21 +194,33 @@ class HTTPStreamTransport:
         except ImportError:
             raise ImportError("starlette required. Install with: pip install starlette")
         
-        def _check_auth(request: Request) -> Optional[Response]:
+        def _check_auth(request: Request):
             """Check authentication for all HTTP verbs.
-            
+
             Returns:
-                None if auth passes, error Response if auth fails
+                Tuple ``(error_response, granted_scopes)``:
+                - ``error_response`` is an error Response if auth fails, else None.
+                - ``granted_scopes`` is the list of scopes granted to the caller
+                  (``["*"]`` for a wildcard key), or None when no auth is
+                  configured (scope enforcement disabled — "allow all").
             """
-            if self.api_key:
-                auth_header = request.headers.get("Authorization", "")
-                if not auth_header.startswith("Bearer "):
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
-                # Use constant-time comparison to prevent timing attacks
-                provided_key = auth_header[7:]
-                if not hmac.compare_digest(provided_key, self.api_key):
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            return None
+            if self.api_key_auth is None:
+                return None, None
+
+            auth_header = request.headers.get("Authorization", "")
+            is_valid, api_key = self.api_key_auth.validate_header(auth_header)
+            if not is_valid:
+                return JSONResponse({"error": "Unauthorized"}, status_code=401), None
+
+            # api_key is None only for the env-key path, which is wildcard by
+            # construction. For a resolved key, honor its configured scopes
+            # exactly — an explicit empty list is a deliberate no-permission
+            # grant and must NOT be widened to wildcard (privilege escalation).
+            if api_key is None:
+                granted = ["*"]
+            else:
+                granted = list(getattr(api_key, "scopes", None) or [])
+            return None, granted
         
         async def mcp_post(request: Request) -> Response:
             """Handle POST requests (client→server messages)."""
@@ -218,9 +243,9 @@ class HTTPStreamTransport:
                 )
             
             # Check authentication
-            auth_result = _check_auth(request)
-            if auth_result is not None:
-                return auth_result
+            auth_error, granted_scopes = _check_auth(request)
+            if auth_error is not None:
+                return auth_error
             
             # Get or create session (check both header casings for compatibility)
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
@@ -240,8 +265,19 @@ class HTTPStreamTransport:
                     status_code=400,
                 )
             
-            # Handle message
-            response = await self.server.handle_message(body)
+            # Handle message (scope enforcement is a no-op when granted_scopes is None)
+            response = await self.server.handle_message(body, granted_scopes=granted_scopes)
+
+            # Surface insufficient_scope as HTTP 403 with a WWW-Authenticate
+            # challenge, per the MCP incremental-consent model.
+            if response and isinstance(response, dict):
+                err = response.get("error")
+                if err and err.get("code") == -32001:
+                    challenge_headers = {"MCP-Protocol-Version": PROTOCOL_VERSION}
+                    www_auth = (err.get("data") or {}).get("www_authenticate")
+                    if www_auth:
+                        challenge_headers["WWW-Authenticate"] = www_auth
+                    return JSONResponse(response, status_code=403, headers=challenge_headers)
             
             # Check if this is an initialize request
             if body.get("method") == "initialize":
@@ -302,9 +338,9 @@ class HTTPStreamTransport:
         async def mcp_get(request: Request) -> Response:
             """Handle GET requests (server→client SSE stream)."""
             # Check authentication first
-            auth_result = _check_auth(request)
-            if auth_result is not None:
-                return auth_result
+            auth_error, _ = _check_auth(request)
+            if auth_error is not None:
+                return auth_error
             
             # Check both header casings for compatibility
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
@@ -345,10 +381,18 @@ class HTTPStreamTransport:
         async def mcp_delete(request: Request) -> Response:
             """Handle DELETE requests (session termination)."""
             # Check authentication first to prevent information disclosure
-            auth_result = _check_auth(request)
-            if auth_result is not None:
-                return auth_result
-            
+            auth_error, granted_scopes = _check_auth(request)
+            if auth_error is not None:
+                return auth_error
+
+            # Enforce scope on the administrative session-termination action.
+            # When auth is configured (granted_scopes is a list), a non-wildcard
+            # key must carry the 'admin' scope; otherwise a read-only key could
+            # terminate arbitrary sessions. No-auth mode (None) is unaffected.
+            scope_error = self._enforce_termination_scope(granted_scopes)
+            if scope_error is not None:
+                return scope_error
+
             if not self.allow_client_termination:
                 return Response(status_code=405)
             
@@ -430,3 +474,52 @@ class HTTPStreamTransport:
             del self._sessions[sid]
             if sid in self._event_history:
                 del self._event_history[sid]
+
+    def _enforce_termination_scope(self, granted_scopes: Optional[list]) -> Optional[Any]:
+        """Enforce the scope required to terminate a session via DELETE.
+
+        Session termination is an administrative, state-changing action. When
+        auth is configured (``granted_scopes`` is a list), a non-wildcard key
+        must carry the ``admin`` scope. Returns a 403 JSON-RPC-style error
+        response when the requirement is not met, otherwise ``None``.
+
+        No-auth mode (``granted_scopes is None``) is a no-op ("allow all"),
+        preserving backward compatibility.
+        """
+        # No auth configured: enforcement disabled.
+        if granted_scopes is None:
+            return None
+
+        # Wildcard grant satisfies every requirement.
+        if "*" in granted_scopes:
+            return None
+
+        if "admin" in granted_scopes:
+            return None
+
+        from starlette.responses import JSONResponse
+
+        challenge = 'Bearer realm="{realm}", scope="admin", error="insufficient_scope"'.format(
+            realm=getattr(self.server, "name", "mcp")
+        )
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32001,
+                    "message": "insufficient_scope",
+                    "data": {
+                        "required_scopes": ["admin"],
+                        "granted_scopes": list(granted_scopes),
+                        "missing_scopes": ["admin"],
+                        "error": "insufficient_scope",
+                    },
+                },
+            },
+            status_code=403,
+            headers={
+                "WWW-Authenticate": challenge,
+                "MCP-Protocol-Version": PROTOCOL_VERSION,
+            },
+        )

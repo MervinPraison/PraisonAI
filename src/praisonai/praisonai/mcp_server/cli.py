@@ -101,7 +101,8 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
   --host <host>           HTTP host (default: 127.0.0.1)
   --port <port>           HTTP port (default: 8080)
   --endpoint <path>       HTTP endpoint (default: /mcp)
-  --api-key <key>         API key for authentication
+  --api-key <key>         API key for authentication (single wildcard-scoped key)
+  --keys-file <path>      JSON file of per-key scopes for least-privilege access
   --name <name>           Server name (default: praisonai)
   --response-mode <mode>  Response mode: batch (default) or stream
   --cors-origins <list>   Comma-separated CORS origins
@@ -182,6 +183,11 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         parser.add_argument("--port", type=int, default=8080)
         parser.add_argument("--endpoint", default="/mcp")
         parser.add_argument("--api-key", default=None)
+        parser.add_argument(
+            "--keys-file",
+            default=None,
+            help='JSON file of scoped API keys: [{"key":"…","scopes":["tools:read"]}, …]',
+        )
         parser.add_argument("--name", default="praisonai")
         parser.add_argument("--debug", action="store_true")
         parser.add_argument("--response-mode", default="batch", choices=["batch", "stream"])
@@ -233,7 +239,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 cors_origins = parsed.cors_origins.split(",") if parsed.cors_origins else None
                 allowed_origins = parsed.allowed_origins.split(",") if parsed.allowed_origins else None
                 allow_termination = not parsed.no_termination
-                
+
+                # Build a scope-aware key store from --keys-file (per-key scopes
+                # enforced via OPERATION_SCOPES). Falls back to the scalar
+                # --api-key (single wildcard-scoped key) when no file is given.
+                api_key_auth = self._load_keys_file(parsed.keys_file) if parsed.keys_file else None
+
                 if not parsed.json:
                     self._print_success(f"Starting MCP server '{parsed.name}' on http://{parsed.host}:{parsed.port}{parsed.endpoint}")
                 
@@ -242,6 +253,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                     port=parsed.port,
                     endpoint=parsed.endpoint,
                     api_key=parsed.api_key,
+                    api_key_auth=api_key_auth,
                     cors_origins=cors_origins,
                     allowed_origins=allowed_origins,
                     session_ttl=parsed.session_ttl,
@@ -262,6 +274,40 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_ERROR
+
+    def _load_keys_file(self, path: str):
+        """Load scoped API keys from a JSON file into an APIKeyAuth instance.
+
+        Expected format:
+            [{"key": "<raw-key>", "name": "monitor", "scopes": ["tools:read"]}, ...]
+
+        A key with the ``scopes`` field omitted (or set to ``["*"]``) is treated
+        as wildcard. An explicit empty list (``"scopes": []``) is honored as a
+        no-permission key and is NOT promoted to wildcard.
+        """
+        from .auth.api_key import APIKeyAuth
+
+        with open(path, "r") as f:
+            entries = json.load(f)
+
+        if not isinstance(entries, list):
+            raise ValueError("keys-file must contain a JSON array of key objects")
+
+        auth = APIKeyAuth(allow_env_key=False)
+        for entry in entries:
+            raw_key = entry.get("key")
+            if not raw_key:
+                raise ValueError("each key entry requires a non-empty 'key' field")
+            # Only default to wildcard when 'scopes' is omitted entirely. An
+            # explicit empty list is a deliberate no-permission grant and must
+            # NOT be widened to wildcard (privilege escalation).
+            scopes = entry.get("scopes", ["*"])
+            auth.add_key(
+                raw_key,
+                name=entry.get("name"),
+                scopes=scopes,
+            )
+        return auth
     
     def cmd_list_tools(self, args: List[str]) -> int:
         """List available MCP tools."""

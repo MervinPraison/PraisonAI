@@ -32,6 +32,14 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
+# MCP-specific: insufficient scope (least-privilege enforcement)
+INSUFFICIENT_SCOPE = -32001
+
+# Sentinel used when scope enforcement should be skipped entirely (no auth
+# configured). Distinct from an empty granted-scope list, which means
+# "authenticated but granted nothing".
+SCOPE_ENFORCEMENT_DISABLED = None
+
 
 class MCPServer:
     """
@@ -85,6 +93,10 @@ class MCPServer:
         
         # Progress notification callback
         self._progress_callback: Optional[Callable] = None
+
+        # Scope enforcement (least-privilege). Lazily created on first use so
+        # servers that never enforce scopes pay no import cost.
+        self._scope_manager = None
         
         # Method handlers
         self._handlers: Dict[str, Callable] = {
@@ -139,12 +151,62 @@ class MCPServer:
         """Check if a request has been cancelled."""
         return request_id in self._cancelled_requests
     
-    async def handle_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _enforce_scopes(
+        self,
+        method: str,
+        granted_scopes: Optional[list],
+    ) -> Optional[Dict[str, Any]]:
+        """Check per-method scope requirements against the caller's grants.
+
+        Args:
+            method: JSON-RPC method being invoked
+            granted_scopes: Scopes granted to the caller, or None to disable
+                enforcement entirely (no auth configured).
+
+        Returns:
+            A JSON-RPC error dict (without id) if the requirement is not met,
+            otherwise None. The returned error's ``data`` carries the scope
+            challenge, including a ``www_authenticate`` string the transport can
+            surface as a WWW-Authenticate header.
+        """
+        if granted_scopes is SCOPE_ENFORCEMENT_DISABLED:
+            return None
+
+        # Wildcard grant satisfies every requirement (admin / single-key mode).
+        if "*" in granted_scopes:
+            return None
+
+        from .auth.scopes import get_operation_scopes, ScopeManager
+
+        requirement = get_operation_scopes(method)
+        if requirement is None:
+            return None
+
+        if self._scope_manager is None:
+            self._scope_manager = ScopeManager()
+
+        ok, challenge = requirement.check(granted_scopes or [], self._scope_manager)
+        if ok:
+            return None
+
+        data = challenge.to_dict()
+        data["www_authenticate"] = challenge.to_www_authenticate(realm=self.name)
+        return {"code": INSUFFICIENT_SCOPE, "message": "insufficient_scope", "data": data}
+
+    async def handle_message(
+        self,
+        message: Dict[str, Any],
+        granted_scopes: Optional[list] = SCOPE_ENFORCEMENT_DISABLED,
+    ) -> Optional[Dict[str, Any]]:
         """
         Handle an incoming JSON-RPC message.
         
         Args:
             message: JSON-RPC message
+            granted_scopes: Scopes granted to the caller. ``None`` (default)
+                disables scope enforcement for backward compatibility; a list
+                (possibly empty) enables per-method enforcement via
+                ``OPERATION_SCOPES``.
             
         Returns:
             Response message or None for notifications
@@ -188,6 +250,16 @@ class MCPServer:
             if is_notification:
                 return None
             return self._error_response(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+        
+        # Enforce per-method scopes (least-privilege). No-op when enforcement is
+        # disabled (granted_scopes is None) or the method has no scope mapping.
+        scope_error = self._enforce_scopes(method, granted_scopes)
+        if scope_error is not None:
+            if is_notification:
+                return None
+            return self._error_response(
+                msg_id, scope_error["code"], scope_error["message"], data=scope_error["data"]
+            )
         
         # Execute handler
         try:

@@ -68,7 +68,9 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
             logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
-            # Use scoped telemetry disabling instead of global patching
+            # Disable CrewAI telemetry while constructing agents/tasks/crew. The
+            # class-level fallback is locked + reference counted, so concurrent
+            # runs cannot corrupt the Telemetry class during this window.
             with scoped_telemetry_disable(Telemetry):
                 from ._config_builder import build_agent_specs
 
@@ -166,7 +168,14 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 logger.debug(f"Agents: {crew.agents}")
                 logger.debug(f"Tasks: {crew.tasks}")
 
-                response = crew.kickoff()
+                # Prefer per-instance telemetry shadowing around kickoff so the
+                # opt-out is race-free even under concurrent runs. Falls back to
+                # the (locked) class-level patch when the Crew does not expose a
+                # per-instance telemetry object.
+                crew_telemetry = getattr(crew, "_telemetry", None)
+                disable_target = crew_telemetry if crew_telemetry is not None else Telemetry
+                with scoped_telemetry_disable(disable_target):
+                    response = crew.kickoff()
                 result = f"### Task Output ###\n{response}"
 
                 return result
