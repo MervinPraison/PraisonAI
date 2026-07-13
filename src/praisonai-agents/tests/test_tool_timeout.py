@@ -108,3 +108,21 @@ def test_parallel_executor_forwards_timeout():
     results = ParallelToolCallExecutor().execute_batch(calls, execute, timeout_ms=200)
     assert results[0].error_kind == "timeout"
     assert results[1].error is None
+
+
+def test_llm_reads_tool_timeout_ms_from_extra_settings():
+    """Guard against regression where the timeout is accepted but never wired.
+
+    The executor plumbing is opt-in via ``extra_settings['tool_timeout_ms']``;
+    the ``LLM`` must store it so the tool-calling loop can forward it to
+    ``execute_batch``. Defaults to ``None`` for zero regression.
+    """
+    import pytest
+
+    llm_mod = pytest.importorskip("praisonaiagents.llm.llm")
+
+    configured = llm_mod.LLM(model="gpt-4o-mini", tool_timeout_ms=1500)
+    assert configured.tool_timeout_ms == 1500
+
+    default = llm_mod.LLM(model="gpt-4o-mini")
+    assert default.tool_timeout_ms is None

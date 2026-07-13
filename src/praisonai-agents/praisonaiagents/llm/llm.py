@@ -452,6 +452,11 @@ Respond with ONLY a valid JSON tool call in this format:
         self._force_tool_usage_explicit = 'force_tool_usage' in extra_settings
         self.max_tool_repairs = extra_settings.get('max_tool_repairs', 0)  # Will be set to 2 for Ollama if not explicit
         self.force_tool_usage = extra_settings.get('force_tool_usage', 'never')  # Will be set to 'auto' for Ollama if not explicit
+        # Optional per-tool timeout (ms). When set, a hung tool is abandoned and
+        # surfaced as a typed timeout result instead of blocking the turn.
+        # Opt-in via extra_settings (no new required param); defaults to None
+        # for zero regression.
+        self.tool_timeout_ms = extra_settings.get('tool_timeout_ms', None)
         
         # Initialize provider adapter for dispatch logic
         self._provider_adapter = self._initialize_provider_adapter()
@@ -2489,8 +2494,11 @@ Now provide your final answer using this result. Summarize the information natur
                             # Create appropriate executor based on parallel_tool_calls setting
                             executor = create_tool_call_executor(parallel=parallel_tool_calls)
                             
-                            # Execute batch
-                            tool_results_batch = executor.execute_batch(tool_calls_batch, execute_tool_fn)
+                            # Execute batch (forward optional per-tool timeout)
+                            tool_results_batch = executor.execute_batch(
+                                tool_calls_batch, execute_tool_fn,
+                                timeout_ms=self.tool_timeout_ms,
+                            )
                             
                             tool_results = []
                             for tool_call_obj, tool_result_obj in zip(tool_calls_batch, tool_results_batch):
@@ -3965,7 +3973,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         executor = create_tool_call_executor(parallel=parallel_tool_calls)
                         
                         # Execute batch and add results to conversation
-                        tool_results = executor.execute_batch(tool_calls_batch, execute_tool_fn)
+                        # (forward optional per-tool timeout)
+                        tool_results = executor.execute_batch(
+                            tool_calls_batch, execute_tool_fn,
+                            timeout_ms=self.tool_timeout_ms,
+                        )
                         
                         for tool_result in tool_results:
                             if tool_result.error is None:
