@@ -29,9 +29,26 @@ def test_drain_steering_messages_returns_all_pending():
     s.steer("note one")
     s.steer("note two")
     notes = s._drain_steering_messages()
-    assert "note one" in notes and "note two" in notes
+    joined = "\n".join(notes)
+    assert "note one" in joined and "note two" in joined
     # Draining a second time yields nothing (queue emptied)
     assert s._drain_steering_messages() == []
+
+
+def test_drain_steering_messages_preserves_interrupt_priority():
+    # A mid-run interrupt-priority steer must not be downgraded to normal
+    # guidance when drained and injected between tool iterations.
+    from praisonaiagents.agent.protocols import SteeringPriority
+
+    s = _Steerable()
+    s.steer("stop and pivot", priority=SteeringPriority.INTERRUPT.value)
+    s.steer("also consider Y", priority=SteeringPriority.NORMAL.value)
+    notes = s._drain_steering_messages()
+
+    interrupt_note = next((n for n in notes if "stop and pivot" in n), None)
+    normal_note = next((n for n in notes if "also consider Y" in n), None)
+    assert interrupt_note is not None and "[INTERRUPT USER GUIDANCE]" in interrupt_note
+    assert normal_note is not None and "[USER GUIDANCE]" in normal_note
 
 
 def test_drain_steering_messages_noop_when_disabled():

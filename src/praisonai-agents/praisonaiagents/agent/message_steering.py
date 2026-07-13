@@ -239,6 +239,22 @@ class SteeringMixin:
         """Whether message steering is enabled for this agent."""
         return self._message_steering is not None and self._message_steering.enabled
     
+    @staticmethod
+    def _format_steering_note(content: str, priority: str) -> str:
+        """
+        Format a steering message according to its priority.
+
+        Shared by ``_check_steering_messages`` (pre-turn) and
+        ``_drain_steering_messages`` (mid-run) so INTERRUPT/URGENT priority is
+        preserved consistently on every injection path.
+        """
+        if priority == "INTERRUPT":
+            return f"\n[INTERRUPT USER GUIDANCE]: {content}\nPlease stop current work and follow this guidance immediately."
+        elif priority in ("HIGH", "URGENT"):
+            return f"\n[URGENT USER GUIDANCE]: {content}\nPlease acknowledge and adjust your approach accordingly."
+        else:
+            return f"\n[USER GUIDANCE]: {content}\nPlease consider this feedback as you continue."
+
     def _check_steering_messages(self) -> Optional[str]:
         """
         Check for and process steering messages.
@@ -259,16 +275,7 @@ class SteeringMixin:
             if steering_messages:
                 # Get the most recent message
                 latest = steering_messages[-1]
-                content = latest["content"]
-                priority = latest["priority"]
-                
-                # Format as system message
-                if priority == "INTERRUPT":
-                    return f"\n[INTERRUPT USER GUIDANCE]: {content}\nPlease stop current work and follow this guidance immediately."
-                elif priority in ("HIGH", "URGENT"):
-                    return f"\n[URGENT USER GUIDANCE]: {content}\nPlease acknowledge and adjust your approach accordingly."
-                else:
-                    return f"\n[USER GUIDANCE]: {content}\nPlease consider this feedback as you continue."
+                return self._format_steering_note(latest["content"], latest["priority"])
         
         return None
 
@@ -278,11 +285,13 @@ class SteeringMixin:
 
         Unlike ``_check_steering_messages`` (which is rate-limited and returns a
         single formatted string for pre-turn use), this returns every pending
-        steering message's raw content so it can be injected as ``user``
-        messages between tool iterations of an in-flight run.
+        steering message formatted with priority-aware guidance so it can be
+        injected as ``user`` messages between tool iterations of an in-flight
+        run. INTERRUPT/URGENT priority is preserved so a mid-run interrupt is
+        not silently downgraded to normal guidance.
 
         Returns:
-            List of steering message contents (may be empty). Never raises.
+            List of formatted steering notes (may be empty). Never raises.
         """
         steering = getattr(self, "_message_steering", None)
         if steering is None:
@@ -293,9 +302,16 @@ class SteeringMixin:
                 msg = steering._message_queue.dequeue(timeout=0)
                 if msg is None:
                     break
-                content = getattr(msg, "content", msg)
-                if content:
-                    notes.append(str(content))
+                content = getattr(msg, "content", None)
+                if content is None:
+                    # Non-SteeringMessage payload - inject raw content as-is.
+                    if msg:
+                        notes.append(str(msg))
+                    continue
+                if not content:
+                    continue
+                priority = getattr(getattr(msg, "priority", None), "name", "NORMAL")
+                notes.append(self._format_steering_note(str(content), priority))
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"Draining steering messages failed: {e}")
         return notes
