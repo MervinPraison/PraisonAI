@@ -86,48 +86,93 @@ class HybridConversationAnalyzer:
         return unique_decisions[-10:]  # Keep last 10 decisions
     
     def identify_main_topic(self, messages: List[Dict[str, Any]]) -> str:
-        """Identify main topic using frequency analysis."""
+        """Identify main topic using frequency analysis.
+
+        Returns a human-readable topic phrase, preserving the original casing
+        of the source text (e.g. "REST API") for capitalized phrases while
+        using lowercase text only for frequency counting and action/focus
+        pattern matching. Candidates are ranked primarily by how often they
+        recur; capitalization is only a tie-breaker, so a frequently-discussed
+        lowercase topic still wins over a rarely-repeated capitalized word
+        (e.g. a greeting).
+        """
         if not messages:
             return "General conversation"
         
-        # Collect text content
-        text_content = []
+        # Collect text content, preserving original casing for
+        # capitalized-phrase extraction while keeping a lowercase copy for
+        # frequency counting and case-insensitive action/focus patterns.
+        original_content = []
         for msg in messages:
             content = str(msg.get("content", ""))
             if content and msg.get("role") in ("user", "assistant"):
-                text_content.append(content.lower())
+                original_content.append(content)
         
-        if not text_content:
+        if not original_content:
             return "General conversation"
         
-        # Extract potential topics (nouns and noun phrases)
-        topic_candidates = set()
-        combined_text = " ".join(text_content)
+        # Extract potential topics (nouns and noun phrases). Track whether a
+        # candidate came from the capitalized-phrase pattern so that readable,
+        # properly-cased phrases (e.g. "REST API") are preferred over lowercase
+        # action-object fragments (e.g. "a rest api").
+        combined_original = " ".join(original_content)
+        combined_lower = combined_original.lower()
+        cap_candidates = set()
+        other_candidates = set()
         
-        # Simple topic extraction patterns
-        topic_patterns = [
-            r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b",  # Capitalized phrases
-            r"\b(implement|build|create|develop|design)\s+([a-z\s]+)",  # Action + object
-            r"\b(working on|focusing on|dealing with)\s+([a-z\s]+)",  # Focus indicators
+        # Capitalized phrases: run on ORIGINAL case so uppercase acronyms and
+        # proper nouns (e.g. "REST", "API") are preserved. This intentionally
+        # does NOT use re.IGNORECASE.
+        cap_pattern = r"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b"
+        for match in re.finditer(cap_pattern, combined_original):
+            candidate = match.group(1).strip()
+            if 3 <= len(candidate) <= 50:  # Reasonable length
+                cap_candidates.add(candidate)
+        
+        # Action/focus patterns: run on lowercase text (case-insensitive).
+        # Capture only a short following noun phrase (a few words) and stop at
+        # punctuation or conjunctions so a single greedy match does not swallow
+        # multiple sentences and get discarded by the length filter. Optional
+        # leading articles ("a"/"an"/"the") are consumed but not captured.
+        object_np = r"(?:a |an |the )?([a-z][a-z]*(?:\s+[a-z]+){0,3})"
+        lower_patterns = [
+            rf"\b(?:implement|build|create|develop|design)\s+{object_np}",  # Action + object
+            rf"\b(?:working on|focusing on|dealing with)\s+{object_np}",  # Focus indicators
         ]
-        
-        for pattern in topic_patterns:
-            matches = re.finditer(pattern, combined_text, re.IGNORECASE)
-            for match in matches:
-                candidate = match.group(1 if len(match.groups()) == 1 else 2).strip()
+        stop_words = {"and", "or", "but", "with", "for", "the", "please", "now"}
+        for pattern in lower_patterns:
+            for match in re.finditer(pattern, combined_lower):
+                candidate = match.group(1).strip()
+                # Trim trailing stop words so "rest api and" -> "rest api".
+                words = candidate.split()
+                while words and words[-1] in stop_words:
+                    words.pop()
+                candidate = " ".join(words)
                 if 3 <= len(candidate) <= 50:  # Reasonable length
-                    topic_candidates.add(candidate)
+                    other_candidates.add(candidate)
         
-        if topic_candidates:
-            # Return most frequently mentioned candidate
-            word_freq = {}
-            for candidate in topic_candidates:
-                freq = combined_text.count(candidate.lower())
-                if freq > 1:  # Mentioned more than once
-                    word_freq[candidate] = freq
-            
-            if word_freq:
-                return max(word_freq.keys(), key=word_freq.get)
+        # Rank all repeated candidates by frequency. Capitalization is used
+        # only as a tie-breaker so that readable, properly-cased phrases
+        # (e.g. "REST API") are preferred over lowercase action-object
+        # fragments (e.g. "a rest api") of EQUAL frequency, while a genuinely
+        # more frequent lowercase topic still wins over a rarely-repeated
+        # capitalized word (e.g. a greeting like "Hello").
+        scored = {}
+        for is_cap, candidate_set in ((True, cap_candidates), (False, other_candidates)):
+            for candidate in candidate_set:
+                freq = combined_lower.count(candidate.lower())
+                if freq <= 1:  # Must be mentioned more than once
+                    continue
+                existing = scored.get(candidate)
+                if existing is None or (freq, is_cap) > existing[1:]:
+                    scored[candidate] = (candidate, freq, is_cap)
+
+        if scored:
+            # Prefer higher frequency, then capitalized phrases, then longer.
+            return max(
+                scored.values(),
+                key=lambda item: (item[1], item[2], len(item[0])),
+            )[0]
         
         # Fallback: Look at first user message
         for msg in messages:
