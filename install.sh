@@ -34,31 +34,71 @@ detect_platform() {
   info "Detected platform: ${os} ${arch}"
 }
 
-# Add a directory to PATH in the user's shell rc file, idempotently.
+# Append an export line to a single rc file, idempotently. Returns 0 on success.
+_append_path_line() {
+  rc="$1"
+  line="$2"
+  [ -n "${rc}" ] || return 1
+  if [ -f "${rc}" ] && grep -Fq "${bindir}" "${rc}" 2>/dev/null; then
+    return 0
+  fi
+  printf '\n# Added by PraisonAI installer\n%s\n' "${line}" >>"${rc}" 2>/dev/null
+}
+
+wire_path_dispatch() {
+  bindir="$1"
+  shell_name="$(basename "${SHELL:-sh}")"
+  updated=""
+
+  case "${shell_name}" in
+    zsh)
+      line="export PATH=\"${bindir}:\$PATH\""
+      _append_path_line "${HOME}/.zshrc" "${line}" && updated="${HOME}/.zshrc"
+      ;;
+    fish)
+      mkdir -p "${HOME}/.config/fish" 2>/dev/null || true
+      rc="${HOME}/.config/fish/config.fish"
+      # `fish_add_path` is unavailable on older fish; guard it and provide a
+      # POSIX-safe fallback so PATH is wired regardless of fish version.
+      line="if type -q fish_add_path; fish_add_path ${bindir}; else; set -gx PATH ${bindir} \$PATH; end"
+      _append_path_line "${rc}" "${line}" && updated="${rc}"
+      ;;
+    bash)
+      # Interactive non-login shells read ~/.bashrc; login shells read the
+      # first existing of ~/.bash_profile, ~/.bash_login, ~/.profile. Wire the
+      # interactive rc and whichever login profile applies so both work.
+      line="export PATH=\"${bindir}:\$PATH\""
+      _append_path_line "${HOME}/.bashrc" "${line}" && updated="${HOME}/.bashrc"
+      if [ -f "${HOME}/.bash_profile" ]; then
+        login_rc="${HOME}/.bash_profile"
+      elif [ -f "${HOME}/.bash_login" ]; then
+        login_rc="${HOME}/.bash_login"
+      else
+        login_rc="${HOME}/.profile"
+      fi
+      _append_path_line "${login_rc}" "${line}" \
+        && updated="${updated:+${updated} }${login_rc}"
+      ;;
+    *)
+      line="export PATH=\"${bindir}:\$PATH\""
+      _append_path_line "${HOME}/.profile" "${line}" && updated="${HOME}/.profile"
+      ;;
+  esac
+
+  if [ -n "${updated}" ]; then
+    info "Added ${bindir} to PATH in ${updated} (restart your shell to apply)."
+  else
+    warn "Could not update your shell profile; add ${bindir} to your PATH manually."
+  fi
+}
+
+# Add a directory to PATH in the user's shell rc file(s), idempotently.
 wire_path() {
   bindir="$1"
   case ":${PATH}:" in
     *":${bindir}:"*) return 0 ;;
   esac
-
-  shell_name="$(basename "${SHELL:-sh}")"
-  case "${shell_name}" in
-    zsh) rc="${HOME}/.zshrc"; line="export PATH=\"${bindir}:\$PATH\"" ;;
-    fish)
-      rc="${HOME}/.config/fish/config.fish"
-      line="fish_add_path ${bindir}"
-      mkdir -p "${HOME}/.config/fish" 2>/dev/null || true
-      ;;
-    bash) rc="${HOME}/.bashrc"; line="export PATH=\"${bindir}:\$PATH\"" ;;
-    *) rc="${HOME}/.profile"; line="export PATH=\"${bindir}:\$PATH\"" ;;
-  esac
-
-  if [ -f "${rc}" ] && grep -Fq "${bindir}" "${rc}" 2>/dev/null; then
-    return 0
-  fi
-  printf '\n# Added by PraisonAI installer\n%s\n' "${line}" >>"${rc}" 2>/dev/null \
-    && info "Added ${bindir} to PATH in ${rc} (restart your shell or 'source ${rc}')." \
-    || warn "Could not update ${rc}; add ${bindir} to your PATH manually."
+  wire_path_dispatch "${bindir}"
 }
 
 spec() {
@@ -88,7 +128,21 @@ bootstrap_uv() {
   else
     info "No uv/pipx found; bootstrapping uv..."
   fi
-  curl -fsSL https://astral.sh/uv/install.sh | sh
+  # Download the installer to a file first so a failed/empty download (which a
+  # piped `curl | sh` can silently swallow) surfaces here with a useful message
+  # instead of a later confusing `uv: command not found`.
+  tmp_installer="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/uv-install.$$.sh")"
+  if ! curl -fsSL https://astral.sh/uv/install.sh -o "${tmp_installer}" \
+      || [ ! -s "${tmp_installer}" ]; then
+    rm -f "${tmp_installer}" 2>/dev/null || true
+    err "Failed to download the uv bootstrap installer (network/DNS issue?)."
+    err "Install uv or pipx manually, then re-run this installer:"
+    err "  https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
+  fi
+  sh "${tmp_installer}"
+  rm -f "${tmp_installer}" 2>/dev/null || true
+
   # uv installs to ~/.local/bin or ~/.cargo/bin depending on platform.
   if [ -x "${HOME}/.local/bin/uv" ]; then
     PATH="${HOME}/.local/bin:${PATH}"
@@ -96,6 +150,14 @@ bootstrap_uv() {
     PATH="${HOME}/.cargo/bin:${PATH}"
   fi
   export PATH
+
+  # Verify the bootstrap actually produced a working `uv`; otherwise fail loudly
+  # instead of proceeding to `uv tool install` with no uv on PATH.
+  if ! has uv; then
+    err "uv bootstrap completed but 'uv' is not on PATH."
+    err "Open a new shell or install uv/pipx manually, then re-run this installer."
+    exit 1
+  fi
 }
 
 main() {

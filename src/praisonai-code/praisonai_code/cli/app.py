@@ -795,11 +795,17 @@ def main_callback(
     # raises (only reads a time-boxed cache, never performs network I/O here).
     if mode == OutputMode.TEXT and not state.quiet:
         try:
-            from .features.self_manage import read_cached_hint
+            from .features.self_manage import (
+                maybe_schedule_update_check,
+                read_cached_hint,
+            )
 
             hint = read_cached_hint()
             if hint:
                 typer.echo(hint, err=True)
+            # Warm the cache in a detached child for the next invocation. Never
+            # performs network I/O here and never blocks or raises.
+            maybe_schedule_update_check()
         except Exception:
             pass
 

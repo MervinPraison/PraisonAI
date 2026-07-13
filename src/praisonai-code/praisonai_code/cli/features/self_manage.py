@@ -258,3 +258,53 @@ def refresh_update_cache(timeout: float = 5.0) -> None:
     except Exception:
         # A read-only home or unwritable state dir must never break the CLI.
         return
+
+
+def _cache_is_fresh() -> bool:
+    """Return True when the update cache exists and is within its TTL."""
+    try:
+        path = _update_cache_path()
+        if not path.exists():
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        checked_at = float(data.get("checked_at", 0))
+        return (time.time() - checked_at) <= _UPDATE_CHECK_TTL_SECONDS
+    except Exception:
+        return False
+
+
+def maybe_schedule_update_check() -> None:
+    """Warm the update cache in a fully detached background process.
+
+    Called once per CLI start. Performs **no** network I/O in the caller and
+    never blocks or raises: if the cache is missing/stale it spawns a
+    short-lived detached child that refreshes it for the *next* invocation. If
+    the cache is already fresh, or checks are disabled, this is a no-op.
+    """
+    if update_check_disabled():
+        return
+    try:
+        if _cache_is_fresh():
+            return
+        # Detached, output-suppressed child so the parent CLI never waits on it.
+        code = (
+            "from praisonai_code.cli.features.self_manage import "
+            "refresh_update_cache; refresh_update_cache()"
+        )
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+        }
+        if os.name == "posix":
+            kwargs["start_new_session"] = True
+        else:  # pragma: no cover - Windows-only detach flag
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
+            if creationflags:
+                kwargs["creationflags"] = creationflags
+        subprocess.Popen([sys.executable, "-c", code], **kwargs)
+    except Exception:
+        # Best-effort only: a spawn failure must never break start-up.
+        return
