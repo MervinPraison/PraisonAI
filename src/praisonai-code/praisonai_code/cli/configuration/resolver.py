@@ -3,17 +3,24 @@ Unified configuration resolver for PraisonAI CLI.
 
 Implements a single, project-aware configuration hierarchy with proper precedence:
 1. Built-in defaults
-2. Global user config (~/.praisonai/config.yaml)
-3. Project config (discovered by walking up from cwd)
-4. Environment variables
-5. Explicit CLI flags
+2. Managed non-policy defaults (optional; below local so teams suggest, not clobber)
+3. Global user config (~/.praisonai/config.yaml)
+4. Project config (discovered by walking up from cwd)
+5. Environment variables
+6. Explicit CLI flags
+7. Managed policy (optional; above local so an org can enforce, not just suggest)
 
 Supports deep-merge semantics and backward compatibility with legacy paths.
+
+The managed layer is fully opt-in: with no managed source configured
+(``PRAISONAI_MANAGED_CONFIG_URL`` / ``PRAISONAI_MANAGED_CONFIG_DIR`` or a global
+``managed`` config section), resolution behaves exactly as before.
 """
 
 import os
 import json
 import difflib
+import hashlib
 import warnings
 import toml
 import yaml
@@ -23,6 +30,15 @@ from typing import Any, Dict, List, Optional, Union
 
 from ..utils.project import get_git_root
 from ..utils.env_utils import interpolate
+
+
+# Policy keys sourced from a managed layer are enforced ABOVE local config so an
+# organisation can guarantee (not merely suggest) them. Everything else from a
+# managed source is treated as a default and layered BELOW local config.
+MANAGED_POLICY_KEYS = ("permissions", "model_allowlist")
+
+# Where the managed-config on-disk cache lives (fail-soft last-good copy).
+_MANAGED_CACHE_DIRNAME = "state"
 
 
 # Known top-level sections the resolver consumes.
@@ -38,6 +54,10 @@ KNOWN_TOP_LEVEL_KEYS = {
     "checkpoints",
     # Plugin enablement + per-plugin options (unified project config surface).
     "plugins",
+    # Optional managed/remote config source ({url, dir, timeout, enforce}).
+    "managed",
+    # Managed model allow-list (enforceable policy key).
+    "model_allowlist",
 }
 
 # Reserved keys in the plugins section; any other key is a per-plugin option map.
@@ -233,6 +253,9 @@ class ResolvedConfig:
     # Permission policy declared in project config (single source of truth)
     permissions: Dict[str, Any] = field(default_factory=dict)
     
+    # Model allow-list (enforceable policy key; may be set by a managed source)
+    model_allowlist: List[str] = field(default_factory=list)
+    
     # Plugin enablement + per-plugin options declared in project config.
     # Reserved keys: enabled/auto_discover/directories; any other key is a
     # per-plugin option map delivered to that plugin's on_config hook.
@@ -262,6 +285,8 @@ class ResolvedConfig:
             result["mcp"] = self.mcp
         if self.permissions:
             result["permissions"] = self.permissions
+        if self.model_allowlist:
+            result["model_allowlist"] = self.model_allowlist
         if self.plugins:
             result["plugins"] = self.plugins
         return result
@@ -274,7 +299,8 @@ class ResolvedConfig:
         output_data = data.get("output", {})
         
         # Extract known top-level fields
-        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "plugins", "sources", "$schema", "_source"}
+        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions",
+                      "model_allowlist", "managed", "plugins", "sources", "$schema", "_source"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         return cls(
@@ -287,6 +313,7 @@ class ResolvedConfig:
             telemetry=data.get("telemetry", True),
             mcp=mcp_data if isinstance(mcp_data := data.get("mcp"), dict) else {},
             permissions=perm_data if isinstance(perm_data := data.get("permissions"), dict) else {},
+            model_allowlist=allow if isinstance(allow := data.get("model_allowlist"), list) else [],
             plugins=plugins_data if isinstance(plugins_data := data.get("plugins"), dict) else {},
             sources=data.get("sources", []),
             extra=extra,
@@ -346,33 +373,54 @@ class ConfigResolver:
         if self._cache and not force_refresh and not cli_args:
             return self._cache
         
+        # Load the optional managed source once and split it into a
+        # (non-policy defaults, enforced policy) pair. When no managed source is
+        # configured both are empty and precedence is unchanged.
+        managed = self._load_managed_config()
+        managed_source = managed.get("_source") if managed else None
+        managed_defaults, managed_policy = self._split_managed_config(managed)
+
         # Start with defaults
         config = ResolvedConfig()
         config.sources.append("defaults")
         
-        # Layer 2: Global user config
+        # Layer 2: Managed non-policy defaults (below local so teams set
+        # defaults without clobbering deliberate local choices).
+        if managed_defaults:
+            config = self._merge_configs(config, managed_defaults)
+            config.sources.append(f"managed:{managed_source}")
+        
+        # Layer 3: Global user config
         global_config = self._load_global_config()
         if global_config:
             config = self._merge_configs(config, global_config)
             config.sources.append(f"global:{global_config['_source']}")
         
-        # Layer 3: Project config (with walk-up discovery)
+        # Layer 4: Project config (with walk-up discovery)
         project_config = self._load_project_config()
         if project_config:
             config = self._merge_configs(config, project_config)
             config.sources.append(f"project:{project_config['_source']}")
         
-        # Layer 4: Environment variables
+        # Layer 5: Environment variables
         env_config = self._load_env_config()
         if env_config:
             config = self._merge_configs(config, env_config)
             config.sources.append("environment")
         
-        # Layer 5: CLI arguments (if provided)
+        # Layer 6: CLI arguments (if provided)
         if cli_args:
             cli_config = self._process_cli_args(cli_args)
             config = self._merge_configs(config, cli_config)
             config.sources.append("cli")
+        
+        # Layer 7: Managed policy (permissions, model allow-list) enforced ABOVE
+        # all local layers so an org policy cannot be silently overridden.
+        # Enforced values replace (not merge/concat) any local counterpart so a
+        # local override of an enforced key is ignored, not appended.
+        if managed_policy:
+            config = self._merge_configs(config, managed_policy, replace_lists=True)
+            config.sources.append(f"managed-policy:{managed_source}")
         
         # Cache if no CLI args (CLI args are transient)
         if not cli_args:
@@ -453,6 +501,163 @@ class ConfigResolver:
         
         return None
     
+    def _managed_source_spec(self) -> Dict[str, Any]:
+        """Resolve where the managed config should be fetched from, if anywhere.
+
+        Precedence: environment variables override the global config's
+        ``managed`` section. Returns an empty dict when no managed source is
+        configured (the fully opt-in / backward-compatible path).
+        """
+        spec: Dict[str, Any] = {}
+
+        # Global config may declare a `managed` section.
+        global_config = self._load_global_config()
+        if global_config and isinstance(global_config.get("managed"), dict):
+            spec.update(global_config["managed"])
+
+        # Environment overrides take precedence over the global section.
+        env_url = os.environ.get("PRAISONAI_MANAGED_CONFIG_URL")
+        if env_url:
+            spec["url"] = env_url
+        env_dir = os.environ.get("PRAISONAI_MANAGED_CONFIG_DIR")
+        if env_dir:
+            spec["dir"] = env_dir
+        env_timeout = os.environ.get("PRAISONAI_MANAGED_CONFIG_TIMEOUT")
+        if env_timeout:
+            try:
+                spec["timeout"] = float(env_timeout)
+            except ValueError:
+                pass
+
+        return spec
+
+    def _managed_cache_path(self, url: str) -> Path:
+        """Deterministic on-disk cache location for a managed URL."""
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+        cache_dir = Path.home() / ".praison" / _MANAGED_CACHE_DIRNAME
+        return cache_dir / f"managed-config-{digest}.json"
+
+    def _fetch_managed_url(self, url: str, timeout: float) -> Optional[Dict[str, Any]]:
+        """Fetch managed config from a URL, fail-soft to the cached copy.
+
+        Never blocks a run on the network: a short timeout is used and any
+        failure falls back to the last good on-disk cache, else ``None`` so the
+        managed layer is simply skipped (offline == local-only behaviour).
+        """
+        cache_path = self._managed_cache_path(url)
+        data: Optional[Dict[str, Any]] = None
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+                raw = resp.read().decode("utf-8")
+            parsed = yaml.safe_load(raw)
+            if isinstance(parsed, dict):
+                data = parsed
+        except Exception:
+            data = None
+
+        if data is not None:
+            # Persist the last good copy for offline fail-soft.
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(data))
+            except OSError:
+                pass
+            return data
+
+        # Fetch failed: fall back to the cached last-good copy if present.
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text())
+                if isinstance(cached, dict):
+                    return cached
+            except (OSError, json.JSONDecodeError):
+                return None
+        return None
+
+    def _load_managed_dir(self, dir_path: str) -> Optional[Dict[str, Any]]:
+        """Load managed config from a managed/enterprise directory on disk."""
+        try:
+            base = Path(dir_path).expanduser()
+        except (OSError, ValueError):
+            return None
+        for name in ("config.yaml", "config.yml", "config.json"):
+            candidate = base / name
+            if candidate.exists():
+                data = self._read_config_file(candidate)
+                if isinstance(data, dict):
+                    data = dict(data)
+                    data["_source"] = str(candidate)
+                    return data
+        return None
+
+    def _load_managed_config(self) -> Optional[Dict[str, Any]]:
+        """Load the optional managed config (remote URL and/or managed dir).
+
+        Returns the merged managed config dict (with ``_source`` provenance) or
+        ``None`` when no managed source is configured or nothing could be
+        loaded. Backward-compatible: absent configuration is a no-op.
+        """
+        spec = self._managed_source_spec()
+        if not spec:
+            return None
+
+        merged: Dict[str, Any] = {}
+        sources: List[str] = []
+
+        # Managed directory (MDM/config-management) first.
+        dir_path = spec.get("dir")
+        if dir_path:
+            dir_data = self._load_managed_dir(str(dir_path))
+            if dir_data:
+                src = dir_data.pop("_source", str(dir_path))
+                merged = self._deep_merge(merged, dir_data)
+                sources.append(src)
+
+        # Remote URL (fail-soft, cached) layered on top of the managed dir.
+        url = spec.get("url")
+        if url:
+            timeout = float(spec.get("timeout", 3.0))
+            url_data = self._fetch_managed_url(str(url), timeout)
+            if url_data:
+                merged = self._deep_merge(merged, url_data)
+                sources.append(str(url))
+
+        if not merged:
+            return None
+
+        # Validate the config body only; the ``enforce`` flag is a managed
+        # control key, not a config section, so it is excluded from validation.
+        self._validate(
+            {k: v for k, v in merged.items() if k != "enforce"}, source="managed"
+        )
+        merged["_source"] = ", ".join(sources) if sources else "managed"
+        return merged
+
+    def _split_managed_config(
+        self, managed: Optional[Dict[str, Any]]
+    ) -> tuple:
+        """Split a managed config into (non-policy defaults, enforced policy).
+
+        Policy keys (``permissions``, ``model_allowlist``) are enforced above
+        local config unless the managed source opts out via ``enforce: false``.
+        Everything else is treated as an overridable default below local config.
+        """
+        if not managed:
+            return {}, {}
+
+        enforce = managed.get("enforce", True)
+        body = {k: v for k, v in managed.items() if k not in ("_source", "managed", "enforce")}
+
+        if not enforce:
+            # Opt-out: the whole managed source is advisory (below local).
+            return body, {}
+
+        policy = {k: body[k] for k in MANAGED_POLICY_KEYS if k in body}
+        defaults = {k: v for k, v in body.items() if k not in MANAGED_POLICY_KEYS}
+        return defaults, policy
+
     def resolve_with_provenance(
         self, cli_args: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Dict[str, Any]]:
@@ -473,29 +678,48 @@ class ConfigResolver:
                     "source": source,
                 }
 
+        managed = self._load_managed_config()
+        managed_source = managed.get("_source") if managed else None
+        managed_defaults, managed_policy = self._split_managed_config(managed)
+
         # Layer 1: built-in defaults (from an empty ResolvedConfig).
         _record("defaults", None, ResolvedConfig().to_dict())
 
-        # Layer 2: global user config.
+        # Layer 2: managed non-policy defaults (below local).
+        if managed_defaults:
+            _record(f"managed:{managed_source}", managed_source, managed_defaults)
+
+        # Layer 3: global user config.
         global_config = self._load_global_config()
         if global_config:
             source = global_config.get("_source")
             _record("global", source, {k: v for k, v in global_config.items() if k != "_source"})
 
-        # Layer 3: project config (walk-up discovery).
+        # Layer 4: project config (walk-up discovery).
         project_config = self._load_project_config()
         if project_config:
             source = project_config.get("_source")
             _record("project", source, {k: v for k, v in project_config.items() if k != "_source"})
 
-        # Layer 4: environment variables.
+        # Layer 5: environment variables.
         env_config = self._load_env_config()
         if env_config:
             _record("environment", None, env_config)
 
-        # Layer 5: CLI arguments.
+        # Layer 6: CLI arguments.
         if cli_args:
             _record("cli", None, self._process_cli_args(cli_args))
+
+        # Layer 7: managed policy — enforced above local; marked non-overridable
+        # so it is obvious an org policy won over any local setting.
+        if managed_policy:
+            for dotted, value in self._flatten(managed_policy).items():
+                provenance[dotted] = {
+                    "value": value,
+                    "layer": f"managed-policy:{managed_source}",
+                    "source": managed_source,
+                    "enforced": True,
+                }
 
         return provenance
 
@@ -700,14 +924,25 @@ class ConfigResolver:
         
         return migrated
     
-    def _merge_configs(self, base: ResolvedConfig, overlay: Dict[str, Any]) -> ResolvedConfig:
-        """Merge overlay config into base config."""
+    def _merge_configs(
+        self,
+        base: ResolvedConfig,
+        overlay: Dict[str, Any],
+        replace_lists: bool = False,
+    ) -> ResolvedConfig:
+        """Merge overlay config into base config.
+
+        Args:
+            replace_lists: When True, overlay lists replace base lists instead
+                of concatenating. Used for enforced managed-policy so an org
+                allow-list wins outright rather than being appended to.
+        """
         # Convert base to dict for merging
         base_dict = base.to_dict()
         base_dict["sources"] = base.sources
         
         # Deep merge
-        merged_dict = self._deep_merge(base_dict, overlay)
+        merged_dict = self._deep_merge(base_dict, overlay, replace_lists=replace_lists)
         
         # Convert back to ResolvedConfig
         result = ResolvedConfig.from_dict(merged_dict)
@@ -715,8 +950,17 @@ class ConfigResolver:
         
         return result
     
-    def _deep_merge(self, base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
-        """Deep merge overlay into base dictionary."""
+    def _deep_merge(
+        self,
+        base: Dict[str, Any],
+        overlay: Dict[str, Any],
+        replace_lists: bool = False,
+    ) -> Dict[str, Any]:
+        """Deep merge overlay into base dictionary.
+
+        When ``replace_lists`` is True, overlay lists replace base lists rather
+        than being concatenated (used for enforced managed policy values).
+        """
         result = base.copy()
         
         for key, value in overlay.items():
@@ -726,10 +970,10 @@ class ConfigResolver:
             if key in result:
                 if isinstance(result[key], dict) and isinstance(value, dict):
                     # Recursive merge for nested dicts
-                    result[key] = self._deep_merge(result[key], value)
+                    result[key] = self._deep_merge(result[key], value, replace_lists=replace_lists)
                 elif isinstance(result[key], list) and isinstance(value, list):
-                    # Concatenate lists (could be configurable)
-                    result[key] = result[key] + value
+                    # Concatenate lists (or replace when enforcing policy).
+                    result[key] = list(value) if replace_lists else result[key] + value
                 else:
                     # Scalar override
                     result[key] = value
