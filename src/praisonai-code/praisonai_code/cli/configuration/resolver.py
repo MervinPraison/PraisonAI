@@ -21,7 +21,10 @@ import os
 import json
 import difflib
 import hashlib
+import ipaddress
+import socket
 import warnings
+from urllib.parse import urlparse
 import toml
 import yaml
 from dataclasses import dataclass, field, asdict
@@ -39,6 +42,64 @@ MANAGED_POLICY_KEYS = ("permissions", "model_allowlist")
 
 # Where the managed-config on-disk cache lives (fail-soft last-good copy).
 _MANAGED_CACHE_DIRNAME = "state"
+
+# Only these URL schemes may be fetched for a managed config. ``https`` is the
+# safe default; plain ``http`` is permitted solely so an operator can point at an
+# explicit loopback dev server (validated separately below).
+_MANAGED_ALLOWED_SCHEMES = ("https", "http")
+
+
+def _is_safe_managed_url(url: str) -> bool:
+    """Whether a managed-config URL is safe to fetch (SSRF guard).
+
+    Rejects non-http(s) schemes (``file:``, ``gopher:``, etc.) and any host that
+    resolves to a private, loopback, link-local, or otherwise non-global
+    address. This blocks the managed layer from being pointed at internal
+    services or cloud metadata endpoints (e.g. ``169.254.169.254``) during a
+    normal CLI run. Plain ``http`` is allowed only for explicit loopback.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _MANAGED_ALLOWED_SCHEMES:
+        return False
+
+    host = parsed.hostname
+    if not host:
+        return False
+
+    # Resolve the host to every candidate address and require all of them to be
+    # global (public). If any resolves to a private/internal range, reject —
+    # this defends against DNS entries that point inward.
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if scheme == "https" else 80))
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+
+    saw_address = False
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        saw_address = True
+        is_loopback = ip.is_loopback
+        if not (ip.is_global and not ip.is_private):
+            # Plain http is tolerated only for an explicit loopback dev server.
+            if scheme == "http" and is_loopback:
+                continue
+            return False
+        if scheme == "http":
+            # http to a public host is not allowed (loopback-only above).
+            return False
+
+    return saw_address
 
 
 # Known top-level sections the resolver consumes.
@@ -416,10 +477,11 @@ class ConfigResolver:
         
         # Layer 7: Managed policy (permissions, model allow-list) enforced ABOVE
         # all local layers so an org policy cannot be silently overridden.
-        # Enforced values replace (not merge/concat) any local counterpart so a
-        # local override of an enforced key is ignored, not appended.
+        # Enforced keys REPLACE (not merge/concat) any local counterpart wholesale
+        # so a local override of an enforced key is ignored — including nested
+        # local sub-keys the managed policy does not itself mention.
         if managed_policy:
-            config = self._merge_configs(config, managed_policy, replace_lists=True)
+            config = self._enforce_policy(config, managed_policy)
             config.sources.append(f"managed-policy:{managed_source}")
         
         # Cache if no CLI args (CLI args are transient)
@@ -546,16 +608,29 @@ class ConfigResolver:
         """
         cache_path = self._managed_cache_path(url)
         data: Optional[Dict[str, Any]] = None
-        try:
-            import urllib.request
 
-            with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
-                raw = resp.read().decode("utf-8")
-            parsed = yaml.safe_load(raw)
-            if isinstance(parsed, dict):
-                data = parsed
-        except Exception:
-            data = None
+        # SSRF guard: only fetch http(s) URLs that resolve to a public host (or
+        # explicit loopback for http). A rejected URL falls through to the cache
+        # fallback below, exactly like an offline fetch, so behaviour stays
+        # fail-soft and never targets internal/metadata endpoints.
+        if _is_safe_managed_url(url):
+            try:
+                import urllib.request
+
+                with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+                    raw = resp.read().decode("utf-8")
+                parsed = yaml.safe_load(raw)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except Exception:
+                data = None
+        else:
+            warnings.warn(
+                f"Ignoring unsafe managed config URL '{url}': only https (or "
+                "loopback http) URLs resolving to a public host are fetched.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if data is not None:
             # Persist the last good copy for offline fail-soft.
@@ -924,6 +999,32 @@ class ConfigResolver:
         
         return migrated
     
+    def _enforce_policy(
+        self, base: ResolvedConfig, policy: Dict[str, Any]
+    ) -> ResolvedConfig:
+        """Enforce managed-policy keys ABOVE local config by REPLACING them.
+
+        Unlike a deep merge, each enforced top-level key (``permissions``,
+        ``model_allowlist``) is swapped out wholesale so that no local sub-key
+        (e.g. a project ``permissions.default: allow`` or extra ``rules``)
+        survives when the managed policy narrows or omits it. A managed policy
+        that documents "replace local permissions" must not silently inherit
+        local allow rules.
+        """
+        base_dict = base.to_dict()
+        base_dict["sources"] = base.sources
+
+        # Drop any local counterpart of an enforced key before applying policy so
+        # nested local entries cannot survive, then set the managed value outright.
+        for key, value in policy.items():
+            if key == "_source":
+                continue
+            base_dict[key] = value
+
+        result = ResolvedConfig.from_dict(base_dict)
+        result.sources = base.sources
+        return result
+
     def _merge_configs(
         self,
         base: ResolvedConfig,

@@ -86,6 +86,63 @@ def test_managed_policy_enforced_above_local(tmp_path, monkeypatch):
     assert config.model_allowlist == ["gpt-4o"]
 
 
+def test_enforced_policy_replaces_local_nested_permissions(tmp_path, monkeypatch):
+    """A managed policy that narrows permissions must not inherit local sub-keys.
+
+    Regression guard for the deep-merge leak: a local ``permissions.default:
+    allow`` / local ``rules`` must NOT survive when the managed policy sets a
+    different, narrower ``permissions`` block. Enforcement replaces the whole
+    ``permissions`` key wholesale.
+    """
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    managed_dir = _write_managed_dir(
+        tmp_path,
+        "permissions:\n"
+        "  bash:\n"
+        "    auto: false\n",
+    )
+    monkeypatch.setenv("PRAISONAI_MANAGED_CONFIG_DIR", str(managed_dir))
+
+    proj = tmp_path / ".praisonai"
+    proj.mkdir()
+    (proj / "config.yaml").write_text(
+        "permissions:\n"
+        "  default: allow\n"
+        "  rules:\n"
+        "    - allow-everything\n"
+    )
+
+    resolver = ConfigResolver(cwd=tmp_path)
+    config = resolver.resolve()
+
+    # Only the managed permissions block remains — no local default/rules leak.
+    assert config.permissions == {"bash": {"auto": False}}
+    assert "default" not in config.permissions
+    assert "rules" not in config.permissions
+
+
+def test_unsafe_managed_url_is_not_fetched(tmp_path, monkeypatch):
+    """SSRF guard: non-http(s) and internal-host URLs must not be fetched.
+
+    A ``file://`` URL (and, by extension, loopback/metadata hosts) is rejected
+    before any network/file access, so a configured managed URL cannot coerce
+    the CLI into reading internal endpoints. With no cache the layer is skipped.
+    """
+    home = tmp_path / "home"
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    secret = tmp_path / "secret.yaml"
+    secret.write_text("agent:\n  model: exfiltrated\n")
+    monkeypatch.setenv("PRAISONAI_MANAGED_CONFIG_URL", f"file://{secret}")
+
+    resolver = ConfigResolver(cwd=tmp_path)
+    config = resolver.resolve()
+
+    # The file:// URL was refused: the managed layer is a no-op.
+    assert config.agent.model != "exfiltrated"
+    assert config.sources == ["defaults"]
+
+
 def test_provenance_labels_managed_origins(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
     managed_dir = _write_managed_dir(
