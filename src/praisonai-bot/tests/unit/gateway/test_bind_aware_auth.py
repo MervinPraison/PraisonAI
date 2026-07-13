@@ -181,6 +181,21 @@ class TestLoopbackAuthBypassDefault:
     def test_missing_client_host_blocks_bypass(self):
         assert self._bypass("127.0.0.1", None, allow_env="") is False
 
+    def test_semantic_loopback_client_bypasses(self):
+        """Loopback clients reported as non-canonical addresses still bypass.
+
+        L4-forwarded/local peers can appear as ``127.0.0.2``,
+        ``127.255.255.255`` or the expanded IPv6 form ``0:0:0:0:0:0:0:1``.
+        These are semantically loopback and must not get a spurious 401.
+        """
+        for client in ("127.0.0.2", "127.255.255.255", "0:0:0:0:0:0:0:1"):
+            assert self._bypass("127.0.0.1", client, allow_env="") is True
+
+    def test_non_loopback_client_string_blocks_bypass(self):
+        """A non-loopback client address must not bypass on a loopback bind."""
+        assert self._bypass("127.0.0.1", "10.0.0.5", allow_env="") is False
+        assert self._bypass("127.0.0.1", "2001:db8::1", allow_env="") is False
+
     def test_env_var_default_read(self, monkeypatch):
         """When allow_env is not passed, the env var drives the decision."""
         from praisonai_bot.gateway.server import _should_bypass_loopback_auth

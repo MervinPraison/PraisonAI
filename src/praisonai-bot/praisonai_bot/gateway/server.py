@@ -198,7 +198,12 @@ def _should_bypass_loopback_auth(
         if not is_loopback(bind_host or ""):
             return False
 
-    if not client_host or client_host not in ("127.0.0.1", "::1", "localhost"):
+    # The client must itself be a loopback peer. Use ``is_loopback`` (not an
+    # exact-string match) so semantically-loopback addresses such as
+    # ``127.0.0.2``, ``127.255.255.255`` or the expanded IPv6 form
+    # ``0:0:0:0:0:0:0:1`` are accepted too — otherwise a fresh local request
+    # from one of those peers would wrongly get a 401 (Greptile #2945).
+    if not is_loopback(client_host or ""):
         return False
     # Reject if proxy headers are present (indicates request went through proxy)
     proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
