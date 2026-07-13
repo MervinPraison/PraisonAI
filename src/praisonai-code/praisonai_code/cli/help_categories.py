@@ -45,6 +45,8 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "doctor": CATEGORY_GET_STARTED,
     "models": CATEGORY_GET_STARTED,
     "version": CATEGORY_GET_STARTED,
+    "upgrade": CATEGORY_GET_STARTED,
+    "uninstall": CATEGORY_GET_STARTED,
 
     # Run & chat — invoke agents interactively or headless.
     "run": CATEGORY_RUN_CHAT,

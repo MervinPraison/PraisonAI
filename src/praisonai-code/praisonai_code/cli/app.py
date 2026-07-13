@@ -149,6 +149,8 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "session": (".commands.session", "app", "Session management"),
     "completion": (".commands.completion", "app", "Shell completion scripts"),
     "version": (".commands.version", "app", "Version information"),
+    "upgrade": (".commands.upgrade", "app", "Update the managed PraisonAI CLI install"),
+    "uninstall": (".commands.uninstall", "app", "Remove the managed PraisonAI CLI install"),
     "debug": (".commands.debug", "app", "Debug and test interactive flows"),
     "lsp": (".commands.lsp", "app", "LSP service lifecycle"),
     "diag": (".commands.diag", "app", "Diagnostics export"),
@@ -787,7 +789,20 @@ def main_callback(
         trace_id=context.trace_id,
     )
     set_output_controller(state.output_controller)
-    
+
+    # Non-blocking "update available" hint from the cached background check.
+    # Text-mode only, opt-out via PRAISONAI_NO_UPDATE_CHECK; never blocks or
+    # raises (only reads a time-boxed cache, never performs network I/O here).
+    if mode == OutputMode.TEXT and not state.quiet:
+        try:
+            from .features.self_manage import read_cached_hint
+
+            hint = read_cached_hint()
+            if hint:
+                typer.echo(hint, err=True)
+        except Exception:
+            pass
+
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
         # Check for credentials before starting TUI
