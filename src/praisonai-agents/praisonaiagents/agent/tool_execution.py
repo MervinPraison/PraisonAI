@@ -968,31 +968,35 @@ class ToolExecutionMixin:
                 ) from e
             raise  # Re-raise if already wrapped
 
-    def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
-        """Trigger AFTER_AGENT hook and return response."""
-        # During a guarded skill-review turn, skip the entire after-agent
-        # side-effect pipeline (hooks, auto-memory, auto-learning, nudge,
-        # skill-review). The review turn is internal and must not re-fire
-        # these effects or recurse into another review.
-        if getattr(self, "_in_skill_review", False):
-            return response
-        # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
-        from ..hooks import HookEvent, AfterAgentInput
-        if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
-            after_agent_input = AfterAgentInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.AFTER_AGENT,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                prompt=prompt if isinstance(prompt, str) else str(prompt),
-                response=response or "",
-                tools_used=tools_used or [],
-                total_tokens=0,
-                execution_time_ms=(time.time() - start_time) * 1000
-            )
-            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+    def _build_after_agent_input(self, prompt, response, start_time, tools_used=None):
+        """Build the AfterAgentInput payload shared by sync/async hook dispatch.
 
+        Loop-agnostic (no ``await``, no event-loop interaction) so it can be
+        reused by both ``_trigger_after_agent_hook`` and
+        ``_atrigger_after_agent_hook`` without any async-safety change.
+        """
+        from ..hooks import HookEvent, AfterAgentInput
+        return AfterAgentInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.AFTER_AGENT,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            prompt=prompt if isinstance(prompt, str) else str(prompt),
+            response=response or "",
+            tools_used=tools_used or [],
+            total_tokens=0,
+            execution_time_ms=(time.time() - start_time) * 1000
+        )
+
+    def _after_agent_side_effects(self, prompt, response):
+        """Run loop-agnostic after-agent side effects (no ``await`` inside).
+
+        Covers auto-memory extraction, auto-learning extraction, and the
+        periodic learning nudge. Skill-review and hook dispatch remain in the
+        respective sync/async public methods because they differ on the async
+        boundary.
+        """
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
         if response:
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
@@ -1012,6 +1016,22 @@ class ToolExecutionMixin:
         except Exception as e:
             # Log learning nudge failures for debugging
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
+
+    def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
+        """Trigger AFTER_AGENT hook and return response."""
+        # During a guarded skill-review turn, skip the entire after-agent
+        # side-effect pipeline (hooks, auto-memory, auto-learning, nudge,
+        # skill-review). The review turn is internal and must not re-fire
+        # these effects or recurse into another review.
+        if getattr(self, "_in_skill_review", False):
+            return response
+        # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
+        from ..hooks import HookEvent
+        if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
+            after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
+            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+
+        self._after_agent_side_effects(prompt, response)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
         # Runs a guarded review pass restricted to skill_manage. No-op when
@@ -1058,38 +1078,12 @@ class ToolExecutionMixin:
         if getattr(self, "_in_skill_review", False):
             return response
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
-        from ..hooks import HookEvent, AfterAgentInput
+        from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
-            after_agent_input = AfterAgentInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.AFTER_AGENT,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                prompt=prompt if isinstance(prompt, str) else str(prompt),
-                response=response or "",
-                tools_used=tools_used or [],
-                total_tokens=0,
-                execution_time_ms=(time.time() - start_time) * 1000
-            )
+            after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
             await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
-        
-        # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
-        if response:
-            prompt_str = prompt if isinstance(prompt, str) else str(prompt)
-            self._process_auto_memory(prompt_str, str(response))
-        
-        # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
-        self._process_auto_learning()
 
-        # Periodic nudge (opt-in via LearnConfig(nudge_interval>0)).
-        try:
-            nudge = self._maybe_emit_nudge(prompt if isinstance(prompt, str) else str(prompt))
-            if nudge and hasattr(self, "chat_history") and isinstance(self.chat_history, list):
-                self._append_to_chat_history({"role": "system", "content": nudge.strip()})
-        except Exception as e:
-            # Log learning nudge failures for debugging
-            logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
+        self._after_agent_side_effects(prompt, response)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
         # In "background" mode the review runs off the hot path on the core
