@@ -414,12 +414,20 @@ class CustomDefinitionsDiscovery:
 
         Executing the module is gated by ``PRAISONAI_ALLOW_LOCAL_TOOLS`` via the
         shared safe loader; when disabled or on error this returns an empty list.
+
+        User-global tools (``~/.praisonai/tools/``, ``source="user"``) live
+        outside the project CWD by design, so the safe loader's CWD boundary is
+        opted out for that explicitly user-owned location — mirroring how an
+        explicit ``--tools`` path is trusted. Project-local tools keep the
+        default CWD check so an untrusted checkout cannot escape it.
         """
         try:
             from praisonai_code._safe_loader import load_user_module
 
             module = load_user_module(
-                file_path, name=f"praisonai_tools_{file_path.stem}"
+                file_path,
+                name=f"praisonai_tools_{file_path.stem}",
+                allow_outside_cwd=(source == "user"),
             )
             if module is None:
                 return []

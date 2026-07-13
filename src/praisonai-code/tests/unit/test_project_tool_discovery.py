@@ -116,6 +116,39 @@ class TestToolDiscovery:
         assert discover_project_tools() == []
 
 
+class TestUserGlobalTools:
+    def test_user_global_tools_load_outside_cwd(self, tmp_path, monkeypatch):
+        """User-global ~/.praisonai/tools/*.py must load even though they live
+        outside the project CWD (regression: the safe loader's CWD boundary
+        previously silently dropped them)."""
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+
+        # Separate the "home" tree from the project CWD so the user tool is
+        # genuinely outside the working directory.
+        user_root = tmp_path / "home"
+        (user_root / ".praisonai" / "tools").mkdir(parents=True)
+        (user_root / ".praisonai" / "tools" / "greet.py").write_text(GREET_TOOL)
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.get_git_root",
+            lambda: project_dir,
+        )
+        monkeypatch.setattr(
+            CustomDefinitionsDiscovery,
+            "_get_user_dir",
+            lambda self: user_root / ".praisonai",
+        )
+
+        discovery = CustomDefinitionsDiscovery()
+        greet = discovery.get_tool("greet.greet")
+        assert greet is not None
+        assert greet.source == "user"
+        assert greet.callable("Ada") == "Hello, Ada!"
+
+
 class TestAgentsCommandsUnaffected:
     def test_agents_still_discovered_alongside_tools(self, project, monkeypatch):
         monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
