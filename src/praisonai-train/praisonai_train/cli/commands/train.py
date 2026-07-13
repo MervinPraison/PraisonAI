@@ -442,11 +442,22 @@ def train_apply(
         output.print_error(f"Session not found: {session_id}")
         raise typer.Exit(1)
     
+    # Load the agent early (if provided) to resolve the correct agent name for
+    # the profile and to avoid loading the file a second time when --run is set.
+    agent = None
+    agent_name = "agent"
+    if agent_file:
+        agent = _load_agent_from_file(agent_file, output)
+        if agent is None:
+            raise typer.Exit(1)
+        if getattr(agent, "name", None):
+            agent_name = agent.name
+    
     # Get the training profile
     profile = get_training_profile(
         session_id=session_id,
         iteration=iteration,
-        agent_name="agent",
+        agent_name=agent_name,
     )
     
     if profile is None:
@@ -480,13 +491,9 @@ def train_apply(
     
     # If run_prompt provided, create agent and run
     if run_prompt:
-        # Create or load agent
-        agent = None
-        if agent_file:
-            agent = _load_agent_from_file(agent_file, output)
-            if agent is None:
-                raise typer.Exit(1)
-        else:
+        # Reuse the agent loaded above when an agent file was given; otherwise
+        # fall back to a default agent.
+        if agent is None:
             try:
                 from praisonaiagents import Agent
                 agent = Agent(
@@ -572,10 +579,11 @@ def _create_storage_backend(backend_type: str, storage_path: Optional[str], outp
     try:
         if backend_type == "file":
             from praisonaiagents.storage import FileBackend
-            return FileBackend(storage_dir=storage_path or "~/.praison/train")
+            path = str(Path(storage_path or "~/.praison/train").expanduser())
+            return FileBackend(storage_dir=path)
         elif backend_type == "sqlite":
             from praisonaiagents.storage import SQLiteBackend
-            db_path = storage_path or "~/.praison/train.db"
+            db_path = str(Path(storage_path or "~/.praison/train.db").expanduser())
             return SQLiteBackend(db_path=db_path)
         elif backend_type.startswith("redis://"):
             from praisonaiagents.storage import RedisBackend
@@ -603,7 +611,7 @@ def _load_scenarios_from_file(file_path: str, output) -> Optional[list]:
         return None
     
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         
         if isinstance(data, list):

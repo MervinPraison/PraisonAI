@@ -33,7 +33,7 @@ class UploadVisionModel:
 
     def load_config(self, path):
         """Load configuration from yaml file."""
-        with open(path, "r") as file:
+        with open(path, "r", encoding="utf-8") as file:
             self.config = yaml.safe_load(file)
         print("DEBUG: Loaded config:", self.config)
 

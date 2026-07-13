@@ -21,6 +21,9 @@ dependencies = [
 # Mirrors praisonai_train/setup/setup_conda_env.sh (the conda path remains the
 # recommended GPU install; this extra is the pip approximation).
 llm = [
+    # `praisonai-train llm` bridges into the code-tier CLI runner for dataset
+    # dispatch, so the LLM extra must pull praisonai-code alongside the ML stack.
+    "praisonai-code>=0.0.1",
     "torch>=2.3.0",
     "transformers>=4.40.0",
     "unsloth>=2024.8",
@@ -47,6 +50,7 @@ Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [project.scripts]
 praisonai-train = "praisonai_train.__main__:main"
+setup-conda-env = "praisonai_train.setup.setup_conda_env:main"
 
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }

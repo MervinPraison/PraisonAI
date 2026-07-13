@@ -19,9 +19,9 @@ ANY_TRAIN_RE='(^[[:space:]]*from praisonai_train([[:space:]]|\.)|^[[:space:]]*im
 
 echo "== C10 praisonai_train wrapper import gate (must be zero) =="
 if command -v rg >/dev/null 2>&1; then
-  MATCHES="$(rg -n "$ANY_WRAPPER_RE" "$TRAIN_ROOT" --glob '*.py' 2>/dev/null | grep -v 'praisonai_train\|praisonaiagents' || true)"
+  MATCHES="$(rg -n "$ANY_WRAPPER_RE" "$TRAIN_ROOT" --glob '*.py' 2>/dev/null | grep -Ev 'praisonai_train|praisonaiagents' || true)"
 else
-  MATCHES="$(grep -rEn --include='*.py' "$ANY_WRAPPER_RE" "$TRAIN_ROOT" 2>/dev/null | grep -v 'praisonai_train\|praisonaiagents' || true)"
+  MATCHES="$(grep -rEn --include='*.py' "$ANY_WRAPPER_RE" "$TRAIN_ROOT" 2>/dev/null | grep -Ev 'praisonai_train|praisonaiagents' || true)"
 fi
 if [ -n "$MATCHES" ]; then
   echo "$MATCHES"
