@@ -70,7 +70,7 @@ def get_dimensions(model_name: str) -> int:
     
     # Check if model name contains known model identifiers
     for model_key, dimensions in MODEL_DIMENSIONS.items():
-        if model_key in model_lower:
+        if model_key.lower() in model_lower:
             return dimensions
     
     # Default to 1536 for unknown models (OpenAI standard)
