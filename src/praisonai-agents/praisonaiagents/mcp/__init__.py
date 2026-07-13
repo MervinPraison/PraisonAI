@@ -91,6 +91,13 @@ def __getattr__(name):
     elif name == "load_mcp_tools":
         from .loader import load_mcp_tools
         return load_mcp_tools
+    # Resource/prompt normalisation helpers (lazy loaded)
+    elif name == "normalize_resource_result":
+        from .resources import normalize_resource_result
+        return normalize_resource_result
+    elif name == "normalize_prompt_result":
+        from .resources import normalize_prompt_result
+        return normalize_prompt_result
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -100,6 +107,9 @@ __all__ = [
     "MCPClientProtocol",
     # Loader (lazy loaded)
     "load_mcp_tools",
+    # Resource/prompt normalisation helpers (lazy loaded)
+    "normalize_resource_result",
+    "normalize_prompt_result",
     # Server (lazy loaded)
     "ToolsMCPServer",
     "launch_tools_mcp_server",

@@ -32,6 +32,9 @@ class MCPToolRunner(threading.Thread):
         self.initialized = threading.Event()
         self._init_error = None
         self.tools = []
+        self.resources = []
+        self.resource_templates = []
+        self.prompts = []
         self.timeout = timeout
         self._tool_timings = {}
         self._timings_lock = threading.Lock()
@@ -53,7 +56,13 @@ class MCPToolRunner(threading.Thread):
                     # Get tools
                     tools_result = await session.list_tools()
                     self.tools = tools_result.tools
-                    
+
+                    # Best-effort capability negotiation for resources and prompts.
+                    # Servers that do not advertise these capabilities simply
+                    # leave the corresponding lists empty (tools-only servers are
+                    # unaffected).
+                    await self._discover_resources_and_prompts(session)
+
                     # Signal that initialization is complete
                     self.initialized.set()
                     
@@ -66,9 +75,14 @@ class MCPToolRunner(threading.Thread):
                                 if item is None:  # Shutdown signal
                                     break
                                 
-                                response_queue, tool_name, arguments = item
+                                response_queue, kind, name, arguments = item
                                 try:
-                                    result = await session.call_tool(tool_name, arguments)
+                                    if kind == "resource":
+                                        result = await session.read_resource(name)
+                                    elif kind == "prompt":
+                                        result = await session.get_prompt(name, arguments or None)
+                                    else:
+                                        result = await session.call_tool(name, arguments)
                                     response_queue.put((True, result))
                                 except Exception as e:
                                     response_queue.put((False, str(e)))
@@ -82,7 +96,80 @@ class MCPToolRunner(threading.Thread):
         except Exception as e:
             self._init_error = f"MCP initialization error: {str(e)}"
             self.initialized.set()  # Ensure we don't hang
-    
+
+    async def _discover_resources_and_prompts(self, session):
+        """Enumerate server resources, resource templates and prompts.
+
+        Each call is guarded independently so a server that supports only a
+        subset of primitives (or none) still initializes cleanly. Failures are
+        logged at debug level and leave the corresponding list empty.
+        """
+        try:
+            resources_result = await session.list_resources()
+            self.resources = list(getattr(resources_result, "resources", []) or [])
+        except Exception as e:
+            logging.debug(f"MCP list_resources unavailable: {e}")
+
+        try:
+            templates_result = await session.list_resource_templates()
+            self.resource_templates = list(
+                getattr(templates_result, "resourceTemplates", []) or []
+            )
+        except Exception as e:
+            logging.debug(f"MCP list_resource_templates unavailable: {e}")
+
+        try:
+            prompts_result = await session.list_prompts()
+            self.prompts = list(getattr(prompts_result, "prompts", []) or [])
+        except Exception as e:
+            logging.debug(f"MCP list_prompts unavailable: {e}")
+
+    def _dispatch(self, kind, name, arguments):
+        """Send a request to the runner thread and wait for its result.
+
+        Args:
+            kind: One of ``"tool"``, ``"resource"`` or ``"prompt"``.
+            name: Tool name, resource URI, or prompt name.
+            arguments: Argument mapping (tools/prompts) or ``None``.
+
+        Returns:
+            The raw MCP result object on success, or ``(False, message)`` on
+            failure so callers can format errors consistently.
+        """
+        if not self.initialized.is_set():
+            self.initialized.wait(timeout=self.timeout)
+            if not self.initialized.is_set():
+                return (False, f"MCP initialization timed out after {self.timeout} seconds")
+
+        if self._init_error:
+            return (False, self._init_error)
+
+        response_queue = queue.Queue(maxsize=1)
+        self.queue.put((response_queue, kind, name, arguments))
+        try:
+            success, result = response_queue.get(timeout=self.timeout)
+        except queue.Empty:
+            return (False, f"MCP {kind} call timed out after {self.timeout} seconds")
+        if not success:
+            return (False, result)
+        return result
+
+    def read_resource(self, uri):
+        """Read an MCP resource by URI and return its normalised contents."""
+        from .resources import normalize_resource_result
+        result = self._dispatch("resource", uri, None)
+        if isinstance(result, tuple) and result and result[0] is False:
+            return f"Error: {result[1]}"
+        return normalize_resource_result(result)
+
+    def get_prompt(self, name, arguments=None):
+        """Fetch an MCP prompt template rendered with ``arguments``."""
+        from .resources import normalize_prompt_result
+        result = self._dispatch("prompt", name, arguments or {})
+        if isinstance(result, tuple) and result and result[0] is False:
+            return f"Error: {result[1]}"
+        return normalize_prompt_result(result)
+
     def call_tool(self, tool_name, arguments):
         """Call an MCP tool and wait for the result."""
         # Import telemetry here to avoid circular imports
@@ -112,7 +199,7 @@ class MCPToolRunner(threading.Thread):
         response_queue = queue.Queue(maxsize=1)
         try:
             # Put request in queue with caller-specific response channel
-            self.queue.put((response_queue, tool_name, arguments))
+            self.queue.put((response_queue, "tool", tool_name, arguments))
             
             # Wait for result with timeout
             try:
@@ -401,9 +488,74 @@ class MCP:
         for tool in self.runner.tools:
             wrapper = self._create_tool_wrapper(tool)
             tool_functions.append(wrapper)
-        
+
+        # Register synthetic, agent-callable tools for MCP resources and
+        # prompts, but only when the connected server actually advertises them
+        # (tools-only servers are unaffected — no extra tools appear).
+        tool_functions.extend(self._generate_resource_tools())
+
         return tool_functions
-    
+
+    def _generate_resource_tools(self) -> List[Callable]:
+        """Build synthetic tools for resources/prompts advertised by the server.
+
+        Returns an empty list when the server exposes neither, so existing
+        tools-only configurations behave exactly as before.
+        """
+        runner = getattr(self, "runner", None)
+        if runner is None:
+            return []
+
+        from . import resources as _res
+
+        # Server tools take precedence over synthetic helpers: if a server
+        # already exposes a tool whose name collides with a synthetic one, skip
+        # creating the synthetic callable so the callable and its OpenAI schema
+        # stay consistent (avoids the LLM seeing one but being able to call the
+        # other).
+        server_tool_names = {
+            getattr(t, "name", None) for t in getattr(runner, "tools", []) or []
+        }
+
+        candidates: List[Callable] = []
+        has_resources = bool(runner.resources or runner.resource_templates)
+        has_prompts = bool(runner.prompts)
+
+        if has_resources:
+            def list_mcp_resources() -> str:
+                """List the resources available from the connected MCP server."""
+                return _res.to_json(_res.resources_to_dicts(runner.resources))
+
+            def list_mcp_resource_templates() -> str:
+                """List the resource templates available from the MCP server."""
+                return _res.to_json(
+                    _res.resource_templates_to_dicts(runner.resource_templates)
+                )
+
+            def read_mcp_resource(uri: str) -> str:
+                """Read a resource from the MCP server by its URI."""
+                return runner.read_resource(uri)
+
+            candidates.extend(
+                [list_mcp_resources, list_mcp_resource_templates, read_mcp_resource]
+            )
+
+        if has_prompts:
+            def list_mcp_prompts() -> str:
+                """List the prompt templates available from the MCP server."""
+                return _res.to_json(_res.prompts_to_dicts(runner.prompts))
+
+            def get_mcp_prompt(name: str, arguments: dict = None) -> str:
+                """Fetch an MCP prompt template rendered with the given arguments."""
+                return runner.get_prompt(name, arguments or {})
+
+            candidates.extend([list_mcp_prompts, get_mcp_prompt])
+
+        synthetic: List[Callable] = [
+            fn for fn in candidates if fn.__name__ not in server_tool_names
+        ]
+        return synthetic
+
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
         # Determine parameter names from the schema
@@ -717,6 +869,39 @@ class MCP:
             ```
         """
         return self._tools
+
+    def get_resources(self) -> List[dict]:
+        """List resources/resource-templates advertised by the MCP server.
+
+        Returns an empty list for transports that do not surface resources or
+        for tools-only servers.
+
+        Returns:
+            List[dict]: Serialised resource and resource-template descriptors.
+        """
+        from . import resources as _res
+        runner = getattr(self, "runner", None)
+        if runner is None:
+            return []
+        return (
+            _res.resources_to_dicts(runner.resources)
+            + _res.resource_templates_to_dicts(runner.resource_templates)
+        )
+
+    def get_prompts(self) -> List[dict]:
+        """List prompt templates advertised by the MCP server.
+
+        Returns an empty list for transports that do not surface prompts or for
+        servers that expose none.
+
+        Returns:
+            List[dict]: Serialised prompt descriptors with argument hints.
+        """
+        from . import resources as _res
+        runner = getattr(self, "runner", None)
+        if runner is None:
+            return []
+        return _res.prompts_to_dicts(runner.prompts)
     
     def _fix_array_schemas(self, schema):
         """
@@ -751,9 +936,15 @@ class MCP:
             # Return all tools from HTTP Stream client
             return self._apply_prefix_to_openai_tools(self.http_stream_client.to_openai_tools())
             
+        # Synthetic resource/prompt tools (if the server advertises them) are
+        # captured up front so resource-only servers still expose something.
+        synthetic_tools = self._synthetic_resource_openai_tools()
+
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
         if not hasattr(self, 'runner') or not self.runner.tools:
+            if synthetic_tools:
+                return synthetic_tools
             logging.warning("No MCP tools available to convert to OpenAI format")
             return None
             
@@ -782,8 +973,65 @@ class MCP:
                 },
                 "__praisonai_deferrable__": True  # Mark MCP tools as deferrable for tool search
             })
-        
+
+        openai_tools.extend(synthetic_tools)
+
         return openai_tools
+
+    # Names of the synthetic resource/prompt tools generated by
+    # _generate_resource_tools. Used to distinguish them from server tools
+    # (which live in self.runner.tools) when building OpenAI schemas.
+    _SYNTHETIC_TOOL_NAMES = {
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "list_mcp_prompts",
+        "get_mcp_prompt",
+    }
+
+    def _synthetic_resource_openai_tools(self):
+        """Build OpenAI schemas for the synthetic MCP resource/prompt tools.
+
+        Derives schemas from the callables' own signatures so their names stay
+        in sync with the configured tool prefix and any applied filtering.
+        """
+        server_tool_names = {
+            getattr(t, "name", None) for t in getattr(getattr(self, "runner", None), "tools", []) or []
+        }
+
+        schemas = []
+        for fn in getattr(self, "_tools", []) or []:
+            original = getattr(fn, "__original_name__", getattr(fn, "__name__", ""))
+            if original not in self._SYNTHETIC_TOOL_NAMES or original in server_tool_names:
+                continue
+
+            properties = {}
+            required = []
+            try:
+                sig = inspect.signature(fn)
+                for pname, param in sig.parameters.items():
+                    ptype = "object" if pname == "arguments" else "string"
+                    properties[pname] = {"type": ptype}
+                    if param.default is inspect.Parameter.empty:
+                        required.append(pname)
+            except (ValueError, TypeError):
+                pass
+
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": getattr(fn, "__name__", original),
+                    "description": (fn.__doc__ or f"Call the {original} tool").strip(),
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+                "__praisonai_deferrable__": True,
+            })
+
+        return schemas
 
     def _apply_prefix_to_openai_tools(self, openai_tools):
         """Apply the configured tool prefix to OpenAI schema tool names.
