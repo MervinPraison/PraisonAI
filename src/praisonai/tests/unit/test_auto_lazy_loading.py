@@ -121,19 +121,9 @@ class TestThreadSafety:
     """Test thread-safe patterns added in the wrapper layer."""
 
     def test_get_openai_client_returns_same_instance_per_generator(self):
-        """Multiple threads on one generator must get the same client object."""
+        """Multiple threads on one generator must get the same core client object."""
         import threading
-        import types
-        import sys
         import praisonai.auto as auto
-        import unittest.mock as mock
-
-        class DummyOpenAI:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def close(self):
-                pass
 
         generator = auto.BaseAutoGenerator(config_list=[{
             "model": "gpt-4o-mini",
@@ -146,42 +136,30 @@ class TestThreadSafety:
 
         def call_client():
             try:
-                client = generator._get_openai_client()
+                client = generator._get_core_client()
                 results.append(id(client))
             except Exception as exc:
                 errors.append(exc)
 
-        with mock.patch.dict(sys.modules, {"openai": types.SimpleNamespace(OpenAI=DummyOpenAI)}):
-            threads = [threading.Thread(target=call_client) for _ in range(8)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+        threads = [threading.Thread(target=call_client) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         assert not errors, f"Unexpected errors: {errors}"
         assert len(results) == 8
         assert len(set(results)) == 1, "Got different client instances across threads"
 
     def test_get_openai_client_is_not_shared_across_generators(self):
-        """Different generator instances must not share a client."""
-        import types
-        import sys
+        """Different generator instances must not share a core client."""
         import praisonai.auto as auto
-        import unittest.mock as mock
-
-        class DummyOpenAI:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def close(self):
-                pass
 
         generator_a = auto.BaseAutoGenerator(config_list=[{"model": "gpt-4o-mini", "api_key": "key-a", "base_url": None}])
         generator_b = auto.BaseAutoGenerator(config_list=[{"model": "gpt-4o-mini", "api_key": "key-b", "base_url": None}])
 
-        with mock.patch.dict(sys.modules, {"openai": types.SimpleNamespace(OpenAI=DummyOpenAI)}):
-            client_a = generator_a._get_openai_client()
-            client_b = generator_b._get_openai_client()
+        client_a = generator_a._get_core_client()
+        client_b = generator_b._get_core_client()
 
         assert id(client_a) != id(client_b), "Different generators must own distinct clients"
 
@@ -251,22 +229,15 @@ class TestThreadSafety:
             "Cache must remain None after failure to allow retries"
         )
 
-    async def test_aclose_releases_both_sync_and_async_clients(self):
-        """aclose() should close both client types for mixed-mode usage."""
+    async def test_aclose_releases_core_client(self):
+        """aclose() should close and release the core-owned client."""
         import praisonai.auto as auto
 
-        class DummyOpenAI:
+        class DummyCoreClient:
             def __init__(self):
                 self.closed = False
 
-            def close(self):
-                self.closed = True
-
-        class DummyAsyncOpenAI:
-            def __init__(self):
-                self.closed = False
-
-            async def close(self):
+            async def aclose(self):
                 self.closed = True
 
         generator = auto.BaseAutoGenerator(config_list=[{
@@ -275,14 +246,10 @@ class TestThreadSafety:
             "base_url": None,
         }])
 
-        sync_client = DummyOpenAI()
-        async_client = DummyAsyncOpenAI()
-        generator._openai_client = sync_client
-        generator._async_openai_client = async_client
+        core_client = DummyCoreClient()
+        generator._core_client = core_client
 
         await generator.aclose()
 
-        assert sync_client.closed is True
-        assert async_client.closed is True
-        assert generator._openai_client is None
-        assert generator._async_openai_client is None
+        assert core_client.closed is True
+        assert generator._core_client is None

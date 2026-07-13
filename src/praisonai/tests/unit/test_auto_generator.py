@@ -178,12 +178,11 @@ class TestAutoGeneratorLazyLoading:
                 framework="praisonai"
             )
 
-            # Check that clients are not created yet
-            assert generator._openai_client is None
-            assert generator._async_openai_client is None
+            # Check that the core client is not created yet
+            assert generator._core_client is None
 
     def test_client_is_created_on_first_access(self):
-        """Test that OpenAI client is created on first access."""
+        """Test that the core OpenAI client is created on first access."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = AutoGenerator(
                 topic="Test topic",
@@ -191,14 +190,14 @@ class TestAutoGeneratorLazyLoading:
             )
 
             # Before access
-            assert generator._openai_client is None
+            assert generator._core_client is None
 
             # Trigger lazy loading
-            client = generator._get_openai_client()
+            client = generator._get_core_client()
 
             # After access
             assert client is not None
-            assert generator._openai_client is not None
+            assert generator._core_client is not None
             
 class TestAutoGeneratorLiteLLMFallback:
     """Test suite for LiteLLM fallback to OpenAI."""
@@ -234,23 +233,12 @@ class TestAutoGeneratorLiteLLMFallback:
 
             with patch.object(
                 AutoGenerator,
-                "_get_openai_client"
+                "_get_core_client"
             ) as mock_client:
 
-                mock_response = Mock()
-
-                choice = Mock()
-                choice.message = Mock()
-                choice.message.parsed = DummyModel()
-
-                mock_response.choices = [choice]
-
                 mock_client.return_value \
-                    .beta \
-                    .chat \
-                    .completions \
-                    .parse \
-                    .return_value = mock_response
+                    .parse_structured_output \
+                    .return_value = DummyModel()
 
                 generator = AutoGenerator(
                     topic="Test topic",
@@ -285,8 +273,7 @@ class TestWorkflowAutoGenerator:
                 topic="Test workflow"
             )
 
-            assert generator._openai_client is None
-            assert generator._async_openai_client is None
+            assert generator._core_client is None
 
 
 
@@ -299,24 +286,12 @@ class TestWorkflowAutoGenerator:
 
             with patch.object(
                 WorkflowAutoGenerator,
-                "_get_openai_client"
+                "_get_core_client"
             ) as mock_client:
 
-                mock_response = Mock()
-                mock_response.choices = [
-                    Mock(
-                        message=Mock(
-                            parsed=DummyModel()
-                        )
-                    )
-                ]
-
                 mock_client.return_value \
-                    .beta \
-                    .chat \
-                    .completions \
-                    .parse \
-                    .return_value = mock_response
+                    .parse_structured_output \
+                    .return_value = DummyModel()
 
                 generator = WorkflowAutoGenerator(
                     topic="Test workflow"
@@ -350,20 +325,12 @@ class TestAutoGeneratorJSONMode:
 
                 with patch.object(
                     AutoGenerator,
-                    "_get_openai_client"
+                    "_get_core_client"
                 ) as mock_client:
 
-                    mock_response = Mock()
-                    mock_response.choices = [
-                        Mock(message=Mock(parsed=DummyModel()))
-                    ]
-
                     mock_client.return_value \
-                        .beta \
-                        .chat \
-                        .completions \
-                        .parse \
-                        .return_value = mock_response
+                        .parse_structured_output \
+                        .return_value = DummyModel()
 
 
                     generator = AutoGenerator(
@@ -386,10 +353,7 @@ class TestAutoGeneratorJSONMode:
                     call_kwargs = (
                         mock_client
                         .return_value
-                        .beta
-                        .chat
-                        .completions
-                        .parse
+                        .parse_structured_output
                         .call_args
                         .kwargs
                     )
@@ -419,22 +383,13 @@ class TestAutoGeneratorJSONMode:
 
                 with patch.object(
                     WorkflowAutoGenerator,
-                    "_get_openai_client"
+                    "_get_core_client"
                 ) as mock_client:
 
 
-                    mock_response = Mock()
-                    mock_response.choices = [
-                        Mock(message=Mock(parsed=DummyModel()))
-                    ]
-
-
                     mock_client.return_value \
-                        .beta \
-                        .chat \
-                        .completions \
-                        .parse \
-                        .return_value = mock_response
+                        .parse_structured_output \
+                        .return_value = DummyModel()
 
 
                     generator = WorkflowAutoGenerator(
@@ -456,10 +411,7 @@ class TestAutoGeneratorJSONMode:
                     call_kwargs = (
                         mock_client
                         .return_value
-                        .beta
-                        .chat
-                        .completions
-                        .parse
+                        .parse_structured_output
                         .call_args
                         .kwargs
                     )
