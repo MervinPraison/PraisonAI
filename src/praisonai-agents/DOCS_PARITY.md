@@ -33,27 +33,27 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 13 | 3893 |
 | ✅ Conditions | 1 | 3 | 1175 |
 | ✅ Configuration | 3 | 7 | 2546 |
-| ✅ Context Management | 16 | 34 | 12971 |
+| ✅ Context Management | 16 | 34 | 13124 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2036 |
-| ✅ Evaluation | 1 | 7 | 2779 |
+| ✅ Evaluation | 1 | 7 | 2800 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 16155 |
+| ✅ Gateway | 7 | 48 | 16176 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 3819 |
+| ✅ Hooks | 2 | 9 | 3850 |
 | ✅ Image | 1 | 11 | 1255 |
-| ✅ Knowledge | 4 | 13 | 4055 |
+| ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4763 |
 | ✅ Loops | 4 | 4 | 1082 |
 | ✅ MCP | 1 | 54 | 11916 |
-| ✅ Memory | 6 | 17 | 6434 |
+| ✅ Memory | 6 | 17 | 6460 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
 | ✅ Optimizer | 1 | 2 | 792 |
