@@ -2,8 +2,8 @@
 """
 One-command monorepo PyPI release (patch by default).
 
-Publishes all four packages in order:
-  praisonaiagents → praisonai-code → praisonai-bot → praisonai (wrapper)
+Publishes all five packages in order:
+  praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai (wrapper)
 
 Usage (from repo root or src/praisonai):
   python scripts/publish_all.py                  # patch bump + publish all
@@ -38,7 +38,7 @@ def _wait(package: str, version: str, max_wait: int, interval: int = 30) -> None
 def _plan_versions(bump_type: str, overrides: dict[str, str | None]) -> dict[str, str]:
     current = lib.read_current_versions()
     planned: dict[str, str] = {}
-    for key in ("agents", "code", "bot", "wrapper"):
+    for key in ("agents", "code", "bot", "train", "wrapper"):
         planned[key] = overrides.get(key) or lib.bump_semver(current[key], bump_type)
     return planned
 
@@ -49,6 +49,7 @@ def _print_plan(planned: dict[str, str], skip: dict[str, bool]) -> None:
         ("agents", lib.PYPI_NAMES["agents"]),
         ("code", lib.PYPI_NAMES["code"]),
         ("bot", lib.PYPI_NAMES["bot"]),
+        ("train", lib.PYPI_NAMES["train"]),
         ("wrapper", lib.PYPI_NAMES["wrapper"]),
     ]
     current = lib.read_current_versions()
@@ -79,10 +80,12 @@ def main() -> None:
     parser.add_argument("--skip-agents", action="store_true")
     parser.add_argument("--skip-code", action="store_true")
     parser.add_argument("--skip-bot", action="store_true")
+    parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--skip-wrapper", action="store_true")
     parser.add_argument("--agents-version", default=None)
     parser.add_argument("--code-version", default=None)
     parser.add_argument("--bot-version", default=None)
+    parser.add_argument("--train-version", default=None)
     parser.add_argument("--wrapper-version", default=None)
     args = parser.parse_args()
 
@@ -90,12 +93,14 @@ def main() -> None:
         "agents": args.skip_agents,
         "code": args.skip_code,
         "bot": args.skip_bot,
+        "train": args.skip_train,
         "wrapper": args.skip_wrapper,
     }
     overrides = {
         "agents": args.agents_version,
         "code": args.code_version,
         "bot": args.bot_version,
+        "train": args.train_version,
         "wrapper": args.wrapper_version,
     }
     planned = _plan_versions(args.bump, overrides)
@@ -181,7 +186,30 @@ def main() -> None:
                     root,
                 )
 
-    # --- 4. praisonai wrapper ---
+    # --- 4. praisonai-train ---
+    if not skip["train"]:
+        pkg = lib.PYPI_NAMES["train"]
+        ver = planned["train"]
+        if lib.pypi_has_version(pkg, ver):
+            print(f"⏭️  {pkg}=={ver} already on PyPI")
+        else:
+            print(f"\n📦 Publishing {pkg} {ver}")
+            _wait(lib.PYPI_NAMES["bot"], planned["bot"], args.max_wait)
+            lib.bump_train_files(ver)
+            lib.publish_package(lib.train_dir())
+            _wait(pkg, ver, args.max_wait)
+            if not args.no_git:
+                lib.git_commit_files(
+                    f"Bump praisonai-train to {ver}",
+                    [
+                        "src/praisonai-train/pyproject.toml",
+                        "src/praisonai-train/praisonai_train/_version.py",
+                        "src/praisonai-train/uv.lock",
+                    ],
+                    root,
+                )
+
+    # --- 5. praisonai wrapper ---
     if not skip["wrapper"]:
         pkg = lib.PYPI_NAMES["wrapper"]
         ver = planned["wrapper"]
@@ -192,12 +220,14 @@ def main() -> None:
             _wait(lib.PYPI_NAMES["agents"], planned["agents"], args.max_wait)
             _wait(lib.PYPI_NAMES["code"], planned["code"], args.max_wait)
             _wait(lib.PYPI_NAMES["bot"], planned["bot"], args.max_wait)
+            _wait(lib.PYPI_NAMES["train"], planned["train"], args.max_wait)
 
             bump.bump_version(
                 ver,
                 planned["agents"],
                 code_version=planned["code"],
                 bot_version=planned["bot"],
+                train_version=planned["train"],
             )
             if not bump.validate_dependencies(
                 max_retries=3,
@@ -205,6 +235,7 @@ def main() -> None:
                 agents_version=planned["agents"],
                 code_version=planned["code"],
                 bot_version=planned["bot"],
+                train_version=planned["train"],
             ):
                 sys.exit(1)
 
@@ -218,6 +249,7 @@ def main() -> None:
     print(f"   praisonaiagents {planned['agents']}")
     print(f"   praisonai-code    {planned['code']}")
     print(f"   praisonai-bot     {planned['bot']}")
+    print(f"   praisonai-train   {planned['train']}")
     print(f"   praisonai         {planned['wrapper']}")
 
 

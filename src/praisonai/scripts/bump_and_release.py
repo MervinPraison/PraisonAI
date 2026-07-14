@@ -23,7 +23,7 @@ This script:
 8. Pushes to GitHub (with rebase if needed)
 9. Creates GitHub release (latest)
 
-Three-package publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai
+Publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai
 
 One-command full release (patch by default):
     python scripts/publish_all.py
@@ -31,13 +31,14 @@ One-command full release (patch by default):
 
 Wrapper-only bump (after deps already on PyPI):
     python scripts/bump_and_release.py 4.6.119 --agents 1.6.119 --code-pin 0.0.18 --bot-pin 0.0.3 \\
-        --wait --wait-code --wait-bot --no-add-all
+        --train-pin 0.0.1 --wait --wait-code --wait-bot --wait-train --no-add-all
     cd src/praisonai && uv publish
 
 Use --code to bump code package; --code-pin to pin wrapper after code publish.
 Use --bot to bump bot package; --bot-pin to pin wrapper after bot publish.
-Use --wait for agents PyPI propagation; --wait-code for praisonai-code; --wait-bot for praisonai-bot.
-Use --wait-all to wait for agents, code, and bot (when pins are set).
+Use --train to bump train package; --train-pin to pin wrapper after train publish.
+Use --wait for agents PyPI propagation; --wait-code for praisonai-code; --wait-bot for praisonai-bot; --wait-train for praisonai-train.
+Use --wait-all to wait for agents, code, bot, and train (when pins are set).
 """
 
 import re
@@ -71,6 +72,11 @@ def get_praisonai_code_dir() -> Path:
 def get_praisonai_bot_dir() -> Path:
     """Get the praisonai-bot package directory."""
     return get_project_root() / "src/praisonai-bot"
+
+
+def get_praisonai_train_dir() -> Path:
+    """Get the praisonai-train package directory."""
+    return get_project_root() / "src/praisonai-train"
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
@@ -189,12 +195,15 @@ def bump_version(
     code_pin_only: bool = False,
     bot_version: Optional[str] = None,
     bot_pin_only: bool = False,
+    train_version: Optional[str] = None,
+    train_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
     code_dir = get_praisonai_code_dir()
     bot_dir = get_praisonai_bot_dir()
+    train_dir = get_praisonai_train_dir()
     
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
@@ -301,7 +310,33 @@ def bump_version(
             ],
             root,
         )
-    
+
+    if train_version:
+        if train_pin_only:
+            print(f"\n📦 Pinning praisonai-train dependency to >={train_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-train to {train_version}:")
+            update_file(
+                train_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{train_version}"')],
+                root,
+            )
+            update_file(
+                train_dir / "praisonai_train/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{train_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-train(?:>=[0-9.]+)?"',
+                    f'"praisonai-train>={train_version}"',
+                )
+            ],
+            root,
+        )
+
     print("\n✨ Version bump complete!")
 
 
@@ -312,11 +347,12 @@ def validate_dependencies(
     agents_version: Optional[str] = None,
     code_version: Optional[str] = None,
     bot_version: Optional[str] = None,
+    train_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version or bot_version:
+    if agents_version or code_version or bot_version or train_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
@@ -324,6 +360,8 @@ def validate_dependencies(
             lock_cmd.extend(["--upgrade-package", f"praisonai-code=={code_version}"])
         if bot_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-bot=={bot_version}"])
+        if train_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-train=={train_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -410,6 +448,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai-bot/pyproject.toml",
         "src/praisonai-bot/praisonai_bot/_version.py",
         "src/praisonai-bot/uv.lock",
+        "src/praisonai-train/pyproject.toml",
+        "src/praisonai-train/praisonai_train/_version.py",
+        "src/praisonai-train/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -469,7 +510,7 @@ Examples:
 
   # Wrapper only (deps already published):
   python scripts/bump_and_release.py --agents 1.6.119 --code-pin 0.0.18 --bot-pin 0.0.3 \\
-      --wait-all --no-add-all 4.6.119
+      --train-pin 0.0.1 --wait-all --no-add-all 4.6.119
 
   # Bump to 3.8.2 with agents 0.11.8
   python scripts/bump_and_release.py --agents 0.11.8 3.8.2
@@ -543,9 +584,24 @@ Examples:
         help="Wait for the specified praisonai-bot version to be available on PyPI"
     )
     parser.add_argument(
+        "--train", "-t",
+        help="Bump praisonai-train version (pyproject + _version.py) and pin wrapper dep",
+        default=None
+    )
+    parser.add_argument(
+        "--train-pin",
+        help="Pin praisonai-train>= in wrapper pyproject only (after CI train publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-train",
+        action="store_true",
+        help="Wait for the specified praisonai-train version to be available on PyPI"
+    )
+    parser.add_argument(
         "--wait-all",
         action="store_true",
-        help="Wait for agents, code, and bot versions on PyPI (needs --agents and pins)",
+        help="Wait for agents, code, bot, and train versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -590,8 +646,13 @@ Examples:
         print("❌ Use only one of --bot or --bot-pin")
         sys.exit(1)
 
+    if args.train and args.train_pin:
+        print("❌ Use only one of --train or --train-pin")
+        sys.exit(1)
+
     code_version = args.code or args.code_pin
     bot_version = args.bot or args.bot_pin
+    train_version = args.train or args.train_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
@@ -600,6 +661,11 @@ Examples:
     if bot_version and not re.match(r'^\d+\.\d+\.\d+$', bot_version):
         print(f"❌ Invalid bot version format: {bot_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.2)")
+        sys.exit(1)
+
+    if train_version and not re.match(r'^\d+\.\d+\.\d+$', train_version):
+        print(f"❌ Invalid train version format: {train_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.1)")
         sys.exit(1)
     
     # Pre-flight checks
@@ -620,6 +686,7 @@ Examples:
     wait_agents = args.wait or args.wait_all
     wait_code = args.wait_code or args.wait_all
     wait_bot = args.wait_bot or args.wait_all
+    wait_train = args.wait_train or args.wait_all
 
     if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
@@ -636,6 +703,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-bot", bot_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-bot was published successfully")
             sys.exit(1)
+
+    if wait_train and train_version:
+        if not wait_for_pypi_version("praisonai-train", train_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-train was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -645,6 +717,8 @@ Examples:
         code_pin_only=bool(args.code_pin and not args.code),
         bot_version=bot_version,
         bot_pin_only=bool(args.bot_pin and not args.bot),
+        train_version=train_version,
+        train_pin_only=bool(args.train_pin and not args.train),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -656,6 +730,7 @@ Examples:
         agents_version=args.agents,
         code_version=code_version,
         bot_version=bot_version,
+        train_version=train_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

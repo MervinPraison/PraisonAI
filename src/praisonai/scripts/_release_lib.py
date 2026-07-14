@@ -17,6 +17,7 @@ PYPI_NAMES = {
     "agents": "praisonaiagents",
     "code": "praisonai-code",
     "bot": "praisonai-bot",
+    "train": "praisonai-train",
     "wrapper": "praisonai",
 }
 
@@ -35,6 +36,10 @@ def code_dir() -> Path:
 
 def bot_dir() -> Path:
     return project_root() / "src/praisonai-bot"
+
+
+def train_dir() -> Path:
+    return project_root() / "src/praisonai-train"
 
 
 def wrapper_dir() -> Path:
@@ -95,6 +100,7 @@ def read_current_versions() -> dict[str, str]:
         "agents": read_pyproject_version(agents_dir() / "pyproject.toml"),
         "code": read_pyproject_version(code_dir() / "pyproject.toml"),
         "bot": read_pyproject_version(bot_dir() / "pyproject.toml"),
+        "train": read_pyproject_version(train_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -141,6 +147,16 @@ def bump_bot_files(new_version: str) -> None:
     current = read_pyproject_version(path)
     write_pyproject_version(path, current, new_version)
     version_py = bot_dir() / "praisonai_bot/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_train_files(new_version: str) -> None:
+    path = train_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = train_dir() / "praisonai_train/_version.py"
     version_py.write_text(
         re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
     )

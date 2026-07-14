@@ -1,0 +1,67 @@
+[project]
+name = "praisonai-train"
+version = "0.0.1"
+description = "Training for PraisonAI — LLM fine-tuning (Unsloth) and iterative agent training extracted from the praisonai wrapper."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.126",
+    "rich>=13.7",
+    "typer>=0.12.0",
+    "click>=8.4.2",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# Heavy ML stack for `praisonai-train llm` / vision fine-tuning.
+# Mirrors praisonai_train/setup/setup_conda_env.sh (the conda path remains the
+# recommended GPU install; this extra is the pip approximation).
+llm = [
+    # `praisonai-train llm` bridges into the code-tier CLI runner for dataset
+    # dispatch, so the LLM extra must pull praisonai-code alongside the ML stack.
+    "praisonai-code>=0.0.1",
+    "torch>=2.3.0",
+    "transformers>=4.40.0",
+    "unsloth>=2024.8",
+    "trl<0.9.0",
+    "peft>=0.10.0",
+    "accelerate>=0.30.0",
+    "bitsandbytes>=0.43.0",
+    "datasets>=2.19.0",
+    "sentencepiece>=0.2.0",
+    "protobuf",
+    "huggingface_hub>=0.23.0",
+    "hf_transfer",
+]
+vision = [
+    "praisonai-train[llm]",
+]
+all = [
+    "praisonai-train[llm]",
+]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[project.scripts]
+praisonai-train = "praisonai_train.__main__:main"
+setup-conda-env = "praisonai_train.setup.setup_conda_env:main"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_train*"]
+
+[tool.setuptools.package-data]
+praisonai_train = ["setup/*.sh", "setup/*.yaml"]

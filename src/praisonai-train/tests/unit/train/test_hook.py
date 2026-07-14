@@ -17,7 +17,7 @@ class TestTrainingProfile:
     
     def test_training_profile_creation(self):
         """Test creating a TrainingProfile."""
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.models import TrainingProfile
         
         profile = TrainingProfile(
             agent_name="assistant",
@@ -37,7 +37,7 @@ class TestTrainingProfile:
     
     def test_training_profile_to_dict(self):
         """Test converting TrainingProfile to dict."""
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.models import TrainingProfile
         
         profile = TrainingProfile(
             agent_name="assistant",
@@ -55,7 +55,7 @@ class TestTrainingProfile:
     
     def test_training_profile_from_dict(self):
         """Test creating TrainingProfile from dict."""
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.models import TrainingProfile
         
         data = {
             "agent_name": "researcher",
@@ -77,7 +77,7 @@ class TestGetBestIteration:
     
     def test_get_best_iteration_returns_highest_score(self):
         """Test that get_best_iteration returns iteration with highest score."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(
@@ -107,7 +107,7 @@ class TestGetBestIteration:
     
     def test_get_best_iteration_empty_returns_none(self):
         """Test that get_best_iteration returns None for empty iterations."""
-        from praisonai.train.agents.models import TrainingReport
+        from praisonai_train.train.agents.models import TrainingReport
         
         report = TrainingReport(
             session_id="train-empty",
@@ -120,7 +120,7 @@ class TestGetBestIteration:
     
     def test_get_iteration_by_number(self):
         """Test getting a specific iteration by number."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(
@@ -146,7 +146,7 @@ class TestGetBestIteration:
     
     def test_get_iteration_not_found(self):
         """Test getting non-existent iteration returns None."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(
@@ -170,8 +170,8 @@ class TestApplyTraining:
     
     def test_apply_training_registers_hook(self):
         """Test that apply_training registers a BEFORE_AGENT hook."""
-        from praisonai.train.agents.hook import apply_training
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.hook import apply_training
+        from praisonai_train.train.agents.models import TrainingProfile
         
         # Create mock agent
         mock_agent = Mock()
@@ -199,7 +199,7 @@ class TestApplyTraining:
     
     def test_apply_training_from_session(self):
         """Test apply_training loads from session ID."""
-        from praisonai.train.agents.hook import apply_training
+        from praisonai_train.train.agents.hook import apply_training
         
         mock_agent = Mock()
         mock_agent.name = "assistant"
@@ -209,7 +209,7 @@ class TestApplyTraining:
         mock_agent._hook_runner = mock_hook_runner
         
         # Mock storage
-        with patch('praisonai.train.agents.hook.TrainingStorage') as MockStorage:
+        with patch('praisonai_train.train.agents.hook.TrainingStorage') as MockStorage:
             mock_storage = Mock()
             mock_report = Mock()
             mock_iteration = Mock()
@@ -232,8 +232,8 @@ class TestRemoveTraining:
     
     def test_remove_training_unregisters_hook(self):
         """Test that remove_training removes the training hook."""
-        from praisonai.train.agents.hook import apply_training, remove_training
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.hook import apply_training, remove_training
+        from praisonai_train.train.agents.models import TrainingProfile
         
         mock_agent = Mock()
         mock_agent.name = "assistant"
@@ -265,8 +265,8 @@ class TestTrainingHook:
     
     def test_training_hook_modifies_prompt(self):
         """Test that TrainingHook injects suggestions into prompt."""
-        from praisonai.train.agents.hook import TrainingHook
-        from praisonai.train.agents.models import TrainingProfile
+        from praisonai_train.train.agents.hook import TrainingHook
+        from praisonai_train.train.agents.models import TrainingProfile
         from praisonaiagents.hooks import BeforeAgentInput
         
         profile = TrainingProfile(
@@ -305,7 +305,7 @@ class TestCLIApplyCommand:
     
     def test_cli_apply_command_exists(self):
         """Test that apply command is registered."""
-        from praisonai.cli.commands.train import app
+        from praisonai_train.cli.commands.train import app
         
         # Check command exists
         command_names = [cmd.name for cmd in app.registered_commands]
@@ -314,7 +314,7 @@ class TestCLIApplyCommand:
     def test_cli_apply_requires_session_id(self):
         """Test that apply command requires session_id argument."""
         from typer.testing import CliRunner
-        from praisonai.cli.commands.train import app
+        from praisonai_train.cli.commands.train import app
         
         runner = CliRunner()
         result = runner.invoke(app, ["apply"])
@@ -329,12 +329,12 @@ class TestCLIShowEnhanced:
     def test_cli_show_displays_iterations(self):
         """Test that show command displays iteration details."""
         from typer.testing import CliRunner
-        from praisonai.cli.commands.train import app
+        from praisonai_train.cli.commands.train import app
         
         runner = CliRunner()
         
         # Mock storage
-        with patch('praisonai.train.agents.storage.TrainingStorage') as MockStorage:
+        with patch('praisonai_train.train.agents.storage.TrainingStorage') as MockStorage:
             mock_storage = Mock()
             mock_storage.storage_path.exists.return_value = True
             

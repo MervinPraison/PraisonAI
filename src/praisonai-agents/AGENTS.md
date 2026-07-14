@@ -84,11 +84,12 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      praisonai (Wrapper)                        │
-│  Integrations • framework_adapters • train • serve • dashboard  │
-├──────────────────────────────┬──────────────────────────────────┤
-│   praisonai-code (Terminal)  │   praisonai-bot (Channels)       │
-│   run • chat • code • doctor │   bots • gateway • BotOS • CLI   │
-├──────────────────────────────┴──────────────────────────────────┤
+│     Integrations • framework_adapters • serve • dashboard       │
+├─────────────────────┬─────────────────────┬─────────────────────┤
+│ praisonai-code      │ praisonai-bot       │ praisonai-train     │
+│ run • chat • code   │ bots • gateway •    │ LLM fine-tune •     │
+│ • doctor            │ BotOS • CLI         │ agent training      │
+├─────────────────────┴─────────────────────┴─────────────────────┤
 │                    praisonaiagents (Core SDK)                   │
 │  Protocols • Hooks • Adapters • Base Classes • Decorators       │
 ├─────────────────────────────────────────────────────────────────┤
@@ -99,7 +100,7 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 
 ### 2.3 `praisonai-code` — Agentic Terminal CLI Split (C5/C6)
 
-The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends, Typer app) lives in **`praisonai-code`** (`praisonai_code`). **Bots, gateway, and channel CLI** live in **`praisonai-bot`** (`praisonai_bot`) after C9. The **`praisonai`** wrapper keeps integrations, framework adapters, train, serve, and dashboard. **`pip install praisonai`** still installs everything; old import paths are preserved via shims.
+The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends, Typer app) lives in **`praisonai-code`** (`praisonai_code`). **Bots, gateway, and channel CLI** live in **`praisonai-bot`** (`praisonai_bot`) after C9. **LLM fine-tuning and agent training** live in **`praisonai-train`** (`praisonai_train`) after C10. The **`praisonai`** wrapper keeps integrations, framework adapters, serve, and dashboard. **`pip install praisonai`** still installs everything; old import paths are preserved via shims.
 
 | Product | Location | Stays out of |
 |---------|----------|--------------|
@@ -191,7 +192,7 @@ C6 is the **sign-off step** after C0–C5 file moves: no further moves, only reg
 
 **C7 (hot path complete):** Core agentic CLI imports no longer require the `praisonai`
 wrapper at module level. Remaining lazy wrapper imports (~211, regression-gated) are optional commands
-and features (train, capabilities, bots, framework adapters) — use
+and features (capabilities, bots, framework adapters) — use
 `praisonai_code._wrapper_bridge` or `pip install praisonai`. See
 `src/praisonai/tests/C7_VERIFICATION.md`. CI gate: `scripts/check_c7_imports.sh`.
 
@@ -201,7 +202,9 @@ and features (train, capabilities, bots, framework adapters) — use
 |------|---------|------|
 | 1 | `praisonaiagents` | Agent, tools, memory, hooks, `frameworks/` protocols |
 | 2 | `praisonai-code` | `run`/`chat`/`code`, Typer, runtime, llm, tool resolution |
-| 3 | `praisonai` | Gateway, bots, `framework_adapters/`, capabilities, train, serve orchestration |
+| 2b | `praisonai-bot` | Bots, gateway, channel CLI, OS daemon |
+| 2c | `praisonai-train` | LLM fine-tuning (Unsloth), agent training, `train` CLI |
+| 3 | `praisonai` | `framework_adapters/`, capabilities, serve orchestration, dashboard |
 
 **Cross-tier rule:** `praisonai-code` must not declare a PyPI dependency on `praisonai`. Use
 [`praisonai_code._wrapper_bridge`](../praisonai-code/praisonai_code/_wrapper_bridge.py) for lazy wrapper access.
@@ -209,9 +212,11 @@ and features (train, capabilities, bots, framework adapters) — use
 **framework_adapters:** protocols in SDK; registry + CrewAI/AutoGen/PraisonAI bodies stay in
 [`praisonai/framework_adapters/`](../praisonai/praisonai/framework_adapters/). Do not move to `praisonai-code`.
 
-**Typer `_WRAPPER_COMMANDS`:** only for commands whose implementation lives in the wrapper
-(`bot`, `gateway`, `pairing`, `identity`, `onboard`, `kanban`, `dashboard`, `claw`). Commands
-implemented in `praisonai_code` (`train`, `serve`) stay local; bridge internal wrapper imports.
+**Typer routing sets** (in `praisonai_code/cli/app.py`): `_BOT_RESIDENT_COMMANDS` loads from
+`praisonai_bot.cli.commands.*` (`bot`, `gateway`, `pairing`, …); `_TRAIN_RESIDENT_COMMANDS` loads
+from `praisonai_train.cli.commands.*` (`train`, C10); `_WRAPPER_RESIDENT_COMMANDS` loads from
+`praisonai.cli.commands.*` (`dashboard`, `flow`, …). Commands implemented in `praisonai_code`
+(`serve`, …) stay local; bridge internal wrapper imports.
 
 Full boundary doc: [`src/praisonai/tests/C7.1_BOUNDARIES.md`](../praisonai/tests/C7.1_BOUNDARIES.md).
 

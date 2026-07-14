@@ -12,7 +12,7 @@ class TestTrainingScenario:
     
     def test_create_scenario_minimal(self):
         """Test creating scenario with minimal required fields."""
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.models import TrainingScenario
         
         scenario = TrainingScenario(
             id="test-1",
@@ -26,7 +26,7 @@ class TestTrainingScenario:
     
     def test_create_scenario_full(self):
         """Test creating scenario with all fields."""
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.models import TrainingScenario
         
         scenario = TrainingScenario(
             id="test-2",
@@ -41,7 +41,7 @@ class TestTrainingScenario:
     
     def test_scenario_to_dict(self):
         """Test converting scenario to dictionary."""
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.models import TrainingScenario
         
         scenario = TrainingScenario(
             id="test-3",
@@ -55,7 +55,7 @@ class TestTrainingScenario:
     
     def test_scenario_from_dict(self):
         """Test creating scenario from dictionary."""
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.models import TrainingScenario
         
         data = {
             "id": "test-4",
@@ -73,7 +73,7 @@ class TestTrainingIteration:
     
     def test_create_iteration(self):
         """Test creating a training iteration."""
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.models import TrainingIteration
         
         iteration = TrainingIteration(
             iteration_num=1,
@@ -92,7 +92,7 @@ class TestTrainingIteration:
     
     def test_iteration_has_timestamp(self):
         """Test that iteration has timestamp."""
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.models import TrainingIteration
         
         iteration = TrainingIteration(
             iteration_num=1,
@@ -109,7 +109,7 @@ class TestTrainingIteration:
     
     def test_iteration_to_dict(self):
         """Test converting iteration to dictionary."""
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.models import TrainingIteration
         
         iteration = TrainingIteration(
             iteration_num=2,
@@ -131,7 +131,7 @@ class TestTrainingReport:
     
     def test_create_report(self):
         """Test creating a training report."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(
@@ -164,7 +164,7 @@ class TestTrainingReport:
     
     def test_report_avg_score(self):
         """Test calculating average score."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(iteration_num=1, scenario_id="s1", input_text="T", output="O", score=6.0, feedback="F"),
@@ -178,7 +178,7 @@ class TestTrainingReport:
     
     def test_report_improvement(self):
         """Test calculating improvement from first to last."""
-        from praisonai.train.agents.models import TrainingReport, TrainingIteration
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
         
         iterations = [
             TrainingIteration(iteration_num=1, scenario_id="s1", input_text="T", output="O", score=5.0, feedback="F"),
@@ -192,7 +192,7 @@ class TestTrainingReport:
     
     def test_report_to_dict(self):
         """Test converting report to dictionary."""
-        from praisonai.train.agents.models import TrainingReport
+        from praisonai_train.train.agents.models import TrainingReport
         
         report = TrainingReport(
             session_id="test-session",
@@ -207,7 +207,7 @@ class TestTrainingReport:
     
     def test_report_empty_iterations(self):
         """Test report with no iterations."""
-        from praisonai.train.agents.models import TrainingReport
+        from praisonai_train.train.agents.models import TrainingReport
         
         report = TrainingReport(
             session_id="empty",

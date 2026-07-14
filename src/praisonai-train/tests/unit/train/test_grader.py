@@ -14,7 +14,7 @@ class TestTrainingGrader:
     
     def test_create_grader_default(self):
         """Test creating grader with defaults."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader()
         
@@ -22,7 +22,7 @@ class TestTrainingGrader:
     
     def test_create_grader_custom_model(self):
         """Test creating grader with custom model."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader(model="gpt-4o")
         
@@ -30,7 +30,7 @@ class TestTrainingGrader:
     
     def test_grade_output_returns_score(self):
         """Test grading returns a score between 1-10."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         # Mock litellm module
         mock_litellm = Mock()
@@ -52,7 +52,7 @@ class TestTrainingGrader:
     
     def test_grade_output_clamps_score(self):
         """Test that scores are clamped to 1-10 range."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         # Mock LLM returning out-of-range score
         mock_litellm = Mock()
@@ -72,7 +72,7 @@ class TestTrainingGrader:
     
     def test_grade_without_expected_output(self):
         """Test grading without expected output (quality assessment only)."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         mock_litellm = Mock()
         mock_response = Mock()
@@ -91,7 +91,7 @@ class TestTrainingGrader:
     
     def test_grade_returns_suggestions(self):
         """Test that grading returns improvement suggestions."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         mock_litellm = Mock()
         mock_response = Mock()
@@ -115,7 +115,7 @@ SUGGESTIONS:
     
     def test_grade_handles_malformed_response(self):
         """Test graceful handling of malformed LLM response."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         mock_litellm = Mock()
         mock_response = Mock()
@@ -135,7 +135,7 @@ SUGGESTIONS:
     
     def test_grade_result_dataclass(self):
         """Test GradeResult dataclass structure."""
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.grader import GradeResult
         
         result = GradeResult(
             score=8.5,
@@ -151,7 +151,7 @@ SUGGESTIONS:
     
     def test_grade_result_to_dict(self):
         """Test converting GradeResult to dictionary."""
-        from praisonai.train.agents.grader import GradeResult
+        from praisonai_train.train.agents.grader import GradeResult
         
         result = GradeResult(
             score=7.0,
@@ -172,7 +172,7 @@ class TestTrainingGraderPrompts:
     
     def test_prompt_includes_input(self):
         """Test that grading prompt includes input text."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader()
         prompt = grader._build_prompt(
@@ -184,7 +184,7 @@ class TestTrainingGraderPrompts:
     
     def test_prompt_includes_output(self):
         """Test that grading prompt includes agent output."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader()
         prompt = grader._build_prompt(
@@ -196,7 +196,7 @@ class TestTrainingGraderPrompts:
     
     def test_prompt_includes_expected_when_provided(self):
         """Test that prompt includes expected output when provided."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader()
         prompt = grader._build_prompt(
@@ -209,7 +209,7 @@ class TestTrainingGraderPrompts:
     
     def test_prompt_requests_score_format(self):
         """Test that prompt requests specific score format."""
-        from praisonai.train.agents.grader import TrainingGrader
+        from praisonai_train.train.agents.grader import TrainingGrader
         
         grader = TrainingGrader()
         prompt = grader._build_prompt(

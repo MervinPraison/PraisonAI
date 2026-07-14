@@ -264,8 +264,7 @@ _WRAPPER_RESIDENT_COMMANDS = frozenset({
     "flow",
     "n8n",
     "replay",
-    # C8.2 Batch B — training / managed / examples
-    "train",
+    # C8.2 Batch B — managed / examples (train extracted to praisonai-train in C10)
     "managed",
     "examples",
     "standardise",
@@ -287,6 +286,13 @@ _WRAPPER_RESIDENT_COMMANDS = frozenset({
     "validate",
 })
 
+# C10: Training commands implemented in ``praisonai_train.cli.commands.*``.
+# ``get_command()`` loads them via ``praisonai_train.cli.commands.{name}`` when the
+# train package is installed; standalone ``praisonai-code`` hides them from ``--help``.
+_TRAIN_RESIDENT_COMMANDS = frozenset({
+    "train",
+})
+
 # Backward-compatible alias (C7.1 name).
 _WRAPPER_COMMANDS = _WRAPPER_RESIDENT_COMMANDS
 
@@ -299,6 +305,7 @@ _SPECIAL_COMMANDS = {
 
 from praisonai_code._wrapper_bridge import wrapper_available
 from praisonai_code._bot_bridge import bot_package_available
+from praisonai_code._train_bridge import train_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -314,10 +321,12 @@ class LazyCommandGroup(TyperGroup):
         # install does not surface commands it cannot resolve.
         wrapper_ok = wrapper_available()
         bot_ok = bot_package_available()
+        train_ok = train_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
             and (bot_ok or name not in _BOT_RESIDENT_COMMANDS)
+            and (train_ok or name not in _TRAIN_RESIDENT_COMMANDS)
         )
         commands.update(_SPECIAL_COMMANDS.keys())
         
@@ -363,6 +372,10 @@ class LazyCommandGroup(TyperGroup):
                     if not bot_package_available():
                         return None
                     module = importlib.import_module(f"praisonai_bot.cli.commands.{name}")
+                elif name in _TRAIN_RESIDENT_COMMANDS:
+                    if not train_package_available():
+                        return None
+                    module = importlib.import_module(f"praisonai_train.cli.commands.{name}")
                 elif name in _WRAPPER_RESIDENT_COMMANDS:
                     if not wrapper_available():
                         return None

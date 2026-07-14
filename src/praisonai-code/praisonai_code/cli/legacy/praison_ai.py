@@ -46,6 +46,14 @@ def _get_generate_config():
     from praisonai_code._wrapper_bridge import import_wrapper_module
     return import_wrapper_module("praisonai.cli.legacy.inbuilt_tools").get_generate_config()
 
+def _get_setup_conda_env_main():
+    """Lazy import the conda training-env installer (C10: praisonai-train)."""
+    from praisonai_code._train_bridge import import_train_module, train_package_available
+    if train_package_available():
+        return import_train_module("praisonai_train.setup.setup_conda_env").main
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    return import_wrapper_module("praisonai.setup.setup_conda_env").main
+
 # Lazy import helpers for heavy modules
 def _get_auto_generator():
     """Lazy import AutoGenerator to avoid loading heavy deps at CLI startup."""
@@ -665,9 +673,7 @@ class PraisonAI:
                 config["ollama_save"] = "true"
 
             if 'init' in sys.argv:
-                from praisonai_code._wrapper_bridge import import_wrapper_module
-                _mod = import_wrapper_module('praisonai.setup.setup_conda_env')
-                setup_conda_main = getattr(_mod, 'main')
+                setup_conda_main = _get_setup_conda_env_main()
                 setup_conda_main()
                 print("All packages installed")
                 return
@@ -683,9 +689,7 @@ class PraisonAI:
                     conda_env_exists = True
                 else:
                     print("Conda environment 'praison_env' not found. Setting it up...")
-                    from praisonai_code._wrapper_bridge import import_wrapper_module
-                    _mod = import_wrapper_module('praisonai.setup.setup_conda_env')
-                    setup_conda_main = getattr(_mod, 'main')
+                    setup_conda_main = _get_setup_conda_env_main()
                     setup_conda_main()
                     print("All packages installed.")
                     # Check again if environment was created successfully
@@ -704,21 +708,28 @@ class PraisonAI:
             model_name = config.get("model_name", "").lower()
             is_vision_model = any(x in model_name for x in ["-vl-", "-vl", "vl-", "-vision-", "-vision", "vision-", "visionmodel"])
             
-            # Choose appropriate training invocation. The standard LLM
-            # fine-tuner is the canonical package module
-            # (``praisonai.train.llm.trainer``); vision fine-tuning uses the
-            # dedicated wrapper script located inside the wrapper package.
+            # Choose appropriate training invocation. C10: the canonical
+            # implementation lives in ``praisonai_train`` (``praisonai.train.*``
+            # remains a wrapper shim). Prefer the train package when installed
+            # so training also works without the wrapper.
+            from praisonai_code._train_bridge import train_package_available
             if is_vision_model:
-                # The vision training wrapper script lives inside the ``praisonai``
-                # wrapper package, not next to this dispatcher (which moved to
-                # cli/legacy/ during the CLI package split). Resolve it via the
-                # wrapper package. Only the vision path needs this lookup.
-                import praisonai as _praisonai_wrapper
-                package_root = os.path.dirname(os.path.abspath(_praisonai_wrapper.__file__))
+                # The vision training script ships inside the training package
+                # (previously inside the wrapper). Resolve its file path via
+                # whichever package is installed.
+                if train_package_available():
+                    import praisonai_train as _train_pkg
+                    package_root = os.path.dirname(os.path.abspath(_train_pkg.__file__))
+                else:
+                    import praisonai as _praisonai_wrapper
+                    package_root = os.path.dirname(os.path.abspath(_praisonai_wrapper.__file__))
                 train_invocation = [os.path.join(package_root, 'train_vision.py'), 'train']
                 print("Using vision training script for VL model...")
             else:
-                train_invocation = ['-m', 'praisonai.train.llm.trainer', 'train']
+                if train_package_available():
+                    train_invocation = ['-m', 'praisonai_train.train.llm.trainer', 'train']
+                else:
+                    train_invocation = ['-m', 'praisonai.train.llm.trainer', 'train']
                 print("Using standard training module...")
 
             # Set environment variables

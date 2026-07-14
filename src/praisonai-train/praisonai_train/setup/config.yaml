@@ -1,0 +1,60 @@
+ollama_save: "true"
+huggingface_save: "true"
+train: "true"
+
+model_name: "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
+hf_model_name: "mervinpraison/llama-3.1-tamilan-8B-test"
+ollama_model: "mervinpraison/llama3.1-tamilan-test"
+model_parameters: "8b"
+
+max_seq_length: 2048
+load_in_4bit: true
+lora_r: 16
+lora_target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+lora_alpha: 16
+lora_dropout: 0
+lora_bias: "none"
+use_gradient_checkpointing: "unsloth"
+random_state: 3407
+use_rslora: false
+loftq_config: null
+
+dataset:
+  - name: "yahma/alpaca-cleaned"
+    split_type: "train"
+    processing_func: "format_prompts"
+    rename:
+      input: "input"
+      output: "output"
+      instruction: "instruction"
+    filter_data: false
+    filter_column_value: "id"
+    filter_value: "alpaca"
+    num_samples: 20000
+
+dataset_text_field: "text"
+dataset_num_proc: 2
+packing: false
+
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 2
+warmup_steps: 5
+num_train_epochs: 1
+max_steps: 10
+learning_rate: 2.0e-4
+logging_steps: 1
+optim: "adamw_8bit"
+weight_decay: 0.01
+lr_scheduler_type: "linear"
+seed: 3407
+output_dir: "outputs"
+
+quantization_method: 
+  - "q4_k_m"

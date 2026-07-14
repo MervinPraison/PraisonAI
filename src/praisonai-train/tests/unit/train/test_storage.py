@@ -14,7 +14,7 @@ class TestTrainingStorage:
     
     def test_create_storage_default_path(self):
         """Test creating storage with default path."""
-        from praisonai.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.storage import TrainingStorage
         
         storage = TrainingStorage(session_id="test-session")
         
@@ -23,7 +23,7 @@ class TestTrainingStorage:
     
     def test_create_storage_custom_path(self):
         """Test creating storage with custom path."""
-        from praisonai.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.storage import TrainingStorage
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -35,8 +35,8 @@ class TestTrainingStorage:
     
     def test_save_iteration(self):
         """Test saving a training iteration."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingIteration
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -68,8 +68,8 @@ class TestTrainingStorage:
     
     def test_save_multiple_iterations(self):
         """Test saving multiple iterations."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingIteration
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -96,8 +96,8 @@ class TestTrainingStorage:
     
     def test_load_iterations(self):
         """Test loading iterations from storage."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingIteration
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -126,7 +126,7 @@ class TestTrainingStorage:
     
     def test_load_empty_storage(self):
         """Test loading from empty/nonexistent storage."""
-        from praisonai.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.storage import TrainingStorage
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -140,8 +140,8 @@ class TestTrainingStorage:
     
     def test_save_scenario(self):
         """Test saving a training scenario."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingScenario
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -166,8 +166,8 @@ class TestTrainingStorage:
     
     def test_save_report(self):
         """Test saving a training report."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingReport
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingReport
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -192,8 +192,8 @@ class TestTrainingStorage:
     
     def test_storage_uses_json_not_pickle(self):
         """Verify storage uses JSON format, not pickle."""
-        from praisonai.train.agents.storage import TrainingStorage
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingIteration
         
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = TrainingStorage(
@@ -220,8 +220,8 @@ class TestTrainingStorage:
     
     def test_list_sessions(self):
         """Test listing all training sessions."""
-        from praisonai.train.agents.storage import TrainingStorage, list_training_sessions
-        from praisonai.train.agents.models import TrainingIteration
+        from praisonai_train.train.agents.storage import TrainingStorage, list_training_sessions
+        from praisonai_train.train.agents.models import TrainingIteration
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
