@@ -83,6 +83,10 @@ __all__ = [
     # Built-in runtimes
     "get_native_runtime_capabilities",
     "get_reduced_harness_capabilities",
+    # Durable run-state journal (resumable execution)
+    "RunJournal",
+    "JournalEvent",
+    "RunMeta",
 ]
 
 # Grouped lazy imports for efficient loading
@@ -154,6 +158,11 @@ _LAZY_GROUPS = {
         'get_rules': ('praisonaiagents.runtime.doctor_registry', 'get_rules'),
         'collect_findings': ('praisonaiagents.runtime.doctor_registry', 'collect_findings'),
         'apply_fixes': ('praisonaiagents.runtime.doctor_registry', 'apply_fixes'),
+    },
+    'journal': {
+        'RunJournal': ('praisonaiagents.runtime.journal', 'RunJournal'),
+        'JournalEvent': ('praisonaiagents.runtime.journal', 'JournalEvent'),
+        'RunMeta': ('praisonaiagents.runtime.journal', 'RunMeta'),
     },
 }
 
