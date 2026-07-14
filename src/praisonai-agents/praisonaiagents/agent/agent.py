@@ -28,6 +28,7 @@ from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
 from .skill_review import SkillReviewMixin
+from ..goal.loop import GoalLoopMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -221,7 +222,7 @@ from ..errors import BudgetExceededError
 # Import retry configuration
 from .retry_utils import RetryBackoffConfig
 
-class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -2898,7 +2899,10 @@ Summary:"""
         """
         # Initialize verification hooks (always available, even without autonomy)
         self._verification_hooks = verification_hooks or []
-        
+
+        # Goal-loop state (default: disabled → autonomous loop unchanged)
+        self._init_goal_state()
+
         if autonomy is None or autonomy is False:
             self.autonomy_enabled = False
             self.autonomy_config = {}
@@ -3491,7 +3495,36 @@ Summary:"""
                 
                 # Auto-save session after each iteration (memory integration)
                 self._auto_save_session()
-                
+
+                # ─────────────────────────────────────────────────────────────
+                # GOAL COMPLETION JUDGE (opt-in): when a goal loop is active,
+                # an independent judge gates termination on the goal's
+                # acceptance criteria instead of the keyword/promise heuristics.
+                # When no goal is set, this is a no-op (behaviour unchanged).
+                # ─────────────────────────────────────────────────────────────
+                _goal_gate = self._goal_gate(response_str)
+                if _goal_gate is not None:
+                    _outcome, _reason = _goal_gate
+                    if _outcome == "done":
+                        return AutonomyResult(
+                            success=True, output=response_str,
+                            completion_reason="goal_met", iterations=iterations,
+                            stage=stage, actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    if _outcome == "budget_paused":
+                        return AutonomyResult(
+                            success=False, output=response_str,
+                            completion_reason="budget_paused",
+                            iterations=iterations, stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    prompt = self._goal_continuation_prompt(self._goal_state)
+                    continue
+
                 # ─────────────────────────────────────────────────────────────
                 # TOOL-CALL COMPLETION: If the model used tools this turn AND
                 # produced a substantive response, the inner loop completed
@@ -3895,7 +3928,35 @@ Summary:"""
                 
                 # Auto-save session after each async iteration (memory integration)
                 self._auto_save_session()
-                
+
+                # ─────────────────────────────────────────────────────────────
+                # GOAL COMPLETION JUDGE (opt-in): independent acceptance-criteria
+                # gate. No-op when no goal loop is active (behaviour unchanged).
+                # ─────────────────────────────────────────────────────────────
+                _goal_gate = self._goal_gate(response_str)
+                if _goal_gate is not None:
+                    _outcome, _reason = _goal_gate
+                    if _outcome == "done":
+                        return AutonomyResult(
+                            success=True, output=response_str,
+                            completion_reason="goal_met", iterations=iterations,
+                            stage=stage, actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    if _outcome == "budget_paused":
+                        return AutonomyResult(
+                            success=False, output=response_str,
+                            completion_reason="budget_paused",
+                            iterations=iterations, stage=stage,
+                            actions=actions_taken,
+                            duration_seconds=time_module.time() - start_time,
+                            started_at=started_at,
+                        )
+                    prompt = self._goal_continuation_prompt(self._goal_state)
+                    await asyncio.sleep(0)
+                    continue
+
                 # ─────────────────────────────────────────────────────────────
                 # TOOL-CALL COMPLETION: If the model used tools this turn AND
                 # produced a substantive response, the inner loop completed
@@ -4074,19 +4135,26 @@ Summary:"""
     def run_until(
         self,
         prompt: str,
-        criteria: str,
+        criteria: str = "",
         threshold: float = 8.0,
         max_iterations: int = 5,
         mode: str = "optimize",
         on_iteration: Optional[Callable[[Any], None]] = None,
         verbose: bool = False,
+        goal: Optional[str] = None,
+        goal_criteria: Optional[Any] = None,
+        judge_model: Optional[str] = None,
     ) -> "EvaluationLoopResult":
         """
         Run agent iteratively until output meets quality criteria.
         
         This method implements the "Ralph Loop" pattern: run agent → judge output
         → improve based on feedback → repeat until threshold met.
-        
+
+        When ``goal`` is provided, delegates to the tool-using goal loop
+        (:meth:`run_goal`) so the acceptance-criteria completion judge gates a
+        real tool-iteration loop (rather than re-generating a whole answer).
+
         Args:
             prompt: The prompt to send to the agent
             criteria: Evaluation criteria for the Judge (e.g., "Response is thorough")
@@ -4095,10 +4163,19 @@ Summary:"""
             mode: "optimize" (stop on success) or "review" (run all iterations)
             on_iteration: Optional callback called after each iteration
             verbose: Enable verbose logging
+            goal: Optional goal text — enables the tool-using goal loop
+            goal_criteria: Optional structured GoalCriteria for the goal loop
+            judge_model: Optional independent judge model for the goal loop
             
         Returns:
-            EvaluationLoopResult with iteration history and final score
-            
+            EvaluationLoopResult with iteration history and final score.
+
+            NOTE: when ``goal`` is provided this delegates to the tool-using
+            goal loop and returns an
+            :class:`~praisonaiagents.agent.autonomy.AutonomyResult` instead
+            (``success``/``output``/``completion_reason``), which is a
+            different shape from the default ``EvaluationLoopResult``.
+
         Example:
             ```python
             agent = Agent(name="analyzer", instructions="Analyze systems")
@@ -4111,6 +4188,17 @@ Summary:"""
             print(result.success)      # True
             ```
         """
+        if goal is not None:
+            # Prefer explicit structured criteria; otherwise fold the string
+            # ``criteria`` into a GoalCriteria so it is not silently dropped.
+            effective_criteria = goal_criteria
+            if effective_criteria is None and criteria:
+                from ..goal.models import GoalCriteria
+                effective_criteria = GoalCriteria(outcome=criteria)
+            return self.run_goal(
+                prompt, goal, criteria=effective_criteria,
+                max_turns=max_iterations, judge_model=judge_model,
+            )
         from ..eval.loop import EvaluationLoop
         
         loop = EvaluationLoop(

@@ -26,6 +26,10 @@ __all__ = [
     "Goal",
     "SuccessCriterion",
     "GoalVerificationResult",
+    "GoalCriteria",
+    "GoalState",
+    # Completion judge (goal-gated autonomous loop)
+    "judge_goal",
     # Protocols
     "GoalDecomposerProtocol",
     "GoalVerifierProtocol",
@@ -38,6 +42,9 @@ _LAZY_IMPORTS = {
     "Goal": ("models", "Goal"),
     "SuccessCriterion": ("models", "SuccessCriterion"),
     "GoalVerificationResult": ("models", "GoalVerificationResult"),
+    "GoalCriteria": ("models", "GoalCriteria"),
+    "GoalState": ("models", "GoalState"),
+    "judge_goal": ("judge", "judge_goal"),
     "GoalDecomposerProtocol": ("protocols", "GoalDecomposerProtocol"),
     "GoalVerifierProtocol": ("protocols", "GoalVerifierProtocol"),
     "GoalEngineerProtocol": ("protocols", "GoalEngineerProtocol"),

@@ -142,6 +142,96 @@ class Goal:
 
 
 @dataclass
+class GoalCriteria:
+    """
+    A structured "definition of done" for a goal-gated autonomous loop.
+
+    Attributes:
+        outcome: What "done" means, in one line.
+        verification: How to check it — the concrete bar the judge uses.
+        constraints: Must-not-violate conditions; any violation blocks ``done``.
+    """
+
+    outcome: str = ""
+    verification: str = ""
+    constraints: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "verification": self.verification,
+            "constraints": list(self.constraints),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GoalCriteria":
+        return cls(
+            outcome=data.get("outcome", ""),
+            verification=data.get("verification", ""),
+            constraints=list(data.get("constraints", [])),
+        )
+
+
+@dataclass
+class GoalState:
+    """
+    Persistent state for a goal-gated autonomous loop.
+
+    Tracks the goal, its acceptance criteria, and the budget/verdict bookkeeping
+    the completion judge needs across turns (and, for the gateway, sessions).
+
+    Attributes:
+        goal: The goal text (free text, or paired with ``criteria``).
+        criteria: Optional structured acceptance criteria.
+        status: ``active`` | ``paused`` | ``done``.
+        turns_used: Judged iterations consumed so far.
+        max_turns: Budget of judged iterations before a recoverable pause.
+        last_verdict: Most recent judge verdict (``done`` | ``continue``).
+        last_reason: Most recent judge reason.
+        consecutive_parse_failures: Consecutive unparseable judge responses.
+    """
+
+    goal: str
+    criteria: Optional[GoalCriteria] = None
+    status: str = "active"
+    turns_used: int = 0
+    max_turns: int = 20
+    last_verdict: str = ""
+    last_reason: str = ""
+    consecutive_parse_failures: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "goal": self.goal,
+            "criteria": self.criteria.to_dict() if self.criteria else None,
+            "status": self.status,
+            "turns_used": self.turns_used,
+            "max_turns": self.max_turns,
+            "last_verdict": self.last_verdict,
+            "last_reason": self.last_reason,
+            "consecutive_parse_failures": self.consecutive_parse_failures,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GoalState":
+        criteria_data = data.get("criteria")
+        return cls(
+            goal=data.get("goal", ""),
+            criteria=(
+                GoalCriteria.from_dict(criteria_data) if criteria_data else None
+            ),
+            status=data.get("status", "active"),
+            turns_used=int(data.get("turns_used", 0)),
+            max_turns=int(data.get("max_turns", 20)),
+            last_verdict=data.get("last_verdict", ""),
+            last_reason=data.get("last_reason", ""),
+            consecutive_parse_failures=int(
+                data.get("consecutive_parse_failures", 0)
+            ),
+        )
+
+
+@dataclass
 class GoalVerificationResult:
     """
     Outcome of verifying an output against a goal.
