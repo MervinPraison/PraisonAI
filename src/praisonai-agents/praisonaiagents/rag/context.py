@@ -8,6 +8,8 @@ No heavy imports - only stdlib.
 import hashlib
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
+from .budget import estimate_tokens as _budget_estimate_tokens
+
 if TYPE_CHECKING:
     from ..knowledge.models import SearchResultItem
 
@@ -18,11 +20,14 @@ ResultItem = Union[Dict[str, Any], "SearchResultItem"]
 def _estimate_tokens(text: str) -> int:
     """
     Estimate token count for text.
-    
-    Uses simple heuristic: ~4 characters per token for English.
-    This avoids importing tokenizers for lightweight operation.
+
+    Delegates to the canonical rag heuristic in ``budget.estimate_tokens``.
+    Preserves this module's historical behaviour of returning 1 for empty
+    text (the budget estimator returns 0 for empty input).
     """
-    return len(text) // 4 + 1
+    if not text:
+        return 1
+    return _budget_estimate_tokens(text)
 
 
 def _extract_value(item: ResultItem, key: str, default: Any = None) -> Any:

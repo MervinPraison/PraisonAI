@@ -12,6 +12,8 @@ No heavy imports at module level.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
+from .budget import estimate_tokens
+
 
 @runtime_checkable
 class CompressorProtocol(Protocol):
@@ -35,13 +37,6 @@ class CompressionResult:
     compressed_tokens: int = 0
     compression_ratio: float = 1.0
     method_used: str = "none"
-
-
-def estimate_tokens(text: str) -> int:
-    """Estimate token count (~4 chars per token)."""
-    if not text:
-        return 0
-    return len(text) // 4 + 1
 
 
 class ContextCompressor:
