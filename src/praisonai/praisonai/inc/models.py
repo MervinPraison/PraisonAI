@@ -11,6 +11,13 @@ logger = logging.getLogger(__name__)
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
+# Provider prefixes handled directly by the built-in ladder in this module.
+# Any prefix NOT in this set is delegated to praisonai.llm.registry so that
+# user-registered providers (register_llm_provider(...)) take effect here.
+_BUILTIN_MODEL_PREFIXES = frozenset(
+    {"openai", "groq", "cohere", "ollama", "anthropic", "google", "openrouter"}
+)
+
 def _is_module_available(module_name: str) -> bool:
     """Safely check if a module spec is importable.
 
@@ -107,13 +114,61 @@ class PraisonAIModel:
                        "api.openai.com" not in self.base_url)
             if is_local:
                 self.api_key = LOCAL_SERVER_API_KEY_PLACEHOLDER
-        
+
+        # A user-registered provider (llm.registry) owns its own credential
+        # resolution, so defer the OpenAI-key requirement to it rather than
+        # failing here for e.g. "bedrock/..." that isn't a built-in prefix.
+        if not self.api_key and self._is_registered_provider():
+            return
+
         if not self.api_key:
             raise ValueError(
                 f"{self.api_key_var} environment variable is required for the default OpenAI service. "
                 f"For local servers, set {self.api_key_var}='{LOCAL_SERVER_API_KEY_PLACEHOLDER}' and OPENAI_API_BASE to your local endpoint."
             )
 
+
+    def _is_registered_provider(self):
+        """Return True if the model's provider prefix is a user-registered one.
+
+        A non-built-in prefix (e.g. "bedrock/") that has been registered via
+        ``register_llm_provider`` should be resolved through the registry rather
+        than the built-in ladder. Never raises.
+        """
+        if "/" not in self.model:
+            return False
+        provider_id = self.model.split("/", 1)[0].lower()
+        if provider_id in _BUILTIN_MODEL_PREFIXES:
+            return False
+        try:
+            from praisonai.llm import has_llm_provider
+            return bool(has_llm_provider(provider_id))
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    def _resolve_registered_provider(self):
+        """Resolve a user-registered LLM provider from ``praisonai.llm.registry``.
+
+        Consults the extension point advertised in ``llm/registry.py`` so that
+        ``register_llm_provider("bedrock", BedrockProvider)`` becomes visible to
+        every framework adapter that goes through ``PraisonAIModel``. Only
+        providers NOT covered by the built-in ladder below are resolved here;
+        built-ins keep their existing fast, direct-SDK behaviour. Returns the
+        resolved provider instance, or ``None`` to fall back to the built-in
+        ladder. Never raises — registry problems degrade to the built-in path.
+        """
+        if not self._is_registered_provider():
+            return None
+        try:
+            from praisonai.llm import create_llm_provider
+            config = {"api_key": self.api_key, "base_url": self.base_url}
+            return create_llm_provider(self.model, config=config)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "Registered provider lookup for %r failed (%s); "
+                "falling back to built-in resolution.", self.model, exc
+            )
+            return None
 
     def get_model(self):
         """
@@ -125,6 +180,15 @@ class PraisonAIModel:
         Returns:
             Client: An instance of the native SDK client (OpenAI, Anthropic, etc.)
         """
+        # Extension point: honour user-registered providers (llm.registry) before
+        # the built-in ladder so custom providers (e.g. "bedrock/...") take effect.
+        registered = self._resolve_registered_provider()
+        if registered is not None:
+            get_client = getattr(registered, "get_client", None)
+            if callable(get_client):
+                return get_client()
+            return registered
+
         if self.model.startswith("google/"):
             if GOOGLE_GENAI_AVAILABLE:
                 genai = _get_google_genai()
