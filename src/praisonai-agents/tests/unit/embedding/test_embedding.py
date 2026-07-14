@@ -162,8 +162,31 @@ class TestGetDimensions:
     def test_get_dimensions_unknown_model(self):
         """Test get_dimensions() returns default for unknown models."""
         from praisonaiagents.embedding import get_dimensions
-        
+
         assert get_dimensions("unknown-model") == 1536  # Default
+
+    def test_get_dimensions_mixed_case_key(self):
+        """Model keys with uppercase letters must still match (case-insensitive).
+
+        all-MiniLM-L6-v2 is the only mixed-case key in MODEL_DIMENSIONS; the
+        substring lookup lowercases the input, so it must lowercase the key too
+        or this common local model wrongly falls back to the 1536 default.
+        """
+        from praisonaiagents.embedding import get_dimensions
+
+        assert get_dimensions("all-MiniLM-L6-v2") == 384
+        assert get_dimensions("sentence-transformers/all-MiniLM-L6-v2") == 384
+
+    def test_get_dimensions_prefers_longer_key(self):
+        """More specific (longer) keys must win over shorter prefixes.
+
+        "voyage-3" (1024) is a substring of "voyage-3-lite" (512); without
+        matching longest-key-first, "voyage/voyage-3-lite" wrongly returns 1024.
+        """
+        from praisonaiagents.embedding import get_dimensions
+
+        assert get_dimensions("voyage/voyage-3-lite") == 512
+        assert get_dimensions("voyage-3") == 1024
 
 
 class TestAliases:

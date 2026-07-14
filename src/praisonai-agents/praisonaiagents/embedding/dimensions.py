@@ -40,6 +40,17 @@ MODEL_DIMENSIONS: Dict[str, int] = {
 # Default dimension for unknown models
 DEFAULT_DIMENSION = 1536
 
+# Precomputed lowercased lookup so mixed-case keys (e.g. "all-MiniLM-L6-v2")
+# resolve on the exact-match path, and precomputed length-descending entries
+# so specific keys ("voyage-3-lite") win over prefixes ("voyage-3") without
+# sorting/lowercasing on every call.
+_LOWER_MODEL_DIMENSIONS: Dict[str, int] = {
+    key.lower(): value for key, value in MODEL_DIMENSIONS.items()
+}
+_SORTED_MODEL_DIMENSIONS = sorted(
+    _LOWER_MODEL_DIMENSIONS.items(), key=lambda item: len(item[0]), reverse=True
+)
+
 
 def get_dimensions(model_name: str) -> int:
     """Get embedding dimensions based on model name.
@@ -64,12 +75,14 @@ def get_dimensions(model_name: str) -> int:
     """
     model_lower = model_name.lower()
     
-    # Check for exact match first
-    if model_lower in MODEL_DIMENSIONS:
-        return MODEL_DIMENSIONS[model_lower]
+    # Check for exact match first (lowercased lookup handles mixed-case keys)
+    if model_lower in _LOWER_MODEL_DIMENSIONS:
+        return _LOWER_MODEL_DIMENSIONS[model_lower]
     
-    # Check if model name contains known model identifiers
-    for model_key, dimensions in MODEL_DIMENSIONS.items():
+    # Check if model name contains known model identifiers.
+    # Entries are pre-sorted by key length (longest first) so more specific
+    # keys like "voyage-3-lite" match before shorter prefixes like "voyage-3".
+    for model_key, dimensions in _SORTED_MODEL_DIMENSIONS:
         if model_key in model_lower:
             return dimensions
     
