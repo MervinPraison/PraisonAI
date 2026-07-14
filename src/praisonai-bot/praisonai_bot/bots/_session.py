@@ -568,6 +568,19 @@ class BotSessionManager:
             if self._compaction_enabled
             else None
         )
+        # Hard cap before compaction: short messages can under-shoot the token
+        # budget yet still arrive in huge batches. Trimming first avoids running
+        # token counting / summarisation over thousands of turns (and prevents
+        # offline CI hangs when tiktoken tries a first-use network download).
+        if compactor is not None and self._max_history > 0:
+            hard_cap = self._max_history * 4
+            if len(history) > hard_cap:
+                # Preserve system messages (e.g. an existing compaction summary)
+                # so trimming the oldest turns never erases long-term memory the
+                # compactor would otherwise keep. Cap only the non-system tail.
+                sys_msgs = [m for m in history if m.get("role") == "system"]
+                non_sys = [m for m in history if m.get("role") != "system"]
+                history = sys_msgs + non_sys[-hard_cap:]
         if compactor is not None:
             try:
                 if compactor.needs_compaction(history):
@@ -579,15 +592,6 @@ class BotSessionManager:
                 )
                 if self._max_history > 0 and len(history) > self._max_history:
                     history = history[-self._max_history:]
-            else:
-                # Hard cap safety valve: even when the token-based compactor
-                # hasn't triggered (e.g. short messages under-shoot the token
-                # estimate), never let history grow unbounded. Allow headroom
-                # so the cap doesn't fight compaction's recent-tail + summary.
-                if self._max_history > 0:
-                    hard_cap = self._max_history * 4
-                    if len(history) > hard_cap:
-                        history = history[-hard_cap:]
         elif self._max_history > 0 and len(history) > self._max_history:
             history = history[-self._max_history:]
 
