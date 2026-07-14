@@ -238,7 +238,22 @@ class ContextCompactor:
             )
             result.calculate_savings_pct()
             return messages, result
-        
+
+        # Anti-thrashing: if prior passes yielded too little savings, skip and
+        # surface it on the result so callers can detect the skip. Without this
+        # the documented ``was_skipped_due_to_low_savings`` flag never fired.
+        if self._low_savings_streak >= self.config.max_consecutive_low_savings:
+            result = CompactionResult(
+                original_tokens=original_tokens,
+                compacted_tokens=original_tokens,
+                messages_removed=0,
+                messages_kept=len(messages),
+                strategy_used=self.strategy,
+                was_skipped_due_to_low_savings=True,
+            )
+            result.calculate_savings_pct()
+            return messages, result
+
         # Apply tool result deduplication pre-pass if enabled
         processed_messages = messages
         tool_results_pruned = 0
@@ -333,7 +348,22 @@ class ContextCompactor:
             )
             result.calculate_savings_pct()
             return messages, result
-        
+
+        # Anti-thrashing: if prior passes yielded too little savings, skip and
+        # surface it on the result so callers can detect the skip. Without this
+        # the documented ``was_skipped_due_to_low_savings`` flag never fired.
+        if self._low_savings_streak >= self.config.max_consecutive_low_savings:
+            result = CompactionResult(
+                original_tokens=original_tokens,
+                compacted_tokens=original_tokens,
+                messages_removed=0,
+                messages_kept=len(messages),
+                strategy_used=self.strategy,
+                was_skipped_due_to_low_savings=True,
+            )
+            result.calculate_savings_pct()
+            return messages, result
+
         # Apply tool result deduplication pre-pass if enabled
         processed_messages = messages
         tool_results_pruned = 0
@@ -592,6 +622,7 @@ class ContextCompactor:
         """
         self._used_previous_summary = False
         result = []
+        summary_written = False
         
         # Keep system messages
         system_msgs = [m for m in messages if m.get("role") == "system"]
@@ -670,11 +701,22 @@ class ContextCompactor:
                 }
                 result.append(summary_msg)
                 
-                # Update tracking for future iterative summarization
+                # Remember the summary text for the next iterative pass. The
+                # global baseline is set below against the *returned* list length
+                # (see the note there) — not len(messages) — so the next call's
+                # `messages_since_summary` counts only genuinely new turns.
                 self._previous_summary = summary
-                self._previous_summary_global_idx = len(messages)
+                summary_written = True
         
         result.extend(recent)
+        if summary_written:
+            # Baseline for the NEXT iterative pass must be the length of the
+            # compacted list we actually return (system + summary + recent),
+            # NOT len(messages) of the pre-compaction input. Using the input
+            # length made the iterative branch compare two differently-based
+            # lengths, so later passes sliced the wrong window and silently
+            # dropped intervening conversation turns.
+            self._previous_summary_global_idx = len(result)
         return result
 
     async def _llm_summarize_async(self, messages: List[Dict[str, Any]], focus_topic: str = "") -> List[Dict[str, Any]]:
@@ -690,6 +732,7 @@ class ContextCompactor:
         """
         self._used_previous_summary = False
         result = []
+        summary_written = False
         
         # Keep system messages
         system_msgs = [m for m in messages if m.get("role") == "system"]
@@ -761,9 +804,12 @@ class ContextCompactor:
                     "_focus_topic": focus_topic
                 })
                 
-                # Update tracking for future iterative summarization
+                # Remember the summary text for the next iterative pass. The
+                # global baseline is set against the *returned* list length
+                # below (not len(messages)) so later passes count only new turns
+                # and never drop intervening conversation from the result.
                 self._previous_summary = summary
-                self._previous_summary_global_idx = len(messages)
+                summary_written = True
             except Exception as e:
                 # Fallback to naive summarization if LLM call fails
                 import logging
@@ -811,6 +857,11 @@ class ContextCompactor:
                 })
         
         result.extend(recent)
+        if summary_written:
+            # Baseline for the NEXT iterative pass is the length of the
+            # compacted list we return, not len(messages) of the input, so
+            # subsequent passes summarize (not silently drop) new turns.
+            self._previous_summary_global_idx = len(result)
         return result
 
     def _format_messages_for_summary(self, messages: List[Dict[str, Any]]) -> str:

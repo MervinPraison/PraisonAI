@@ -1232,7 +1232,18 @@ class ToolExecutionMixin:
         from ..approval.protocols import ApprovalRequest, ApprovalDecision
         from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
         from ..tools import get_registry as get_tool_registry
-        
+
+        # PermissionMode / PermissionManager gate. This must run *before* the
+        # backend/registry approval logic so an explicit ``ask`` rule actually
+        # prompts, a ``deny`` rejects, ``PermissionMode.BYPASS`` short-circuits
+        # to always-allow, and ``PLAN``/``DONT_ASK`` deny as documented.
+        mode_decision = self._resolve_permission_mode_decision(
+            tool_name, is_async=is_async
+        )
+        if mode_decision is not None:
+            return mode_decision
+        manager_forces_approval = self._permission_manager_requires_approval(tool_name)
+
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
         
@@ -1253,6 +1264,7 @@ class ToolExecutionMixin:
                 approve_all 
                 or tool_name in DEFAULT_DANGEROUS_TOOLS
                 or registry_required
+                or manager_forces_approval  # explicit PermissionManager ``ask`` rule
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
@@ -1324,6 +1336,15 @@ class ToolExecutionMixin:
                 else:
                     return ApprovalDecision(approved=True, reason="Not a dangerous tool")
         else:
+            # No approval backend configured. An explicit PermissionManager
+            # ``ask`` rule must still gate the call, so mark it required in the
+            # approval registry (idempotent) before delegating so the registry
+            # prompts instead of silently allowing.
+            if manager_forces_approval:
+                try:
+                    get_approval_registry().add_requirement(tool_name)
+                except Exception:  # noqa: BLE001
+                    pass
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
@@ -1332,6 +1353,144 @@ class ToolExecutionMixin:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
                 )
+
+    def _permission_manager_requires_approval(self, function_name) -> bool:
+        """Return ``True`` when an explicit ``ask`` rule gates *function_name*.
+
+        Consults the attached ``PermissionManager`` so a rule with
+        ``action="ask"`` actually drives the approval prompt at execution time
+        (previously only a hard ``deny`` had any effect). ``allow``/``deny`` and
+        the "no matching rule" default are not treated as approval-forcing here
+        (``deny`` is already handled by ``_check_permission_manager_deny``).
+        """
+        manager = getattr(self, "_permission_manager", None)
+        if manager is None:
+            return False
+        try:
+            from ..permissions import PermissionAction
+            action = manager.resolve_tool_action(
+                function_name, getattr(self, "name", None)
+            )
+            return action == PermissionAction.ASK
+        except Exception as e:  # noqa: BLE001
+            logging.debug(
+                "permission manager resolve_tool_action failed for %s: %s",
+                function_name, e,
+            )
+            return False
+
+    def _resolve_permission_mode_decision(self, function_name, is_async=False):
+        """Apply ``PermissionMode`` to *function_name*, if a mode is set.
+
+        Returns an ``ApprovalDecision`` (or its awaitable in async context) when
+        the mode determines the outcome, else ``None`` to defer to the normal
+        approval flow.
+
+        - ``BYPASS``: skip all permission checks → always allow.
+        - ``PLAN``: read-only exploration → deny any tool not tagged read-only.
+        - ``DONT_ASK``: auto-deny anything that would otherwise prompt for input
+          (an explicit ``ask`` rule or a known dangerous tool).
+        - ``DEFAULT``/``ACCEPT_EDITS``/unset: defer (return ``None``).
+        """
+        mode = getattr(self, "_permission_mode", None)
+        if mode is None:
+            return None
+        try:
+            from ..permissions import PermissionMode
+        except Exception:  # noqa: BLE001
+            return None
+
+        # Normalise string values to the enum for robustness.
+        if isinstance(mode, str):
+            try:
+                mode = PermissionMode(mode)
+            except ValueError:
+                return None
+
+        from ..approval.protocols import ApprovalDecision
+
+        def _wrap(decision):
+            if is_async:
+                async def _coro():
+                    return decision
+                return _coro()
+            return decision
+
+        if mode == PermissionMode.BYPASS:
+            return _wrap(ApprovalDecision(
+                approved=True, reason="PermissionMode.BYPASS: permission checks skipped"
+            ))
+
+        if mode == PermissionMode.PLAN:
+            # PLAN allows only side-effect-free exploration. A tool is treated as
+            # read-only only when its name has no mutation marker *and* it is not
+            # flagged as approval-worthy elsewhere (dangerous / external /
+            # registry-required / explicit ``ask`` rule). This closes the gap
+            # where a write-capable tool (e.g. ``send_email``) whose name misses
+            # the marker list would otherwise be allowed in plan mode.
+            if self._is_read_only_tool(function_name) and not self._tool_would_prompt(function_name):
+                return _wrap(ApprovalDecision(
+                    approved=True, reason="PermissionMode.PLAN: read-only tool allowed"
+                ))
+            return _wrap(ApprovalDecision(
+                approved=False,
+                reason=f"PermissionMode.PLAN: '{function_name}' is not read-only; write operations are not allowed",
+            ))
+
+        if mode == PermissionMode.DONT_ASK:
+            # Auto-deny anything that would otherwise prompt so a non-interactive
+            # run never hangs — including tools that prompt only because of their
+            # ``external`` trust level or a registry approval requirement.
+            if self._tool_would_prompt(function_name):
+                return _wrap(ApprovalDecision(
+                    approved=False,
+                    reason=f"PermissionMode.DONT_ASK: auto-denied prompt for '{function_name}'",
+                ))
+            return None
+
+        return None
+
+    def _tool_would_prompt(self, function_name) -> bool:
+        """Return ``True`` when *function_name* would trigger an approval prompt.
+
+        Mirrors the ``needs_approval`` criteria in ``_resolve_approval_decision``
+        so ``DONT_ASK`` and ``PLAN`` see the same set of prompt-worthy tools:
+        an explicit ``ask`` rule, a built-in dangerous tool, a registry-required
+        tool, or an ``external`` trust level.
+        """
+        try:
+            from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+            if function_name in DEFAULT_DANGEROUS_TOOLS:
+                return True
+            if self._permission_manager_requires_approval(function_name):
+                return True
+            from ..approval import get_approval_registry
+            if get_approval_registry().is_required(function_name):
+                return True
+            from ..tools import get_registry as get_tool_registry
+            if get_tool_registry().get_trust_level(function_name) == "external":
+                return True
+        except Exception as e:  # noqa: BLE001
+            logging.debug("_tool_would_prompt failed for %s: %s", function_name, e)
+        return False
+
+    @staticmethod
+    def _is_read_only_tool(function_name) -> bool:
+        """Best-effort heuristic for whether a tool only reads (no writes).
+
+        Used by ``PermissionMode.PLAN``. Tools whose names imply mutation
+        (write/edit/delete/create/run/exec/…) are treated as non-read-only.
+        """
+        if not function_name:
+            return True
+        name = str(function_name).lower()
+        write_markers = (
+            "write", "edit", "append", "delete", "remove", "create", "mkdir",
+            "rm", "put", "post", "patch", "update", "insert", "save", "move",
+            "rename", "chmod", "chown", "exec", "run", "shell", "bash", "command",
+            "kill", "apply_patch", "install", "deploy",
+        )
+        return not any(marker in name for marker in write_markers)
 
     def _check_permission_manager_deny(self, function_name):
         """Return an error dict if the PermissionManager hard-denies the tool.
@@ -1355,6 +1514,27 @@ class ToolExecutionMixin:
             logging.debug("permission manager is_denied failed for %s: %s", function_name, e)
         return None
 
+    def _is_bypass_mode(self) -> bool:
+        """Return ``True`` when ``PermissionMode.BYPASS`` is active.
+
+        BYPASS means *skip all permission checks*, so it must short-circuit
+        even the pattern-based ``PermissionManager`` deny gate (which otherwise
+        runs before the approval decision and would block the tool first).
+        """
+        mode = getattr(self, "_permission_mode", None)
+        if mode is None:
+            return False
+        try:
+            from ..permissions import PermissionMode
+            if isinstance(mode, str):
+                try:
+                    mode = PermissionMode(mode)
+                except ValueError:
+                    return False
+            return mode == PermissionMode.BYPASS
+        except Exception:  # noqa: BLE001
+            return False
+
     def _check_tool_approval_sync(self, function_name, arguments):
         """Check tool approval synchronously. Returns (decision, arguments) or error dict."""
         # Permission tier fast-path (O(1) frozenset lookup, resolved at __init__)
@@ -1364,9 +1544,11 @@ class ToolExecutionMixin:
             return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
 
         # Pattern-based PermissionManager deny gate (native + MCP, uniform).
-        manager_denial = self._check_permission_manager_deny(function_name)
-        if manager_denial is not None:
-            return manager_denial
+        # BYPASS mode skips this gate as its contract requires.
+        if not self._is_bypass_mode():
+            manager_denial = self._check_permission_manager_deny(function_name)
+            if manager_denial is not None:
+                return manager_denial
 
         decision = self._resolve_approval_decision(function_name, arguments, is_async=False)
         
@@ -1392,9 +1574,11 @@ class ToolExecutionMixin:
             return {"error": f"Tool '{function_name}' not in allowed tools list", "permission_denied": True}
 
         # Pattern-based PermissionManager deny gate (native + MCP, uniform).
-        manager_denial = self._check_permission_manager_deny(function_name)
-        if manager_denial is not None:
-            return manager_denial
+        # BYPASS mode skips this gate as its contract requires.
+        if not self._is_bypass_mode():
+            manager_denial = self._check_permission_manager_deny(function_name)
+            if manager_denial is not None:
+                return manager_denial
 
         decision_coro = self._resolve_approval_decision(function_name, arguments, is_async=True)
         decision = await decision_coro

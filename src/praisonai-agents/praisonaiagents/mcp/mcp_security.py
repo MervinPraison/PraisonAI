@@ -270,8 +270,16 @@ def load_sse_security_from_env():
     return config, token
 
 
-def build_sse_security_app(app, security: Optional["SecurityConfig"] = None):
-    """Wrap a Starlette app with SSE security middleware when configured."""
+def resolve_sse_security(security: Optional["SecurityConfig"] = None):
+    """Resolve the effective SSE security config and auth token.
+
+    Returns a ``(config, token)`` tuple. When *security* is ``None`` the
+    settings are loaded from the ``MCP_SSE_*`` environment variables; when a
+    config is supplied with ``require_auth=True`` the token is read from
+    ``MCP_SSE_AUTH_TOKEN`` / ``MCP_AUTH_TOKEN``. This is the single source of
+    truth used by both the middleware wiring and the server start-up guard so
+    a ``require_auth=True`` config cannot silently start unauthenticated.
+    """
     config = security
     token = None
     if config is None:
@@ -280,6 +288,12 @@ def build_sse_security_app(app, security: Optional["SecurityConfig"] = None):
         import os
 
         token = os.environ.get("MCP_SSE_AUTH_TOKEN") or os.environ.get("MCP_AUTH_TOKEN")
+    return config, token
+
+
+def build_sse_security_app(app, security: Optional["SecurityConfig"] = None):
+    """Wrap a Starlette app with SSE security middleware when configured."""
+    config, token = resolve_sse_security(security)
     if config is None or (not config.require_auth and not config.validate_origin):
         return app
 
