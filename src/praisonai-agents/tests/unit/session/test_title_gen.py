@@ -188,3 +188,51 @@ class TestSmallModelResolution:
             assert get_small_model(primary_model=None, fallback="fb") == "fb"
         finally:
             config.defaults = original
+
+    def test_agent_namespace_small_model_honored(self, monkeypatch):
+        """`agent.small_model` (CLI/schema namespace) is honored by the resolver.
+
+        The CLI resolver and JSON schema place model settings under a top-level
+        `agent` section, while the typed loader uses `defaults`. Both read the
+        same config file, so a schema-guided `agent.small_model` must not be
+        silently ignored.
+        """
+        from praisonaiagents.config import loader
+        from praisonaiagents.config.loader import (
+            get_small_model,
+            get_config,
+            DefaultsConfig,
+        )
+
+        config = get_config()
+        original = config.defaults
+        try:
+            config.defaults = DefaultsConfig(model=None, small_model=None)
+            monkeypatch.setattr(
+                loader, "_load_config",
+                lambda: {"agent": {"small_model": "agent-small"}},
+            )
+            assert get_small_model(primary_model="p", fallback="fb") == "agent-small"
+        finally:
+            config.defaults = original
+
+    def test_agent_namespace_model_fallback(self, monkeypatch):
+        """`agent.model` is used as a fallback when no small model is set."""
+        from praisonaiagents.config import loader
+        from praisonaiagents.config.loader import (
+            get_small_model,
+            get_config,
+            DefaultsConfig,
+        )
+
+        config = get_config()
+        original = config.defaults
+        try:
+            config.defaults = DefaultsConfig(model=None, small_model=None)
+            monkeypatch.setattr(
+                loader, "_load_config",
+                lambda: {"agent": {"model": "agent-model"}},
+            )
+            assert get_small_model(primary_model=None, fallback="fb") == "agent-model"
+        finally:
+            config.defaults = original

@@ -436,15 +436,38 @@ def get_default(key: str, fallback: Any = None) -> Any:
     return value if value is not None else fallback
 
 
+def _agent_section_value(key: str) -> Optional[Any]:
+    """Read ``agent.<key>`` from the raw config file, if present.
+
+    The CLI config surface (``praisonai_code`` resolver) and the published JSON
+    schema place model settings under a top-level ``agent`` section (e.g.
+    ``agent.small_model``), whereas this loader's typed defaults live under
+    ``defaults``. Both surfaces read the same ``.praisonai/config.yaml`` file,
+    so honour ``agent.<key>`` here as well to avoid silently ignoring
+    schema-guided config.
+    """
+    raw = _load_config()
+    agent = raw.get("agent")
+    if isinstance(agent, dict):
+        return agent.get(key)
+    return None
+
+
 def get_small_model(primary_model: Optional[str] = None, fallback: Optional[str] = None) -> Optional[str]:
     """Resolve the auxiliary/"small" model for cheap internal LLM calls.
 
     Resolution order:
-    1. ``defaults.small_model`` from the config file, if set.
+    1. ``defaults.small_model`` (or the equivalent ``agent.small_model`` CLI
+       namespace) from the config file, if set.
     2. The supplied ``primary_model`` (e.g. the running agent's model).
-    3. ``defaults.model`` from the config file, if set.
+    3. ``defaults.model`` (or ``agent.model``) from the config file, if set.
     4. ``fallback`` (preserves today's hardcoded behaviour when nothing else
        is configured).
+
+    Both the ``defaults.*`` (typed loader) and ``agent.*`` (CLI resolver / JSON
+    schema) namespaces are honoured because they read the same config file; a
+    user following schema autocomplete (``agent.small_model``) is therefore not
+    silently ignored.
 
     This keeps internal calls (title generation, summarisation/compaction) on
     a configured cheap model, and — when unset — on the primary model rather
@@ -459,12 +482,12 @@ def get_small_model(primary_model: Optional[str] = None, fallback: Optional[str]
     Returns:
         The resolved auxiliary model identifier, or ``fallback``.
     """
-    small = get_default("small_model")
+    small = get_default("small_model") or _agent_section_value("small_model")
     if small:
         return small
     if primary_model:
         return primary_model
-    config_model = get_default("model")
+    config_model = get_default("model") or _agent_section_value("model")
     if config_model:
         return config_model
     return fallback
