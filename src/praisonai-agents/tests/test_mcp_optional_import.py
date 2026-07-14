@@ -121,16 +121,17 @@ class TestMCPOptionalImport:
         finally:
             http_module.MCP_AVAILABLE = original_available
 
-    def test_http_stream_client_raises_import_error_when_aiohttp_unavailable(self):
-        """Test that HTTPStreamMCPClient raises ImportError when aiohttp unavailable."""
+    def test_http_stream_client_raises_import_error_when_streamable_client_unavailable(self):
+        """Test that HTTPStreamMCPClient raises ImportError when the official
+        Streamable HTTP client is unavailable."""
         import praisonaiagents.mcp.mcp_http_stream as http_module
 
-        # Ensure MCP is available but aiohttp is not
+        # Ensure MCP is available but the official streamable client is not
         original_available = http_module.MCP_AVAILABLE
-        original_aiohttp = http_module.aiohttp
+        original_client = http_module.streamablehttp_client
 
         http_module.MCP_AVAILABLE = True
-        http_module.aiohttp = None
+        http_module.streamablehttp_client = None
 
         try:
             from praisonaiagents.mcp.mcp_http_stream import HTTPStreamMCPClient
@@ -138,11 +139,10 @@ class TestMCPOptionalImport:
                 HTTPStreamMCPClient('http://test.com/mcp')
 
             error_msg = str(exc_info.value)
-            assert 'aiohttp' in error_msg.lower()
-            assert 'pip install praisonaiagents[mcp]' in error_msg
+            assert 'streamable' in error_msg.lower()
         finally:
             http_module.MCP_AVAILABLE = original_available
-            http_module.aiohttp = original_aiohttp
+            http_module.streamablehttp_client = original_client
 
 
 if __name__ == "__main__":
