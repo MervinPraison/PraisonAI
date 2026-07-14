@@ -367,65 +367,64 @@ class BaseAutoGenerator:
         # Resolve LLM endpoint configuration from environment variables
         from praisonai.llm.config import build_config_list
         self.config_list = config_list or build_config_list(include_api_type=False)
-        self._openai_client = None  # lazy, per-instance
-        self._async_openai_client = None  # lazy, per-instance async client
+        self._core_client = None  # lazy, per-instance core OpenAIClient
         self._client_lock = threading.Lock()
-        
-    def _get_openai_client(self):
-        """Get or create the OpenAI client for this instance.
+
+    def _get_core_client(self):
+        """Get or create the core-owned ``OpenAIClient`` for this instance.
+
+        The OpenAI leg of the structured-completion ladder is owned by the core
+        SDK (``praisonaiagents.llm.openai_client.OpenAIClient``), which manages
+        sync/async client construction, lifecycle, and the
+        ``beta.chat.completions.parse`` structured-output path. The wrapper
+        delegates to it rather than maintaining a parallel copy.
 
         Lazy-init AND snapshot the client under the same lock so the returned
-        local reference survives a concurrent close() that nulls the attribute,
-        closing the shutdown-during-request race (mirrors the async path).
+        local reference survives a concurrent close()/aclose() that nulls the
+        attribute, closing the shutdown-during-request race.
         """
         with self._client_lock:
-            client = self._openai_client
+            client = self._core_client
             if client is None:
                 try:
-                    from openai import OpenAI
+                    from praisonaiagents.llm.openai_client import OpenAIClient
                 except ImportError as e:
                     raise ImportError("Install with: pip install openai") from e
                 cfg = self.config_list[0]
-                client = self._openai_client = OpenAI(
+                client = self._core_client = OpenAIClient(
                     api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
                     base_url=cfg.get("base_url"),
                 )
             return client
 
     def close(self):
-        """Close the sync OpenAI client if it exists."""
+        """Close the core OpenAI client if it exists."""
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
         # Snapshot under the lock, close OUTSIDE it, and only null the attribute
         # after a successful close so a failed close can be retried.
         with self._client_lock:
-            client = getattr(self, '_openai_client', None)
+            client = getattr(self, '_core_client', None)
         if client is not None:
             client.close()
         with self._client_lock:
-            if getattr(self, '_openai_client', None) is client:
-                self._openai_client = None
-    
+            if getattr(self, '_core_client', None) is client:
+                self._core_client = None
+
     async def aclose(self):
-        """Close both sync and async OpenAI clients if they exist."""
+        """Close the core OpenAI client if it exists."""
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
-        # Snapshot under the lock, close OUTSIDE it, and only null each attribute
-        # after its successful close so a failed close can be retried.
+        # Snapshot under the lock, close OUTSIDE it, and only null the attribute
+        # after a successful close so a failed close can be retried.
         with self._client_lock:
-            sync_client = getattr(self, '_openai_client', None)
-            async_client = getattr(self, '_async_openai_client', None)
-        if sync_client is not None:
-            await asyncio.to_thread(sync_client.close)
+            client = getattr(self, '_core_client', None)
+        if client is not None:
+            await client.aclose()
             with self._client_lock:
-                if getattr(self, '_openai_client', None) is sync_client:
-                    self._openai_client = None
-        if async_client is not None:
-            await async_client.close()
-            with self._client_lock:
-                if getattr(self, '_async_openai_client', None) is async_client:
-                    self._async_openai_client = None
-    
+                if getattr(self, '_core_client', None) is client:
+                    self._core_client = None
+
     def __enter__(self):
         return self
     
@@ -439,28 +438,6 @@ class BaseAutoGenerator:
     async def __aexit__(self, exc_type, exc, tb):
         await self.aclose()
         return False
-
-    
-    def _get_async_openai_client(self):
-        """Get or create the async OpenAI client for this instance.
-
-        Lazy-init AND snapshot the client under the same lock so the returned
-        local reference survives a concurrent aclose() that nulls the attribute,
-        closing the shutdown-during-request race (mirrors the sync path).
-        """
-        with self._client_lock:
-            client = self._async_openai_client
-            if client is None:
-                try:
-                    from openai import AsyncOpenAI
-                except ImportError as e:
-                    raise ImportError("Install with: pip install openai") from e
-                cfg = self.config_list[0]
-                client = self._async_openai_client = AsyncOpenAI(
-                    api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                    base_url=cfg.get("base_url"),
-                )
-            return client
 
     async def _completion_impl(
         self,
@@ -513,27 +490,30 @@ class BaseAutoGenerator:
                     "falling back to OpenAI SDK.", e
                 )
 
-        # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
+        # Fallback to the core-owned OpenAI client (uses beta.chat.completions.parse).
+        # Delegating to praisonaiagents.llm.openai_client.OpenAIClient keeps the
+        # OpenAI structured-output path in a single, core-owned place instead of a
+        # parallel wrapper copy that can silently drift from core.
         if is_available("openai"):
-            client = (
-                self._get_async_openai_client() if is_async
-                else self._get_openai_client()
+            client = self._get_core_client()
+            # The async path awaits the core coroutine directly. The sync path
+            # offloads the blocking core call via asyncio.to_thread so it never
+            # blocks the bridge event loop this coroutine runs on.
+            if is_async:
+                return await client.aparse_structured_output(
+                    messages=messages,
+                    response_format=response_model,
+                    model=model_name,
+                    **kwargs,
+                )
+            return await asyncio.to_thread(
+                lambda: client.parse_structured_output(
+                    messages=messages,
+                    response_format=response_model,
+                    model=model_name,
+                    **kwargs,
+                )
             )
-            parse = client.beta.chat.completions.parse
-            parse_kwargs = dict(
-                model=model_name,
-                messages=messages,
-                response_format=response_model,
-                **kwargs,
-            )
-            # As above: await directly when async, otherwise offload the blocking
-            # sync parse() so the bridge event loop is never blocked.
-            response = (
-                await _maybe_await(parse(**parse_kwargs))
-                if is_async
-                else await asyncio.to_thread(lambda: parse(**parse_kwargs))
-            )
-            return response.choices[0].message.parsed
 
         # Neither available - raise helpful error
         raise ImportError(
