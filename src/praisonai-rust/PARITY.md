@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 407 | **Rust Features:** 667 | **Parity:** 70.8%
+> **Python Features:** 409 | **Rust Features:** 667 | **Parity:** 70.4%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 407 |
+| Python Core Features | 409 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **119** |
+| **Actual Gap Count** | **121** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **70.8%** |
+| **Parity** | **70.4%** |
 
 ## Implemented Features
 
@@ -769,6 +769,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `StopReason`
 - ❌ `StructuredFormatter`
 - ❌ `SuccessCriterion`
+- ❌ `TerminationReason`
 - ❌ `ToolExecutionError`
 - ❌ `ToolSearchConfig`
 - ❌ `ToolUseEvent`
@@ -808,6 +809,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `resolve_runtime`
 - ❌ `resolve_toolset`
 - ❌ `resolve_toolsets`
+- ❌ `termination_to_run_status`
 - ❌ `unregister_toolset`
 - ❌ `validate`
 - ❌ `validate_decision_string`

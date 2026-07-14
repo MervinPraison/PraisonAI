@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 407,
+    "pythonCoreFeatures": 409,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
-    "gapCount": 113,
+    "gapCount": 115,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 100
+    "priorityP3": 102
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -281,6 +281,7 @@
       "TaskOutput",
       "TelemetryCollector",
       "TemplateConfig",
+      "TerminationReason",
       "TodoItem",
       "TodoList",
       "ToolExecutionError",
@@ -411,6 +412,7 @@
       "route",
       "suggest_similar",
       "sync_display_callbacks",
+      "termination_to_run_status",
       "tool",
       "tools",
       "trace_context",
@@ -721,6 +723,7 @@
         "StopReason",
         "StructuredFormatter",
         "SuccessCriterion",
+        "TerminationReason",
         "ToolExecutionError",
         "ToolUseEvent",
         "ToolsetRegistry",
@@ -753,6 +756,7 @@
         "resolve_runtime",
         "resolve_toolset",
         "resolve_toolsets",
+        "termination_to_run_status",
         "tools",
         "unregister_toolset",
         "validate_decision_string",
@@ -5713,6 +5717,15 @@
         "category": "config"
       },
       {
+        "feature": "TerminationReason",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ToolExecutionError",
         "python": true,
         "typescript": false,
@@ -6539,6 +6552,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "termination_to_run_status",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "tools",

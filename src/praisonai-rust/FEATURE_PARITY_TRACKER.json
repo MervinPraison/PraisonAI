@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 407,
+    "pythonCoreFeatures": 409,
     "rustFeatures": 667,
-    "gapCount": 125,
-    "parityPercentage": 163.9
+    "gapCount": 127,
+    "parityPercentage": 163.1
   },
   "pythonCoreSDK": {
     "exports": [
@@ -277,6 +277,7 @@
       "TaskOutput",
       "TelemetryCollector",
       "TemplateConfig",
+      "TerminationReason",
       "TodoItem",
       "TodoList",
       "ToolExecutionError",
@@ -407,6 +408,7 @@
       "route",
       "suggest_similar",
       "sync_display_callbacks",
+      "termination_to_run_status",
       "tool",
       "tools",
       "trace_context",
@@ -4630,6 +4632,15 @@
         "category": "config"
       },
       {
+        "feature": "TerminationReason",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ToolExecutionError",
         "python": true,
         "rust": false,
@@ -5456,6 +5467,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "termination_to_run_status",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "tools",

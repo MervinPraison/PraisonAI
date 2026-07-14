@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 407 |
+| Python Core Features | 409 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **113** |
+| **Gap Count** | **115** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 100 |
+| P3 (Low) | 102 |
 
 ## Gap Matrix
 
@@ -160,7 +160,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 100 todo)
+### P3_Advanced (180 done, 102 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -233,6 +233,7 @@
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
 | `SuccessCriterion` | ✅ | ❌ | high | ⏳ TODO |
+| `TerminationReason` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
@@ -262,6 +263,7 @@
 | `resolve\_runtime` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `termination\_to\_run\_status` | ✅ | ❌ | low | ⏳ TODO |
 | `unregister\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `validate\_decision\_string` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
@@ -603,7 +605,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (103 exports)</summary>
+<summary><strong>other</strong> (105 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
