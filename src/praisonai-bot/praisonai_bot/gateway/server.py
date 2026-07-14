@@ -3873,51 +3873,22 @@ class WebSocketGateway:
         if not raw or not isinstance(raw, dict):
             raise ValueError(f"Invalid gateway config: {config_path}")
 
-        # ── Schema validation ──────────────────────────────────────
-        errors = []
-        if "agents" not in raw:
-            errors.append("Missing required 'agents' section")
-        elif not isinstance(raw["agents"], dict) or not raw["agents"]:
-            errors.append("'agents' must be a non-empty dictionary")
-        else:
-            for aid, adef in raw["agents"].items():
-                if not isinstance(adef, dict):
-                    errors.append(f"Agent '{aid}' must be a dictionary")
-
-        if "channels" not in raw:
-            errors.append("Missing required 'channels' section")
-        elif not isinstance(raw["channels"], dict) or not raw["channels"]:
-            errors.append("'channels' must be a non-empty dictionary")
-        else:
-            valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email", "agentmail"}
-            for cname, cdef in raw["channels"].items():
-                if not isinstance(cdef, dict):
-                    errors.append(f"Channel '{cname}' must be a dictionary")
-                    continue
-                # Resolve platform: explicit field takes priority over key
-                platform = cdef.get("platform", cname).lower()
-                if platform not in valid_platforms:
-                    logger.warning(
-                        f"Channel '{cname}' platform '{platform}' is not "
-                        f"a known platform ({', '.join(sorted(valid_platforms))})"
-                    )
-                # WhatsApp web mode doesn't require a token
-                is_wa_web = (platform == "whatsapp" and
-                             cdef.get("mode", "cloud").lower().strip() == "web")
-                # Email/AgentMail use env vars for tokens — not required in YAML
-                is_email_platform = platform in ("email", "agentmail")
-                if not cdef.get("token") and not is_wa_web and not is_email_platform:
-                    errors.append(
-                        f"Channel '{cname}' missing 'token' "
-                        "(use ${{ENV_VAR}} syntax for env vars)"
-                    )
-
-        if errors:
-            msg = (
-                f"Gateway config validation failed ({config_path}):\n"
-                + "\n".join(f"  - {e}" for e in errors)
-            )
-            raise ValueError(msg)
+        # ── Canonical schema validation (issue #3018) ──────────────
+        # Route through the single, registry-aware validator that the ``bot``
+        # CLI already uses instead of a second hand-rolled allowlist. This
+        # migrates legacy config shapes (single-bot / BotOS / string
+        # allowed_users) and *fails closed* on an unknown/typo'd platform
+        # rather than emitting a warning and starting a channel that will
+        # silently never run. Validation reads the platform registry
+        # (built-ins + entry-point-discovered + ``register_platform()``), so
+        # plugin channels validate on the runtime path too. Unknown-platform
+        # and missing-token failures raise ``ValueError`` here, which the CLI
+        # maps to the fatal-config exit code (78) so supervisors don't
+        # crash-loop.
+        from praisonai_bot.bots._config_schema import (
+            migrate_legacy_config,
+            validate_gateway_config,
+        )
 
         def _resolve(obj):
             if isinstance(obj, str):
@@ -3928,7 +3899,99 @@ class WebSocketGateway:
                 return [_resolve(v) for v in obj]
             return obj
 
-        return _resolve(raw)
+        migrated = migrate_legacy_config(raw)
+
+        # ── Gateway-runtime required-section contract ──────────────
+        # The canonical schema treats ``agent``/``agents`` and per-channel
+        # ``token`` as optional (it serves the ``bot`` CLI's looser shapes).
+        # The gateway *runtime*, however, needs an ``agents`` map to build
+        # agents from, a ``channels`` map to start adapters, and a token per
+        # channel (except tokenless platforms). Enforce those here — on the
+        # *pre-substitution* config so a channel with **no** ``token`` key
+        # fails closed, while a ``${VAR}`` that resolves to empty is left for
+        # ``start_channels()`` to skip (regression guard, PR #3019 review).
+        # Platform/typo fail-closed is still delegated to the canonical
+        # validator below (single source of truth for the registry).
+        errors: list[str] = []
+        agents_cfg = migrated.get("agents")
+        if not agents_cfg:
+            errors.append("Missing required 'agents' section")
+        elif not isinstance(agents_cfg, dict):
+            errors.append("'agents' must be a non-empty dictionary")
+
+        channels_cfg = migrated.get("channels")
+        if not channels_cfg:
+            errors.append("Missing required 'channels' section")
+        elif not isinstance(channels_cfg, dict):
+            errors.append("'channels' must be a non-empty dictionary")
+        else:
+            _tokenless = {"email", "agentmail"}
+            for cname, cdef in channels_cfg.items():
+                if not isinstance(cdef, dict):
+                    continue
+                platform = str(cdef.get("platform", cname)).lower()
+                is_wa_web = (
+                    platform == "whatsapp"
+                    and str(cdef.get("mode", cdef.get("whatsapp_mode", "cloud")))
+                    .lower()
+                    .strip()
+                    == "web"
+                )
+                if (
+                    "token" not in cdef
+                    and platform not in _tokenless
+                    and not is_wa_web
+                ):
+                    errors.append(
+                        f"Channel '{cname}' missing 'token' "
+                        "(use ${ENV_VAR} syntax for env vars)"
+                    )
+
+        if errors:
+            raise ValueError(
+                f"Gateway config validation failed ({config_path}):\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+
+        # Resolve ``${VAR}`` *before* validation so the schema sees literal
+        # values, not placeholders. This loader owns env resolution and maps an
+        # unset var to an empty string (``_substitute_env_vars``); doing it up
+        # front means an unset token for a currently-unused channel stays an
+        # empty string that ``start_channels()`` skips, instead of tripping the
+        # schema's ``${VAR}``-token validator and aborting the whole gateway
+        # (regression guard, PR #3019 review). Platform-typo fail-closed still
+        # applies — that check keys off the platform *name*, not the token.
+        raw = _resolve(migrated)
+        # Validate (raises ValueError on unknown platform / no channels). Env
+        # substitution already happened above, so skip the schema's own.
+        validated = validate_gateway_config(raw, apply_env_substitution=False)
+        # The schema normalises legacy single-bot (top-level platform/token)
+        # and BotOS (``platforms:``) shapes into a ``channels`` dict, resolves
+        # the effective ``platform`` name, and wires plugin descriptor env
+        # fallbacks / required fields (Issue #2801). Merge those validated
+        # channel fields back so the runtime — which reads ``channels`` from
+        # this dict — starts adapters with the same fully-resolved settings the
+        # ``bot`` command sees. User-supplied raw values win; validator-derived
+        # fields only fill gaps (PR #3019 review: existing ``channels:`` configs
+        # previously lost descriptor-populated fields).
+        if validated.channels:
+            raw_channels = raw.get("channels")
+            if not isinstance(raw_channels, dict):
+                raw_channels = {}
+            merged: Dict[str, Any] = {}
+            for name, channel in validated.channels.items():
+                validated_fields = channel.model_dump(exclude_none=True)
+                existing = raw_channels.get(name)
+                if isinstance(existing, dict):
+                    merged[name] = {**validated_fields, **existing}
+                    for key, val in validated_fields.items():
+                        if existing.get(key) in (None, ""):
+                            merged[name][key] = val
+                else:
+                    merged[name] = validated_fields
+            raw["channels"] = merged
+
+        return raw
 
     def _create_agents_from_config(
         self,
