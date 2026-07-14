@@ -141,6 +141,11 @@ class AutonomyConfig:
     snapshot_dir: Optional[str] = None  # Defaults to ~/.praisonai/snapshots
     # Default tools for autonomy mode (auto-populated with code intelligence tools)
     default_tools: Optional[List[Any]] = None  # None = auto (uses get_autonomy_default_tools())
+    # Spend kill-switches — independent of turn/time caps. None = unlimited
+    # (today's behaviour). Checked against cumulative run cost/tokens each iteration.
+    max_budget_usd: Optional[float] = None  # hard cumulative USD spend cap for the run
+    max_tokens: Optional[int] = None        # hard cumulative-token cap for the run
+    budget_action: str = "pause"            # "pause" (recoverable) | "stop"
     
     def __post_init__(self):
         if self.level not in VALID_AUTONOMY_LEVELS:
@@ -163,6 +168,38 @@ class AutonomyConfig:
         if self.snapshot_dir is None:
             from ..paths import get_snapshots_dir
             self.snapshot_dir = str(get_snapshots_dir())
+        # Validate spend kill-switch settings
+        if self.budget_action not in ("pause", "stop"):
+            raise ValueError(
+                f"Invalid budget_action: {self.budget_action!r}. "
+                "Must be 'pause' or 'stop'."
+            )
+        if self.max_budget_usd is not None:
+            if isinstance(self.max_budget_usd, bool) or not isinstance(
+                self.max_budget_usd, (int, float)
+            ):
+                raise ValueError(
+                    f"Invalid max_budget_usd: {self.max_budget_usd!r}. "
+                    "Must be a non-negative number or None."
+                )
+            if self.max_budget_usd < 0:
+                raise ValueError(
+                    f"Invalid max_budget_usd: {self.max_budget_usd!r}. "
+                    "Must be non-negative."
+                )
+        if self.max_tokens is not None:
+            if isinstance(self.max_tokens, bool) or not isinstance(
+                self.max_tokens, int
+            ):
+                raise ValueError(
+                    f"Invalid max_tokens: {self.max_tokens!r}. "
+                    "Must be a non-negative integer or None."
+                )
+            if self.max_tokens < 0:
+                raise ValueError(
+                    f"Invalid max_tokens: {self.max_tokens!r}. "
+                    "Must be non-negative."
+                )
     
     @property
     def effective_track_changes(self) -> bool:
@@ -193,6 +230,9 @@ class AutonomyConfig:
             sandbox=data.get("sandbox"),
             snapshot_dir=data.get("snapshot_dir"),
             default_tools=data.get("default_tools"),
+            max_budget_usd=data.get("max_budget_usd"),
+            max_tokens=data.get("max_tokens"),
+            budget_action=data.get("budget_action", "pause"),
         )
 
 class AutonomySignal(str, Enum):
@@ -286,23 +326,29 @@ class AutonomyResult:
     Attributes:
         success: Whether the task completed successfully
         output: Final output/response
-        completion_reason: Why execution stopped (goal, timeout, max_iterations, doom_loop, error, promise)
+        completion_reason: Why execution stopped. One of the
+            ``TerminationReason`` string values: goal, tool_completion, promise,
+            no_tool_calls, max_iterations, timeout, budget_exhausted, doom_loop,
+            needs_help, interrupted, cancelled, error.
         iterations: Number of iterations executed
         stage: Final execution stage
         actions: List of actions taken
         duration_seconds: Total execution time
         error: Error message if failed
         started_at: ISO 8601 timestamp when execution started
+        metadata: Optional structured metadata (e.g. spend_usd/tokens/status
+            on a budget_exhausted outcome)
     """
     success: bool
     output: str = ""
-    completion_reason: str = "goal"  # goal, timeout, max_iterations, doom_loop, error, promise
+    completion_reason: str = "goal"  # a TerminationReason value; see docstring
     iterations: int = 0
     stage: str = "direct"
     actions: List[Dict[str, Any]] = field(default_factory=list)
     duration_seconds: float = 0.0
     error: Optional[str] = None
     started_at: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
     def __str__(self) -> str:
         """Return the output text for display purposes.

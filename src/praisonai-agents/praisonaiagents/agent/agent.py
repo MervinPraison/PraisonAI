@@ -2479,6 +2479,71 @@ Your Goal: {self.goal}
                 "llm_calls": self._llm_call_count,
             }
 
+    def _run_spend(self) -> tuple:
+        """Return cumulative (usd, tokens) spent by this agent so far.
+
+        Reuses the per-run cost/token accounting already accumulated in
+        ``chat``/``achat`` (``_total_cost``, ``_total_tokens_in/out``). Used by
+        ``run_autonomous`` to enforce the spend kill-switch each iteration.
+        """
+        with self._cost_lock:
+            return (
+                self._total_cost,
+                self._total_tokens_in + self._total_tokens_out,
+            )
+
+    def _autonomy_budget_result(self, iterations, stage, actions_taken,
+                                start_time, started_at, last_output,
+                                spend_baseline=(0.0, 0)):
+        """Return an AutonomyResult if the run's spend cap is exceeded, else None.
+
+        Compares *this run's* spend against the autonomy
+        ``max_budget_usd``/``max_tokens`` caps. ``spend_baseline`` is the
+        ``(usd, tokens)`` snapshot taken at the start of the autonomous loop, so
+        prior usage on a reused Agent (earlier ``chat``/``run_autonomous`` calls
+        accumulated in the lifetime counters) does not count against this run's
+        cap. Either/both caps unset = unlimited, preserving today's behaviour
+        (returns None → run continues). On exceed, returns a typed
+        ``budget_exhausted`` outcome carrying spend-so-far and the partial
+        result; ``budget_action='pause'`` marks it recoverable.
+        """
+        cap_usd = self.autonomy_config.get("max_budget_usd")
+        cap_tok = self.autonomy_config.get("max_tokens")
+        if cap_usd is None and cap_tok is None:
+            return None
+        raw_usd, raw_toks = self._run_spend()
+        base_usd, base_toks = spend_baseline
+        usd = raw_usd - base_usd
+        toks = raw_toks - base_toks
+        exceeded = (
+            (cap_usd is not None and usd >= cap_usd)
+            or (cap_tok is not None and toks >= cap_tok)
+        )
+        if not exceeded:
+            return None
+        import time as _time_module
+        from .autonomy import AutonomyResult
+        from ..run_outcome import TerminationReason
+        action = self.autonomy_config.get("budget_action", "pause")
+        status = "paused" if action == "pause" else "stopped"
+        return AutonomyResult(
+            success=False,
+            output=last_output or "",
+            completion_reason=TerminationReason.BUDGET_EXHAUSTED.value,
+            iterations=iterations,
+            stage=stage,
+            actions=actions_taken,
+            duration_seconds=_time_module.time() - start_time,
+            started_at=started_at,
+            metadata={
+                "spend_usd": usd,
+                "tokens": toks,
+                "max_budget_usd": cap_usd,
+                "max_tokens": cap_tok,
+                "status": status,
+            },
+        )
+
     @property
     def context_manager(self) -> Optional[Any]:
         """
@@ -2979,6 +3044,9 @@ Summary:"""
             "track_changes": config.effective_track_changes,
             "snapshot_dir": config.snapshot_dir,
             "default_tools": config.default_tools,
+            "max_budget_usd": config.max_budget_usd,
+            "max_tokens": config.max_tokens,
+            "budget_action": config.budget_action,
         }
         # Also preserve any extra user-provided keys from dict input
         if isinstance(autonomy, dict):
@@ -3315,6 +3383,9 @@ Summary:"""
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
         actions_taken = []
+        # Spend baseline: snapshot lifetime spend so the budget cap measures
+        # only THIS run (reused Agents keep prior chat/run spend in the counters).
+        spend_baseline = self._run_spend()
         
         # Get config values
         config_max_iter = self.autonomy_config.get("max_iterations", 20)
@@ -3398,6 +3469,20 @@ Summary:"""
                     )
                 
                 response_str = str(response)
+                
+                # Spend kill-switch: halt if cumulative cost/tokens exceed cap.
+                # Zero overhead when no cap is set (returns None immediately).
+                _budget_result = self._autonomy_budget_result(
+                    iterations, stage, actions_taken, start_time, started_at,
+                    response_str, spend_baseline
+                )
+                if _budget_result is not None:
+                    execute_sync_callback('autonomy_complete',
+                        completion_reason=_budget_result.completion_reason,
+                        iterations=iterations,
+                        duration_seconds=time_module.time() - start_time
+                    )
+                    return _budget_result
                 
                 # Record response text for content streaming loop detection
                 if self._doom_loop_tracker is not None:
@@ -3764,6 +3849,9 @@ Summary:"""
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
         actions_taken = []
+        # Spend baseline: snapshot lifetime spend so the budget cap measures
+        # only THIS run (reused Agents keep prior chat/run spend in the counters).
+        spend_baseline = self._run_spend()
         
         # Get config values
         config_max_iter = self.autonomy_config.get("max_iterations", 20)
@@ -3838,6 +3926,15 @@ Summary:"""
                     )
                 
                 response_str = str(response)
+                
+                # Spend kill-switch: halt if cumulative cost/tokens exceed cap.
+                # Zero overhead when no cap is set (returns None immediately).
+                _budget_result = self._autonomy_budget_result(
+                    iterations, stage, actions_taken, start_time, started_at,
+                    response_str, spend_baseline
+                )
+                if _budget_result is not None:
+                    return _budget_result
                 
                 # Record response text for content streaming loop detection
                 if self._doom_loop_tracker is not None:
