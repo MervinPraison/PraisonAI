@@ -3214,6 +3214,29 @@ Summary:"""
         """Reset doom loop tracking."""
         if self._doom_loop_tracker is not None:
             self._doom_loop_tracker.reset()
+
+    def _reset_loop_warnings(self) -> None:
+        """Clear stale loop-warning latch/nudge from a prior autonomous run.
+
+        Called at the top of run_autonomous(_async) so a self-correction
+        queued near the end of a previous run never leaks into an unrelated
+        task's first prompt.
+        """
+        self._pending_self_correction = None
+        self._loop_warned_this_turn = False
+
+    def _consume_self_correction(self, prompt: str) -> str:
+        """Reset the per-turn warning latch and inject any queued nudge.
+
+        Two-tier response: if the result-aware tool-loop detector queued a
+        self-correction nudge last turn, append it to this turn's prompt (one
+        chance to adapt before the critical hard-stop fires on persistence).
+        """
+        self._loop_warned_this_turn = False
+        if getattr(self, '_pending_self_correction', None):
+            prompt = f"{prompt}\n\n{self._pending_self_correction}"
+            self._pending_self_correction = None
+        return prompt
     
     @staticmethod
     def _is_completion_signal(response_text: str) -> bool:
@@ -3378,11 +3401,8 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
-        # Clear any stale loop-warning latch/nudge left over from a previous
-        # run_autonomous(_async) call on this agent instance so warnings never
-        # leak into an unrelated task's first prompt.
-        self._pending_self_correction = None
-        self._loop_warned_this_turn = False
+        # Clear any stale loop-warning latch/nudge from a previous run.
+        self._reset_loop_warnings()
         
         # P3/G2: Import callback helper for autonomy events
         from ..main import execute_sync_callback
@@ -3430,16 +3450,8 @@ Summary:"""
                 # Always use the original prompt (prompt re-injection)
                 # Reset per-turn tool count for no-tool-call detection
                 self._autonomy_turn_tool_count = 0
-                # Reset the per-turn loop-warning latch so the result-aware
-                # detector can nudge once per turn.
-                self._loop_warned_this_turn = False
-                # Two-tier response: if the result-aware tool-loop detector queued
-                # a self-correction nudge last turn, inject it now (one chance to
-                # adapt before the critical hard-stop fires on persistence).
-                turn_prompt = prompt
-                if getattr(self, '_pending_self_correction', None):
-                    turn_prompt = f"{prompt}\n\n{self._pending_self_correction}"
-                    self._pending_self_correction = None
+                # Reset the per-turn warning latch and inject any queued nudge.
+                turn_prompt = self._consume_self_correction(prompt)
                 try:
                     response = self.chat(turn_prompt)
                 except Exception as e:
@@ -3818,11 +3830,8 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
-        # Clear any stale loop-warning latch/nudge left over from a previous
-        # run_autonomous(_async) call on this agent instance so warnings never
-        # leak into an unrelated task's first prompt.
-        self._pending_self_correction = None
-        self._loop_warned_this_turn = False
+        # Clear any stale loop-warning latch/nudge from a previous run.
+        self._reset_loop_warnings()
         
         try:
             # Execute the autonomous loop
@@ -3861,13 +3870,8 @@ Summary:"""
                 # Always use the original prompt (prompt re-injection)
                 # Reset per-turn tool count for no-tool-call detection
                 self._autonomy_turn_tool_count = 0
-                # Reset the per-turn loop-warning latch and inject any queued
-                # self-correction nudge from the result-aware tool-loop detector.
-                self._loop_warned_this_turn = False
-                turn_prompt = prompt
-                if getattr(self, '_pending_self_correction', None):
-                    turn_prompt = f"{prompt}\n\n{self._pending_self_correction}"
-                    self._pending_self_correction = None
+                # Reset the per-turn warning latch and inject any queued nudge.
+                turn_prompt = self._consume_self_correction(prompt)
                 try:
                     response = await self.achat(turn_prompt)
                 except Exception as e:
