@@ -38,7 +38,10 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self.compute_quality_score(content, metadata)
+            # Call the mixin's own 2-arg content scorer explicitly. A subclass
+            # (e.g. Memory) may define an unrelated compute_quality_score with a
+            # different signature that would otherwise shadow this via the MRO.
+            quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
         # Prepare metadata
         if metadata is None:
@@ -110,7 +113,10 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self.compute_quality_score(content, metadata)
+            # Call the mixin's own 2-arg content scorer explicitly. A subclass
+            # (e.g. Memory) may define an unrelated compute_quality_score with a
+            # different signature that would otherwise shadow this via the MRO.
+            quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
         # Prepare metadata with quality score
         metadata = metadata or {}
@@ -205,7 +211,10 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self.compute_quality_score(content, metadata)
+            # Call the mixin's own 2-arg content scorer explicitly. A subclass
+            # (e.g. Memory) may define an unrelated compute_quality_score with a
+            # different signature that would otherwise shadow this via the MRO.
+            quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
         # Only store high-quality content in LTM
         if quality_score < 5.0:  # Minimum quality threshold for LTM
@@ -443,7 +452,10 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self.compute_quality_score(content, metadata)
+            # Call the mixin's own 2-arg content scorer explicitly. A subclass
+            # (e.g. Memory) may define an unrelated compute_quality_score with a
+            # different signature that would otherwise shadow this via the MRO.
+            quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
         # Prepare metadata (mirror sync version's metadata construction including sanitization
         # to ensure only JSON-serializable values are stored, preventing crashes across backends)
@@ -511,7 +523,15 @@ class MemoryCoreMixin:
         
         # Calculate quality score if not provided
         if quality_score is None:
-            quality_score = self.compute_quality_score(content, metadata)
+            # Call the mixin's own 2-arg content scorer explicitly. A subclass
+            # (e.g. Memory) may define an unrelated compute_quality_score with a
+            # different signature that would otherwise shadow this via the MRO.
+            quality_score = MemoryCoreMixin.compute_quality_score(self, content, metadata)
         
-        # Use sync version in thread to avoid blocking event loop
-        return await asyncio.to_thread(self.store_long_term, content, metadata, quality_score, user_id, **kwargs)
+        # Use sync version in thread to avoid blocking event loop. Call the mixin's
+        # own store_long_term explicitly: a subclass (e.g. Memory) may override
+        # store_long_term with an incompatible signature (completeness/relevance/...),
+        # which would otherwise bind quality_score/user_id to the wrong parameters.
+        return await asyncio.to_thread(
+            MemoryCoreMixin.store_long_term, self, content, metadata, quality_score, user_id, **kwargs
+        )
