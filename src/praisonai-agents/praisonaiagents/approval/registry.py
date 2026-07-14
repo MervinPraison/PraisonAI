@@ -98,6 +98,12 @@ class ApprovalRegistry:
         # Per-agent, per-tool auto-approval (G-A fix)
         self._agent_tool_auto_approve: Dict[tuple[str, str], bool] = {}
 
+        # In-memory "this session" scoped approvals: (agent_name, target) grants
+        # that live only for the current process (never written to disk), keyed
+        # by the reusable permission target so they cover matching calls for the
+        # rest of the run. Cleared by ``clear_approved``.
+        self._session_scoped_targets: Set[tuple[Optional[str], str]] = set()
+
         # Context variables (per-coroutine / per-thread)
         self._approved_context: contextvars.ContextVar[Set[str]] = contextvars.ContextVar(
             "approved_context", default=set()
@@ -193,8 +199,108 @@ class ApprovalRegistry:
             return False
         return self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set())
 
+    def _is_session_scoped(
+        self, agent_name: Optional[str], tool_name: str, arguments: Optional[Dict]
+    ) -> bool:
+        """Return True if a "this session" grant covers this call for the run.
+
+        Checks the in-memory session store by the reusable permission target so
+        a single ``session`` approval covers matching calls (e.g. the same
+        ``bash:git status *`` prefix) without persisting anything to disk.
+        """
+        if not self._session_scoped_targets:
+            return False
+        try:
+            from .utils import build_permission_target
+
+            target = build_permission_target(tool_name, arguments)
+        except Exception:  # noqa: BLE001 — never block on target derivation
+            return False
+        return (agent_name, target) in self._session_scoped_targets
+
+    def _persist_scoped_decision(
+        self,
+        agent_name: Optional[str],
+        tool_name: str,
+        arguments: Optional[Dict],
+        decision: ApprovalDecision,
+    ) -> None:
+        """Record a ``session``/``always`` decision for reuse this run (or beyond).
+
+        * ``always`` decisions are routed into :class:`PermissionManager` (which
+          writes to ``approvals.json``) so future runs short-circuit too.
+        * ``session`` decisions are recorded **only** in the in-memory
+          ``_session_scoped_targets`` store — never on disk — so they cover
+          matching calls for the rest of *this* run and then vanish. Persisting
+          them via ``PermissionManager`` would reload them next run and violate
+          the "this session only" contract shown in the prompt.
+
+        A missing ``agent_name`` is skipped for the durable ``always`` path: an
+        approval stored without an agent boundary matches *any* later agent
+        making the same target call, so a nameless grant is not persisted where
+        it could cross agent boundaries (it still gets the in-memory fast-path).
+
+        Any failure is swallowed — the in-memory fast-path still applies, so a
+        persistence hiccup never blocks execution.
+        """
+        scope = getattr(decision, "scope", "once")
+        if scope not in ("session", "always"):
+            return
+        if not decision.approved:
+            return
+
+        if scope == "session":
+            try:
+                from .utils import build_permission_target
+
+                target = build_permission_target(tool_name, arguments)
+                self._session_scoped_targets.add((agent_name, target))
+            except Exception as e:  # noqa: BLE001 — best-effort, in-memory only
+                logger.debug(
+                    "Could not record session approval for tool '%s': %s",
+                    tool_name, e,
+                )
+            return
+
+        # scope == "always" — persist to the durable store.
+        if not agent_name:
+            logger.debug(
+                "Skipping persistent 'always' approval for tool '%s': no agent "
+                "name (would match any agent). Kept in-memory for this run.",
+                tool_name,
+            )
+            # Fall back to session semantics so the grant still helps this run.
+            try:
+                from .utils import build_permission_target
+
+                self._session_scoped_targets.add(
+                    (agent_name, build_permission_target(tool_name, arguments))
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        try:
+            from ..permissions import PermissionManager
+            from .utils import build_permission_target
+
+            target = build_permission_target(tool_name, arguments)
+            manager = PermissionManager(agent_name=agent_name)
+            manager.approve(
+                target,
+                decision.approved,
+                scope=scope,
+                agent_name=agent_name,
+                reusable_scope=True,
+                pattern=getattr(decision, "scope_pattern", None),
+            )
+        except Exception as e:  # noqa: BLE001 — persistence is best-effort
+            logger.warning(
+                "Could not persist %s approval for tool '%s': %s", scope, tool_name, e
+            )
+
     def clear_approved(self) -> None:
         self._approved_context.set(set())
+        self._session_scoped_targets.clear()
 
     def set_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
         return self._yaml_approved_tools.set(set(tools))
@@ -248,6 +354,11 @@ class ApprovalRegistry:
         if self.is_already_approved(tool_name, arguments):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
+        # "This session" scoped grant covers matching calls for the run
+        if self._is_session_scoped(agent_name, tool_name, arguments):
+            self.mark_approved(tool_name, arguments)
+            return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
+
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
             self.mark_approved(tool_name, arguments)
@@ -285,6 +396,7 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision
 
     async def approve_async(
@@ -300,6 +412,11 @@ class ApprovalRegistry:
 
         if self.is_already_approved(tool_name, arguments):
             return ApprovalDecision(approved=True, reason="Already approved in context")
+
+        # "This session" scoped grant covers matching calls for the run
+        if self._is_session_scoped(agent_name, tool_name, arguments):
+            self.mark_approved(tool_name, arguments)
+            return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
@@ -332,4 +449,5 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision

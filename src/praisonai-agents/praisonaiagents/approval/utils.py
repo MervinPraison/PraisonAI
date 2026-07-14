@@ -7,9 +7,83 @@ across the approval system.
 
 import asyncio
 import concurrent.futures
-from typing import Any, Awaitable, Callable, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
 T = TypeVar('T')
+
+
+# Tool names that map to a shell-command permission target (``bash:<command>``)
+# so the reusable command-prefix machinery in ``PermissionManager`` applies.
+_SHELL_TOOLS = frozenset({
+    "execute_command",
+    "acp_execute_command",
+})
+
+# File-mutating tool names -> the permission-target prefix used for their path,
+# so an "always" grant reads naturally (e.g. ``edit:src/app.py``).
+# NOTE: ``apply_patch`` is deliberately absent. It takes ``patch`` (multi-file
+# patch text), not a single path, so there is no stable path to pin a scoped
+# grant to — it falls through to ``tool:apply_patch`` rather than a misleading
+# ``edit:<...>`` target that could silently cover unrelated files on reuse.
+_FILE_TOOL_PREFIXES: Dict[str, str] = {
+    "edit_file": "edit",
+    "acp_edit_file": "edit",
+    "write_file": "write",
+    "acp_create_file": "write",
+    "delete_file": "delete",
+    "acp_delete_file": "delete",
+    "move_file": "move",
+    "copy_file": "copy",
+}
+
+# Argument keys commonly holding the shell command / file path, in priority order.
+_COMMAND_KEYS = ("command", "cmd", "code", "query")
+# ``src`` covers ``move_file``/``copy_file`` (which take ``src``/``dst``) so a
+# scoped grant is pinned to the concrete source path rather than falling back to
+# a tool-wide ``tool:move_file`` allow-rule.
+_PATH_KEYS = ("file_path", "path", "filename", "file", "target", "filepath", "src")
+
+
+def build_permission_target(
+    tool_name: str, arguments: Optional[Dict[str, Any]] = None
+) -> str:
+    """Build a :class:`PermissionManager`-compatible target for a tool call.
+
+    Maps a tool name + arguments to a target string the permission store can
+    match against (and generalise via ``suggest_scope_pattern``):
+
+    * shell tools -> ``bash:<command>``
+    * file tools  -> ``<edit|write|delete|…>:<path>``
+    * everything else -> ``tool:<tool_name>``
+
+    Falls back to ``tool:<tool_name>`` whenever the expected argument is missing
+    so a target is always produced.
+
+    Args:
+        tool_name: Name of the tool requesting approval.
+        arguments: The arguments the tool will be called with.
+
+    Returns:
+        A target string such as ``"bash:git status -s"`` or ``"edit:src/app.py"``.
+    """
+    args = arguments or {}
+
+    if tool_name in _SHELL_TOOLS:
+        for key in _COMMAND_KEYS:
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                return f"bash:{value.strip()}"
+        return f"tool:{tool_name}"
+
+    prefix = _FILE_TOOL_PREFIXES.get(tool_name)
+    if prefix is not None:
+        for key in _PATH_KEYS:
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                return f"{prefix}:{value.strip()}"
+        return f"tool:{tool_name}"
+
+    return f"tool:{tool_name}"
 
 
 def run_coroutine_safely(
