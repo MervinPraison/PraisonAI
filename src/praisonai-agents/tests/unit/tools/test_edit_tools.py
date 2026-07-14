@@ -24,6 +24,14 @@ def _auto_approve():
         reset_yaml_approved_tools(token)
 
 
+@pytest.fixture(autouse=True)
+def _chdir_tmp(tmp_path, monkeypatch):
+    """Run each test from within its ``tmp_path`` so the default cwd-confined
+    ``_validate_path`` (which now rejects reads/writes outside the workspace)
+    permits the temporary files these tests create."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def tools():
     return EditTools()
@@ -992,3 +1000,100 @@ class TestConcurrency:
         assert lock_a is not lock_b
         # Same path returns the same lock object (shared across callers).
         assert lock_a is _file_locks.get_lock(tools._validate_path(str(a)))
+
+
+class TestWorkspaceContainment:
+    """Fallback path validator must confine resolution to a base directory.
+
+    Regression coverage for the "read any host file (e.g. /etc/passwd) with no
+    workspace boundary" gap: with no explicit workspace, an absolute path
+    outside the working directory must be rejected rather than resolved.
+    """
+
+    def test_read_file_rejects_outside_cwd_absolute_path(self, tools):
+        # No workspace configured (default instance) -> confined to cwd.
+        content, meta = tools.read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_search_files_rejects_outside_cwd_absolute_path(self, tools):
+        import json
+
+        result = json.loads(tools.search_files("/etc", "root", "*"))
+        assert "error" in result
+        assert "Path traversal detected" in result["error"]
+
+    def test_edit_file_rejects_outside_cwd_absolute_path(self, tools):
+        result = tools.edit_file("/etc/passwd", "root", "pwned")
+        assert "Path traversal detected" in result
+
+    def test_module_level_read_file_rejects_outside_cwd(self):
+        from praisonaiagents.tools.edit_tools import read_file
+
+        content, meta = read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_read_within_cwd_still_works(self, tools, tmp_path):
+        # A path inside the confined workspace (cwd == tmp_path here) resolves.
+        p = tmp_path / "inside.txt"
+        _write(p, "hello\n")
+        content, meta = tools.read_file(str(p))
+        assert content == "hello\n"
+        assert meta
+
+    def test_explicit_root_confines_resolution(self, tmp_path):
+        # A caller-supplied root confines resolution to that directory even when
+        # the process cwd differs.
+        root = tmp_path / "root"
+        root.mkdir()
+        inside = root / "ok.txt"
+        _write(inside, "ok\n")
+        editor = EditTools(root=str(root))
+
+        content, meta = editor.read_file(str(inside))
+        assert content == "ok\n"
+        assert meta
+
+        content, meta = editor.read_file("/etc/passwd")
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_boundary_stable_across_chdir(self, tmp_path, monkeypatch):
+        # The fallback base is pinned at construction, so a later os.chdir must
+        # not move the containment boundary of a long-lived instance.
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        secret = outside / "secret.txt"
+        _write(secret, "top secret\n")
+
+        monkeypatch.chdir(workdir)
+        editor = EditTools()  # base pinned to workdir
+
+        # After chdir into the 'outside' dir, a relative read must still resolve
+        # against the pinned base (workdir), not the new cwd - so the secret in
+        # the new cwd is never read (it resolves to a non-existent path inside
+        # the pinned base).
+        monkeypatch.chdir(outside)
+        content, meta = editor.read_file("secret.txt")
+        assert meta == ""
+        assert "top secret" not in content
+
+        # An absolute path into the new cwd is likewise rejected as escaping the
+        # pinned base.
+        content, meta = editor.read_file(str(secret))
+        assert meta == ""
+        assert "Path traversal detected" in content
+
+    def test_valid_name_with_double_dots_allowed(self, tmp_path, monkeypatch):
+        # A legitimate in-workspace filename that merely contains '..' must not
+        # be rejected by a naive substring check.
+        monkeypatch.chdir(tmp_path)
+        p = tmp_path / "v1..2.md"
+        _write(p, "notes\n")
+        editor = EditTools()
+        content, meta = editor.read_file(str(p))
+        assert content == "notes\n"
+        assert meta
