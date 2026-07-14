@@ -42,9 +42,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
-| ✅ Files | 2 | 6 | 1944 |
+| ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 16068 |
+| ✅ Gateway | 7 | 48 | 16155 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
 | ✅ Hooks | 2 | 9 | 3819 |
@@ -52,7 +52,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 13 | 4055 |
 | ✅ LLM | 3 | 14 | 4763 |
 | ✅ Loops | 4 | 4 | 1082 |
-| ✅ MCP | 1 | 53 | 11633 |
+| ✅ MCP | 1 | 54 | 11916 |
 | ✅ Memory | 6 | 17 | 6434 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
@@ -76,7 +76,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 130 | 36454 |
+| ✅ Tools | 12 | 130 | 36463 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
