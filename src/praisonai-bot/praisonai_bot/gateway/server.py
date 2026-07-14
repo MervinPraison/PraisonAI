@@ -3900,6 +3900,59 @@ class WebSocketGateway:
             return obj
 
         migrated = migrate_legacy_config(raw)
+
+        # ── Gateway-runtime required-section contract ──────────────
+        # The canonical schema treats ``agent``/``agents`` and per-channel
+        # ``token`` as optional (it serves the ``bot`` CLI's looser shapes).
+        # The gateway *runtime*, however, needs an ``agents`` map to build
+        # agents from, a ``channels`` map to start adapters, and a token per
+        # channel (except tokenless platforms). Enforce those here — on the
+        # *pre-substitution* config so a channel with **no** ``token`` key
+        # fails closed, while a ``${VAR}`` that resolves to empty is left for
+        # ``start_channels()`` to skip (regression guard, PR #3019 review).
+        # Platform/typo fail-closed is still delegated to the canonical
+        # validator below (single source of truth for the registry).
+        errors: list[str] = []
+        agents_cfg = migrated.get("agents")
+        if not agents_cfg:
+            errors.append("Missing required 'agents' section")
+        elif not isinstance(agents_cfg, dict):
+            errors.append("'agents' must be a non-empty dictionary")
+
+        channels_cfg = migrated.get("channels")
+        if not channels_cfg:
+            errors.append("Missing required 'channels' section")
+        elif not isinstance(channels_cfg, dict):
+            errors.append("'channels' must be a non-empty dictionary")
+        else:
+            _tokenless = {"email", "agentmail"}
+            for cname, cdef in channels_cfg.items():
+                if not isinstance(cdef, dict):
+                    continue
+                platform = str(cdef.get("platform", cname)).lower()
+                is_wa_web = (
+                    platform == "whatsapp"
+                    and str(cdef.get("mode", cdef.get("whatsapp_mode", "cloud")))
+                    .lower()
+                    .strip()
+                    == "web"
+                )
+                if (
+                    "token" not in cdef
+                    and platform not in _tokenless
+                    and not is_wa_web
+                ):
+                    errors.append(
+                        f"Channel '{cname}' missing 'token' "
+                        "(use ${ENV_VAR} syntax for env vars)"
+                    )
+
+        if errors:
+            raise ValueError(
+                f"Gateway config validation failed ({config_path}):\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+
         # Resolve ``${VAR}`` *before* validation so the schema sees literal
         # values, not placeholders. This loader owns env resolution and maps an
         # unset var to an empty string (``_substitute_env_vars``); doing it up
