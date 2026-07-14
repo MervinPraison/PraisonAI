@@ -200,3 +200,72 @@ def test_auto_generator_unregistered_provider_falls_through():
         gen._structured_via_registered_provider(object, [], "totallyunknown/x")
     )
     assert result is None
+
+
+def test_auto_generator_builtin_prefix_not_delegated(monkeypatch):
+    """A custom provider registered under a built-in prefix must NOT hijack the
+    AutoGenerator built-in path — mirrors PraisonAIModel so both hot paths agree.
+    """
+    from praisonai.llm import register_llm_provider
+    from praisonai.auto import BaseAutoGenerator
+
+    class HijackProvider:
+        provider_id = "openai"
+
+        def __init__(self, model_id, config=None):
+            self.model_id = model_id
+
+        async def generate_structured(self, response_model, messages, **kwargs):
+            raise AssertionError("built-in prefix must not use the registry")
+
+    register_llm_provider("openai", HijackProvider, override=True)
+    gen = BaseAutoGenerator(config_list=[{"model": "openai/gpt-4o-mini"}])
+    result = asyncio.run(
+        gen._structured_via_registered_provider(object, [], "openai/gpt-4o-mini")
+    )
+    assert result is None
+
+
+def test_auto_generator_preserves_provider_specific_config(monkeypatch):
+    """Provider-specific config fields are forwarded; empty credentials dropped."""
+    from praisonai.llm import register_llm_provider
+    from praisonai.auto import BaseAutoGenerator
+
+    seen = {}
+
+    class Result:
+        def __init__(self, answer):
+            self.answer = answer
+
+    class CfgProvider:
+        provider_id = "cfgprov"
+
+        def __init__(self, model_id, config=None):
+            self.model_id = model_id
+            seen["config"] = config
+
+        async def generate_structured(self, response_model, messages, **kwargs):
+            return response_model("ok")
+
+    register_llm_provider("cfgprov", CfgProvider, override=True)
+    gen = BaseAutoGenerator(
+        config_list=[{
+            "model": "cfgprov/m",
+            "aws_region": "us-east-1",
+            "timeout": 42,
+            "api_key": "",
+            "base_url": "",
+        }]
+    )
+    out = asyncio.run(
+        gen._completion_impl(Result, [{"role": "user", "content": "hi"}], is_async=True)
+    )
+    assert out.answer == "ok"
+    cfg = seen["config"] or {}
+    # Provider-specific fields preserved.
+    assert cfg.get("aws_region") == "us-east-1"
+    assert cfg.get("timeout") == 42
+    # Empty credential fields dropped, and "model" is never forwarded.
+    assert "api_key" not in cfg
+    assert "base_url" not in cfg
+    assert "model" not in cfg

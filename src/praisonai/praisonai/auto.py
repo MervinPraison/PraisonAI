@@ -458,21 +458,36 @@ class BaseAutoGenerator:
         """
         if "/" not in model_name:
             return None
+        provider_id = model_name.split("/", 1)[0].lower()
+        # Built-in prefixes keep the fast, direct LiteLLM/OpenAI ladder below and
+        # are never resolved through the registry — reuse the SAME set as
+        # PraisonAIModel._is_registered_provider() so both hot paths agree on
+        # which providers are "registered" (a custom "openai"/"anthropic"
+        # registration must not hijack the built-in path here).
+        try:
+            from praisonai.inc.models import _BUILTIN_MODEL_PREFIXES
+        except ImportError:
+            _BUILTIN_MODEL_PREFIXES = frozenset(
+                {"openai", "groq", "cohere", "ollama",
+                 "anthropic", "google", "openrouter"}
+            )
+        if provider_id in _BUILTIN_MODEL_PREFIXES:
+            return None
         try:
             from praisonai.llm import create_llm_provider, has_llm_provider
         except ImportError:
             return None
-        provider_id = model_name.split("/", 1)[0].lower()
-        # Forward the selected generator's credentials/endpoint so a provider
-        # that needs them for generate_structured() authenticates correctly —
-        # mirrors what PraisonAIModel passes. Only include resolved values so a
-        # provider's own credential chain is not shadowed by empty entries.
+        # Forward the selected generator's config so a provider that needs it for
+        # generate_structured() authenticates correctly — mirrors what
+        # PraisonAIModel passes. Preserve provider-specific fields (e.g.
+        # aws_region, timeout, model_kwargs) but drop empty credential entries so
+        # a provider's own credential chain is not shadowed by empty values.
         cfg = self.config_list[0]
-        provider_config = {}
-        if cfg.get("api_key"):
-            provider_config["api_key"] = cfg["api_key"]
-        if cfg.get("base_url"):
-            provider_config["base_url"] = cfg["base_url"]
+        provider_config = {
+            k: v
+            for k, v in cfg.items()
+            if k != "model" and not (k in ("api_key", "base_url") and not v)
+        }
         try:
             if not has_llm_provider(provider_id):
                 return None
