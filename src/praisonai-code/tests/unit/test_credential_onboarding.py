@@ -92,8 +92,27 @@ def test_provider_setup_info_derives_env_key_for_catalogue_only_provider():
         "mistral", defaults
     )
     assert env_key == "MISTRAL_API_KEY"
-    assert default_model is None
     assert name == "Mistral"
+
+
+def test_provider_setup_info_env_key_matches_auth_for_perplexity():
+    # setup must write the SAME env-var name auth (and the runtime) reads back.
+    defaults = SetupHandler()._provider_defaults()
+    env_key, _default_model, _name = SetupHandler()._provider_setup_info(
+        "perplexity", defaults
+    )
+    assert env_key == "PERPLEXITYAI_API_KEY"
+    assert env_key == auth_cmd._PROVIDER_ENV_KEYS["perplexity"]
+
+
+def test_provider_setup_info_derives_default_model_for_catalogue_provider():
+    # Catalogue providers that have models get a non-interactive default so
+    # `praisonai setup --non-interactive --provider groq` no longer fails.
+    defaults = SetupHandler()._provider_defaults()
+    _env_key, default_model, _name = SetupHandler()._provider_setup_info(
+        "groq", defaults
+    )
+    assert default_model is not None
 
 
 def test_provider_menu_backcompat_shape_preserved():

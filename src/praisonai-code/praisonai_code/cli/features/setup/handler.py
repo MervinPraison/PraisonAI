@@ -341,18 +341,48 @@ class SetupHandler(CommandHandler):
         menu[str(idx)] = ("custom", None, None, "Custom")
         return menu
 
+    # Providers whose canonical API-key env-var is NOT ``<PROVIDER>_API_KEY``.
+    # Kept in sync with auth's ``_PROVIDER_ENV_KEYS`` so setup writes the same
+    # env-var name that auth (and the runtime) reads back.
+    _PROVIDER_ENV_KEY_OVERRIDES = {
+        "google": "GEMINI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "perplexity": "PERPLEXITYAI_API_KEY",
+    }
+
     def _provider_setup_info(self, provider_id: str, defaults: Dict[str, tuple]) -> tuple:
         """Resolve ``(env_key, default_model, name)`` for a provider id.
 
         Prefers a curated ``_provider_defaults`` row; otherwise derives a
-        sensible ``<PROVIDER>_API_KEY`` env-var and a display name so
-        catalogue-only providers are still usable from the picker.
+        usable env-var, default model, and display name from the catalogue so
+        catalogue-only providers (Groq, OpenRouter, …) get a working
+        non-interactive path rather than falling through to the custom branch.
         """
         if provider_id in defaults:
             name, env_key, model = defaults[provider_id]
             return env_key, model, name
-        env_key = f"{provider_id.upper()}_API_KEY"
-        return env_key, None, provider_id.capitalize()
+        env_key = self._PROVIDER_ENV_KEY_OVERRIDES.get(
+            provider_id, f"{provider_id.upper()}_API_KEY"
+        )
+        default_model = self._catalogue_default_model(provider_id)
+        return env_key, default_model, provider_id.capitalize()
+
+    def _catalogue_default_model(self, provider_id: str) -> Optional[str]:
+        """Return a sensible default model for a catalogue provider, or ``None``.
+
+        Picks the first model the catalogue lists for the provider so
+        catalogue-known providers get a non-interactive default instead of
+        being rejected like a custom provider.
+        """
+        try:
+            from praisonai_code.llm.catalogue import ModelCatalogue
+
+            models = ModelCatalogue().list_models(provider=provider_id)
+        except Exception:
+            return None
+        if not models:
+            return None
+        return models[0].get("id")
 
     def _print_key_url_hint(self, provider_id: str, output) -> None:
         """Print a one-line 'Get your key' hint for well-known providers."""

@@ -467,11 +467,11 @@ def auth_list():
                 })
 
         # Fold in active environment-variable keys (redacted) so the live
-        # credential is unambiguous. Env keys not also stored are surfaced as
-        # env-sourced; a provider present in both is left as its stored row.
+        # credential is unambiguous. An env key is ALWAYS surfaced when present
+        # — even if the provider also has a stored key — because the env value
+        # overrides the stored one at runtime, so hiding it would point users at
+        # the wrong secret when they inspect or rotate credentials.
         for provider_name, (env_var, value) in _env_credentials().items():
-            if provider_name in stored_names:
-                continue
             provider_info.append({
                 "provider": provider_name,
                 "auth_method": "apikey",
@@ -482,6 +482,7 @@ def auth_list():
                 "model": None,
                 "expires_at": None,
                 "expires": "(n/a)",
+                "overrides_stored": provider_name in stored_names,
             })
 
         if not provider_info:
@@ -500,6 +501,8 @@ def auth_list():
                 source = info["source"]
                 if source == "env" and info.get("env_var"):
                     source = f"env ({info['env_var']})"
+                    if info.get("overrides_stored"):
+                        source += " [live, overrides stored]"
                 rows.append([
                     info["provider"],
                     info["auth_method"],
@@ -581,18 +584,34 @@ def auth_status(
                     })
                 raise typer.Exit(1)
             
-            # Basic format validation (OAuth tokens have no static format)
+            # A live env var overrides the stored credential at runtime. When
+            # both exist, validate/report the env key (the credential actually
+            # in effect) so status never claims the wrong secret is active.
+            env_var = _PROVIDER_ENV_KEYS.get(provider.lower())
+            env_value = os.environ.get(env_var) if env_var else None
+            active_from_env = bool(env_value) and not cred.is_oauth()
+
             if cred.is_oauth():
                 format_valid, format_msg = True, "OAuth token"
+                secret = cred.api_key
+                source = "stored"
+            elif active_from_env:
+                format_valid, format_msg = validate_api_key(provider, env_value)
+                secret = env_value
+                source = f"env ({env_var})"
             else:
                 format_valid, format_msg = validate_api_key(provider, cred.api_key)
-            
+                secret = cred.api_key
+                source = "stored"
+
             status_info = {
                 "provider": provider,
                 "status": "found",
                 "auth_method": cred.auth_method,
-                "source": "stored",
-                "key_redacted": redact_key(cred.api_key),
+                "source": source,
+                "env_var": env_var if active_from_env else None,
+                "overrides_stored": active_from_env,
+                "key_redacted": redact_key(secret),
                 "format_valid": format_valid,
                 "format_message": format_msg,
                 "base_url": cred.base_url,
@@ -603,9 +622,11 @@ def auth_status(
             
             # Live validation if requested
             if validate:
-                # Use a freshly-refreshed token for OAuth so we don't validate a
-                # stale mirrored access token.
-                live_secret = store.get_valid_token(provider) if cred.is_oauth() else cred.api_key
+                if cred.is_oauth():
+                    # Freshly-refreshed token so we don't validate a stale mirror.
+                    live_secret = store.get_valid_token(provider)
+                else:
+                    live_secret = secret
                 live_valid, live_msg = _validate_with_live_call(provider, live_secret, cred.base_url)
                 status_info["live_valid"] = live_valid
                 status_info["live_message"] = live_msg
@@ -616,8 +637,9 @@ def auth_status(
                 output.print_panel(
                     f"Provider: {provider}\n"
                     f"Method: {cred.auth_method}\n"
-                    f"Source: stored\n"
-                    f"Secret: {redact_key(cred.api_key)}\n"
+                    f"Source: {source}\n"
+                    + ("Note: env var overrides stored key at runtime\n" if active_from_env else "") +
+                    f"Secret: {redact_key(secret)}\n"
                     + (f"Expires: {_format_expiry(cred)}\n" if cred.is_oauth() else "") +
                     f"Format: {'✅' if format_valid else '❌'} {format_msg}\n"
                     + (f"Live Test: {'✅' if status_info.get('live_valid') else '❌'} {status_info.get('live_message', 'Not tested')}\n" if validate else "") +
@@ -664,15 +686,18 @@ def auth_status(
                     
                     all_status.append(status)
 
-            # Fold in active env-var keys (redacted), marked env-sourced.
+            # Fold in active env-var keys (redacted), marked env-sourced. Always
+            # surfaced even when the provider also has a stored key, since the
+            # env value is the credential in effect at runtime.
             for provider_name, (env_var, value) in _env_credentials().items():
-                if provider_name in stored_names:
-                    continue
                 format_valid, format_msg = validate_api_key(provider_name, value)
+                source = f"env ({env_var})"
+                if provider_name in stored_names:
+                    source += " [live, overrides stored]"
                 status = {
                     "provider": provider_name,
                     "auth_method": "apikey",
-                    "source": f"env ({env_var})",
+                    "source": source,
                     "key_redacted": redact_key(value),
                     "format_valid": format_valid,
                     "format_message": format_msg,
