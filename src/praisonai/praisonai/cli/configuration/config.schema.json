@@ -13,6 +13,7 @@
       "additionalProperties": false,
       "properties": {
         "model": { "type": "string" },
+        "small_model": { "type": "string" },
         "provider": { "type": "string" },
         "base_url": { "type": "string" },
         "api_key": { "type": "string" },

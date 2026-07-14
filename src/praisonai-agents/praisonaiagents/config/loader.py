@@ -46,6 +46,7 @@ VALID_PLUGINS_KEYS = {
 VALID_DEFAULTS_KEYS = {
     # LLM settings
     "model": (str,),
+    "small_model": (str,),
     "base_url": (str,),
     "api_key": (str,),
     # Feature flags
@@ -136,6 +137,9 @@ class DefaultsConfig:
     """Default configuration for Agent parameters."""
     # LLM defaults
     model: Optional[str] = None
+    # Cheap/fast auxiliary model for internal LLM calls (title generation,
+    # summarisation/compaction). Falls back to ``model`` when unset.
+    small_model: Optional[str] = None
     base_url: Optional[str] = None
     
     # Feature flags
@@ -158,6 +162,7 @@ class DefaultsConfig:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "model": self.model,
+            "small_model": self.small_model,
             "base_url": self.base_url,
             "allow_delegation": self.allow_delegation,
             "allow_code_execution": self.allow_code_execution,
@@ -331,6 +336,7 @@ def _dict_to_defaults_config(data: Dict[str, Any]) -> DefaultsConfig:
     """Convert dict to DefaultsConfig."""
     return DefaultsConfig(
         model=data.get("model"),
+        small_model=data.get("small_model"),
         base_url=data.get("base_url"),
         allow_delegation=data.get("allow_delegation", False),
         allow_code_execution=data.get("allow_code_execution", False),
@@ -428,6 +434,63 @@ def get_default(key: str, fallback: Any = None) -> Any:
     # Simple key
     value = getattr(defaults, key, None)
     return value if value is not None else fallback
+
+
+def _agent_section_value(key: str) -> Optional[Any]:
+    """Read ``agent.<key>`` from the raw config file, if present.
+
+    The CLI config surface (``praisonai_code`` resolver) and the published JSON
+    schema place model settings under a top-level ``agent`` section (e.g.
+    ``agent.small_model``), whereas this loader's typed defaults live under
+    ``defaults``. Both surfaces read the same ``.praisonai/config.yaml`` file,
+    so honour ``agent.<key>`` here as well to avoid silently ignoring
+    schema-guided config.
+    """
+    raw = _load_config()
+    agent = raw.get("agent")
+    if isinstance(agent, dict):
+        return agent.get(key)
+    return None
+
+
+def get_small_model(primary_model: Optional[str] = None, fallback: Optional[str] = None) -> Optional[str]:
+    """Resolve the auxiliary/"small" model for cheap internal LLM calls.
+
+    Resolution order:
+    1. ``defaults.small_model`` (or the equivalent ``agent.small_model`` CLI
+       namespace) from the config file, if set.
+    2. The supplied ``primary_model`` (e.g. the running agent's model).
+    3. ``defaults.model`` (or ``agent.model``) from the config file, if set.
+    4. ``fallback`` (preserves today's hardcoded behaviour when nothing else
+       is configured).
+
+    Both the ``defaults.*`` (typed loader) and ``agent.*`` (CLI resolver / JSON
+    schema) namespaces are honoured because they read the same config file; a
+    user following schema autocomplete (``agent.small_model``) is therefore not
+    silently ignored.
+
+    This keeps internal calls (title generation, summarisation/compaction) on
+    a configured cheap model, and — when unset — on the primary model rather
+    than a hardcoded third-party default.
+
+    Args:
+        primary_model: The primary model to fall back to when no auxiliary
+            model is configured.
+        fallback: Final fallback used only when neither ``small_model`` nor a
+            primary model is available.
+
+    Returns:
+        The resolved auxiliary model identifier, or ``fallback``.
+    """
+    small = get_default("small_model") or _agent_section_value("small_model")
+    if small:
+        return small
+    if primary_model:
+        return primary_model
+    config_model = get_default("model") or _agent_section_value("model")
+    if config_model:
+        return config_model
+    return fallback
 
 
 def is_plugins_enabled() -> bool:
@@ -528,8 +591,9 @@ def _defaults_has_any_values() -> bool:
         _defaults_has_values = any(
             getattr(defaults, key, None) is not None
             for key in (
-                "model", "base_url", "memory", "knowledge", "planning",
-                "reflection", "web", "output", "execution", "caching", "autonomy",
+                "model", "small_model", "base_url", "memory", "knowledge",
+                "planning", "reflection", "web", "output", "execution",
+                "caching", "autonomy",
             )
         )
     return _defaults_has_values
