@@ -496,6 +496,49 @@ class PermissionManager:
                 return True
         return False
 
+    def resolve_tool_action(
+        self, tool_name: str, agent_name: Optional[str] = None
+    ) -> Optional[PermissionAction]:
+        """Return the effective action for *tool_name* from an explicit rule.
+
+        Call-time approval gate helper. Unlike :meth:`is_denied` (which only
+        surfaces ``DENY``), this exposes ``ALLOW`` / ``DENY`` / ``ASK`` so an
+        explicit ``ask`` rule can drive the approval prompt at execution time.
+
+        Returns ``None`` when no rule/approval explicitly matched the tool
+        (i.e. the manager only produced its "no matching rule" ``ask`` default),
+        so unlisted tools keep their prior behaviour and are *not* forced
+        through approval merely because a manager is attached.
+
+        Both the bare tool name and the ``tool:<name>`` form are checked, and
+        ``DENY`` wins over ``ASK`` which wins over ``ALLOW`` when the two forms
+        disagree.
+        """
+        if not tool_name:
+            return None
+        best: Optional[PermissionAction] = None
+        priority = {
+            PermissionAction.ALLOW: 0,
+            PermissionAction.ASK: 1,
+            PermissionAction.DENY: 2,
+        }
+        for target in (tool_name, f"tool:{tool_name}"):
+            try:
+                result = self.check(target, agent_name)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(
+                    "Permission resolve failed for tool '%s' (target '%s'): %s",
+                    tool_name, target, e,
+                )
+                continue
+            # Only honour an *explicit* match: a matched rule or a persistent
+            # approval. The bare "no matching rule" ASK default has no rule.
+            if result.action == PermissionAction.ASK and result.rule is None:
+                continue
+            if best is None or priority[result.action] > priority[best]:
+                best = result.action
+        return best
+
     def check_path_boundary(
         self, path: str, agent_name: Optional[str] = None
     ) -> Optional[PermissionResult]:

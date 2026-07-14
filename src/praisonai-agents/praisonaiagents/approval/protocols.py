@@ -87,12 +87,18 @@ class ApprovalConfig:
         permissions: Declarative permission rules mapping patterns to actions
                     (e.g., {"read:*": "allow", "bash:rm *": "deny"}).
                     Used for CI-safe, non-interactive permission policies.
+        permission_mode: Optional Claude-Code-parity mode controlling the
+                    overall permission behaviour (``PermissionMode`` enum or its
+                    string value). ``bypass_permissions`` skips all checks,
+                    ``plan`` denies write operations, ``dont_ask`` auto-denies
+                    prompts. ``None``/``default`` uses the normal rule flow.
     """
 
     backend: Any = None
     all_tools: bool = False
     timeout: Optional[float] = 0
     permissions: Optional[Dict[str, Any]] = None
+    permission_mode: Optional[Any] = None
 
 
 @runtime_checkable

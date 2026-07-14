@@ -1913,6 +1913,9 @@ Your Goal: {self.goal}
         # rules both hide tools from the advertised schema and block them at
         # call time (native + MCP, uniformly). None = no pattern rules consulted.
         self._permission_manager = None
+        # Optional Claude-Code-parity PermissionMode (bypass/plan/dont_ask/…).
+        # None = normal rule flow. Consulted at tool-call approval time.
+        self._permission_mode = None
         if isinstance(approval, str) and approval not in ('True', 'False'):
             # Permission preset: "safe", "read_only", "full"
             from ..approval.registry import PERMISSION_PRESETS
@@ -1992,6 +1995,7 @@ Your Goal: {self.goal}
             self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
             # Store permissions if provided (for CI-safe declarative policies)
             self._approval_permissions = getattr(approval, 'permissions', None)
+            self._permission_mode = getattr(approval, 'permission_mode', None)
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
             approval_config = ApprovalConfig(**approval)
@@ -1999,6 +2003,7 @@ Your Goal: {self.goal}
             self._approve_all_tools = approval_config.all_tools
             self._approval_timeout = approval_config.timeout
             self._approval_permissions = getattr(approval_config, 'permissions', None)
+            self._permission_mode = getattr(approval_config, 'permission_mode', None)
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval

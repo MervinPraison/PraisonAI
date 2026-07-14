@@ -244,14 +244,18 @@ class ToolsMCPServer:
     
     def run_sse(
         self,
-        host: str = "0.0.0.0",
+        host: "Optional[str]" = None,
         port: int = 8080,
         security: "Optional[SecurityConfig]" = None,
     ) -> None:
         """Run the MCP server using SSE transport.
         
         Args:
-            host: Host to bind to
+            host: Host to bind to. When ``None`` (default) the bind address is
+                derived from ``security.get_bind_address()`` so
+                ``bind_localhost_only`` (secure-by-default) actually controls the
+                interface the server listens on. Pass an explicit host to
+                override.
             port: Port to listen on
             security: Optional security config; when unset, reads MCP_SSE_* env vars
         """
@@ -267,8 +271,37 @@ class ToolsMCPServer:
                 "Install with: pip install uvicorn starlette"
             )
 
-        from .mcp_security import SecurityConfig, build_sse_security_app
-        
+        from .mcp_security import (
+            SecurityConfig,
+            build_sse_security_app,
+            resolve_sse_security,
+        )
+
+        # Resolve the effective security config/token up-front so both the
+        # bind address and the fail-fast auth guard use the same source of
+        # truth as the request-time middleware.
+        resolved_config, resolved_token = resolve_sse_security(security)
+        if resolved_config is None:
+            resolved_config = SecurityConfig()
+
+        # Honour bind_localhost_only (secure-by-default) unless the caller
+        # explicitly overrides the host. Without this the security config's
+        # bind_localhost_only=True default was silently ignored and the server
+        # bound 0.0.0.0, exposing the endpoint on every interface.
+        if host is None:
+            host = resolved_config.get_bind_address()
+
+        # Refuse to start an unauthenticated server when auth was requested but
+        # no token is available (env var unset/typo'd). Previously the
+        # request-time guard `require_auth and self._token` evaluated False and
+        # every request was let through with no warning.
+        if resolved_config.require_auth and not resolved_token:
+            raise ValueError(
+                "SecurityConfig.require_auth=True but no auth token was found. "
+                "Set MCP_SSE_AUTH_TOKEN (or MCP_AUTH_TOKEN) in the environment; "
+                "refusing to start an unauthenticated SSE server."
+            )
+
         mcp = self.get_fastmcp()
         
         # Set up SSE transport
