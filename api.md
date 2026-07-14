@@ -963,12 +963,6 @@ Methods:
 * <code title="cli">praisonai standardise fix <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai standardise init <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
 * <code title="cli">praisonai standardise report <a href="./src/praisonai/praisonai/cli/commands/standardise.py">--help</a></code>
-* <code title="cli">praisonai train agents <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
-* <code title="cli">praisonai train apply <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
-* <code title="cli">praisonai train list <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
-* <code title="cli">praisonai train llm <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
-* <code title="cli">praisonai train show <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
-* <code title="cli">praisonai train train-callback <a href="./src/praisonai/praisonai/cli/commands/train.py">--help</a></code>
 * <code title="cli">praisonai validate check <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai validate schema <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai validate validate <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
