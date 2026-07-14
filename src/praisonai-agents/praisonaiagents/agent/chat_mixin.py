@@ -2379,28 +2379,29 @@ Your Goal: {self.goal}"""
         prompt_str = prompt if isinstance(prompt, str) else str(prompt)
         self._start_run(prompt_str)
 
-        # Trigger BEFORE_AGENT hook
+        # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, BeforeAgentInput
-        before_agent_input = BeforeAgentInput(
-            session_id=getattr(self, '_session_id', 'default'),
-            cwd=os.getcwd(),
-            event_name=HookEvent.BEFORE_AGENT,
-            timestamp=str(time.time()),
-            agent_name=self.name,
-            prompt=prompt_str,
-            conversation_history=self.chat_history,
-            tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-        )
-        hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, before_agent_input)
-        if self._hook_runner.is_blocked(hook_results):
-            logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
-            return None
-        
-        # Update prompt if modified by hooks
-        for res in hook_results:
-            if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
-                prompt = res.output.modified_input["prompt"]
-                llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
+            before_agent_input = BeforeAgentInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_AGENT,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                prompt=prompt_str,
+                conversation_history=self.chat_history,
+                tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+            )
+            hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, before_agent_input)
+            if self._hook_runner.is_blocked(hook_results):
+                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                return None
+
+            # Update prompt if modified by hooks
+            for res in hook_results:
+                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
+                    prompt = res.output.modified_input["prompt"]
+                    llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
 
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
@@ -2956,28 +2957,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT
         llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         
-        # Trigger BEFORE_AGENT hook
+        # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, BeforeAgentInput
-        before_agent_input = BeforeAgentInput(
-            session_id=getattr(self, '_session_id', 'default'),
-            cwd=os.getcwd(),
-            event_name=HookEvent.BEFORE_AGENT,
-            timestamp=str(time.time()),
-            agent_name=self.name,
-            prompt=prompt if isinstance(prompt, str) else str(prompt),
-            conversation_history=self.chat_history,
-            tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
-        )
-        hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
-        if self._hook_runner.is_blocked(hook_results):
-            logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
-            return None
-            
-        # Update prompt if modified by hooks
-        for res in hook_results:
-            if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
-                prompt = res.output.modified_input["prompt"]
-                llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
+            before_agent_input = BeforeAgentInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_AGENT,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                prompt=prompt if isinstance(prompt, str) else str(prompt),
+                conversation_history=self.chat_history,
+                tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools or self.tools)]
+            )
+            hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
+            if self._hook_runner.is_blocked(hook_results):
+                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                return None
+
+            # Update prompt if modified by hooks
+            for res in hook_results:
+                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
+                    prompt = res.output.modified_input["prompt"]
+                    llm_prompt = self._build_multimodal_prompt(prompt, attachments) if attachments else prompt
         
         # Track execution via telemetry
         if hasattr(self, '_telemetry') and self._telemetry:
