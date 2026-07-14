@@ -313,17 +313,17 @@ function Install-PraisonAI {
         $pipArgs += @("-m", "pip")
     }
     
-    # Build install package name
-    $installPkg = "praisonaiagents"
+    # Build install command - default is praisonai[all] for full experience
+    $installPkg = "praisonai[all]"
     if ($Version -ne "latest") {
-        $installPkg = "praisonaiagents==$Version"
+        $installPkg = "praisonai[all]==$Version"
     }
     
-    # Add extras if specified
+    # Override extras if specified
     if ($Extras) {
-        $installPkg = "praisonaiagents[$Extras]"
+        $installPkg = "praisonai[$Extras]"
         if ($Version -ne "latest") {
-            $installPkg = "praisonaiagents[$Extras]==$Version"
+            $installPkg = "praisonai[$Extras]==$Version"
         }
     }
     
