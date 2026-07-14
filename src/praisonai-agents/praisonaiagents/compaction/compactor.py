@@ -5,6 +5,7 @@ Manages context window by compacting messages when needed.
 """
 
 import re
+import threading
 from typing import List, Dict, Any, Optional, Callable, Awaitable, Tuple
 import asyncio
 
@@ -12,6 +13,54 @@ from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
 from .strategy import CompactionStrategy
 from .result import CompactionResult
 from .protocols import ToolResultPrunerProtocol, MessageFormatterProtocol, SummaryBuilderProtocol
+
+
+# Cache for the one-time offline-safe tiktoken probe (see estimate_tokens).
+# None = not yet probed; True/False = probe result. Guarded by a lock so a
+# single worker thread performs the probe even under concurrent compaction.
+_ACCURATE_TOKENISER_STATE: Optional[bool] = None
+_ACCURATE_TOKENISER_LOCK = threading.Lock()
+# Seconds to wait for tiktoken's first init. A local (cached) vocab loads well
+# under this; a network download does not, so we fall back without blocking.
+_ACCURATE_TOKENISER_PROBE_TIMEOUT = 2.0
+
+
+def _accurate_tokeniser_available() -> bool:
+    """Return True if tiktoken can tokenise offline without a blocking download.
+
+    tiktoken fetches its BPE vocab from the network on first use, which can hang
+    on network-isolated hosts (e.g. CI). We probe exactly once in a short-lived
+    daemon thread: if the accurate tokeniser initialises within the timeout it is
+    used thereafter; otherwise we cache a permanent fallback to the heuristic.
+    """
+    global _ACCURATE_TOKENISER_STATE
+    if _ACCURATE_TOKENISER_STATE is not None:
+        return _ACCURATE_TOKENISER_STATE
+
+    with _ACCURATE_TOKENISER_LOCK:
+        if _ACCURATE_TOKENISER_STATE is not None:
+            return _ACCURATE_TOKENISER_STATE
+
+        result: List[bool] = []
+
+        def _probe() -> None:
+            try:
+                from ..context.tokens import estimate_tokens_accurate
+                # Force real tokeniser init; heuristic fallback returns >0 too,
+                # but a network download would block here (bounded by the thread
+                # timeout below rather than hanging the caller).
+                estimate_tokens_accurate("probe", "gpt-4")
+                result.append(True)
+            except Exception:
+                result.append(False)
+
+        probe_thread = threading.Thread(target=_probe, daemon=True)
+        probe_thread.start()
+        probe_thread.join(_ACCURATE_TOKENISER_PROBE_TIMEOUT)
+
+        # Timed out (likely a network download) or probe reported unavailable.
+        _ACCURATE_TOKENISER_STATE = bool(result and result[0])
+        return _ACCURATE_TOKENISER_STATE
 
 
 class ContextCompactor:
@@ -88,25 +137,52 @@ class ContextCompactor:
         self._used_previous_summary: bool = False
     
     def estimate_tokens(self, text: str) -> int:
-        """Estimate token count for text."""
-        # Rough estimate: ~4 chars per token
-        return len(text) // 4
-    
+        """
+        Estimate token count for text.
+
+        Uses an accurate tokeniser (tiktoken) when it is available **offline**;
+        otherwise falls back to a fast character heuristic.
+
+        tiktoken downloads its BPE vocabulary from the network on first use, and
+        that download can block indefinitely on network-isolated hosts (e.g. CI).
+        To keep token counting fast and offline-safe, the accurate path is probed
+        exactly once in a short-lived worker thread: if the tokeniser is already
+        available locally it is used, otherwise we permanently fall back to the
+        heuristic without ever blocking the hot path.
+        """
+        if not text:
+            return 0
+        if _accurate_tokeniser_available():
+            try:
+                from ..context.tokens import estimate_tokens_accurate
+                return estimate_tokens_accurate(
+                    text, getattr(self.config, "model", None) or "gpt-4"
+                )
+            except Exception:
+                pass
+        return max(1, len(text) // 4)
+
     def count_message_tokens(self, message: Dict[str, Any]) -> int:
-        """Count tokens in a message."""
+        """Count tokens in a message, including tool_calls payloads."""
+        total = 0
         content = message.get("content", "")
         if isinstance(content, str):
-            return self.estimate_tokens(content)
+            total += self.estimate_tokens(content)
         elif isinstance(content, list):
             # Handle multi-part content
-            total = 0
             for part in content:
                 if isinstance(part, dict):
                     total += self.estimate_tokens(str(part.get("text", "")))
                 else:
                     total += self.estimate_tokens(str(part))
-            return total
-        return 0
+
+        # Count tool_calls (function name + arguments) which are otherwise ignored
+        for tool_call in (message.get("tool_calls") or []):
+            if isinstance(tool_call, dict):
+                func = tool_call.get("function", {})
+                total += self.estimate_tokens(str(func))
+
+        return total
     
     def count_total_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """Count total tokens in messages."""
@@ -465,6 +541,43 @@ class ContextCompactor:
         result.extend(recent)
         return result
     
+    def clear_tool_results(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        keep_recent: int = 6,
+        placeholder: str = "[tool result cleared to save context; re-fetch if needed]"
+    ) -> List[Dict[str, Any]]:
+        """
+        Clear old, re-fetchable tool result contents while keeping tool_calls intact.
+
+        Replaces the content of older ``tool`` messages with a short placeholder
+        so the model still knows the call happened (and with what args, via the
+        assistant ``tool_calls``), but the verbose output no longer consumes the
+        window. The most recent ``keep_recent`` tool results are preserved.
+
+        Args:
+            messages: Conversation messages
+            keep_recent: Number of most recent tool results to keep verbatim
+            placeholder: Replacement content for cleared tool results
+
+        Returns:
+            New message list with old tool results cleared
+        """
+        tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        to_clear = set(tool_idxs[:-keep_recent]) if len(tool_idxs) > keep_recent else set()
+
+        out = []
+        for i, m in enumerate(messages):
+            if (
+                i in to_clear
+                and isinstance(m.get("content"), str)
+                and m["content"] != placeholder
+            ):
+                m = {**m, "content": placeholder}
+            out.append(m)
+        return out
+
     def _llm_summarize(self, messages: List[Dict[str, Any]], focus_topic: str = "") -> List[Dict[str, Any]]:
         """
         Use LLM to summarize older messages with iterative support.

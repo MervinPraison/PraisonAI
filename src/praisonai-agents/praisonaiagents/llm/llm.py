@@ -446,6 +446,14 @@ Respond with ONLY a valid JSON tool call in this format:
         self.metrics = extra_settings.get('metrics', False)
         # Auto-detect XML tool format for known models, or allow manual override
         self.xml_tool_format = extra_settings.get('xml_tool_format', 'auto')
+        # In-loop context management (clear-then-compact between tool iterations).
+        # Enabled by default but a true no-op below threshold (cheap token count only).
+        self._in_loop_compaction = extra_settings.get('in_loop_compaction', True)
+        self._clear_threshold_pct = extra_settings.get('clear_threshold_pct', 0.5)
+        self._compact_threshold_pct = extra_settings.get('compact_threshold_pct', 0.8)
+        self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
+        self._loop_compactor = None  # Lazily created on first in-loop management call
+        self._loop_compactor_model = None  # Model the cached compactor was built for
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -2279,6 +2287,87 @@ Now provide your final answer using this result. Summarize the information natur
             self._formatted_tools_cache[tools_key] = result
         return result
 
+    def _resolve_context_window(self) -> int:
+        """
+        Resolve the model's real context window via the budgeter's MODEL_LIMITS.
+
+        Falls back to 8000 tokens when the model is unknown.
+        """
+        try:
+            from ..context.budgeter import get_model_limit
+            return get_model_limit(self.model or "")
+        except Exception:
+            return 8000
+
+    def _manage_context_in_loop(self, messages: list) -> list:
+        """
+        Clear-then-compact between tool iterations. No-op when under threshold.
+
+        Two-tier, in-loop context management:
+        1. Clear pass (low threshold): replace old re-fetchable ``tool`` results
+           with a short placeholder, keeping assistant ``tool_calls`` intact.
+        2. Summarise pass (high threshold): summarise dialogue via the existing
+           compaction strategy.
+
+        The token count is computed with an accurate tokeniser when available,
+        so this is a cheap no-op for short runs and never thrashes a cached
+        prefix unnecessarily.
+        """
+        if not getattr(self, "_in_loop_compaction", True):
+            return messages
+        if not messages:
+            return messages
+
+        try:
+            from ..compaction import ContextCompactor, CompactionConfig
+            from ..compaction.strategy import CompactionStrategy
+
+            budget = self._resolve_context_window()
+            compactor = getattr(self, "_loop_compactor", None)
+            # Rebuild the compactor when it is missing or the active model changed
+            # (e.g. auth/model failover) so budgets and the tokenizer model stay
+            # aligned with the current provider window.
+            if compactor is None or getattr(self, "_loop_compactor_model", None) != self.model:
+                clear_pct = getattr(self, "_clear_threshold_pct", 0.5)
+                compact_pct = getattr(self, "_compact_threshold_pct", 0.8)
+                config = CompactionConfig(
+                    max_tokens=int(budget * compact_pct),
+                    target_tokens=int(budget * 0.6),
+                    model=self.model,
+                    in_loop_compaction=True,
+                    clear_threshold_pct=clear_pct,
+                    compact_threshold_pct=compact_pct,
+                    keep_recent_tool_results=getattr(self, "_keep_recent_tool_results", 6),
+                )
+                compactor = ContextCompactor(
+                    config=config,
+                    strategy=CompactionStrategy.SUMMARIZE,
+                )
+                self._loop_compactor = compactor
+                self._loop_compactor_model = self.model
+
+            clear_at = int(budget * compactor.config.clear_threshold_pct)
+            compact_at = int(budget * compactor.config.compact_threshold_pct)
+
+            tokens = compactor.count_total_tokens(messages)
+            if tokens < clear_at:
+                return messages
+
+            # Tier 1: clear re-fetchable tool results
+            messages = compactor.clear_tool_results(
+                messages,
+                keep_recent=compactor.config.keep_recent_tool_results,
+            )
+
+            # Tier 2: summarise dialogue when still above the high threshold
+            if compactor.count_total_tokens(messages) >= compact_at:
+                messages, _ = compactor.compact(messages)
+
+            return messages
+        except Exception as e:
+            logging.debug(f"In-loop context management skipped: {e}")
+            return messages
+
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -2471,6 +2560,9 @@ Now provide your final answer using this result. Summarize the information natur
                 # G2: Mid-run steering - drain any pending steering notes and inject
                 # them as user messages so the model sees them on its next step.
                 _inject_steering(messages)
+                # In-loop context management: clear re-fetchable tool results at a
+                # low threshold, summarise at a higher one. No-op below threshold.
+                messages = self._manage_context_in_loop(messages)
                 try:
                     # Get response from LiteLLM
                     current_time = time.time()
@@ -4362,6 +4454,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # G2: Mid-run steering - drain any pending steering notes and inject
                 # them as user messages so the model sees them on its next step.
                 _inject_steering(messages)
+                # In-loop context management: clear re-fetchable tool results at a
+                # low threshold, summarise at a higher one. No-op below threshold.
+                messages = self._manage_context_in_loop(messages)
                 response_text = ""
                 reasoning_content = None
                 tool_calls = []
@@ -5355,6 +5450,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'execute_tool_fn', 'stream_callback', 'emit_events',  # Callbacks
             'console',  # Rich console
             'max_tool_calls_per_turn', 'parallel_tool_calls',  # Tool execution settings
+            'in_loop_compaction', 'clear_threshold_pct', 'compact_threshold_pct',  # In-loop context management
+            'keep_recent_tool_results',  # In-loop context management
         ]
         for param in internal_params:
             params.pop(param, None)
