@@ -40,13 +40,16 @@ class MongoDBKnowledgeAdapter:
         })
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], verbose: int = 0, **kwargs):
         """
         Initialize MongoDB knowledge adapter.
         
         Args:
             config: Configuration dictionary containing vector_store config
+            verbose: Verbosity level (accepted for interface compatibility)
+            **kwargs: Additional keyword arguments (ignored)
         """
+        self._verbose = verbose
         self.config = config
         self.vector_store_config = config.get("vector_store", {}).get("config", {})
         self.connection_string = self.vector_store_config.get("connection_string", "mongodb://localhost:27017/")

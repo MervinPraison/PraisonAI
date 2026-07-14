@@ -42,6 +42,8 @@ class Mem0Adapter:
         self,
         config: Optional[Dict[str, Any]] = None,
         disable_telemetry: bool = True,
+        verbose: int = 0,
+        **kwargs,
     ):
         """
         Initialize Mem0 adapter.
@@ -49,7 +51,10 @@ class Mem0Adapter:
         Args:
             config: mem0 configuration dict
             disable_telemetry: Whether to disable mem0 telemetry (default True)
+            verbose: Verbosity level (accepted for interface compatibility)
+            **kwargs: Additional keyword arguments (ignored)
         """
+        self._verbose = verbose
         self._config = config or {}
         self._memory = None
         self._disable_telemetry = disable_telemetry

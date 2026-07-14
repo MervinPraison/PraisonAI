@@ -178,6 +178,109 @@ class TestProtocolCompliance:
             assert hasattr(Mem0Adapter, method), f"Missing method: {method}"
 
 
+class TestAdapterVerboseKwarg:
+    """Regression tests for issue #2972.
+
+    Adapter constructors must accept the ``verbose`` keyword (and extra kwargs)
+    passed by ``Knowledge.memory`` via the registry. Previously, ``Mem0Adapter``
+    and ``MongoDBKnowledgeAdapter`` raised ``TypeError`` on ``verbose``, which was
+    silently swallowed and degraded configured semantic search to SQLite keyword
+    matching.
+    """
+
+    def test_mem0_adapter_accepts_verbose(self):
+        """Mem0Adapter.__init__ must accept verbose without raising."""
+        from praisonaiagents.knowledge.adapters.mem0_adapter import Mem0Adapter
+
+        adapter = Mem0Adapter(config={}, verbose=5)
+        assert isinstance(adapter, Mem0Adapter)
+
+    def test_mongodb_adapter_signature_accepts_verbose(self):
+        """MongoDBKnowledgeAdapter.__init__ must declare a verbose parameter."""
+        import inspect
+        from praisonaiagents.knowledge.adapters.mongodb_adapter import (
+            MongoDBKnowledgeAdapter,
+        )
+
+        params = inspect.signature(MongoDBKnowledgeAdapter.__init__).parameters
+        assert "verbose" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
+    def test_registry_constructs_mem0_with_verbose(self):
+        """Registry should construct mem0 adapter with verbose, not fall back."""
+        from praisonaiagents.knowledge.adapters import get_knowledge_adapter
+
+        adapter = get_knowledge_adapter("mem0", config={}, verbose=1)
+        assert type(adapter).__name__ == "Mem0Adapter"
+
+    def test_knowledge_mem0_provider_not_silently_degraded(self):
+        """Knowledge configured for mem0 must not silently fall back to SQLite.
+
+        A ``verbose`` TypeError in the adapter constructor previously caused a
+        silent degradation to ``SQLiteKnowledgeAdapter``. With the fix, the
+        configured provider must be constructed (or, if mem0 is unavailable in
+        the environment, at least not degraded because of a constructor-signature
+        mismatch).
+        """
+        pytest.importorskip("mem0")
+        from praisonaiagents.knowledge import Knowledge
+
+        k = Knowledge(config={"vector_store": {"provider": "mem0", "config": {}}})
+        assert type(k.memory).__name__ == "Mem0Adapter"
+
+    def test_default_knowledge_does_not_warn_on_expected_fallback(self, caplog):
+        """Default ``Knowledge()`` must not log a warning when falling back.
+
+        When no provider is explicitly configured, ``mem0`` is only an implicit
+        default. Falling back to SQLite (e.g. mem0 not installed) is the expected
+        path and must not emit misleading ``logger.warning`` output about reduced
+        retrieval quality (PR #2982 review).
+        """
+        import logging
+        from praisonaiagents.knowledge import Knowledge
+
+        with caplog.at_level(logging.WARNING, logger="praisonaiagents.knowledge.knowledge"):
+            _ = Knowledge().memory
+
+        degradation_warnings = [
+            r.message for r in caplog.records
+            if r.levelno >= logging.WARNING and "Retrieval quality may be reduced" in r.message
+        ]
+        assert degradation_warnings == [], (
+            f"Default Knowledge() should not warn about degraded retrieval: "
+            f"{degradation_warnings}"
+        )
+
+    def test_explicit_provider_warns_on_fallback(self, caplog):
+        """Explicitly configured provider must warn loudly if it degrades.
+
+        This is the whole point of issue #2972: a user who asks for a semantic
+        backend should get a visible warning when it silently degrades. Uses
+        ``chroma`` which is an optional dependency; when unavailable the adapter
+        fails and Knowledge falls back, which must produce a visible warning.
+        """
+        pytest.importorskip("praisonaiagents.knowledge")
+        try:
+            import chromadb  # noqa: F401
+            pytest.skip("chromadb installed; explicit chroma provider would not fall back")
+        except ImportError:
+            pass
+
+        import logging
+        from praisonaiagents.knowledge import Knowledge
+
+        k = Knowledge(config={"vector_store": {"provider": "chroma", "config": {}}})
+        with caplog.at_level(logging.WARNING, logger="praisonaiagents.knowledge.knowledge"):
+            _ = k.memory
+
+        warned = any(
+            r.levelno >= logging.WARNING and "Retrieval quality may be reduced" in r.message
+            for r in caplog.records
+        )
+        assert warned, "Explicitly configured provider should warn on fallback"
+
+
 class TestChromaKnowledgeAdapterWhereFilters:
     """Tests for ChromaKnowledgeAdapter where-filter formatting."""
 
