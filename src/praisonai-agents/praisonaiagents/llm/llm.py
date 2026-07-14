@@ -2315,12 +2315,25 @@ Now provide your final answer using this result. Summarize the information natur
         # G2: Cooperative cancellation - honour InterruptController between tool iterations
         # so /stop (and cancellation generally) halts mid-flight runs on every provider.
         cancel_token = kwargs.pop("cancel_token", None)
+        # Mid-run steering: optional callable() -> list[str] draining pending
+        # steering notes so they can be injected as user messages between iterations.
+        steering_drain = kwargs.pop("steering_drain", None)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _cancel_reason() -> str:
             return getattr(cancel_token, "reason", None) or "user"
+
+        def _inject_steering(msgs) -> None:
+            if steering_drain is None:
+                return
+            try:
+                for note in (steering_drain() or []):
+                    if note:
+                        msgs.append({"role": "user", "content": f"[steering] {note}"})
+            except Exception as _steer_err:
+                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
 
         # Variable to store final response for token usage extraction
         _final_llm_response = None
@@ -2455,6 +2468,9 @@ Now provide your final answer using this result. Summarize the information natur
                     reason = _cancel_reason()
                     logging.debug(f"LLM tool loop cancelled: {reason}")
                     return _prepare_return_value(f"Task interrupted: {reason}")
+                # G2: Mid-run steering - drain any pending steering notes and inject
+                # them as user messages so the model sees them on its next step.
+                _inject_steering(messages)
                 try:
                     # Get response from LiteLLM
                     current_time = time.time()
@@ -2562,6 +2578,12 @@ Now provide your final answer using this result. Summarize the information natur
 
                         # ── Handle tool calls ───────────────────────────────
                         if tool_calls and execute_tool_fn:
+                            # G2: Second cancel check immediately before dispatching
+                            # tools so a /stop mid-iteration skips running them.
+                            if _is_cancelled():
+                                reason = _cancel_reason()
+                                logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
+                                return _prepare_return_value(f"Task interrupted: {reason}")
                             serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                             messages.append({
                                 "role": "assistant",
@@ -3294,6 +3316,12 @@ Now provide your final answer using this result. Summarize the information natur
 
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
+                        # G2: Second cancel check immediately before dispatching
+                        # tools so a /stop mid-iteration skips running them.
+                        if _is_cancelled():
+                            reason = _cancel_reason()
+                            logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
+                            return _prepare_return_value(f"Task interrupted: {reason}")
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         # Check if this is Ollama provider
@@ -4221,12 +4249,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # G2: Cooperative cancellation - honour InterruptController between tool iterations
         # so /stop (and cancellation generally) halts mid-flight runs on every provider.
         cancel_token = kwargs.pop("cancel_token", None)
+        # Mid-run steering: optional callable() -> list[str] draining pending
+        # steering notes so they can be injected as user messages between iterations.
+        steering_drain = kwargs.pop("steering_drain", None)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _cancel_reason() -> str:
             return getattr(cancel_token, "reason", None) or "user"
+
+        def _inject_steering(msgs) -> None:
+            if steering_drain is None:
+                return
+            try:
+                for note in (steering_drain() or []):
+                    if note:
+                        msgs.append({"role": "user", "content": f"[steering] {note}"})
+            except Exception as _steer_err:
+                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
 
         try:
             import litellm
@@ -4318,6 +4359,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     reason = _cancel_reason()
                     logging.debug(f"Async LLM tool loop cancelled: {reason}")
                     return f"Task interrupted: {reason}"
+                # G2: Mid-run steering - drain any pending steering notes and inject
+                # them as user messages so the model sees them on its next step.
+                _inject_steering(messages)
                 response_text = ""
                 reasoning_content = None
                 tool_calls = []
@@ -4378,6 +4422,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # ── Handle tool calls ────────────────────────────
                     if tool_calls and execute_tool_fn:
+                        # G2: Second cancel check immediately before dispatching
+                        # tools so a /stop mid-iteration skips running them.
+                        if _is_cancelled():
+                            reason = _cancel_reason()
+                            logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
+                            return f"Task interrupted: {reason}"
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
@@ -4600,6 +4650,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
+                    # G2: Second cancel check immediately before dispatching
+                    # tools so a /stop mid-iteration skips running them.
+                    if _is_cancelled():
+                        reason = _cancel_reason()
+                        logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
+                        return f"Task interrupted: {reason}"
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider

@@ -2603,6 +2603,11 @@ Your Goal: {self.goal}"""
                     if cancel_token is not None:
                         llm_kwargs['cancel_token'] = cancel_token
 
+                    # G2 - thread steering drain so pending steering messages are
+                    # injected between tool iterations of an in-flight run
+                    if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
+                        llm_kwargs['steering_drain'] = self._drain_steering_messages
+
                     response_text = self.llm_instance.get_response(**llm_kwargs)
 
                     self._add_to_chat_history("assistant", response_text)
@@ -3097,6 +3102,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # mid-flight runs between tool iterations on every provider
                     if _cancel is not None:
                         llm_kwargs['cancel_token'] = _cancel
+
+                    # G2 - thread steering drain so pending steering messages are
+                    # injected between tool iterations of an in-flight run
+                    if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
+                        llm_kwargs['steering_drain'] = self._drain_steering_messages
 
                     response_text = await self.llm_instance.get_response_async(**llm_kwargs)
 

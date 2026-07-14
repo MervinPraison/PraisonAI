@@ -1501,7 +1501,25 @@ class OpenAIClient:
             Final ChatCompletion response or None if error
         """
         start_time = time.time()
-        
+
+        # G2: Cooperative cancellation + mid-run steering, mirroring the LiteLLM
+        # path so /stop and live steering work on the OpenAI-native loop too.
+        cancel_token = kwargs.pop("cancel_token", None)
+        steering_drain = kwargs.pop("steering_drain", None)
+
+        def _is_cancelled() -> bool:
+            return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
+
+        def _inject_steering(msgs) -> None:
+            if steering_drain is None:
+                return
+            try:
+                for note in (steering_drain() or []):
+                    if note:
+                        msgs.append({"role": "user", "content": f"[steering] {note}"})
+            except Exception:
+                pass
+
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
         # the caller's conversation history and pollute subsequent turns.
@@ -1516,8 +1534,17 @@ class OpenAIClient:
         # truncation (unified with the LiteLLM path). "completed" by default.
         self._last_stop_reason = "completed"
         _wrapup_injected = False
+        # Ensure a defined return value even if cancellation breaks the loop
+        # before any model call is made.
+        final_response = None
         
         while iteration_count < max_iterations:
+            # G2: Check for cancellation at the top of each tool iteration.
+            if _is_cancelled():
+                self._last_stop_reason = "cancelled"
+                break
+            # G2: Mid-run steering - inject pending steering notes before next call.
+            _inject_steering(messages)
             # Trigger LLM callback for status/trace output
             from ..main import execute_sync_callback
             execute_sync_callback('llm_start', model=model, agent_name=None)
@@ -1656,6 +1683,11 @@ class OpenAIClient:
                     get_logger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
+                # G2: Second cancel check before dispatching tools so a /stop
+                # mid-iteration skips running them.
+                if _is_cancelled():
+                    self._last_stop_reason = "cancelled"
+                    break
                 # Convert ToolCall dataclass objects to dict for JSON serialization
                 serializable_tool_calls = []
                 for tc in tool_calls:
@@ -1774,7 +1806,25 @@ class OpenAIClient:
             Final ChatCompletion response or None if error
         """
         start_time = time.time()
-        
+
+        # G2: Cooperative cancellation + mid-run steering, mirroring the LiteLLM
+        # path so /stop and live steering work on the OpenAI-native loop too.
+        cancel_token = kwargs.pop("cancel_token", None)
+        steering_drain = kwargs.pop("steering_drain", None)
+
+        def _is_cancelled() -> bool:
+            return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
+
+        def _inject_steering(msgs) -> None:
+            if steering_drain is None:
+                return
+            try:
+                for note in (steering_drain() or []):
+                    if note:
+                        msgs.append({"role": "user", "content": f"[steering] {note}"})
+            except Exception:
+                pass
+
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
         # the caller's conversation history and pollute subsequent turns.
@@ -1788,8 +1838,17 @@ class OpenAIClient:
         # Structured stop reason (unified with the sync/LiteLLM paths).
         self._last_stop_reason = "completed"
         _wrapup_injected = False
+        # Ensure a defined return value even if cancellation breaks the loop
+        # before any model call is made.
+        final_response = None
         
         while iteration_count < max_iterations:
+            # G2: Check for cancellation at the top of each tool iteration.
+            if _is_cancelled():
+                self._last_stop_reason = "cancelled"
+                break
+            # G2: Mid-run steering - inject pending steering notes before next call.
+            _inject_steering(messages)
             # Graceful wrap-up on the final permitted step.
             if not _wrapup_injected and max_iterations > 1 and iteration_count == max_iterations - 1:
                 messages.append({
@@ -1890,6 +1949,11 @@ class OpenAIClient:
                     get_logger(__name__).debug(f"Narrative display failed: {e}")
             
             if tool_calls and execute_tool_fn:
+                # G2: Second cancel check before dispatching tools so a /stop
+                # mid-iteration skips running them.
+                if _is_cancelled():
+                    self._last_stop_reason = "cancelled"
+                    break
                 # Convert ToolCall dataclass objects to dict for JSON serialization
                 serializable_tool_calls = []
                 for tc in tool_calls:
