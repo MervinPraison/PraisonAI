@@ -379,25 +379,26 @@ def parse_score_reasoning(response_text: str) -> tuple:
     Returns:
         Tuple of (score: float, reasoning: str)
     """
+    import re
+
     score = 5.0  # Default
     reasoning = "Unable to parse response"
-    
-    lines = response_text.strip().split('\n')
-    for line in lines:
-        line = line.strip()
-        
-        if line.startswith('SCORE:'):
-            try:
-                score_str = line.replace('SCORE:', '').strip()
-                score = float(score_str)
-                # Clamp to valid range
-                score = max(1.0, min(10.0, score))
-            except ValueError:
-                pass
-        
-        elif line.startswith('REASONING:'):
-            reasoning = line.replace('REASONING:', '').strip()
-    
+
+    # Extract score (case-insensitive, first numeric value after SCORE:)
+    score_match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', response_text, re.IGNORECASE)
+    if score_match:
+        try:
+            score = float(score_match.group(1))
+            # Clamp to valid range
+            score = max(1.0, min(10.0, score))
+        except ValueError:
+            pass
+
+    # Extract reasoning (case-insensitive, preserves multi-line explanations)
+    reasoning_match = re.search(r'REASONING:\s*(.+)', response_text, re.IGNORECASE | re.DOTALL)
+    if reasoning_match:
+        reasoning = reasoning_match.group(1).strip()
+
     return score, reasoning
 
 __all__ = [

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional
 
 from .base import BaseEvaluator
+from .grader import parse_score_reasoning
 
 logger = get_logger(__name__)
 
@@ -249,7 +250,7 @@ REASONING: [explanation]"""},
                 )
                 
                 response_text = response.choices[0].message.content or ""
-                score, reasoning = self._parse_score_response(response_text)
+                score, reasoning = parse_score_reasoning(response_text)
                 
                 return MediaEvaluationResult(
                     media_type="image",
@@ -354,7 +355,7 @@ REASONING: [explanation]"""
             )
             
             response_text = response.choices[0].message.content or ""
-            score, reasoning = self._parse_score_response(response_text)
+            score, reasoning = parse_score_reasoning(response_text)
             
             return MediaEvaluationResult(
                 media_type="text",
@@ -380,25 +381,6 @@ REASONING: [explanation]"""
         intersection = words1 & words2
         union = words1 | words2
         return len(intersection) / len(union)
-    
-    def _parse_score_response(self, response: str) -> tuple:
-        """Parse score and reasoning from LLM response."""
-        import re
-        
-        score = 5.0  # Default
-        reasoning = response
-        
-        # Try to extract score
-        score_match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', response, re.IGNORECASE)
-        if score_match:
-            score = float(score_match.group(1))
-        
-        # Try to extract reasoning
-        reasoning_match = re.search(r'REASONING:\s*(.+)', response, re.IGNORECASE | re.DOTALL)
-        if reasoning_match:
-            reasoning = reasoning_match.group(1).strip()
-        
-        return score, reasoning
     
     def run(self, output: Any = None, file_path: Optional[str] = None, print_summary: bool = False) -> MediaEvaluationResult:
         """
