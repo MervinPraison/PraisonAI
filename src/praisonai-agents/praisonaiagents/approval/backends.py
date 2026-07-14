@@ -45,6 +45,30 @@ def _get_rich_confirm():
         _rich_confirm = Confirm
     return _rich_confirm
 
+_rich_prompt = None
+
+def _get_rich_prompt():
+    global _rich_prompt
+    if _rich_prompt is None:
+        from rich.prompt import Prompt
+        _rich_prompt = Prompt
+    return _rich_prompt
+
+def _suggest_scope_pattern(request: ApprovalRequest) -> str:
+    """Return a reusable "always" pattern for *request* (best-effort).
+
+    Bridges the tool call to a :class:`PermissionManager`-style target and
+    generalises shell commands into a reusable prefix glob. Never raises —
+    falls back to the raw target so the prompt always has something to show.
+    """
+    from .utils import build_permission_target
+    target = build_permission_target(request.tool_name, request.arguments)
+    try:
+        from ..permissions import PermissionManager
+        return PermissionManager(agent_name=request.agent_name).suggest_scope_pattern(target)
+    except Exception:  # noqa: BLE001 — suggestion is advisory only
+        return target
+
 class AutoApproveBackend:
     """Always approves.  Use for bots or trusted unattended environments."""
 
@@ -57,11 +81,17 @@ class AutoApproveBackend:
 class ConsoleBackend:
     """Interactive Rich terminal prompt.  Default for CLI usage."""
 
-    def _prompt_user(self, request: ApprovalRequest) -> bool:
-        """Show Rich panel and ask yes/no.  Returns True if approved."""
+    def _prompt_user(self, request: ApprovalRequest):
+        """Show Rich panel and ask once/session/always/no.
+
+        Returns a ``(approved, scope, scope_pattern)`` tuple where ``scope`` is
+        one of ``"once"`` / ``"session"`` / ``"always"`` and ``scope_pattern``
+        is the reusable target to persist for ``always`` (``None`` otherwise).
+        A denial returns ``(False, "once", None)``.
+        """
         Console = _get_rich_console()
         Panel = _get_rich_panel()
-        Confirm = _get_rich_confirm()
+        Prompt = _get_rich_prompt()
 
         console = Console()
 
@@ -91,20 +121,42 @@ class ConsoleBackend:
             title_align="left",
         ))
 
+        suggested = _suggest_scope_pattern(request)
+        always_label = f"always ({suggested})" if suggested else "always"
+
         try:
-            return Confirm.ask(
-                f"[{risk_color}]Do you want to execute this {request.risk_level} risk tool?[/{risk_color}]",
-                default=False,
+            console.print(
+                f"[{risk_color}]Allow {request.tool_name}?[/{risk_color}]  "
+                f"[o] once   [s] this session   [a] {always_label}   [n] no"
+            )
+            choice = Prompt.ask(
+                "Choice",
+                choices=["o", "s", "a", "n"],
+                default="n",
             )
         except (KeyboardInterrupt, EOFError):
-            return False
+            return (False, "once", None)
+
+        if choice == "n":
+            return (False, "once", None)
+        if choice == "s":
+            return (True, "session", None)
+        if choice == "a":
+            return (True, "always", suggested or None)
+        return (True, "once", None)
 
     def request_approval_sync(self, request: ApprovalRequest) -> ApprovalDecision:
         """Synchronous approval via Rich console prompt."""
         try:
-            approved = self._prompt_user(request)
+            approved, scope, scope_pattern = self._prompt_user(request)
             if approved:
-                return ApprovalDecision(approved=True, reason="User approved", approver="console")
+                return ApprovalDecision(
+                    approved=True,
+                    reason=f"User approved ({scope})",
+                    approver="console",
+                    scope=scope,
+                    scope_pattern=scope_pattern,
+                )
             return ApprovalDecision(approved=False, reason="User denied", approver="console")
         except Exception as e:
             logger.error("Console approval error: %s", e)

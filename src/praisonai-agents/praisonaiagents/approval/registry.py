@@ -193,6 +193,44 @@ class ApprovalRegistry:
             return False
         return self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set())
 
+    def _persist_scoped_decision(
+        self,
+        agent_name: Optional[str],
+        tool_name: str,
+        arguments: Optional[Dict],
+        decision: ApprovalDecision,
+    ) -> None:
+        """Bridge a ``session``/``always`` decision into the durable store.
+
+        Routes the decision into :class:`PermissionManager.approve` with
+        ``reusable_scope=True`` so future ``check()``/``is_denied()`` calls
+        short-circuit without re-prompting. ``session`` grants live for the
+        process; ``always`` grants are written to ``approvals.json``. Any
+        failure is swallowed — the in-memory ``mark_approved`` fast-path still
+        applies, so a persistence hiccup never blocks execution.
+        """
+        scope = getattr(decision, "scope", "once")
+        if scope not in ("session", "always"):
+            return
+        try:
+            from ..permissions import PermissionManager
+            from .utils import build_permission_target
+
+            target = build_permission_target(tool_name, arguments)
+            manager = PermissionManager(agent_name=agent_name)
+            manager.approve(
+                target,
+                decision.approved,
+                scope=scope,
+                agent_name=agent_name,
+                reusable_scope=True,
+                pattern=getattr(decision, "scope_pattern", None),
+            )
+        except Exception as e:  # noqa: BLE001 — persistence is best-effort
+            logger.warning(
+                "Could not persist %s approval for tool '%s': %s", scope, tool_name, e
+            )
+
     def clear_approved(self) -> None:
         self._approved_context.set(set())
 
@@ -285,6 +323,7 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision
 
     async def approve_async(
@@ -332,4 +371,5 @@ class ApprovalRegistry:
 
         if decision.approved:
             self.mark_approved(tool_name, arguments)
+        self._persist_scoped_decision(agent_name, tool_name, arguments, decision)
         return decision
