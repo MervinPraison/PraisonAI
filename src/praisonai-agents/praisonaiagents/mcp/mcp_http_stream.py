@@ -19,10 +19,15 @@ from urllib.parse import urlparse, urljoin
 
 try:
     from mcp import ClientSession
+    try:
+        from mcp.client.streamable_http import streamablehttp_client
+    except ImportError:
+        streamablehttp_client = None
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
     ClientSession = None
+    streamablehttp_client = None
 
 try:
     import aiohttp
@@ -479,11 +484,13 @@ class HTTPStreamMCPClient:
                 "Install it with: pip install praisonaiagents[mcp]"
             )
 
-        # Check if aiohttp is available
-        if aiohttp is None:
+        # The official streamablehttp_client (httpx-based) is required for the
+        # Streamable HTTP transport.
+        if streamablehttp_client is None:
             raise ImportError(
-                "aiohttp is required for HTTP Stream transport. "
-                "Install it with: pip install praisonaiagents[mcp]"
+                "The installed 'mcp' package does not provide the Streamable HTTP "
+                "client (mcp.client.streamable_http.streamablehttp_client). "
+                "Upgrade it with: pip install -U 'mcp'"
             )
 
         # Parse URL to extract base URL and endpoint
@@ -537,19 +544,27 @@ class HTTPStreamMCPClient:
     async def _async_initialize(self):
         """Asynchronously initialize the connection and tools."""
         logger.debug(f"Connecting to MCP server at {self.base_url}")
-        
-        # Create HTTP Stream transport
-        self.transport = HTTPStreamTransport(self.base_url, options=self.options)
-        await self.transport.__aenter__()
-        
-        # Create read and write streams
-        read_stream = self.transport.read_stream()
-        write_stream = self.transport.write_stream()
-        
-        # Start SSE listener if in stream mode
-        if self.options.get('responseMode', 'batch') == 'stream':
-            await self.transport.start_sse_listener()
-        
+
+        # Use the official MCP SDK's Streamable HTTP client so that the read and
+        # write streams are proper anyio memory-object streams that ClientSession
+        # can drive. A hand-rolled transport would pass a plain function where the
+        # SDK expects a stream with .send()/.receive(), breaking session.initialize().
+        if streamablehttp_client is None:
+            raise ImportError(
+                "The installed 'mcp' package does not provide "
+                "mcp.client.streamable_http.streamablehttp_client. "
+                "Upgrade it with: pip install -U 'mcp'"
+            )
+
+        headers = self.options.get('headers') or None
+
+        self._streams_context = streamablehttp_client(
+            url=self.base_url,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        read_stream, write_stream, _ = await self._streams_context.__aenter__()
+
         # Create client session
         self._session_context = ClientSession(read_stream, write_stream)
         self.session = await self._session_context.__aenter__()
@@ -576,10 +591,6 @@ class HTTPStreamMCPClient:
             )
             tools.append(wrapper)
         
-        # Set up cleanup finalizer now that transport and session are created
-        self._finalizer = weakref.finalize(self, self._static_cleanup, 
-                                         self.transport, self._session_context)
-            
         return tools
     
     def __iter__(self):
@@ -612,8 +623,8 @@ class HTTPStreamMCPClient:
             pass
         
         try:
-            if self.transport:
-                await self.transport.__aexit__(None, None, None)
+            if hasattr(self, '_streams_context') and self._streams_context:
+                await self._streams_context.__aexit__(None, None, None)
         except Exception:
             pass
     
@@ -652,39 +663,11 @@ class HTTPStreamMCPClient:
         """Force cleanup of resources synchronously (for emergencies)."""
         if self._closed:
             return
-            
+
+        # The official streamablehttp_client owns its transport and must be
+        # closed via its async context manager. We cannot safely tear that down
+        # synchronously here, so just mark the client as closed.
         self._closed = True
-        
-        # Force close transport session if it exists
-        try:
-            if self.transport and hasattr(self.transport, '_session') and self.transport._session:
-                session = self.transport._session
-                if not session.closed:
-                    # Force close the aiohttp session
-                    if hasattr(session, '_connector') and session._connector:
-                        try:
-                            # Close connector directly
-                            session._connector.close()
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-    
-    @staticmethod
-    def _static_cleanup(transport, session_context):
-        """Static cleanup method for weakref finalizer."""
-        try:
-            # This is called by weakref finalizer, so we can't do async operations
-            # Just ensure any session is closed if possible
-            if transport and hasattr(transport, '_session') and transport._session:
-                session = transport._session
-                if not session.closed and hasattr(session, '_connector'):
-                    try:
-                        session._connector.close()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
     
     def __del__(self):
         """Cleanup when object is garbage collected."""
