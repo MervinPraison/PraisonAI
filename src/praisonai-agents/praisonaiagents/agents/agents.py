@@ -111,16 +111,6 @@ class _AgentServerRegistry:
         with self._lock:
             return list(self._endpoints.get(port, {}).keys())
     
-    def has_route(self, port: int, path: str) -> bool:
-        """Thread-safe check whether a path is registered on a port."""
-        with self._lock:
-            return path in self._endpoints.get(port, {})
-    
-    def is_server_started(self, port: int) -> bool:
-        """Check if server is started for this port."""
-        with self._lock:
-            return self._started.get(port, False)
-    
     def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:  # noqa: S104
         """Start server with proper readiness signaling. Returns True if server was started."""
         with self._lock:
