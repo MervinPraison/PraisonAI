@@ -77,9 +77,10 @@ def test_agent_tool_execution_with_approval():
         print(f"❌ Agent tool execution test failed: {e}")
         assert False, f"Agent tool execution test failed: {e}"
 
+@patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_with_auto_approval(mock_console_callback, mock_confirm, monkeypatch):
+def test_agent_with_auto_approval(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test agent tool execution with auto-approval callback."""
     print("\n🤖 Testing Agent with Auto-Approval")
     print("=" * 40)
@@ -164,9 +165,10 @@ def test_agent_with_auto_denial():
         print(f"❌ Auto-denial test failed: {e}")
         assert False, f"Auto-denial test failed: {e}"
 
+@patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_python_code_execution(mock_console_callback, mock_confirm, monkeypatch):
+def test_agent_python_code_execution(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test Python code execution through agent with approval."""
     print("\n🐍 Testing Agent Python Code Execution")
     print("=" * 45)
@@ -217,9 +219,10 @@ def test_agent_python_code_execution(mock_console_callback, mock_confirm, monkey
         print(f"❌ Python code execution test failed: {e}")
         assert False, f"Python code execution test failed: {e}"
 
+@patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_file_operations(mock_console_callback, mock_confirm, monkeypatch):
+def test_agent_file_operations(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test file operations through agent with approval."""
     print("\n📁 Testing Agent File Operations")
     print("=" * 35)
