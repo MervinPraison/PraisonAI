@@ -563,15 +563,23 @@ class HTTPStreamMCPClient:
             headers=headers,
             timeout=self.timeout,
         )
-        read_stream, write_stream, _ = await self._streams_context.__aenter__()
 
-        # Create client session
-        self._session_context = ClientSession(read_stream, write_stream)
-        self.session = await self._session_context.__aenter__()
-        
-        # Initialize
-        await self.session.initialize()
-        
+        # If any step of the handshake fails after a context has been entered,
+        # unwind the already-entered contexts so we don't leak the httpx/anyio
+        # connection or a half-open remote MCP session.
+        try:
+            read_stream, write_stream, _ = await self._streams_context.__aenter__()
+
+            # Create client session
+            self._session_context = ClientSession(read_stream, write_stream)
+            self.session = await self._session_context.__aenter__()
+
+            # Initialize
+            await self.session.initialize()
+        except BaseException:
+            await self._cleanup_contexts()
+            raise
+
         # List available tools
         logger.debug("Listing tools...")
         response = await self.session.list_tools()
@@ -609,24 +617,32 @@ class HTTPStreamMCPClient:
         """Async context manager exit."""
         await self.aclose()
     
+    async def _cleanup_contexts(self):
+        """Exit any entered SDK contexts, tolerating partial initialization."""
+        session_context = getattr(self, '_session_context', None)
+        if session_context is not None:
+            try:
+                await session_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._session_context = None
+            self.session = None
+
+        streams_context = getattr(self, '_streams_context', None)
+        if streams_context is not None:
+            try:
+                await streams_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._streams_context = None
+
     async def aclose(self):
         """Async cleanup method to close all resources."""
         if self._closed:
             return
-        
+
         self._closed = True
-        
-        try:
-            if hasattr(self, '_session_context') and self._session_context:
-                await self._session_context.__aexit__(None, None, None)
-        except Exception:
-            pass
-        
-        try:
-            if hasattr(self, '_streams_context') and self._streams_context:
-                await self._streams_context.__aexit__(None, None, None)
-        except Exception:
-            pass
+        await self._cleanup_contexts()
     
     def close(self):
         """Synchronous cleanup method to close all resources."""
@@ -660,13 +676,26 @@ class HTTPStreamMCPClient:
             self._force_cleanup()
     
     def _force_cleanup(self):
-        """Force cleanup of resources synchronously (for emergencies)."""
+        """Force cleanup of resources (for __del__ / process-exit paths).
+
+        The official streamablehttp_client owns its transport and must be closed
+        via its async context manager. We cannot await here, so make a
+        best-effort attempt to schedule the async teardown on the background
+        event loop; if that loop is gone we can only mark the client closed and
+        let the OS reclaim the socket at process exit.
+        """
         if self._closed:
             return
 
-        # The official streamablehttp_client owns its transport and must be
-        # closed via its async context manager. We cannot safely tear that down
-        # synchronously here, so just mark the client as closed.
+        if getattr(self, '_session_context', None) is not None or \
+                getattr(self, '_streams_context', None) is not None:
+            try:
+                loop = get_event_loop()
+                if not loop.is_closed() and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self._cleanup_contexts(), loop)
+            except Exception:
+                pass
+
         self._closed = True
     
     def __del__(self):
