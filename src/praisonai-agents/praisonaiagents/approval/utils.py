@@ -21,10 +21,13 @@ _SHELL_TOOLS = frozenset({
 
 # File-mutating tool names -> the permission-target prefix used for their path,
 # so an "always" grant reads naturally (e.g. ``edit:src/app.py``).
+# NOTE: ``apply_patch`` is deliberately absent. It takes ``patch`` (multi-file
+# patch text), not a single path, so there is no stable path to pin a scoped
+# grant to — it falls through to ``tool:apply_patch`` rather than a misleading
+# ``edit:<...>`` target that could silently cover unrelated files on reuse.
 _FILE_TOOL_PREFIXES: Dict[str, str] = {
     "edit_file": "edit",
     "acp_edit_file": "edit",
-    "apply_patch": "edit",
     "write_file": "write",
     "acp_create_file": "write",
     "delete_file": "delete",
@@ -35,7 +38,10 @@ _FILE_TOOL_PREFIXES: Dict[str, str] = {
 
 # Argument keys commonly holding the shell command / file path, in priority order.
 _COMMAND_KEYS = ("command", "cmd", "code", "query")
-_PATH_KEYS = ("file_path", "path", "filename", "file", "target", "filepath")
+# ``src`` covers ``move_file``/``copy_file`` (which take ``src``/``dst``) so a
+# scoped grant is pinned to the concrete source path rather than falling back to
+# a tool-wide ``tool:move_file`` allow-rule.
+_PATH_KEYS = ("file_path", "path", "filename", "file", "target", "filepath", "src")
 
 
 def build_permission_target(
