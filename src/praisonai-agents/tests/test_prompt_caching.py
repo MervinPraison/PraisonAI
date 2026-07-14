@@ -212,6 +212,160 @@ class TestAgentPromptCachingParameter:
             assert agent.llm_instance.prompt_caching == True
 
 
+def _count_cache_markers(messages):
+    """Count cache_control markers across all message content blocks."""
+    count = 0
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    count += 1
+    return count
+
+
+class TestCacheBreakpointBudget:
+    """Tests for provider-agnostic, budgeted cache breakpoints."""
+
+    def _anthropic_llm(self):
+        from praisonaiagents.llm.llm import LLM
+        return LLM(model="anthropic/claude-3-5-sonnet-latest", prompt_caching=True)
+
+    def test_history_prefix_gets_cache_breakpoint(self):
+        """A stable history prefix is marked with a cache breakpoint."""
+        llm = self._anthropic_llm()
+        history = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "two"},
+            {"role": "user", "content": "three"},
+            {"role": "assistant", "content": "four"},
+        ]
+        with patch.object(llm, '_supports_prompt_caching', return_value=True):
+            messages, _ = llm._build_messages(
+                prompt="latest",
+                system_prompt="You are helpful.",
+                chat_history=history,
+            )
+        # system block + one history-prefix marker
+        assert _count_cache_markers(messages) >= 2
+
+    def test_at_most_four_cache_breakpoints(self):
+        """Never exceed the provider 4-breakpoint limit."""
+        llm = self._anthropic_llm()
+        history = [
+            {"role": "user", "content": f"msg-{i}"} for i in range(20)
+        ]
+        with patch.object(llm, '_supports_prompt_caching', return_value=True):
+            messages, _ = llm._build_messages(
+                prompt="latest",
+                system_prompt="You are helpful.",
+                chat_history=history,
+            )
+        assert _count_cache_markers(messages) <= 4
+
+    def test_openai_path_no_explicit_markers(self):
+        """OpenAI uses automatic prefix caching → no explicit markers."""
+        from praisonaiagents.llm.llm import LLM
+        llm = LLM(model="gpt-4o-mini", prompt_caching=True)
+        history = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "two"},
+            {"role": "user", "content": "three"},
+        ]
+        messages, _ = llm._build_messages(
+            prompt="latest",
+            system_prompt="You are helpful.",
+            chat_history=history,
+        )
+        assert _count_cache_markers(messages) == 0
+        # System stays a plain string (prefix byte-stable by construction)
+        assert isinstance(messages[0]["content"], str)
+
+    def test_short_history_leaves_tail_uncached(self):
+        """With only the tail present, no history breakpoint is added."""
+        llm = self._anthropic_llm()
+        history = [{"role": "user", "content": "only-one"}]
+        with patch.object(llm, '_supports_prompt_caching', return_value=True):
+            messages, _ = llm._build_messages(
+                prompt="latest",
+                system_prompt="You are helpful.",
+                chat_history=history,
+            )
+        # Only the system block should be marked (history too short)
+        assert _count_cache_markers(messages) == 1
+
+    def test_mark_message_cache_control_string(self):
+        """String content is converted to array form with a marker."""
+        from praisonaiagents.llm.llm import LLM
+        msg = {"role": "user", "content": "hello"}
+        assert LLM._mark_message_cache_control(msg) is True
+        assert isinstance(msg["content"], list)
+        assert msg["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_mark_message_cache_control_is_idempotent(self):
+        """Re-marking an already-marked block does not duplicate markers."""
+        from praisonaiagents.llm.llm import LLM
+        msg = {"role": "user", "content": "hello"}
+        LLM._mark_message_cache_control(msg)
+        LLM._mark_message_cache_control(msg)
+        markers = [b for b in msg["content"] if "cache_control" in b]
+        assert len(markers) == 1
+
+    def test_mark_message_cache_control_already_marked_returns_false(self):
+        """An already-marked list block reports no new marker applied."""
+        from praisonaiagents.llm.llm import LLM
+        msg = {"role": "user", "content": "hello"}
+        assert LLM._mark_message_cache_control(msg) is True
+        # Second call finds an existing marker → no new breakpoint applied.
+        assert LLM._mark_message_cache_control(msg) is False
+
+    def test_history_not_mutated_in_place(self):
+        """Marking the history prefix must not mutate caller-owned dicts."""
+        llm = self._anthropic_llm()
+        history = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "two"},
+            {"role": "user", "content": "three"},
+            {"role": "assistant", "content": "four"},
+        ]
+        original = [dict(m) for m in history]
+        with patch.object(llm, '_supports_prompt_caching', return_value=True):
+            llm._build_messages(
+                prompt="latest",
+                system_prompt="You are helpful.",
+                chat_history=history,
+            )
+        # Caller history stays byte-stable (still plain strings, no markers).
+        assert history == original
+        for msg in history:
+            assert isinstance(msg["content"], str)
+
+    def test_budget_respects_preexisting_history_markers(self):
+        """Pre-existing markers in supplied history count toward the budget."""
+        llm = self._anthropic_llm()
+        # History already carrying three ephemeral markers.
+        marked = lambda text: {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+            ],
+        }
+        history = [
+            marked("a"), marked("b"), marked("c"),
+            {"role": "user", "content": "d"},
+            {"role": "assistant", "content": "e"},
+            {"role": "user", "content": "f"},
+        ]
+        with patch.object(llm, '_supports_prompt_caching', return_value=True):
+            messages, _ = llm._build_messages(
+                prompt="latest",
+                system_prompt="You are helpful.",
+                chat_history=history,
+            )
+        # system(1) + three history markers already = 4; no more added.
+        assert _count_cache_markers(messages) <= 4
+
+
 class TestPromptCachingIntegration:
     """Integration tests for prompt caching (requires API key)."""
     

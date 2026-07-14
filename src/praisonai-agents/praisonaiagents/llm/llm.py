@@ -1,6 +1,7 @@
 import logging
 from praisonaiagents._logging import get_logger
 import os
+import copy
 import warnings
 import re
 import inspect
@@ -1979,6 +1980,100 @@ Now provide your final answer using this result. Summarize the information natur
         # Fallback to conservative default if adapter not initialized
         return False
     
+    def _explicit_cache_breakpoints(self) -> bool:
+        """Whether this provider needs explicit ``cache_control`` breakpoints.
+
+        Anthropic requires manual ``cache_control`` markers on the request
+        prefix. OpenAI/Gemini use automatic prefix caching, so no explicit
+        markers are emitted (keeping the prefix byte-stable is enough).
+        """
+        return bool(
+            self.prompt_caching
+            and self._supports_prompt_caching()
+            and self._is_anthropic_model()
+        )
+
+    @staticmethod
+    def _make_cached_system_message(system_prompt: str) -> dict:
+        """Build a system message carrying an ephemeral cache breakpoint."""
+        return {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+
+    @staticmethod
+    def _mark_message_cache_control(message: dict) -> bool:
+        """Attach an ephemeral ``cache_control`` marker to a chat message.
+
+        Converts string content into Anthropic's content-array form. Returns
+        ``True`` if a marker was applied, ``False`` if the message shape is
+        unsupported (already marked or non-text content).
+        """
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            return True
+        if isinstance(content, list):
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    if "cache_control" in block:
+                        # Already marked: no new breakpoint was applied.
+                        return False
+                    block["cache_control"] = {"type": "ephemeral"}
+                    return True
+        return False
+
+    @staticmethod
+    def _count_cache_markers(messages: list) -> int:
+        """Count existing ``cache_control`` markers across message content."""
+        count = 0
+        for message in messages:
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "cache_control" in block:
+                        count += 1
+        return count
+
+    def _mark_history_prefix(self, messages: list, history_start: int, preserve_recent: int = 2) -> None:
+        """Mark the end of the stable history prefix with a cache breakpoint.
+
+        Leaves the most recent ``preserve_recent`` messages (the volatile tail)
+        uncached and places a single breakpoint on the last stable message.
+        Respects the provider 4-breakpoint budget by counting markers already
+        present (e.g. the system block, or markers in caller-supplied history)
+        before adding a new one. To avoid mutating caller-owned history dicts,
+        the boundary message is replaced with a shallow copy before marking.
+        """
+        history_len = len(messages) - history_start
+        if history_len <= preserve_recent:
+            return
+        boundary_index = len(messages) - preserve_recent - 1
+        if boundary_index <= history_start - 1:
+            return
+        # Respect the provider 4-breakpoint budget, accounting for any markers
+        # already present in the system block or caller-supplied history.
+        if self._count_cache_markers(messages) >= 4:
+            return
+        # Copy the boundary message so marking does not mutate the caller's
+        # history, which may be reused for OpenAI/Gemini (which reject
+        # Anthropic cache metadata).
+        boundary = copy.deepcopy(messages[boundary_index])
+        if self._mark_message_cache_control(boundary):
+            messages[boundary_index] = boundary
+
     def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None, tools=None):
         """Build messages list for LLM completion. Works for both sync and async.
         
@@ -2020,24 +2115,21 @@ Now provide your final answer using this result. Summarize the information natur
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
                 # Apply prompt caching for Anthropic models if enabled
-                if self.prompt_caching and self._supports_prompt_caching() and self._is_anthropic_model():
+                if self._explicit_cache_breakpoints():
                     # Anthropic requires cache_control in content array format
-                    messages.append({
-                        "role": "system",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": system_prompt,
-                                "cache_control": {"type": "ephemeral"}
-                            }
-                        ]
-                    })
+                    messages.append(self._make_cached_system_message(system_prompt))
                 else:
                     messages.append({"role": "system", "content": system_prompt})
         
         # Add chat history if provided
         if chat_history:
+            history_start = len(messages)
             messages.extend(chat_history)
+            # Place a cache breakpoint at the end of the stable history prefix
+            # (all but the most recent messages), keeping the request prefix
+            # byte-stable across turns so cached reads are reused.
+            if self._explicit_cache_breakpoints():
+                self._mark_history_prefix(messages, history_start)
         
         # Handle prompt modifications for JSON output
         original_prompt = prompt
