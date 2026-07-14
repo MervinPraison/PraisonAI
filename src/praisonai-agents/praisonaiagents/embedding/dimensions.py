@@ -68,8 +68,12 @@ def get_dimensions(model_name: str) -> int:
     if model_lower in MODEL_DIMENSIONS:
         return MODEL_DIMENSIONS[model_lower]
     
-    # Check if model name contains known model identifiers
-    for model_key, dimensions in MODEL_DIMENSIONS.items():
+    # Check if model name contains known model identifiers.
+    # Sort by key length (longest first) so more specific keys like
+    # "voyage-3-lite" match before shorter prefixes like "voyage-3".
+    for model_key, dimensions in sorted(
+        MODEL_DIMENSIONS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
         if model_key.lower() in model_lower:
             return dimensions
     
