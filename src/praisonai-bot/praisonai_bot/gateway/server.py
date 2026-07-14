@@ -3873,51 +3873,40 @@ class WebSocketGateway:
         if not raw or not isinstance(raw, dict):
             raise ValueError(f"Invalid gateway config: {config_path}")
 
-        # ── Schema validation ──────────────────────────────────────
-        errors = []
-        if "agents" not in raw:
-            errors.append("Missing required 'agents' section")
-        elif not isinstance(raw["agents"], dict) or not raw["agents"]:
-            errors.append("'agents' must be a non-empty dictionary")
-        else:
-            for aid, adef in raw["agents"].items():
-                if not isinstance(adef, dict):
-                    errors.append(f"Agent '{aid}' must be a dictionary")
+        # ── Canonical schema validation (issue #3018) ──────────────
+        # Route through the single, registry-aware validator that the ``bot``
+        # CLI already uses instead of a second hand-rolled allowlist. This
+        # migrates legacy config shapes (single-bot / BotOS / string
+        # allowed_users) and *fails closed* on an unknown/typo'd platform
+        # rather than emitting a warning and starting a channel that will
+        # silently never run. Validation reads the platform registry
+        # (built-ins + entry-point-discovered + ``register_platform()``), so
+        # plugin channels validate on the runtime path too. Unknown-platform
+        # and missing-token failures raise ``ValueError`` here, which the CLI
+        # maps to the fatal-config exit code (78) so supervisors don't
+        # crash-loop.
+        from praisonai_bot.bots._config_schema import (
+            migrate_legacy_config,
+            validate_gateway_config,
+        )
 
-        if "channels" not in raw:
-            errors.append("Missing required 'channels' section")
-        elif not isinstance(raw["channels"], dict) or not raw["channels"]:
-            errors.append("'channels' must be a non-empty dictionary")
-        else:
-            valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email", "agentmail"}
-            for cname, cdef in raw["channels"].items():
-                if not isinstance(cdef, dict):
-                    errors.append(f"Channel '{cname}' must be a dictionary")
-                    continue
-                # Resolve platform: explicit field takes priority over key
-                platform = cdef.get("platform", cname).lower()
-                if platform not in valid_platforms:
-                    logger.warning(
-                        f"Channel '{cname}' platform '{platform}' is not "
-                        f"a known platform ({', '.join(sorted(valid_platforms))})"
-                    )
-                # WhatsApp web mode doesn't require a token
-                is_wa_web = (platform == "whatsapp" and
-                             cdef.get("mode", "cloud").lower().strip() == "web")
-                # Email/AgentMail use env vars for tokens — not required in YAML
-                is_email_platform = platform in ("email", "agentmail")
-                if not cdef.get("token") and not is_wa_web and not is_email_platform:
-                    errors.append(
-                        f"Channel '{cname}' missing 'token' "
-                        "(use ${{ENV_VAR}} syntax for env vars)"
-                    )
-
-        if errors:
-            msg = (
-                f"Gateway config validation failed ({config_path}):\n"
-                + "\n".join(f"  - {e}" for e in errors)
-            )
-            raise ValueError(msg)
+        migrated = migrate_legacy_config(raw)
+        # Validate (raises ValueError on unknown platform / missing token /
+        # no channels). Skip the schema's own ${VAR} substitution — this
+        # loader owns env resolution below and preserves the original raw
+        # dict so every top-level key the runtime reads survives.
+        validated = validate_gateway_config(migrated, apply_env_substitution=False)
+        raw = migrated
+        # The schema normalises legacy single-bot (top-level platform/token)
+        # and BotOS (``platforms:``) shapes into a ``channels`` dict. Backfill
+        # that normalised ``channels`` when the raw dict lacked one so the
+        # runtime — which reads ``channels`` from this dict — sees the same
+        # migrated shape the ``bot`` command does.
+        if not raw.get("channels") and validated.channels:
+            raw["channels"] = {
+                name: channel.model_dump(exclude_none=True)
+                for name, channel in validated.channels.items()
+            }
 
         def _resolve(obj):
             if isinstance(obj, str):
