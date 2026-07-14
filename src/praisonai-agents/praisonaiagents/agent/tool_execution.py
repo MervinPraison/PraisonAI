@@ -554,11 +554,15 @@ class ToolExecutionMixin:
                     )
                     if _verdict.get("stuck"):
                         if _verdict.get("level") == "critical":
-                            return {
+                            # Block via the shared blocked_result path so trace
+                            # spans, stream events, AFTER_TOOL hooks, doom-loop
+                            # and loop-guard teardown still run (matches the
+                            # loop_guard BLOCK behaviour at line ~524).
+                            blocked_result = {
                                 "error": _verdict.get("message", "loop detected"),
                                 "loop_blocked": True,
                             }
-                        if not getattr(self, '_loop_warned_this_turn', False):
+                        elif not getattr(self, '_loop_warned_this_turn', False):
                             self._loop_warned_this_turn = True
                             self._pending_self_correction = (
                                 f"[System: repeated {_verdict.get('detector')} detected. "

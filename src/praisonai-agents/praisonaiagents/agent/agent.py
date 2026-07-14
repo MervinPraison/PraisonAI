@@ -3187,13 +3187,16 @@ Summary:"""
         if not response_str:
             return True
         lowered = response_str.strip().lower()
+        # Only unambiguous hard-failure markers. Phrases like "i am/was unable
+        # to <X>" are deliberately excluded: an agent can complete a task via an
+        # alternate path while noting it could not obtain some optional data, so
+        # treating those as failures would trip consecutive-failure recovery even
+        # while progress is being made.
         _markers = (
             "traceback (most recent call last)",
             "an error occurred",
             "i encountered an error",
-            "i was unable to",
-            "i am unable to",
-            "failed to complete",
+            "failed to complete the task",
         )
         return any(m in lowered for m in _markers)
 
@@ -3375,6 +3378,11 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
+        # Clear any stale loop-warning latch/nudge left over from a previous
+        # run_autonomous(_async) call on this agent instance so warnings never
+        # leak into an unrelated task's first prompt.
+        self._pending_self_correction = None
+        self._loop_warned_this_turn = False
         
         # P3/G2: Import callback helper for autonomy events
         from ..main import execute_sync_callback
@@ -3810,6 +3818,11 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
+        # Clear any stale loop-warning latch/nudge left over from a previous
+        # run_autonomous(_async) call on this agent instance so warnings never
+        # leak into an unrelated task's first prompt.
+        self._pending_self_correction = None
+        self._loop_warned_this_turn = False
         
         try:
             # Execute the autonomous loop

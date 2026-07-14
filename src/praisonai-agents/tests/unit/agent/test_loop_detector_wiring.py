@@ -185,8 +185,13 @@ class TestDoomLoopFeedFixed:
         """_response_indicates_failure derives a real success bool (not True)."""
         agent = _make_agent()
         assert agent._response_indicates_failure("Traceback (most recent call last): ...")
-        assert agent._response_indicates_failure("I was unable to complete the task")
+        assert agent._response_indicates_failure("I failed to complete the task")
         assert not agent._response_indicates_failure("Here is the completed report.")
+        # Partial-success phrasing must NOT be treated as a failure: the agent
+        # may complete via an alternate path while noting missing optional data.
+        assert not agent._response_indicates_failure(
+            "I was unable to fetch the optional metadata, but finished the report."
+        )
 
     def test_failure_streak_recorded_as_false(self):
         """Failing iterations are recorded as success=False (not hard-coded True)."""
