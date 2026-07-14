@@ -439,6 +439,74 @@ class BaseAutoGenerator:
         await self.aclose()
         return False
 
+    async def _structured_via_registered_provider(
+        self,
+        response_model: Type[T],
+        messages: List[Dict],
+        model_name: str,
+        **kwargs,
+    ):
+        """Delegate structured completion to a user-registered LLM provider.
+
+        Consults ``praisonai.llm.registry`` so a provider registered via
+        ``register_llm_provider(...)`` becomes reachable from AutoGenerator (and
+        every generator inheriting from it). Only providers that are (a) NOT a
+        built-in litellm/gateway prefix and (b) opt in by exposing an async
+        ``generate_structured(response_model, messages, **kwargs)`` are used;
+        everything else returns ``None`` so the existing LiteLLM/OpenAI ladder
+        runs unchanged. Never raises for registry issues — returns ``None``.
+        """
+        if "/" not in model_name:
+            return None
+        provider_id = model_name.split("/", 1)[0].lower()
+        # Built-in prefixes keep the fast, direct LiteLLM/OpenAI ladder below and
+        # are never resolved through the registry — reuse the SAME set as
+        # PraisonAIModel._is_registered_provider() so both hot paths agree on
+        # which providers are "registered" (a custom "openai"/"anthropic"
+        # registration must not hijack the built-in path here).
+        try:
+            from praisonai.inc.models import _BUILTIN_MODEL_PREFIXES
+        except ImportError:
+            _BUILTIN_MODEL_PREFIXES = frozenset(
+                {"openai", "groq", "cohere", "ollama",
+                 "anthropic", "google", "openrouter"}
+            )
+        if provider_id in _BUILTIN_MODEL_PREFIXES:
+            return None
+        try:
+            from praisonai.llm import create_llm_provider, has_llm_provider
+        except ImportError:
+            return None
+        # Forward the selected generator's config so a provider that needs it for
+        # generate_structured() authenticates correctly — mirrors what
+        # PraisonAIModel passes. Preserve provider-specific fields (e.g.
+        # aws_region, timeout, model_kwargs) but drop empty credential entries so
+        # a provider's own credential chain is not shadowed by empty values.
+        cfg = self.config_list[0]
+        provider_config = {
+            k: v
+            for k, v in cfg.items()
+            if k != "model" and not (k in ("api_key", "base_url") and not v)
+        }
+        try:
+            if not has_llm_provider(provider_id):
+                return None
+            provider = create_llm_provider(
+                model_name, config=provider_config or None
+            )
+        except Exception as exc:
+            logger.debug(
+                "Registered provider lookup for %r failed (%s); "
+                "using built-in completion ladder.", model_name, exc
+            )
+            return None
+        generate_structured = getattr(provider, "generate_structured", None)
+        if not callable(generate_structured):
+            return None
+        return await _maybe_await(
+            generate_structured(response_model, messages, **kwargs)
+        )
+
     async def _completion_impl(
         self,
         response_model: Type[T],
@@ -456,6 +524,16 @@ class BaseAutoGenerator:
         paths into one place so the ladder can only ever be changed once.
         """
         model_name = self.config_list[0]['model']
+
+        # Extension point: if the model resolves to a user-registered provider
+        # (praisonai.llm.registry) that opts in by exposing generate_structured,
+        # delegate to it so custom providers (e.g. "bedrock/...") take effect
+        # here. Built-in providers are untouched and keep the ladder below.
+        registered = await self._structured_via_registered_provider(
+            response_model, messages, model_name, **kwargs
+        )
+        if registered is not None:
+            return registered
 
         # Try LiteLLM first (preferred - supports 100+ providers)
         if is_available("litellm"):
