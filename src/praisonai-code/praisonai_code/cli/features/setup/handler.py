@@ -87,16 +87,18 @@ class SetupHandler(CommandHandler):
             return 1
         
         providers = self._provider_defaults()
-        
-        if provider not in providers:
-            output.print_error(f"Unknown provider: {provider}")
-            output.console.print("Valid providers: openai, anthropic, google, ollama, custom")
-            return 1
-        
-        provider_info = providers[provider]
-        provider_name = provider_info[0]
-        env_key = provider_info[1]
-        default_model = provider_info[2]
+
+        if provider in providers:
+            provider_info = providers[provider]
+            provider_name = provider_info[0]
+            env_key = provider_info[1]
+            default_model = provider_info[2]
+        else:
+            # Accept any catalogue-known provider (Groq, OpenRouter, Mistral, …)
+            # by deriving its env-var/default rather than rejecting it.
+            env_key, default_model, provider_name = self._provider_setup_info(
+                provider, providers
+            )
         
         # Validate API key requirement
         if env_key:
@@ -173,26 +175,24 @@ class SetupHandler(CommandHandler):
         
         # 2. Provider selection (only if nothing detected / accepted)
         if provider_id is None:
+            menu = self._catalogue_provider_choices()
             output.console.print("[bold]1. Choose your LLM provider:[/bold]")
-            output.console.print("  1) OpenAI (GPT-4o, GPT-4, GPT-3.5)")
-            output.console.print("  2) Anthropic (Claude)")
-            output.console.print("  3) Google (Gemini)")
-            output.console.print("  4) Ollama (Local models)")
-            output.console.print("  5) Custom provider")
-            
+            for choice, (pid, _env_key, _model, name) in menu.items():
+                label = "Custom provider" if pid == "custom" else name
+                output.console.print(f"  {choice}) {label}")
+
             provider_choice = Prompt.ask(
                 "\nSelect provider",
-                choices=["1", "2", "3", "4", "5"],
+                choices=list(menu.keys()),
                 default="1"
             )
             
-            provider_id, env_key, default_model, provider_name = (
-                self._provider_menu()[provider_choice]
-            )
+            provider_id, env_key, default_model, provider_name = menu[provider_choice]
             
             # API key input with live validation + re-prompt loop
             if env_key:
                 output.console.print(f"\n[bold]2. Enter your {provider_name} API key:[/bold]")
+                self._print_key_url_hint(provider_id, output)
                 
                 existing_key = os.getenv(env_key)
                 if existing_key and Confirm.ask(
@@ -291,7 +291,12 @@ class SetupHandler(CommandHandler):
         }
 
     def _provider_menu(self) -> Dict[str, tuple]:
-        """Numeric provider menu → (provider_id, env_key, default_model, name)."""
+        """Numeric provider menu → (provider_id, env_key, default_model, name).
+
+        Retained for backward compatibility / non-interactive callers. The
+        interactive wizard now uses the catalogue-driven picker in
+        ``_catalogue_provider_choices``.
+        """
         defaults = self._provider_defaults()
         ordered = ["openai", "anthropic", "google", "ollama", "custom"]
         menu = {}
@@ -299,6 +304,66 @@ class SetupHandler(CommandHandler):
             name, env_key, model = defaults[pid]
             menu[str(idx)] = (pid, env_key, model, name)
         return menu
+
+    def _catalogue_provider_choices(self) -> Dict[str, tuple]:
+        """Numeric picker keyed "1".. → (provider_id, env_key, default_model, name).
+
+        Catalogue-driven: unions the curated ``_provider_defaults`` entries with
+        every provider enumerated by ``ModelCatalogue`` so onboarding covers the
+        full set of supported providers (Groq, OpenRouter, Mistral, DeepSeek,
+        xAI, …) rather than a hardcoded five. Always ends with a "custom"
+        escape hatch.
+        """
+        defaults = self._provider_defaults()
+
+        ordered = ["openai", "anthropic", "google", "ollama"]
+
+        catalogue_providers = []
+        try:
+            from praisonai_code.llm.catalogue import ModelCatalogue
+
+            catalogue_providers = ModelCatalogue().list_providers()
+        except Exception:
+            catalogue_providers = []
+
+        for pid in catalogue_providers:
+            if pid not in ordered and pid not in ("custom",):
+                ordered.append(pid)
+
+        menu: Dict[str, tuple] = {}
+        idx = 1
+        for pid in ordered:
+            env_key, default_model, name = self._provider_setup_info(pid, defaults)
+            menu[str(idx)] = (pid, env_key, default_model, name)
+            idx += 1
+
+        # Custom escape hatch is always last.
+        menu[str(idx)] = ("custom", None, None, "Custom")
+        return menu
+
+    def _provider_setup_info(self, provider_id: str, defaults: Dict[str, tuple]) -> tuple:
+        """Resolve ``(env_key, default_model, name)`` for a provider id.
+
+        Prefers a curated ``_provider_defaults`` row; otherwise derives a
+        sensible ``<PROVIDER>_API_KEY`` env-var and a display name so
+        catalogue-only providers are still usable from the picker.
+        """
+        if provider_id in defaults:
+            name, env_key, model = defaults[provider_id]
+            return env_key, model, name
+        env_key = f"{provider_id.upper()}_API_KEY"
+        return env_key, None, provider_id.capitalize()
+
+    def _print_key_url_hint(self, provider_id: str, output) -> None:
+        """Print a one-line 'Get your key' hint for well-known providers."""
+        try:
+            from praisonai_code.llm.catalogue import key_url_for_provider
+
+            url = key_url_for_provider(provider_id)
+        except Exception:
+            url = None
+        if url:
+            output.console.print(f"[dim]Get your key: {url}[/dim]")
 
     def _detect_provider_from_env(self) -> Optional[tuple]:
         """Detect a provider whose ``*_API_KEY`` is already in the environment.

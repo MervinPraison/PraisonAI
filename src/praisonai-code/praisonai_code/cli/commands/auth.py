@@ -21,6 +21,85 @@ from ..configuration.credentials import CredentialStore, redact_key, validate_ap
 app = typer.Typer(help="Manage API credentials")
 
 
+# Provider id -> environment variable holding its API key. Used to fold active
+# env-sourced credentials into `auth list`/`status` so users can tell which
+# credential is live (env vs stored).
+_PROVIDER_ENV_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "xai": "XAI_API_KEY",
+    "cohere": "COHERE_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "perplexity": "PERPLEXITYAI_API_KEY",
+}
+
+
+def _env_credentials() -> dict[str, tuple[str, str]]:
+    """Return ``{provider: (env_var, api_key)}`` for env-sourced keys present."""
+    found = {}
+    for provider, env_var in _PROVIDER_ENV_KEYS.items():
+        value = os.environ.get(env_var)
+        if value:
+            found[provider] = (env_var, value)
+    return found
+
+
+def _select_provider_interactively(output) -> Optional[str]:
+    """Catalogue-driven provider picker for when no provider id is supplied.
+
+    Returns the chosen provider id, or ``None`` if selection is unavailable
+    (non-tty / rich missing) so the caller can prompt for a free-form id.
+    """
+    try:
+        from praisonai_code.llm.catalogue import ModelCatalogue
+
+        providers = ModelCatalogue().list_providers()
+    except Exception:
+        providers = []
+
+    ordered = [p for p in ("openai", "anthropic", "google", "ollama") if p in providers]
+    for p in providers:
+        if p not in ordered:
+            ordered.append(p)
+    ordered.append("custom")
+
+    try:
+        from rich.prompt import Prompt
+    except Exception:
+        return None
+
+    output.console.print("[bold]Choose your LLM provider:[/bold]")
+    choices = {}
+    for idx, pid in enumerate(ordered, start=1):
+        choices[str(idx)] = pid
+        label = "Other/custom" if pid == "custom" else pid
+        output.console.print(f"  {idx}) {label}")
+
+    selected = Prompt.ask("Select provider", choices=list(choices.keys()), default="1")
+    pid = choices[selected]
+    if pid == "custom":
+        return Prompt.ask("Enter provider id").strip() or None
+    return pid
+
+
+def _print_key_url_hint(provider: str, output) -> None:
+    """Print a one-line 'Get your key' hint for well-known providers."""
+    try:
+        from praisonai_code.llm.catalogue import key_url_for_provider
+
+        url = key_url_for_provider(provider)
+    except Exception:
+        url = None
+    if url:
+        output.print_info(f"Get your key: {url}")
+
+
 def _format_expiry(cred) -> str:
     """Format an OAuth credential's expiry for display ('(n/a)' for keys)."""
     if not getattr(cred, "auth_method", "apikey") == "oauth":
@@ -148,7 +227,7 @@ def _run_oauth_login(
 
 @app.command("login")
 def auth_login(
-    provider: str = typer.Argument(help="Provider name (e.g., openai, anthropic)"),
+    provider: Optional[str] = typer.Argument(None, help="Provider name (e.g., openai, anthropic); prompts a picker if omitted"),
     method: str = typer.Option("auto", "--method", help="Auth method: auto, apikey, or oauth"),
     key: Optional[str] = typer.Option(None, "--key", help="API key (will prompt if not provided)"),
     key_stdin: bool = typer.Option(False, "--key-stdin", help="Read API key from stdin"),
@@ -172,6 +251,15 @@ def auth_login(
         praisonai auth login github --method oauth --client-id <app-id>
     """
     output = get_output_controller()
+
+    # Provider is optional: when omitted, present a catalogue-driven picker so
+    # users don't need to know the exact provider id up front. The positional
+    # argument still works for scripts.
+    if not provider:
+        provider = _select_provider_interactively(output)
+        if not provider:
+            output.print_error("A provider is required")
+            raise typer.Exit(1)
 
     # Assemble any OAuth endpoint overrides supplied on the command line. These
     # let users sign in to a built-in provider that needs an app client id, or
@@ -232,6 +320,7 @@ def auth_login(
         api_key = key
     else:
         # Prompt for key
+        _print_key_url_hint(provider, output)
         try:
             api_key = typer.prompt(
                 f"Enter API key for {provider}",
@@ -357,46 +446,71 @@ def auth_list():
     try:
         store = CredentialStore()
         providers = store.list_providers()
-        
-        if not providers:
-            output.print_info("No stored credentials")
-            if output.is_json_mode:
-                output.print_json({"providers": []})
-            return
-        
-        # Get detailed info for each provider
+
+        # Get detailed info for each stored provider.
         provider_info = []
+        stored_names = set()
         for provider_name in providers:
             cred = store.get_credential(provider_name)
             if cred:
-                info = {
+                stored_names.add(provider_name.lower())
+                provider_info.append({
                     "provider": provider_name,
                     "auth_method": cred.auth_method,
+                    "source": "stored",
+                    "env_var": None,
                     "key_redacted": redact_key(cred.api_key),
                     "base_url": cred.base_url,
                     "model": cred.model,
                     "expires_at": cred.expires_at,
                     "expires": _format_expiry(cred),
-                }
-                provider_info.append(info)
-        
+                })
+
+        # Fold in active environment-variable keys (redacted) so the live
+        # credential is unambiguous. Env keys not also stored are surfaced as
+        # env-sourced; a provider present in both is left as its stored row.
+        for provider_name, (env_var, value) in _env_credentials().items():
+            if provider_name in stored_names:
+                continue
+            provider_info.append({
+                "provider": provider_name,
+                "auth_method": "apikey",
+                "source": "env",
+                "env_var": env_var,
+                "key_redacted": redact_key(value),
+                "base_url": None,
+                "model": None,
+                "expires_at": None,
+                "expires": "(n/a)",
+            })
+
+        if not provider_info:
+            output.print_info("No stored credentials")
+            if output.is_json_mode:
+                output.print_json({"providers": []})
+            return
+
         if output.is_json_mode:
             output.print_json({"providers": provider_info})
         else:
             # Create table
-            headers = ["Provider", "Method", "Secret", "Expires", "Base URL", "Model"]
+            headers = ["Provider", "Method", "Source", "Secret", "Expires", "Base URL", "Model"]
             rows = []
             for info in provider_info:
+                source = info["source"]
+                if source == "env" and info.get("env_var"):
+                    source = f"env ({info['env_var']})"
                 rows.append([
                     info["provider"],
                     info["auth_method"],
+                    source,
                     info["key_redacted"],
                     info["expires"],
                     info["base_url"] or "(default)",
                     info["model"] or "(none)"
                 ])
             
-            output.print_table(headers, rows, title="Stored Credentials")
+            output.print_table(headers, rows, title="Credentials")
             
     except Exception as e:
         output.print_error(f"Failed to list credentials: {e}")
@@ -425,6 +539,40 @@ def auth_status(
             # Check specific provider
             cred = store.get_credential(provider)
             if not cred:
+                # Fall back to an active environment-variable key so the user
+                # can tell the credential is live from the env, not just missing
+                # from the store.
+                env_var = _PROVIDER_ENV_KEYS.get(provider.lower())
+                env_value = os.environ.get(env_var) if env_var else None
+                if env_value:
+                    format_valid, format_msg = validate_api_key(provider, env_value)
+                    status_info = {
+                        "provider": provider,
+                        "status": "found",
+                        "auth_method": "apikey",
+                        "source": "env",
+                        "env_var": env_var,
+                        "key_redacted": redact_key(env_value),
+                        "format_valid": format_valid,
+                        "format_message": format_msg,
+                        "base_url": None,
+                        "model": None,
+                        "expires_at": None,
+                        "expires": "(n/a)",
+                    }
+                    if output.is_json_mode:
+                        output.print_json(status_info)
+                    else:
+                        output.print_panel(
+                            f"Provider: {provider}\n"
+                            f"Method: apikey\n"
+                            f"Source: env ({env_var})\n"
+                            f"Secret: {redact_key(env_value)}\n"
+                            f"Format: {'✅' if format_valid else '❌'} {format_msg}",
+                            title=f"Credentials Status: {provider}"
+                        )
+                    return
+
                 output.print_warning(f"No credentials found for {provider}")
                 if output.is_json_mode:
                     output.print_json({
@@ -443,6 +591,7 @@ def auth_status(
                 "provider": provider,
                 "status": "found",
                 "auth_method": cred.auth_method,
+                "source": "stored",
                 "key_redacted": redact_key(cred.api_key),
                 "format_valid": format_valid,
                 "format_message": format_msg,
@@ -467,6 +616,7 @@ def auth_status(
                 output.print_panel(
                     f"Provider: {provider}\n"
                     f"Method: {cred.auth_method}\n"
+                    f"Source: stored\n"
                     f"Secret: {redact_key(cred.api_key)}\n"
                     + (f"Expires: {_format_expiry(cred)}\n" if cred.is_oauth() else "") +
                     f"Format: {'✅' if format_valid else '❌'} {format_msg}\n"
@@ -479,17 +629,13 @@ def auth_status(
         else:
             # Check all providers
             providers = store.list_providers()
-            
-            if not providers:
-                output.print_info("No stored credentials")
-                if output.is_json_mode:
-                    output.print_json({"providers": []})
-                return
-            
+
             all_status = []
+            stored_names = set()
             for provider_name in providers:
                 cred = store.get_credential(provider_name)
                 if cred:
+                    stored_names.add(provider_name.lower())
                     if cred.is_oauth():
                         format_valid, format_msg = True, "OAuth token"
                     else:
@@ -498,6 +644,7 @@ def auth_status(
                     status = {
                         "provider": provider_name,
                         "auth_method": cred.auth_method,
+                        "source": "stored",
                         "key_redacted": redact_key(cred.api_key),
                         "format_valid": format_valid,
                         "format_message": format_msg,
@@ -516,12 +663,39 @@ def auth_status(
                         status["live_message"] = live_msg
                     
                     all_status.append(status)
-            
+
+            # Fold in active env-var keys (redacted), marked env-sourced.
+            for provider_name, (env_var, value) in _env_credentials().items():
+                if provider_name in stored_names:
+                    continue
+                format_valid, format_msg = validate_api_key(provider_name, value)
+                status = {
+                    "provider": provider_name,
+                    "auth_method": "apikey",
+                    "source": f"env ({env_var})",
+                    "key_redacted": redact_key(value),
+                    "format_valid": format_valid,
+                    "format_message": format_msg,
+                    "expires_at": None,
+                    "expires": "(n/a)",
+                }
+                if validate:
+                    live_valid, live_msg = _validate_with_live_call(provider_name, value, None)
+                    status["live_valid"] = live_valid
+                    status["live_message"] = live_msg
+                all_status.append(status)
+
+            if not all_status:
+                output.print_info("No stored credentials")
+                if output.is_json_mode:
+                    output.print_json({"providers": []})
+                return
+
             if output.is_json_mode:
                 output.print_json({"providers": all_status})
             else:
                 # Create table
-                headers = ["Provider", "Method", "Secret", "Expires", "Format"]
+                headers = ["Provider", "Method", "Source", "Secret", "Expires", "Format"]
                 if validate:
                     headers.append("Live Test")
                 
@@ -530,6 +704,7 @@ def auth_status(
                     row = [
                         status["provider"],
                         status["auth_method"],
+                        status.get("source", "stored"),
                         status["key_redacted"],
                         status["expires"],
                         "✅" if status["format_valid"] else "❌"

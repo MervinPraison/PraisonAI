@@ -180,6 +180,34 @@ FALLBACK_MODELS = [
 ]
 
 
+# Provider id -> URL where a user can create/find an API key. Used by
+# onboarding (`praisonai setup`, `praisonai auth login`) to print a one-line
+# "Get your key" hint before prompting for a masked key. Kept small and static;
+# providers absent here simply get no hint (never an error).
+PROVIDER_KEY_URLS = {
+    "openai": "https://platform.openai.com/api-keys",
+    "anthropic": "https://console.anthropic.com/settings/keys",
+    "google": "https://aistudio.google.com/app/apikey",
+    "gemini": "https://aistudio.google.com/app/apikey",
+    "groq": "https://console.groq.com/keys",
+    "openrouter": "https://openrouter.ai/keys",
+    "mistral": "https://console.mistral.ai/api-keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+    "xai": "https://console.x.ai",
+    "cohere": "https://dashboard.cohere.com/api-keys",
+    "together": "https://api.together.ai/settings/api-keys",
+    "perplexity": "https://www.perplexity.ai/settings/api",
+    "ollama": "https://ollama.com/download",
+}
+
+
+def key_url_for_provider(provider: str) -> Optional[str]:
+    """Return the key-creation URL for a provider, or ``None`` if unknown."""
+    if not provider:
+        return None
+    return PROVIDER_KEY_URLS.get(provider.lower())
+
+
 class ModelCatalogue:
     """
     Model catalogue with litellm integration and caching.
@@ -372,6 +400,21 @@ class ModelCatalogue:
         
         return [m.to_dict() for m in models]
     
+    def list_providers(self) -> List[str]:
+        """
+        List distinct provider ids known to the catalogue, sorted.
+
+        Backs the catalogue-driven provider picker in onboarding so the set of
+        selectable providers tracks the model catalogue rather than a hardcoded
+        menu.
+        """
+        seen = []
+        for model in self._get_models():
+            provider = (model.provider or "").strip().lower()
+            if provider and provider not in seen:
+                seen.append(provider)
+        return sorted(seen)
+
     def describe_model(self, model_id: str) -> Optional[Dict[str, Any]]:
         """
         Get detailed information for a model.
