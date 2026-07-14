@@ -83,6 +83,52 @@ def test_builtin_prefix_not_delegated_to_registry(monkeypatch):
     assert model._resolve_registered_provider() is None
 
 
+def test_registered_provider_construction_failure_is_surfaced(monkeypatch):
+    """A broken registered provider surfaces its error, not a masked OpenAI 401."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from praisonai.llm import register_llm_provider
+    from praisonai.inc.models import PraisonAIModel
+
+    class BrokenProvider:
+        provider_id = "brokenprov"
+
+        def __init__(self, model_id, config=None):
+            raise RuntimeError("provider boom")
+
+    register_llm_provider("brokenprov", BrokenProvider, override=True)
+
+    model = PraisonAIModel(model="brokenprov/x")
+    with pytest.raises(RuntimeError, match="provider boom"):
+        model.get_model()
+
+
+def test_registered_provider_receives_no_none_api_key(monkeypatch):
+    """No OpenAI key => registered provider config omits api_key entirely."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from praisonai.llm import register_llm_provider
+    from praisonai.inc.models import PraisonAIModel
+
+    seen = {}
+
+    class ConfigCaptureProvider:
+        provider_id = "capprov"
+
+        def __init__(self, model_id, config=None):
+            self.model_id = model_id
+            self.config = config
+            seen["config"] = config
+
+        def get_client(self):
+            return "ok"
+
+    register_llm_provider("capprov", ConfigCaptureProvider, override=True)
+    model = PraisonAIModel(model="capprov/m")
+    model.get_model()
+    # api_key must NOT be present as None so the provider uses its own chain.
+    cfg = seen["config"] or {}
+    assert "api_key" not in cfg or cfg["api_key"]
+
+
 def test_unregistered_unknown_provider_still_requires_openai_key(monkeypatch):
     """Unknown, unregistered providers keep the historical OpenAI-key error."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

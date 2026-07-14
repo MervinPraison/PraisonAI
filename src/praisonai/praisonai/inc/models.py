@@ -154,21 +154,35 @@ class PraisonAIModel:
         every framework adapter that goes through ``PraisonAIModel``. Only
         providers NOT covered by the built-in ladder below are resolved here;
         built-ins keep their existing fast, direct-SDK behaviour. Returns the
-        resolved provider instance, or ``None`` to fall back to the built-in
-        ladder. Never raises — registry problems degrade to the built-in path.
+        resolved provider instance, or ``None`` when the prefix is not a
+        registered provider (so the built-in ladder runs). If the prefix IS a
+        registered provider but its construction fails, the error is propagated
+        rather than masked behind the uncredentialed built-in OpenAI path.
         """
         if not self._is_registered_provider():
             return None
         try:
             from praisonai.llm import create_llm_provider
-            config = {"api_key": self.api_key, "base_url": self.base_url}
-            return create_llm_provider(self.model, config=config)
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug(
-                "Registered provider lookup for %r failed (%s); "
+                "Registry import for %r failed (%s); "
                 "falling back to built-in resolution.", self.model, exc
             )
             return None
+        # Only pass credentials that were actually resolved. Injecting
+        # ``api_key: None``/``base_url: ""`` would let a provider treat a
+        # present-but-empty key as an explicit credential and skip its own
+        # environment/credential chain (Greptile P2).
+        config = {}
+        if self.api_key:
+            config["api_key"] = self.api_key
+        if self.base_url:
+            config["base_url"] = self.base_url
+        # The provider is registered, so a construction failure is a real error
+        # for the user's chosen provider — surface it rather than silently
+        # continuing into the uncredentialed built-in OpenAI ladder, which would
+        # otherwise mask the cause behind a misleading auth error (Greptile P1).
+        return create_llm_provider(self.model, config=config or None)
 
     def get_model(self):
         """

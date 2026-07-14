@@ -463,10 +463,22 @@ class BaseAutoGenerator:
         except ImportError:
             return None
         provider_id = model_name.split("/", 1)[0].lower()
+        # Forward the selected generator's credentials/endpoint so a provider
+        # that needs them for generate_structured() authenticates correctly —
+        # mirrors what PraisonAIModel passes. Only include resolved values so a
+        # provider's own credential chain is not shadowed by empty entries.
+        cfg = self.config_list[0]
+        provider_config = {}
+        if cfg.get("api_key"):
+            provider_config["api_key"] = cfg["api_key"]
+        if cfg.get("base_url"):
+            provider_config["base_url"] = cfg["base_url"]
         try:
             if not has_llm_provider(provider_id):
                 return None
-            provider = create_llm_provider(model_name)
+            provider = create_llm_provider(
+                model_name, config=provider_config or None
+            )
         except Exception as exc:
             logger.debug(
                 "Registered provider lookup for %r failed (%s); "
