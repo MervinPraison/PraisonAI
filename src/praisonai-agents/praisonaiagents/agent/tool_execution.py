@@ -992,12 +992,12 @@ class ToolExecutionMixin:
                 execution_time_ms=(time.time() - start_time) * 1000
             )
             self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
-        
+
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
         if response:
             prompt_str = prompt if isinstance(prompt, str) else str(prompt)
             self._process_auto_memory(prompt_str, str(response))
-        
+
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()
 
@@ -1015,11 +1015,14 @@ class ToolExecutionMixin:
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
         # Runs a guarded review pass restricted to skill_manage. No-op when
-        # disabled or already inside a review (re-entrancy guarded).
+        # disabled or already inside a review (re-entrancy guarded). In
+        # "background" mode (self_improve="background") the extra LLM review
+        # turn is deferred to the core background runner so the reply is not
+        # gated on it (issue #2985).
         try:
             run_review = getattr(self, "_run_skill_review", None)
             if run_review is not None:
-                run_review(prompt, response, tools_used)
+                self._dispatch_skill_review(run_review, prompt, response, tools_used)
         except Exception as e:
             logger.warning(
                 "Skill self-improvement review failed for agent=%s session_id=%s; "
@@ -1031,6 +1034,22 @@ class ToolExecutionMixin:
             )
 
         return response
+
+    def _dispatch_skill_review(self, run_review, prompt, response, tools_used):
+        """Run the guarded skill review inline or in the background per mode.
+
+        Central routing so the sync and async after-agent paths stay in
+        lock-step. When ``self._self_improve_mode == "background"`` the review
+        (a full extra LLM turn) is enqueued on the core background runner via
+        the mixin's :meth:`_schedule_self_improvement`; otherwise it runs
+        inline exactly as before (default, backward compatible).
+        """
+        if getattr(self, "_self_improve_mode", "inline") == "background":
+            schedule = getattr(self, "_schedule_self_improvement", None)
+            if schedule is not None:
+                schedule(lambda: run_review(prompt, response, tools_used))
+                return
+        run_review(prompt, response, tools_used)
 
     async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Async version: Trigger AFTER_AGENT hook and return response."""
@@ -1073,10 +1092,20 @@ class ToolExecutionMixin:
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
+        # In "background" mode the review runs off the hot path on the core
+        # background runner (issue #2985); otherwise it is awaited inline.
         try:
-            arun_review = getattr(self, "_arun_skill_review", None)
-            if arun_review is not None:
-                await arun_review(prompt, response, tools_used)
+            if getattr(self, "_self_improve_mode", "inline") == "background":
+                run_review = getattr(self, "_run_skill_review", None)
+                schedule = getattr(self, "_schedule_self_improvement", None)
+                if run_review is not None and schedule is not None:
+                    schedule(lambda: run_review(prompt, response, tools_used))
+                elif run_review is not None:
+                    run_review(prompt, response, tools_used)
+            else:
+                arun_review = getattr(self, "_arun_skill_review", None)
+                if arun_review is not None:
+                    await arun_review(prompt, response, tools_used)
         except Exception as e:
             logger.warning(
                 "Skill self-improvement review failed for agent=%s session_id=%s; "

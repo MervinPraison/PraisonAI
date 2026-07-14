@@ -523,7 +523,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
-        self_improve: Optional[Union[bool, 'SkillReviewProtocol']] = False,  # Autonomous skill self-improvement loop (off by default)
+        self_improve: Optional[Union[bool, str, 'SkillReviewProtocol']] = False,  # Autonomous skill self-improvement loop (off by default)
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
@@ -581,6 +581,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 ``skill_manage`` tool that asks the agent to capture a reusable
                 technique as a new/patched skill. Accepts:
                 - bool: True enables with the default review policy, False disables
+                - str: "inline"/"blocking" runs the review synchronously (same
+                  as True); "background" delivers the reply first and runs the
+                  review + auto-memory/auto-learning extraction off the hot path
+                  on the core BackgroundJobManager (recommended for long-lived
+                  gateway/bot agents, issue #2985).
                 - SkillReviewProtocol: Custom review policy
                 This is distinct from ``reflection`` (which is answer-quality
                 retry) — it captures durable capability across runs.
@@ -2125,7 +2130,33 @@ Your Goal: {self.goal}
         # Autonomous skill self-improvement loop (issue #2231). Off by default;
         # when enabled, a guarded review pass restricted to skill_manage runs
         # after each task. A SkillReviewProtocol instance customises the policy.
-        if self_improve is True or self_improve is False or self_improve is None:
+        # Execution mode for the after-agent self-improvement side-effects
+        # (skill-review + auto-memory + auto-learning). "inline" (default)
+        # preserves today's synchronous behaviour; "background" delivers the
+        # reply first and runs the extra LLM work off the hot path on the core
+        # BackgroundJobManager (issue #2985).
+        self._self_improve_mode = "inline"
+        if isinstance(self_improve, str):
+            mode = self_improve.strip().lower()
+            if mode in ("background", "async"):
+                self._self_improve = True
+                self._self_improve_policy = None
+                self._self_improve_mode = "background"
+            elif mode in ("inline", "blocking", "sync", "true", "on", "yes", "1"):
+                self._self_improve = True
+                self._self_improve_policy = None
+            else:
+                # Falsy ("false"/"off"/"no"/"0"/""), or an unrecognised value
+                # (e.g. a typo like "backround"): default to disabled rather
+                # than silently enabling an extra review turn on every reply.
+                if mode not in ("false", "off", "no", "0", ""):
+                    logger.warning(
+                        "Unknown self_improve mode %r; disabling self-improvement. "
+                        "Use 'inline', 'background', or a bool.", self_improve,
+                    )
+                self._self_improve = False
+                self._self_improve_policy = None
+        elif self_improve is True or self_improve is False or self_improve is None:
             self._self_improve = bool(self_improve)
             self._self_improve_policy = None
         else:
@@ -2302,10 +2333,16 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             # Autonomous skill self-improvement: forward the custom policy when
-            # set, else the opt-in boolean, so clones keep the same behavior.
+            # set, else the execution-mode string ("background") when enabled so
+            # clones keep the same hot-path behaviour, else the opt-in boolean.
             'self_improve': (
                 getattr(self, '_self_improve_policy', None)
-                or getattr(self, '_self_improve', False)
+                or (
+                    getattr(self, '_self_improve_mode', 'inline')
+                    if getattr(self, '_self_improve', False)
+                    and getattr(self, '_self_improve_mode', 'inline') == 'background'
+                    else getattr(self, '_self_improve', False)
+                )
             ),
             'tool_search': getattr(self, '_tool_search_config', None),
             # Tool configuration - use consolidated config when available  

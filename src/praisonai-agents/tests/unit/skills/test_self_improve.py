@@ -191,3 +191,133 @@ def test_clone_for_channel_preserves_self_improve():
     clone = agent.clone_for_channel()
     assert clone._self_improve is True
     assert clone._self_improve_policy is policy
+
+
+# ---------------------------------------------------------------------------
+# Post-response background execution mode (issue #2985)
+# ---------------------------------------------------------------------------
+
+
+def test_self_improve_mode_defaults_to_inline():
+    assert Agent(instructions="x")._self_improve_mode == "inline"
+    assert Agent(instructions="x", self_improve=True)._self_improve_mode == "inline"
+
+
+def test_self_improve_background_string_enables_background_mode():
+    agent = Agent(instructions="x", self_improve="background")
+    assert agent._self_improve is True
+    assert agent._self_improve_mode == "background"
+
+
+def test_self_improve_inline_string_enables_inline_mode():
+    agent = Agent(instructions="x", self_improve="inline")
+    assert agent._self_improve is True
+    assert agent._self_improve_mode == "inline"
+
+
+def test_dispatch_skill_review_inline_runs_synchronously():
+    agent = Agent(instructions="x", self_improve=True)
+    calls = []
+    agent._dispatch_skill_review(
+        lambda p, r, t: calls.append((p, r, t)), "p", "r", ["shell"]
+    )
+    # Inline mode: the review has already run by the time dispatch returns.
+    assert calls == [("p", "r", ["shell"])]
+
+
+def test_dispatch_skill_review_background_runs_off_path():
+    import time
+
+    agent = Agent(instructions="x", self_improve="background")
+    done = []
+
+    def slow_review(p, r, t):
+        time.sleep(0.15)
+        done.append((p, r, t))
+
+    start = time.time()
+    agent._dispatch_skill_review(slow_review, "p", "r", ["shell"])
+    elapsed = time.time() - start
+    # Caller is not blocked by the review turn.
+    assert elapsed < 0.1
+    # But the review still runs on the background runner.
+    for _ in range(50):
+        if done:
+            break
+        time.sleep(0.02)
+    assert done == [("p", "r", ["shell"])]
+
+
+def test_clone_for_channel_preserves_background_mode():
+    agent = Agent(instructions="x", self_improve="background")
+    clone = agent.clone_for_channel()
+    assert clone._self_improve is True
+    assert clone._self_improve_mode == "background"
+
+
+def test_schedule_self_improvement_falls_back_inline_on_failure(monkeypatch):
+    agent = Agent(instructions="x", self_improve="background")
+    ran = []
+
+    def boom():
+        raise RuntimeError("no runner")
+
+    monkeypatch.setattr(
+        "praisonaiagents.background.job_manager.get_job_manager", boom
+    )
+    agent._schedule_self_improvement(lambda: ran.append(True))
+    assert ran == [True]
+
+
+# ---------------------------------------------------------------------------
+# Safe string parsing: falsy / unknown values must NOT enable review (P2)
+# ---------------------------------------------------------------------------
+
+
+def test_self_improve_falsy_strings_disable():
+    for value in ("false", "off", "no", "0", "", "False", "OFF"):
+        agent = Agent(instructions="x", self_improve=value)
+        assert agent._self_improve is False, value
+        assert agent._self_improve_mode == "inline"
+
+
+def test_self_improve_unknown_string_disables():
+    # A typo like "backround" must not silently enable inline review.
+    agent = Agent(instructions="x", self_improve="backround")
+    assert agent._self_improve is False
+    assert agent._self_improve_mode == "inline"
+
+
+def test_self_improve_truthy_strings_enable_inline():
+    for value in ("true", "on", "yes", "1", "blocking", "sync"):
+        agent = Agent(instructions="x", self_improve=value)
+        assert agent._self_improve is True, value
+        assert agent._self_improve_mode == "inline"
+
+
+# ---------------------------------------------------------------------------
+# Background scheduling uses a unique job id per invocation (P1)
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_self_improvement_uses_unique_job_ids(monkeypatch):
+    agent = Agent(instructions="x", self_improve="background")
+    agent._session_id = "sess"
+    job_ids = []
+
+    class _FakeManager:
+        def start_job(self, func, job_id=None):
+            job_ids.append(job_id)
+            return job_id
+
+    monkeypatch.setattr(
+        "praisonaiagents.background.job_manager.get_job_manager",
+        lambda: _FakeManager(),
+    )
+    agent._schedule_self_improvement(lambda: None)
+    agent._schedule_self_improvement(lambda: None)
+
+    assert len(job_ids) == 2
+    # Both scoped to the session but distinct so neither replaces the other.
+    assert all(jid.startswith("self-improve:sess:") for jid in job_ids)
+    assert job_ids[0] != job_ids[1]

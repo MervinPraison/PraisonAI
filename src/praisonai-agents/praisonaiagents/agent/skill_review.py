@@ -16,12 +16,30 @@ This logic lives in its own mixin so ``agent.py`` stays lean.
 """
 
 import logging
+import threading
+import uuid
 
 logger = logging.getLogger(__name__)
 
 
 class SkillReviewMixin:
     """Mixin providing the guarded skill-review pass for ``Agent``."""
+
+    def _skill_review_lock(self):
+        """Return the per-agent lock serialising the guarded review turn.
+
+        The review mutates shared per-agent state (``chat_history`` and the
+        ``_in_skill_review`` guard). In ``"background"`` mode it runs off the
+        hot path on a worker thread, so the caller may start the next turn on
+        the *same* agent before it finishes. Holding this lock for the whole
+        review keeps its history snapshot/restore atomic and prevents it from
+        interleaving with another turn (or a second review) on the same agent.
+        """
+        lock = getattr(self, "_skill_review_lock_obj", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._skill_review_lock_obj = lock
+        return lock
 
     def _skill_review_policy(self):
         """Return the active review policy, building the default lazily."""
@@ -116,47 +134,83 @@ class SkillReviewMixin:
             response: The final response produced for the task.
             tools_used: Names of tools used during the task (if known).
         """
-        prepared = self._prepare_skill_review(prompt, response, tools_used)
-        if prepared is None:
-            return
-        review_prompt, review_tools = prepared
+        with self._skill_review_lock():
+            prepared = self._prepare_skill_review(prompt, response, tools_used)
+            if prepared is None:
+                return
+            review_prompt, review_tools = prepared
 
-        self._in_skill_review = True
-        history_len = self._snapshot_chat_history_len()
-        try:
-            if getattr(self, "verbose", False):
-                logger.info("Agent %s running guarded skill-review pass", self.name)
-            # Restricted turn: only skill_manage is exposed via the tools= arg.
-            self.chat(review_prompt, tools=review_tools)
-        except Exception as e:
-            name, session_id = self._skill_review_log_context()
-            logger.warning(
-                "Skill review pass failed for agent=%s session_id=%s: %s",
-                name, session_id, e, exc_info=True,
-            )
-        finally:
-            self._restore_chat_history(history_len)
-            self._in_skill_review = False
+            self._in_skill_review = True
+            history_len = self._snapshot_chat_history_len()
+            try:
+                if getattr(self, "verbose", False):
+                    logger.info("Agent %s running guarded skill-review pass", self.name)
+                # Restricted turn: only skill_manage is exposed via the tools= arg.
+                self.chat(review_prompt, tools=review_tools)
+            except Exception as e:
+                name, session_id = self._skill_review_log_context()
+                logger.warning(
+                    "Skill review pass failed for agent=%s session_id=%s: %s",
+                    name, session_id, e, exc_info=True,
+                )
+            finally:
+                self._restore_chat_history(history_len)
+                self._in_skill_review = False
 
     async def _arun_skill_review(self, prompt, response, tools_used=None):
         """Async variant of :meth:`_run_skill_review`."""
-        prepared = self._prepare_skill_review(prompt, response, tools_used)
-        if prepared is None:
-            return
-        review_prompt, review_tools = prepared
+        with self._skill_review_lock():
+            prepared = self._prepare_skill_review(prompt, response, tools_used)
+            if prepared is None:
+                return
+            review_prompt, review_tools = prepared
 
-        self._in_skill_review = True
-        history_len = self._snapshot_chat_history_len()
+            self._in_skill_review = True
+            history_len = self._snapshot_chat_history_len()
+            try:
+                if getattr(self, "verbose", False):
+                    logger.info("Agent %s running guarded skill-review pass", self.name)
+                await self.achat(review_prompt, tools=review_tools)
+            except Exception as e:
+                name, session_id = self._skill_review_log_context()
+                logger.warning(
+                    "Skill review pass failed for agent=%s session_id=%s: %s",
+                    name, session_id, e, exc_info=True,
+                )
+            finally:
+                self._restore_chat_history(history_len)
+                self._in_skill_review = False
+
+    def _schedule_self_improvement(self, run_review):
+        """Enqueue the guarded skill-review pass on the core background runner.
+
+        The reply has already been returned to the caller by the time this is
+        called; the review turn (a full extra LLM round-trip) runs off the hot
+        path on the shared :class:`BackgroundJobManager` so a long-lived
+        gateway/bot agent never pays its latency on the user-visible path
+        (issue #2985). Best-effort: if the runner cannot be reached the review
+        falls back to running inline so behaviour is never silently dropped.
+
+        Args:
+            run_review: A zero-arg callable that performs the guarded review
+                (already bound to the captured trajectory).
+        """
         try:
-            if getattr(self, "verbose", False):
-                logger.info("Agent %s running guarded skill-review pass", self.name)
-            await self.achat(review_prompt, tools=review_tools)
-        except Exception as e:
+            from ..background.job_manager import get_job_manager
             name, session_id = self._skill_review_log_context()
-            logger.warning(
-                "Skill review pass failed for agent=%s session_id=%s: %s",
-                name, session_id, e, exc_info=True,
+            scope = session_id or name or "default"
+            # Unique per invocation: the job manager keys its job/future maps by
+            # job_id, so a stable id would let a later review replace (and drop)
+            # an earlier one still queued for the same agent/session. The short
+            # uuid suffix keeps ids human-scannable while guaranteeing each
+            # scheduled review is tracked independently.
+            get_job_manager().start_job(
+                run_review,
+                job_id=f"self-improve:{scope}:{uuid.uuid4().hex[:8]}",
             )
-        finally:
-            self._restore_chat_history(history_len)
-            self._in_skill_review = False
+        except Exception as e:  # pragma: no cover - defensive fallback
+            logger.debug(
+                "Backgrounding skill review failed (%s); running inline", e,
+                exc_info=True,
+            )
+            run_review()
