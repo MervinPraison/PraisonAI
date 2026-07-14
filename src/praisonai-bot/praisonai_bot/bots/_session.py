@@ -568,6 +568,14 @@ class BotSessionManager:
             if self._compaction_enabled
             else None
         )
+        # Hard cap before compaction: short messages can under-shoot the token
+        # budget yet still arrive in huge batches. Trimming first avoids running
+        # token counting / summarisation over thousands of turns (and prevents
+        # offline CI hangs when tiktoken tries a first-use network download).
+        if compactor is not None and self._max_history > 0:
+            hard_cap = self._max_history * 4
+            if len(history) > hard_cap:
+                history = history[-hard_cap:]
         if compactor is not None:
             try:
                 if compactor.needs_compaction(history):
