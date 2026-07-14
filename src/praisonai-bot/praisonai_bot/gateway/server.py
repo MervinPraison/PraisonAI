@@ -3890,24 +3890,6 @@ class WebSocketGateway:
             validate_gateway_config,
         )
 
-        migrated = migrate_legacy_config(raw)
-        # Validate (raises ValueError on unknown platform / missing token /
-        # no channels). Skip the schema's own ${VAR} substitution — this
-        # loader owns env resolution below and preserves the original raw
-        # dict so every top-level key the runtime reads survives.
-        validated = validate_gateway_config(migrated, apply_env_substitution=False)
-        raw = migrated
-        # The schema normalises legacy single-bot (top-level platform/token)
-        # and BotOS (``platforms:``) shapes into a ``channels`` dict. Backfill
-        # that normalised ``channels`` when the raw dict lacked one so the
-        # runtime — which reads ``channels`` from this dict — sees the same
-        # migrated shape the ``bot`` command does.
-        if not raw.get("channels") and validated.channels:
-            raw["channels"] = {
-                name: channel.model_dump(exclude_none=True)
-                for name, channel in validated.channels.items()
-            }
-
         def _resolve(obj):
             if isinstance(obj, str):
                 return cls._substitute_env_vars(obj)
@@ -3917,7 +3899,46 @@ class WebSocketGateway:
                 return [_resolve(v) for v in obj]
             return obj
 
-        return _resolve(raw)
+        migrated = migrate_legacy_config(raw)
+        # Resolve ``${VAR}`` *before* validation so the schema sees literal
+        # values, not placeholders. This loader owns env resolution and maps an
+        # unset var to an empty string (``_substitute_env_vars``); doing it up
+        # front means an unset token for a currently-unused channel stays an
+        # empty string that ``start_channels()`` skips, instead of tripping the
+        # schema's ``${VAR}``-token validator and aborting the whole gateway
+        # (regression guard, PR #3019 review). Platform-typo fail-closed still
+        # applies — that check keys off the platform *name*, not the token.
+        raw = _resolve(migrated)
+        # Validate (raises ValueError on unknown platform / no channels). Env
+        # substitution already happened above, so skip the schema's own.
+        validated = validate_gateway_config(raw, apply_env_substitution=False)
+        # The schema normalises legacy single-bot (top-level platform/token)
+        # and BotOS (``platforms:``) shapes into a ``channels`` dict, resolves
+        # the effective ``platform`` name, and wires plugin descriptor env
+        # fallbacks / required fields (Issue #2801). Merge those validated
+        # channel fields back so the runtime — which reads ``channels`` from
+        # this dict — starts adapters with the same fully-resolved settings the
+        # ``bot`` command sees. User-supplied raw values win; validator-derived
+        # fields only fill gaps (PR #3019 review: existing ``channels:`` configs
+        # previously lost descriptor-populated fields).
+        if validated.channels:
+            raw_channels = raw.get("channels")
+            if not isinstance(raw_channels, dict):
+                raw_channels = {}
+            merged: Dict[str, Any] = {}
+            for name, channel in validated.channels.items():
+                validated_fields = channel.model_dump(exclude_none=True)
+                existing = raw_channels.get(name)
+                if isinstance(existing, dict):
+                    merged[name] = {**validated_fields, **existing}
+                    for key, val in validated_fields.items():
+                        if existing.get(key) in (None, ""):
+                            merged[name][key] = val
+                else:
+                    merged[name] = validated_fields
+            raw["channels"] = merged
+
+        return raw
 
     def _create_agents_from_config(
         self,
