@@ -41,7 +41,11 @@ class DoomLoopConfig:
     max_consecutive_failures: int = 3    # Max failures before intervention
     max_no_progress_steps: int = 5       # Max steps without progress
     
-    # Similarity threshold for fuzzy matching (0-1)
+    # Similarity threshold for fuzzy matching (0-1).
+    # NOTE: Retained for backward compatibility only. Fuzzy result-similarity is
+    # now handled by the result-aware tool-loop detector
+    # (agent/loop_detection.py), which keys on name+args+result-hash. This field
+    # is not consulted by DoomLoopDetector's current detectors.
     similarity_threshold: float = 0.85
     
     # Time limits

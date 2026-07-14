@@ -361,6 +361,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
             self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
         return self._loop_guard
+
+    def _ensure_loop_detector(self):
+        """Lazy-create the result-aware tool-loop detector on first tool call.
+
+        Returns a (history, config) pair. The detector is enabled by default so
+        that name+args+result-hash fingerprinting actually runs in the tool loop.
+        A polling tool returning changing output is NOT flagged (streak breaks on
+        result-hash change); a genuinely stuck repeat or A->B->A->B oscillation is.
+        """
+        if self._loop_detector_config is None:
+            from .loop_detection import LoopDetectionConfig
+            self._loop_detector_config = LoopDetectionConfig(enabled=True)
+            self._loop_detector_history = []
+        return self._loop_detector_history, self._loop_detector_config
     
     @classmethod
     def _configure_logging(cls):
@@ -1495,6 +1509,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Initialize loop guard lazily on first tool execution (zero init overhead)
         self._loop_guard = None
+
+        # Result-aware tool-loop detector (name + args + result-hash fingerprints).
+        # History and detector are created lazily on first tool call to keep
+        # init overhead at zero. See _ensure_loop_detector().
+        self._loop_detector_history = None
+        self._loop_detector_config = None
+        self._loop_warned_this_turn = False
+        self._pending_self_correction = None
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -3267,6 +3289,31 @@ Summary:"""
         if self._doom_loop_tracker is not None:
             self._doom_loop_tracker.record(action_type, args, result, success)
     
+    @staticmethod
+    def _response_indicates_failure(response_str: str) -> bool:
+        """Best-effort per-iteration failure signal for doom-loop tracking.
+
+        Replaces the old hard-coded ``success=True`` fed to the DoomLoopTracker,
+        which made the consecutive-failure detector impossible to fire. This is a
+        lightweight heuristic on the visible response text; the authoritative
+        result-aware loop detection now runs in the tool-execution path.
+        """
+        if not response_str:
+            return True
+        lowered = response_str.strip().lower()
+        # Only unambiguous hard-failure markers. Phrases like "i am/was unable
+        # to <X>" are deliberately excluded: an agent can complete a task via an
+        # alternate path while noting it could not obtain some optional data, so
+        # treating those as failures would trip consecutive-failure recovery even
+        # while progress is being made.
+        _markers = (
+            "traceback (most recent call last)",
+            "an error occurred",
+            "i encountered an error",
+            "failed to complete the task",
+        )
+        return any(m in lowered for m in _markers)
+
     def _is_doom_loop(self) -> bool:
         """Check if we're in a doom loop.
         
@@ -3281,6 +3328,29 @@ Summary:"""
         """Reset doom loop tracking."""
         if self._doom_loop_tracker is not None:
             self._doom_loop_tracker.reset()
+
+    def _reset_loop_warnings(self) -> None:
+        """Clear stale loop-warning latch/nudge from a prior autonomous run.
+
+        Called at the top of run_autonomous(_async) so a self-correction
+        queued near the end of a previous run never leaks into an unrelated
+        task's first prompt.
+        """
+        self._pending_self_correction = None
+        self._loop_warned_this_turn = False
+
+    def _consume_self_correction(self, prompt: str) -> str:
+        """Reset the per-turn warning latch and inject any queued nudge.
+
+        Two-tier response: if the result-aware tool-loop detector queued a
+        self-correction nudge last turn, append it to this turn's prompt (one
+        chance to adapt before the critical hard-stop fires on persistence).
+        """
+        self._loop_warned_this_turn = False
+        if getattr(self, '_pending_self_correction', None):
+            prompt = f"{prompt}\n\n{self._pending_self_correction}"
+            self._pending_self_correction = None
+        return prompt
     
     @staticmethod
     def _is_completion_signal(response_text: str) -> bool:
@@ -3448,6 +3518,8 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
+        # Clear any stale loop-warning latch/nudge from a previous run.
+        self._reset_loop_warnings()
         
         # P3/G2: Import callback helper for autonomy events
         from ..main import execute_sync_callback
@@ -3495,8 +3567,10 @@ Summary:"""
                 # Always use the original prompt (prompt re-injection)
                 # Reset per-turn tool count for no-tool-call detection
                 self._autonomy_turn_tool_count = 0
+                # Reset the per-turn warning latch and inject any queued nudge.
+                turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = self.chat(prompt)
+                    response = self.chat(turn_prompt)
                 except Exception as e:
                     return AutonomyResult(
                         success=False,
@@ -3530,14 +3604,19 @@ Summary:"""
                 if self._doom_loop_tracker is not None:
                     self._doom_loop_tracker.record_response(response_str)
                 
-                # Record the action for doom loop tracking (G1 fix: was missing)
-                # Use response hash only — iteration was removed because it made
-                # every fingerprint unique, preventing doom loop detection.
+                # Record the action for doom loop tracking (G1 fix: was missing).
+                # The result-aware tool-loop detector (name+args+result-hash,
+                # ping-pong) now owns per-tool-call loop detection in the
+                # tool-execution path; DoomLoopDetector is kept for the
+                # content-loop/"chanting" and time checks it does uniquely.
+                # Derive a REAL success signal instead of the old hard-coded True
+                # (which made the failure-streak detector impossible to fire).
+                iteration_success = not self._response_indicates_failure(response_str)
                 self._record_action(
-                    "chat", 
-                    {"response_hash": hash(response_str[:500])}, 
-                    response_str[:200], 
-                    True
+                    "chat",
+                    {"response_hash": hash(response_str[:500])},
+                    response_str[:200],
+                    iteration_success,
                 )
                 
                 # Check doom loop AFTER recording action so detector sees
@@ -3914,6 +3993,8 @@ Summary:"""
         
         # Reset doom loop tracker for new task
         self._reset_doom_loop()
+        # Clear any stale loop-warning latch/nudge from a previous run.
+        self._reset_loop_warnings()
         
         try:
             # Execute the autonomous loop
@@ -3952,8 +4033,10 @@ Summary:"""
                 # Always use the original prompt (prompt re-injection)
                 # Reset per-turn tool count for no-tool-call detection
                 self._autonomy_turn_tool_count = 0
+                # Reset the per-turn warning latch and inject any queued nudge.
+                turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = await self.achat(prompt)
+                    response = await self.achat(turn_prompt)
                 except Exception as e:
                     return AutonomyResult(
                         success=False,
@@ -3982,14 +4065,19 @@ Summary:"""
                 if self._doom_loop_tracker is not None:
                     self._doom_loop_tracker.record_response(response_str)
                 
-                # Record the action for doom loop tracking (G1 fix: was missing)
-                # Use response hash only — iteration was removed because it made
-                # every fingerprint unique, preventing doom loop detection.
+                # Record the action for doom loop tracking (G1 fix: was missing).
+                # The result-aware tool-loop detector (name+args+result-hash,
+                # ping-pong) now owns per-tool-call loop detection in the
+                # tool-execution path; DoomLoopDetector is kept for the
+                # content-loop/"chanting" and time checks it does uniquely.
+                # Derive a REAL success signal instead of the old hard-coded True
+                # (which made the failure-streak detector impossible to fire).
+                iteration_success = not self._response_indicates_failure(response_str)
                 self._record_action(
-                    "chat", 
-                    {"response_hash": hash(response_str[:500])}, 
-                    response_str[:200], 
-                    True
+                    "chat",
+                    {"response_hash": hash(response_str[:500])},
+                    response_str[:200],
+                    iteration_success,
                 )
                 
                 # Check doom loop AFTER recording action so detector sees

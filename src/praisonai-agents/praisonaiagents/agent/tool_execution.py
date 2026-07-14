@@ -535,6 +535,40 @@ class ToolExecutionMixin:
                         is_retryable=False
                     )
 
+            # Result-aware tool-loop detection (name + args + result-hash).
+            # Record this call, then run the detector on the pre-execution
+            # history. On a CRITICAL verdict, block before executing (a genuine
+            # stuck stall or A->B->A->B oscillation). A WARNING queues a
+            # one-shot self-correction nudge for the next autonomous turn.
+            # Zero overhead when disabled; polling with changing output is NOT
+            # flagged (streaks break on result-hash change).
+            if hasattr(self, '_ensure_loop_detector'):
+                from . import loop_detection as _loop_detection
+                _ld_history, _ld_config = self._ensure_loop_detector()
+                if _ld_config.enabled:
+                    _loop_detection.record_tool_call(
+                        _ld_history, function_name, arguments, _ld_config
+                    )
+                    _verdict = _loop_detection.detect_tool_loop(
+                        _ld_history, function_name, arguments, _ld_config
+                    )
+                    if _verdict.get("stuck"):
+                        if _verdict.get("level") == "critical":
+                            # Block via the shared blocked_result path so trace
+                            # spans, stream events, AFTER_TOOL hooks, doom-loop
+                            # and loop-guard teardown still run (matches the
+                            # loop_guard BLOCK behaviour at line ~524).
+                            blocked_result = {
+                                "error": _verdict.get("message", "loop detected"),
+                                "loop_blocked": True,
+                            }
+                        elif not getattr(self, '_loop_warned_this_turn', False):
+                            self._loop_warned_this_turn = True
+                            self._pending_self_correction = (
+                                f"[System: repeated {_verdict.get('detector')} detected. "
+                                f"Try a different approach. {_verdict.get('message', '')}]"
+                            )
+
             # C4 — optional tool-argument validation via ToolValidatorProtocol.
             # Zero overhead when not set. Users wire via `agent._tool_validator = MyValidator()`.
             _validator = getattr(self, '_tool_validator', None)
@@ -921,6 +955,17 @@ class ToolExecutionMixin:
                     else:
                         result = {"value": result, "_additional_context": extra_context}
             
+            # Back-fill the result hash so the result-aware detector can tell a
+            # genuine stall (identical output) from legitimate polling (changing
+            # output). This is the key data-fix: fingerprints now include output.
+            if hasattr(self, '_ensure_loop_detector'):
+                from . import loop_detection as _loop_detection
+                _ld_history, _ld_config = self._ensure_loop_detector()
+                if _ld_config.enabled:
+                    _loop_detection.record_tool_outcome(
+                        _ld_history, function_name, arguments, result, _ld_config
+                    )
+
             # G10 fix: Mark progress after successful tool execution
             # This prevents false doom loop detection when tools succeed
             if self._doom_loop_tracker is not None and result is not None:
