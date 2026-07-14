@@ -6,7 +6,13 @@ Tests title generation, fallback behavior, and timeout handling.
 
 import pytest
 import asyncio
-from praisonaiagents.session.title import generate_title, generate_title_async, _create_fallback_title
+from praisonaiagents.session.title import (
+    generate_title,
+    generate_title_async,
+    _create_fallback_title,
+    _resolve_small_model,
+    _DEFAULT_SMALL_MODEL,
+)
 
 
 class TestTitleGeneration:
@@ -122,3 +128,63 @@ class TestTitleGeneration:
         assert len(title) > 0
         # Should contain either generated content or fallback
         assert "Test" in title or "sync" in title or "Chat Session" in title
+
+
+class TestSmallModelResolution:
+    """Tests for auxiliary/small model resolution in title generation."""
+
+    def setup_method(self):
+        from praisonaiagents.config.loader import clear_config_cache
+        clear_config_cache()
+
+    def teardown_method(self):
+        from praisonaiagents.config.loader import clear_config_cache
+        clear_config_cache()
+
+    def test_explicit_llm_model_wins(self):
+        """An explicit llm_model always takes precedence."""
+        assert _resolve_small_model("explicit-model", "primary-model") == "explicit-model"
+
+    def test_falls_back_to_primary_model(self):
+        """With no config small_model, resolve to the primary model."""
+        assert _resolve_small_model(None, "primary-model") == "primary-model"
+
+    def test_falls_back_to_default_when_nothing_set(self):
+        """With nothing configured, preserve the historical default."""
+        assert _resolve_small_model(None, None) == _DEFAULT_SMALL_MODEL
+
+    def test_config_small_model_used(self, monkeypatch):
+        """A configured defaults.small_model is used over the primary model."""
+        from praisonaiagents.config import loader
+
+        monkeypatch.setattr(
+            loader, "get_small_model",
+            lambda primary_model=None, fallback=None: "config-small-model",
+        )
+        assert _resolve_small_model(None, "primary-model") == "config-small-model"
+
+    def test_get_small_model_resolution_order(self):
+        """get_small_model resolves small_model -> primary -> config model -> fallback."""
+        from praisonaiagents.config.loader import (
+            get_small_model,
+            get_config,
+            DefaultsConfig,
+        )
+
+        config = get_config()
+        original = config.defaults
+        try:
+            # Unset small_model + primary given -> primary
+            config.defaults = DefaultsConfig(model=None, small_model=None)
+            assert get_small_model(primary_model="p", fallback="fb") == "p"
+            # Unset small_model, no primary, config model set -> config model
+            config.defaults = DefaultsConfig(model="cfg-model", small_model=None)
+            assert get_small_model(primary_model=None, fallback="fb") == "cfg-model"
+            # small_model set -> small_model wins over everything
+            config.defaults = DefaultsConfig(model="cfg-model", small_model="small")
+            assert get_small_model(primary_model="p", fallback="fb") == "small"
+            # Nothing set -> fallback
+            config.defaults = DefaultsConfig(model=None, small_model=None)
+            assert get_small_model(primary_model=None, fallback="fb") == "fb"
+        finally:
+            config.defaults = original
