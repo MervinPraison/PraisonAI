@@ -273,6 +273,7 @@ jobs:
             STEP 1 — READ GUIDELINES:
             Read AGENTS.md to understand the architecture rules.
             SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify or touch praisonai-rust or praisonai-ts packages.
+            AIM: This package must stay LIGHTWEIGHT AND POWERFUL. Do a CRITICAL REVIEW at each stage (issue triage, fix planning, PR review/implementation) and reject scope creep for the sake of adding features. Prefer existing Agent capabilities (instructions/backstory/tools/hooks/memory) over new params/modules/exports. Even when fixing a raised issue, keep the fix minimal and lightweight — do NOT expand the surface area or add knobs with no live consumer.
 
             STEP 2 — ARCHITECTURE VALIDATION & ROUTING (MANDATORY before writing code):
             Before implementing anything, answer these questions:
@@ -284,7 +285,7 @@ jobs:
               5. Plugins → MervinPraison/PraisonAI-Plugins: framework lifecycle extensions (tracing, logging, metrics, hooks, guardrails). Not agent tools — use STEP 3-ALT.
               6. Sandbox backends (optional/niche, e.g. Capsule) → PraisonAI-Plugins via `praisonai.sandbox` entry point; core keeps protocol/config/manager only.
               For items routed to an EXTERNAL repository (Tools, Docs, Plugins), follow STEP 3-ALT below.
-            - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
+            - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory). If it does, reject the change as scope creep and prefer the existing capability — the aim is lightweight and powerful, not more knobs.
             - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
             - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
             - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.

@@ -44,6 +44,7 @@ jobs:
               'run targeted tests, and force-push with `--force-with-lease`.',
               'Comment which files you resolved.',
               'Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.',
+              'Keep the resolution minimal — the aim is a lightweight and powerful package; do not introduce scope creep while resolving conflicts.',
             ].join(' ');
 
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

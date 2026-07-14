@@ -26,6 +26,8 @@ Simpler than competitors • More extensible • Faster • Agent-centric
 Powerful, lightweight, highly reliable and robust.
 Easy and developer-friendly for non-developers.
 Each feature runs 3 ways: **CLI, YAML, Python**.
+
+> **Lightweight & powerful — no scope creep.** The aim of this package is to stay lightweight and powerful. Do a critical review at **each stage** — issue triage, fix planning, and PR review/implementation. Reject scope creep for the sake of adding features: prefer existing Agent capabilities (`instructions`/`backstory`/`tools`/`hooks`/`memory`) over new params, modules, or exports. A change must genuinely strengthen the SDK; never add a knob with no live consumer or that duplicates existing behaviour. Even when fixing a raised issue, keep the fix minimal and lightweight rather than expanding surface area.
 ---
 
 ## 2. Repository Structure
