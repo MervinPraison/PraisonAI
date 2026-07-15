@@ -18,12 +18,33 @@ from praisonai_mcp.cli._configuration import (
 
 app = typer.Typer(help="MCP server management")
 
+# Config/management subcommands (list/add/remove/…) read and write the shared
+# PraisonAI configuration, which lives in ``praisonai-code``. When only the
+# standalone ``praisonai-mcp`` package is installed, surface a clear, actionable
+# install hint instead of an uncaught ``ImportError`` traceback. Host commands
+# (serve/list-tools/doctor/…) do not need it and route directly to the server.
+_CONFIG_INSTALL_HINT = (
+    "MCP configuration commands require praisonai-code.\n"
+    "Install it with: pip install praisonai-code\n"
+    "(or install the full stack: pip install \"praisonai[mcp]\")"
+)
+
+
+def _require_code() -> None:
+    """Exit cleanly with an install hint when praisonai-code is unavailable."""
+    from praisonai_mcp._code_bridge import code_available
+
+    if not code_available():
+        typer.echo(_CONFIG_INSTALL_HINT, err=True)
+        raise typer.Exit(1)
+
 
 @app.command("list")
 def mcp_list(
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """List configured MCP servers."""
+    _require_code()
     schema = configuration_schema()
     MCPLocalConfig, MCPRemoteConfig = schema.MCPLocalConfig, schema.MCPRemoteConfig
     
@@ -81,6 +102,7 @@ def mcp_add(
     env: Optional[str] = typer.Option(None, "--env", "-e", help="Environment variables (KEY=VALUE,...)"),
 ):
     """Add an MCP server."""
+    _require_code()
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -118,6 +140,7 @@ def mcp_remove(
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ):
     """Remove an MCP server."""
+    _require_code()
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -159,6 +182,7 @@ def mcp_test(
     timeout: float = typer.Option(10.0, "--timeout", "-t", help="Timeout in seconds"),
 ):
     """Test an MCP server connection."""
+    _require_code()
     schema = configuration_schema()
     MCPLocalConfig, MCPRemoteConfig = schema.MCPLocalConfig, schema.MCPRemoteConfig
     
@@ -281,6 +305,7 @@ def mcp_sync(
     timeout: float = typer.Option(30.0, "--timeout", "-t", help="Timeout in seconds"),
 ):
     """Sync tool schemas from MCP servers to local index."""
+    _require_code()
     output = get_output_controller()
     loader = get_config_loader()
     config = loader.load()
@@ -380,6 +405,7 @@ def mcp_tools(
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """List indexed MCP tools."""
+    _require_code()
     output = get_output_controller()
     
     try:
@@ -418,6 +444,7 @@ def mcp_describe(
     tool: str = typer.Argument(..., help="Tool name"),
 ):
     """Show full schema for an MCP tool."""
+    _require_code()
     output = get_output_controller()
     
     try:
@@ -447,6 +474,7 @@ def mcp_status(
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Show status of MCP servers."""
+    _require_code()
     output = get_output_controller()
     
     try:
@@ -512,6 +540,7 @@ def mcp_run(
     print("\033[93m'praisonai mcp run' is deprecated and will be removed in a future version.\033[0m", file=sys.stderr)
     print("\033[93mPlease use 'praisonai serve mcp --name <server>' instead.\033[0m\n", file=sys.stderr)
     
+    _require_code()
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -631,6 +660,7 @@ def mcp_auth(
         praisonai mcp auth github
         praisonai mcp auth tavily --timeout 60
     """
+    _require_code()
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -754,6 +784,7 @@ def mcp_logout(
         praisonai mcp logout github
         praisonai mcp logout tavily --yes
     """
+    _require_code()
     output = get_output_controller()
     
     try:
@@ -826,4 +857,5 @@ def mcp_serve_recipe_host(ctx: typer.Context) -> None:
 def mcp_callback(ctx: typer.Context):
     """Show MCP help or list servers."""
     if ctx.invoked_subcommand is None:
+        _require_code()
         mcp_list(json_output=False)
