@@ -1047,7 +1047,18 @@ Write the complete compiled report:"""
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async version of execute_tool with retry policy support"""
-        
+
+        # Record the tool name for this turn so the self-improve review policy
+        # sees async tool usage too (issue #3037). Mirrors the sync path in
+        # _execute_tool_with_context; skipped during a guarded review turn so
+        # the review's own calls are not tracked and cannot recurse.
+        if not getattr(self, "_in_skill_review", False):
+            turn_tools = getattr(self, "_turn_tools_used", None)
+            if turn_tools is None:
+                self._turn_tools_used = []
+                turn_tools = self._turn_tools_used
+            turn_tools.append(function_name)
+
         # Get retry policy (tool-level > agent-level > default)
         retry_policy = self._get_tool_retry_policy(function_name)
         

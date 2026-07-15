@@ -329,6 +329,25 @@ def test_execute_tool_skips_tracking_during_review():
     assert agent._turn_tools_used == []
 
 
+def test_execute_tool_async_records_turn_tool():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    asyncio.run(agent.execute_tool_async("read_file", {}))
+    assert "read_file" in agent._turn_tools_used
+
+
+def test_execute_tool_async_skips_tracking_during_review():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    agent._in_skill_review = True
+    asyncio.run(agent.execute_tool_async("read_file", {}))
+    assert agent._turn_tools_used == []
+
+
 def test_after_agent_hook_uses_turn_tools_used_when_not_passed():
     agent = Agent(instructions="x", self_improve=True)
     captured = {}
