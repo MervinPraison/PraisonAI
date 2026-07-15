@@ -1,7 +1,7 @@
 name: Deploy install scripts to praison.ai
 
-# When install.sh or install.ps1 change on main, trigger praison.ai CI which
-# syncs scripts at build time and deploys to Azure AKS (existing azure-pipeline.yaml).
+# Production praison.ai runs on Hestia (migration-target), not Azure AKS.
+# Uses scoped deploy user (praison-deploy) — not root.
 
 on:
   push:
@@ -19,34 +19,59 @@ permissions:
   contents: read
 
 jobs:
-  trigger-website-deploy:
+  deploy-to-hestia:
     runs-on: ubuntu-latest
+    environment: production-hestia
     steps:
-      - name: Trigger praison.ai CI
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Sync install scripts to Hestia
         env:
-          GH_TOKEN: ${{ secrets.SECRETS_ADMIN_PAT }}
+          SSH_PRIVATE_KEY: ${{ secrets.MIGRATION_TARGET_SSH_KEY }}
+          HESTIA_HOST: ${{ secrets.MIGRATION_TARGET_HOST }}
+          HESTIA_USER: ${{ secrets.MIGRATION_TARGET_USER }}
+          HESTIA_KNOWN_HOSTS: ${{ secrets.MIGRATION_TARGET_KNOWN_HOSTS }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "SECRETS_ADMIN_PAT is not configured in this repository"
+          for var in SSH_PRIVATE_KEY HESTIA_HOST HESTIA_USER; do
+            if [ -z "${!var:-}" ]; then
+              echo "Missing secret for deploy (need MIGRATION_TARGET_SSH_KEY, MIGRATION_TARGET_HOST, MIGRATION_TARGET_USER)"
+              exit 1
+            fi
+          done
+
+          REMOTE_WEB="/home/hestiaadmin/web/praison.ai/pa/web"
+          SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes"
+
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          trap 'rm -f ~/.ssh/id_ed25519' EXIT
+
+          # Pin host identity via an out-of-band secret (no TOFU/ssh-keyscan).
+          if [ -z "${HESTIA_KNOWN_HOSTS:-}" ]; then
+            echo "Missing secret MIGRATION_TARGET_KNOWN_HOSTS (pinned host key). Refusing to deploy without a verified host identity."
             exit 1
           fi
+          echo "$HESTIA_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
-          gh workflow run CI \
-            --repo MervinPraison/praison.ai \
-            --ref master
+          # Upload to temp files, then atomically move both into place in a
+          # single remote step to avoid serving truncated or mixed-commit files.
+          for f in install.sh install.ps1; do
+            echo "Syncing $f..."
+            scp $SSH_OPTS "src/praisonai/scripts/$f" "${HESTIA_USER}@${HESTIA_HOST}:${REMOTE_WEB}/.${f}.tmp"
+          done
 
-          echo "Triggered praison.ai CI for PraisonAI commit ${SOURCE_SHA}"
-          echo "Monitor: https://github.com/MervinPraison/praison.ai/actions/workflows/azure-pipeline.yaml"
+          ssh $SSH_OPTS "${HESTIA_USER}@${HESTIA_HOST}" \
+            "mv -f ${REMOTE_WEB}/.install.sh.tmp ${REMOTE_WEB}/install.sh && \
+             mv -f ${REMOTE_WEB}/.install.ps1.tmp ${REMOTE_WEB}/install.ps1 && \
+             sudo chown hestiaadmin:hestiaadmin ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1 && \
+             sudo chmod 644 ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1"
 
-          sleep 10
-          RUN_URL=$(gh run list \
-            --repo MervinPraison/praison.ai \
-            --workflow CI \
-            --limit 1 \
-            --json url,status,createdAt \
-            --jq '.[0].url' 2>/dev/null || true)
-          if [ -n "${RUN_URL}" ]; then
-            echo "Latest praison.ai CI run: ${RUN_URL}"
-          fi
+          echo "Deployed install scripts for commit ${SOURCE_SHA}"
+          echo "Verify: curl -fsSL https://praison.ai/install.ps1 | head -5"
