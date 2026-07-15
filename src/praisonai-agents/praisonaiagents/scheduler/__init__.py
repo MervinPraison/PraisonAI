@@ -25,8 +25,13 @@ if TYPE_CHECKING:
     from .config_store import ConfigYamlScheduleStore
     from .parser import parse_schedule
     from .runner import ScheduleRunner
-    from .loop import ScheduleLoop
-    from .protocols import ScheduleStoreProtocol, JobConditionProtocol, GateResult
+    from .loop import ScheduleLoop, InProcessScheduleProvider
+    from .protocols import (
+        ScheduleStoreProtocol,
+        JobConditionProtocol,
+        GateResult,
+        SchedulerProviderProtocol,
+    )
 
 _module_cache = {}
 
@@ -59,25 +64,33 @@ def __getattr__(name: str):
         _module_cache[name] = ScheduleRunner
         return ScheduleRunner
 
-    if name == "ScheduleLoop":
-        from .loop import ScheduleLoop
-        _module_cache[name] = ScheduleLoop
-        return ScheduleLoop
+    if name in ("ScheduleLoop", "InProcessScheduleProvider"):
+        from .loop import ScheduleLoop, InProcessScheduleProvider
+        _module_cache["ScheduleLoop"] = ScheduleLoop
+        _module_cache["InProcessScheduleProvider"] = InProcessScheduleProvider
+        return _module_cache[name]
 
     if name == "ConfigYamlScheduleStore":
         from .config_store import ConfigYamlScheduleStore
         _module_cache[name] = ConfigYamlScheduleStore
         return ConfigYamlScheduleStore
 
-    if name in ("ScheduleStoreProtocol", "JobConditionProtocol", "GateResult"):
+    if name in (
+        "ScheduleStoreProtocol",
+        "JobConditionProtocol",
+        "GateResult",
+        "SchedulerProviderProtocol",
+    ):
         from .protocols import (
             ScheduleStoreProtocol,
             JobConditionProtocol,
             GateResult,
+            SchedulerProviderProtocol,
         )
         _module_cache["ScheduleStoreProtocol"] = ScheduleStoreProtocol
         _module_cache["JobConditionProtocol"] = JobConditionProtocol
         _module_cache["GateResult"] = GateResult
+        _module_cache["SchedulerProviderProtocol"] = SchedulerProviderProtocol
         return _module_cache[name]
 
     if name in ("Blueprint", "BlueprintSlot", "BlueprintStoreProtocol"):
@@ -107,9 +120,11 @@ __all__ = [
     "parse_schedule",
     "ScheduleRunner",
     "ScheduleLoop",
+    "InProcessScheduleProvider",
     "ScheduleStoreProtocol",
     "JobConditionProtocol",
     "GateResult",
+    "SchedulerProviderProtocol",
     "Blueprint",
     "BlueprintSlot",
     "BlueprintStoreProtocol",
