@@ -147,9 +147,6 @@ def __getattr__(name: str):
         return Task
     
     # Structured result types for workflow error handling
-    if name == "StepResult":
-        from .results import StepResult
-        return StepResult
     if name == "StepError":
         from .results import StepError
         return StepError
@@ -162,9 +159,6 @@ def __getattr__(name: str):
     if name == "ErrorStrategy":
         from .results import ErrorStrategy
         return ErrorStrategy
-    if name == "StructuredWorkflowExecutor":
-        from .structured_execution import StructuredWorkflowExecutor
-        return StructuredWorkflowExecutor
     
     if name in _LAZY_IMPORTS:
         module_name = _LAZY_IMPORTS[name]
