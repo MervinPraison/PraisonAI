@@ -202,6 +202,16 @@ def _looks_like_framework_tool(tool) -> bool:
     return has_schema and has_exec_method
 
 
+# Marker attribute stamped on wrappers produced by ``_wrap_with_timeout``. Its
+# *value* is the owning executor_factory's identity (not just True) so a shared
+# framework-tool object is never re-wrapped by the same generator (idempotency),
+# yet is correctly re-wrapped when a *different* generator takes ownership.
+_TIMEOUT_MARKER = "__praisonai_timeout_wrapped__"
+# Reference to the pre-wrap callable, so a re-wrap for a new owner wraps the
+# original method rather than stacking on a foreign generator's wrapper.
+_TIMEOUT_ORIGINAL = "__praisonai_timeout_original__"
+
+
 def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
@@ -224,6 +234,15 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     import concurrent.futures
     import functools
     import inspect
+
+    # Identity of the wrapper's owner so a shared framework-tool object patched
+    # in place by one generator is transparently re-wrapped (not skipped) when a
+    # *different* generator processes it — otherwise it would keep the first
+    # generator's executor/timeout even after that generator's pool is closed.
+    # The executor_factory is a bound method unique per generator instance, so
+    # its identity is a stable per-owner key. (May be None for callers that pass
+    # no factory; those paths never capture a foreign executor.)
+    _owner_key = id(executor_factory) if executor_factory is not None else None
 
     def _wrap_callable(fn):
         """Return a timeout-enforcing wrapper around a bare callable."""
@@ -284,9 +303,28 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
         for method_name in ("_run", "run"):
             method = getattr(tool, method_name, None)
             if callable(method):
-                wrapped = _wrap_callable(method)
-                if wrapped is method:
+                # Idempotency guard for shared framework tool objects (cached by
+                # ToolResolver / passed via plugin registries). Re-wrapping on
+                # every generate_crew_and_kickoff() would stack wrappers (N×
+                # timeout, monotonic memory growth). But the marker is keyed by
+                # the *owning* executor_factory: if a *different* generator later
+                # patches the same shared object, we must re-wrap in place so the
+                # method binds to that generator's own executor/timeout instead
+                # of retaining the first generator's (whose pool may already be
+                # shut down). Same owner → skip; different owner → re-wrap.
+                if getattr(method, _TIMEOUT_MARKER, None) is _owner_key:
+                    return tool
+                # Re-wrap the *original* method, never a foreign generator's
+                # wrapper, so wrappers never stack across generators.
+                base = getattr(method, _TIMEOUT_ORIGINAL, method)
+                wrapped = _wrap_callable(base)
+                if wrapped is base:
                     continue
+                try:
+                    setattr(wrapped, _TIMEOUT_MARKER, _owner_key)
+                    setattr(wrapped, _TIMEOUT_ORIGINAL, base)
+                except (AttributeError, TypeError):
+                    pass
                 try:
                     object.__setattr__(tool, method_name, wrapped)  # bypass pydantic frozen
                     return tool
@@ -297,8 +335,20 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
         if not callable(tool):
             return tool
 
-    # Plain callable — safe to wrap as a function.
-    return _wrap_callable(tool)
+    # Plain callable — safe to wrap as a function. If it is already wrapped by
+    # this same owner, return as-is (idempotent). A callable already owned by a
+    # *different* generator is left untouched: it is a fresh per-generator
+    # wrapper object here (not shared in place), so we never stack wrappers.
+    if getattr(tool, _TIMEOUT_MARKER, None) is not None:
+        return tool
+    wrapped = _wrap_callable(tool)
+    if wrapped is not tool:
+        try:
+            setattr(wrapped, _TIMEOUT_MARKER, _owner_key)
+            setattr(wrapped, _TIMEOUT_ORIGINAL, tool)
+        except (AttributeError, TypeError):
+            pass
+    return wrapped
 
 
 def noop(*args, **kwargs):

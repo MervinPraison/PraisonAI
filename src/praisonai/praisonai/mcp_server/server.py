@@ -8,7 +8,8 @@ Supports both STDIO and HTTP Stream transports.
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Dict, Optional, Set
+from collections import OrderedDict
+from typing import Any, Callable, Dict, Optional
 
 from .registry import (
     get_tool_registry,
@@ -88,7 +89,10 @@ class MCPServer:
         
         # Cancellation support
         self._active_requests: Dict[str, asyncio.Task] = {}
-        self._cancelled_requests: Set[str] = set()
+        # Ordered so overflow eviction drops the *oldest* id (FIFO), never the
+        # id that was just added (a plain set.pop() removes an arbitrary element
+        # and could silently forget a cancellation that had just arrived).
+        self._cancelled_requests: "OrderedDict[str, None]" = OrderedDict()
         self._max_cancelled_requests = 10000
         
         # Progress notification callback
@@ -232,15 +236,18 @@ class MCPServer:
         if method == "notifications/cancelled":
             request_id = params.get("requestId")
             if request_id:
-                self._cancelled_requests.add(str(request_id))
-                if len(self._cancelled_requests) > self._max_cancelled_requests:
-                    overflow = len(self._cancelled_requests) - self._max_cancelled_requests
-                    for _ in range(overflow):
-                        self._cancelled_requests.pop()
-                # Cancel active task if exists
-                if str(request_id) in self._active_requests:
-                    task = self._active_requests[str(request_id)]
+                rid = str(request_id)
+                self._cancelled_requests[rid] = None
+                while len(self._cancelled_requests) > self._max_cancelled_requests:
+                    self._cancelled_requests.popitem(last=False)  # drop oldest
+                # Cancel the in-flight task if one is registered. Once we have
+                # acted on the cancellation we drop the marker so a later request
+                # that reuses the same JSON-RPC id is not spuriously cancelled by
+                # this stale entry.
+                task = self._active_requests.get(rid)
+                if task is not None:
                     task.cancel()
+                    self._cancelled_requests.pop(rid, None)
                     logger.debug(f"Cancelled request: {request_id}")
             return None
         
@@ -261,12 +268,37 @@ class MCPServer:
                 msg_id, scope_error["code"], scope_error["message"], data=scope_error["data"]
             )
         
-        # Execute handler
+        # Execute handler. Id-bearing requests run as a registered task so an
+        # incoming ``notifications/cancelled`` can actually cancel the in-flight
+        # work (a plain ``await handler(...)`` leaves nothing to cancel).
         try:
-            result = await handler(params)
+            if not is_notification:
+                rid = str(msg_id)
+                task = asyncio.ensure_future(handler(params))
+                self._active_requests[rid] = task
+                try:
+                    # Honour a cancellation that arrived before we registered,
+                    # then consume the marker so it cannot cancel a *future*
+                    # request that reuses this id. (Stored values are ``None``,
+                    # so test membership rather than the popped value.)
+                    if rid in self._cancelled_requests:
+                        self._cancelled_requests.pop(rid, None)
+                        task.cancel()
+                    result = await task
+                finally:
+                    # Only remove *our* registration: a concurrent client that
+                    # reused this id may have already replaced the entry with its
+                    # own task, which must not be evicted by our cleanup.
+                    if self._active_requests.get(rid) is task:
+                        self._active_requests.pop(rid, None)
+                return self._success_response(msg_id, result)
+            await handler(params)
+            return None
+        except asyncio.CancelledError:
+            logger.debug(f"Request cancelled: {method}")
             if is_notification:
                 return None
-            return self._success_response(msg_id, result)
+            return self._error_response(msg_id, INTERNAL_ERROR, "Request cancelled")
         except Exception as e:
             logger.exception(f"Error handling {method}")
             if is_notification:
@@ -482,8 +514,10 @@ class MCPServer:
             raise
     
     async def _handle_set_log_level(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle logging/setLevel request per MCP spec."""
-        level = params.get("level", "info")
+        """Handle logging/setLevel request per MCP spec (per-server scope only)."""
+        level = params.get("level")
+        if not isinstance(level, str):
+            raise ValueError("`level` must be a string")
         level_map = {
             "debug": logging.DEBUG,
             "info": logging.INFO,
@@ -494,9 +528,15 @@ class MCPServer:
             "alert": logging.CRITICAL,
             "emergency": logging.CRITICAL,
         }
-        log_level = level_map.get(level.lower(), logging.INFO)
-        logging.getLogger().setLevel(log_level)
-        logger.info(f"Log level set to: {level}")
+        if level.lower() not in level_map:
+            raise ValueError(f"Unknown log level: {level!r}")
+        # Scope the change to the MCP-server package logger tree
+        # (``praisonai.mcp_server`` — the parent of the loggers this module and
+        # its siblings actually emit through), never the process root. This
+        # honours the client's request for the server's own log output while
+        # leaving unrelated audit / injection-defense telemetry in the host
+        # process untouched.
+        logging.getLogger("praisonai.mcp_server").setLevel(level_map[level.lower()])
         return {}
     
     def _success_response(self, msg_id: Any, result: Any) -> Dict[str, Any]:

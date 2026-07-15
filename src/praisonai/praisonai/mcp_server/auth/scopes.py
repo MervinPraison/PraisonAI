@@ -232,6 +232,7 @@ OPERATION_SCOPES: Dict[str, ScopeRequirement] = {
     "tasks/get": ScopeRequirement(["tasks:read"]),
     "tasks/list": ScopeRequirement(["tasks:read"]),
     "tasks/cancel": ScopeRequirement(["tasks:write"]),
+    "logging/setLevel": ScopeRequirement(["admin"]),
 }
 
 
