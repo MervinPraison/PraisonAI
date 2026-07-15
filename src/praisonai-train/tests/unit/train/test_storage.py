@@ -247,3 +247,87 @@ class TestTrainingStorage:
             
             assert len(sessions) == 3
             assert any(s.session_id == "session-0" for s in sessions)
+
+
+class TestSQLiteBackedSessions:
+    """
+    Tests for SQLite-backed sessions being discoverable without a JSON sidecar.
+
+    Regression coverage for the bug where ``list``/``show``/``apply`` only
+    scanned ``~/.praison/train/*.json`` and could not find sessions written
+    with ``--storage-backend sqlite``.
+    """
+
+    def _make_iteration(self, num=1, score=9.0):
+        from praisonai_train.train.agents.models import TrainingIteration
+
+        return TrainingIteration(
+            iteration_num=num,
+            scenario_id="s1",
+            input_text="hi",
+            output="hello",
+            score=score,
+            feedback="good",
+        )
+
+    def test_exists_is_backend_aware(self):
+        """TrainingStorage.exists() checks the backend, not just the JSON path."""
+        from praisonaiagents.storage import SQLiteBackend
+        from praisonai_train.train.agents.storage import TrainingStorage
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = str(Path(tmpdir) / "train.db")
+            sid = "train-sqlonly"
+
+            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
+            storage.save_iteration(self._make_iteration())
+
+            reopened = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
+            # Backend-aware existence succeeds even though no JSON sidecar exists
+            assert reopened.exists() is True
+
+    def test_list_sqlite_only_no_json_sidecar(self):
+        """list_sessions_from_backend finds sessions stored only in SQLite."""
+        from praisonaiagents.storage import SQLiteBackend
+        from praisonai_train.train.agents.storage import (
+            TrainingStorage,
+            list_sessions_from_backend,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = str(Path(tmpdir) / "train.db")
+            sid = "train-sqlonly"
+
+            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
+            storage.save_iteration(self._make_iteration())
+
+            sessions = list_sessions_from_backend(SQLiteBackend(db_path=db))
+
+            assert len(sessions) == 1
+            assert sessions[0].session_id == sid
+            assert sessions[0].iteration_count == 1
+
+    def test_show_sqlite_without_json_gate(self):
+        """A SQLite-backed session round-trips report data without a JSON file."""
+        from praisonaiagents.storage import SQLiteBackend
+        from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import TrainingReport
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = str(Path(tmpdir) / "train.db")
+            sid = "train-sqlonly"
+
+            it = self._make_iteration()
+            storage = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
+            storage.save_iteration(it)
+            storage.save_report(
+                TrainingReport(session_id=sid, iterations=[it], total_iterations=1)
+            )
+
+            reopened = TrainingStorage(session_id=sid, backend=SQLiteBackend(db_path=db))
+            report = reopened.load_report()
+
+            assert report is not None
+            assert report.iterations[0].score == 9.0
+            # No JSON sidecar was created for this session id
+            assert not reopened.storage_path.exists()

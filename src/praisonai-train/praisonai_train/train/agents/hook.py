@@ -244,6 +244,7 @@ def _load_profile_from_session(
     session_id: str,
     iteration: Optional[int],
     agent_name: str,
+    backend=None,
 ) -> Optional[TrainingProfile]:
     """
     Load a TrainingProfile from a training session.
@@ -252,14 +253,16 @@ def _load_profile_from_session(
         session_id: The training session ID
         iteration: Specific iteration number, or None for best
         agent_name: Name of the agent
+        backend: Optional storage backend (e.g. SQLite). When provided the
+            session is read from the backend instead of the default JSON dir.
         
     Returns:
         TrainingProfile or None if not found
     """
     try:
-        storage = TrainingStorage(session_id=session_id)
+        storage = TrainingStorage(session_id=session_id, backend=backend)
         
-        if not storage.storage_path.exists():
+        if not storage.exists():
             logger.warning(f"Training session not found: {session_id}")
             return None
         
@@ -298,6 +301,7 @@ def get_training_profile(
     session_id: str,
     iteration: Optional[int] = None,
     agent_name: str = "agent",
+    backend=None,
 ) -> Optional[TrainingProfile]:
     """
     Get a training profile from a session without applying it.
@@ -308,6 +312,8 @@ def get_training_profile(
         session_id: The training session ID
         iteration: Specific iteration number, or None for best
         agent_name: Name to use for the profile
+        backend: Optional storage backend (e.g. SQLite) the session was
+            trained with. When omitted the default JSON directory is used.
         
     Returns:
         TrainingProfile or None if not found
@@ -317,4 +323,4 @@ def get_training_profile(
         print(f"Score: {profile.quality_score}")
         print(f"Suggestions: {profile.suggestions}")
     """
-    return _load_profile_from_session(session_id, iteration, agent_name)
+    return _load_profile_from_session(session_id, iteration, agent_name, backend=backend)

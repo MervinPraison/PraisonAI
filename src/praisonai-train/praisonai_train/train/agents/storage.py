@@ -5,6 +5,7 @@ Provides JSON-based persistence for training iterations, scenarios, and reports.
 DRY: Follows the same pattern as praisonaiagents.memory.learn.stores.BaseStore.
 """
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -126,6 +127,16 @@ class TrainingStorage:
     def storage_path(self) -> Path:
         """Get path to storage file."""
         return self.storage_dir / f"{self.session_id}.json"
+
+    def exists(self) -> bool:
+        """
+        Check if this session exists in storage.
+
+        Backend-aware: when a backend (e.g. SQLite) is configured this checks
+        the backend, otherwise it falls back to the JSON file on disk. Callers
+        should prefer this over ``storage_path.exists()`` which is JSON-only.
+        """
+        return self._store.exists()
     
     def _load(self) -> None:
         """Load data from storage using BaseJSONStore."""
@@ -250,6 +261,60 @@ def list_training_sessions(
         )
         for s in base_sessions
     ]
+
+
+def list_sessions_from_backend(
+    backend: "StorageBackendProtocol",
+    limit: int = 50,
+) -> List[TrainingSessionInfo]:
+    """
+    List training sessions stored in a pluggable backend (e.g. SQLite).
+
+    DRY: Mirrors ``list_training_sessions`` (which scans the JSON directory)
+    but sources sessions from ``backend.list_keys()`` so that sessions written
+    with ``--storage-backend sqlite`` are discoverable even when no JSON
+    sidecar exists in ``~/.praison/train``.
+
+    Args:
+        backend: Storage backend implementing ``list_keys``/``load``.
+        limit: Maximum number of sessions to return.
+
+    Returns:
+        List of TrainingSessionInfo objects (newest first when timestamps
+        are available).
+    """
+    sessions: List[TrainingSessionInfo] = []
+
+    for key in backend.list_keys():
+        data = backend.load(key) or {}
+        iterations = data.get("iterations", [])
+
+        created_at = _parse_iso(data.get("created_at"))
+        modified_at = _parse_iso(data.get("updated_at")) or created_at
+
+        sessions.append(
+            TrainingSessionInfo(
+                session_id=data.get("session_id", key),
+                path=Path(key),
+                size_bytes=len(json.dumps(data, default=str)),
+                created_at=created_at,
+                modified_at=modified_at,
+                item_count=len(iterations),
+            )
+        )
+
+    sessions.sort(key=lambda s: s.modified_at, reverse=True)
+    return sessions[:limit]
+
+
+def _parse_iso(value: Optional[str]) -> datetime:
+    """Parse an ISO timestamp, falling back to epoch on failure."""
+    if value:
+        try:
+            return datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            pass
+    return datetime.fromtimestamp(0)
 
 
 def cleanup_old_sessions(

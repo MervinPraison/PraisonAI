@@ -294,6 +294,16 @@ def train_agents(
 def train_list(
     limit: int = typer.Option(20, "--limit", "-n", help="Max sessions to show"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    storage_backend: Optional[str] = typer.Option(
+        None,
+        "--storage-backend",
+        help="Storage backend: 'file', 'sqlite', or 'redis://url'. Default: file"
+    ),
+    storage_path: Optional[str] = typer.Option(
+        None,
+        "--storage-path",
+        help="Path for storage backend (file dir or sqlite db path)"
+    ),
 ):
     """List all training sessions."""
     from ..output.console import get_output_controller
@@ -301,12 +311,21 @@ def train_list(
     output = get_output_controller()
     
     try:
-        from praisonai_train.train.agents.storage import list_training_sessions
+        from praisonai_train.train.agents.storage import (
+            list_sessions_from_backend,
+            list_training_sessions,
+        )
     except ImportError:
         output.print_error("Training module not available")
         raise typer.Exit(1)
     
-    sessions = list_training_sessions(limit=limit)
+    if storage_backend and storage_backend != "file":
+        backend = _create_storage_backend(storage_backend, storage_path, output)
+        if backend is None:
+            raise typer.Exit(1)
+        sessions = list_sessions_from_backend(backend, limit=limit)
+    else:
+        sessions = list_training_sessions(limit=limit)
     
     if json_output or output.is_json_mode:
         output.print_json({
@@ -341,6 +360,16 @@ def train_show(
     session_id: str = typer.Argument(..., help="Session ID to show"),
     iterations_flag: bool = typer.Option(False, "--iterations", "-i", help="Show detailed iteration info"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    storage_backend: Optional[str] = typer.Option(
+        None,
+        "--storage-backend",
+        help="Storage backend: 'file', 'sqlite', or 'redis://url'. Default: file"
+    ),
+    storage_path: Optional[str] = typer.Option(
+        None,
+        "--storage-path",
+        help="Path for storage backend (file dir or sqlite db path)"
+    ),
 ):
     """
     Show details of a training session.
@@ -354,23 +383,24 @@ def train_show(
         
         # Output as JSON
         praisonai train show train-abc123 --json
+        
+        # Session stored in a SQLite database
+        praisonai train show train-abc123 \\
+            --storage-backend sqlite --storage-path /data/train.db
     """
     from ..output.console import get_output_controller
     
     output = get_output_controller()
     
     try:
-        from praisonai_train.train.agents.storage import TrainingStorage
         from praisonai_train.train.agents.models import console_supports_unicode
     except ImportError:
         output.print_error("Training module not available")
         raise typer.Exit(1)
-    
-    storage = TrainingStorage(session_id=session_id)
-    
-    if not storage.storage_path.exists():
-        output.print_error(f"Session not found: {session_id}")
-        raise typer.Exit(1)
+
+    storage = _open_session_storage(
+        session_id, storage_backend, storage_path, output
+    )
     
     report = storage.load_report()
     iterations = storage.load_iterations()
@@ -430,6 +460,16 @@ def train_apply(
         help="Run agent with this prompt after applying training"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    storage_backend: Optional[str] = typer.Option(
+        None,
+        "--storage-backend",
+        help="Storage backend: 'file', 'sqlite', or 'redis://url'. Default: file"
+    ),
+    storage_path: Optional[str] = typer.Option(
+        None,
+        "--storage-path",
+        help="Path for storage backend (file dir or sqlite db path)"
+    ),
 ):
     """
     Apply training to an agent.
@@ -449,6 +489,10 @@ def train_apply(
         
         # Apply and run immediately
         praisonai train apply train-abc123 --run "Hello, how are you?"
+        
+        # Session stored in a SQLite database
+        praisonai train apply train-abc123 \\
+            --storage-backend sqlite --storage-path /data/train.db
     """
     from ..output.console import get_output_controller
     
@@ -456,16 +500,15 @@ def train_apply(
     
     try:
         from praisonai_train.train.agents import apply_training, get_training_profile
-        from praisonai_train.train.agents.storage import TrainingStorage
     except ImportError as e:
         output.print_error(f"Training module not available: {e}")
         raise typer.Exit(1)
     
-    # Verify session exists
-    storage = TrainingStorage(session_id=session_id)
-    if not storage.storage_path.exists():
-        output.print_error(f"Session not found: {session_id}")
-        raise typer.Exit(1)
+    # Verify session exists (backend-aware)
+    backend = _resolve_backend(storage_backend, storage_path, output)
+    storage = _open_session_storage(
+        session_id, storage_backend, storage_path, output, backend=backend
+    )
     
     # Load the agent early (if provided) to resolve the correct agent name for
     # the profile and to avoid loading the file a second time when --run is set.
@@ -483,6 +526,7 @@ def train_apply(
         session_id=session_id,
         iteration=iteration,
         agent_name=agent_name,
+        backend=backend,
     )
     
     if profile is None:
@@ -597,6 +641,47 @@ def _load_agent_from_file(file_path: str, output) -> Optional[object]:
     else:
         output.print_error(f"Unsupported file type: {path.suffix}")
         return None
+
+
+def _resolve_backend(backend_type: Optional[str], storage_path: Optional[str], output):
+    """
+    Resolve a storage backend from CLI flags, or None for the default JSON dir.
+
+    Returns None when no backend (or the plain ``file`` backend) is requested so
+    that existing default-directory behaviour is preserved. Exits with an error
+    if a backend is requested but cannot be created.
+    """
+    if not backend_type or backend_type == "file":
+        return None
+    backend = _create_storage_backend(backend_type, storage_path, output)
+    if backend is None:
+        raise typer.Exit(1)
+    return backend
+
+
+def _open_session_storage(
+    session_id: str,
+    backend_type: Optional[str],
+    storage_path: Optional[str],
+    output,
+    backend=None,
+):
+    """
+    Open a TrainingStorage for a session, honouring backend flags.
+
+    Uses backend-aware existence checking so SQLite-only sessions (no JSON
+    sidecar) are found. Exits with an error if the session does not exist.
+    """
+    from praisonai_train.train.agents.storage import TrainingStorage
+
+    if backend is None:
+        backend = _resolve_backend(backend_type, storage_path, output)
+
+    storage = TrainingStorage(session_id=session_id, backend=backend)
+    if not storage.exists():
+        output.print_error(f"Session not found: {session_id}")
+        raise typer.Exit(1)
+    return storage
 
 
 def _create_storage_backend(backend_type: str, storage_path: Optional[str], output):
