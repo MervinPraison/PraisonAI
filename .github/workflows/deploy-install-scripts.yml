@@ -1,7 +1,7 @@
 name: Deploy install scripts to praison.ai
 
-# Production praison.ai runs on Hestia (185.249.73.167), not Azure AKS.
-# Sync install.sh / install.ps1 to /home/hestiaadmin/web/praison.ai/pa/web/
+# Production praison.ai runs on Hestia (migration-target), not Azure AKS.
+# Uses scoped deploy user (praison-deploy) — not root.
 
 on:
   push:
@@ -21,23 +21,25 @@ permissions:
 jobs:
   deploy-to-hestia:
     runs-on: ubuntu-latest
+    environment: production-hestia
     steps:
       - uses: actions/checkout@v4
 
       - name: Sync install scripts to Hestia
         env:
           SSH_PRIVATE_KEY: ${{ secrets.MIGRATION_TARGET_SSH_KEY }}
+          HESTIA_HOST: ${{ secrets.MIGRATION_TARGET_HOST }}
+          HESTIA_USER: ${{ secrets.MIGRATION_TARGET_USER }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
-            echo "MIGRATION_TARGET_SSH_KEY is not configured on this repository"
-            echo "Add the migration-target (185.249.73.167) SSH private key as a GitHub secret"
-            exit 1
-          fi
+          for var in SSH_PRIVATE_KEY HESTIA_HOST HESTIA_USER; do
+            if [ -z "${!var:-}" ]; then
+              echo "Missing secret for deploy (need MIGRATION_TARGET_SSH_KEY, MIGRATION_TARGET_HOST, MIGRATION_TARGET_USER)"
+              exit 1
+            fi
+          done
 
-          HESTIA_HOST="185.249.73.167"
-          HESTIA_USER="root"
           REMOTE_WEB="/home/hestiaadmin/web/praison.ai/pa/web"
 
           mkdir -p ~/.ssh
@@ -51,8 +53,8 @@ jobs:
           done
 
           ssh "${HESTIA_USER}@${HESTIA_HOST}" \
-            "chown hestiaadmin:hestiaadmin ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1 && \
-             chmod 644 ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1"
+            "sudo chown hestiaadmin:hestiaadmin ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1 && \
+             sudo chmod 644 ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1"
 
           echo "Deployed install scripts for commit ${SOURCE_SHA}"
           echo "Verify: curl -fsSL https://praison.ai/install.ps1 | head -5"
