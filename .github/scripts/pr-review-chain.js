@@ -16,6 +16,7 @@ const CLAUDE_TRIGGER_LOGINS = new Set(['MervinPraison', 'github-actions[bot]']);
 const REQUIRED_PRIOR = ['coderabbit', 'greptile'];
 const OPTIONAL_PRIOR = ['qodo', 'gemini'];
 const OPTIONAL_PRIOR_WAIT_MS = 20 * 60 * 1000;
+const REQUIRED_PRIOR_WAIT_MS = 30 * 60 * 1000;
 
 function loginOf(item) {
   return (item?.user?.login || '').toLowerCase();
@@ -75,11 +76,23 @@ function priorReviewerStatus(comments, reviews = []) {
 
 function priorReviewersReady(comments, reviews = [], options = {}) {
   const waitMs = options.optionalWaitMs ?? OPTIONAL_PRIOR_WAIT_MS;
+  const requiredWaitMs = options.requiredWaitMs ?? REQUIRED_PRIOR_WAIT_MS;
   const prCreatedAt = options.prCreatedAt || null;
   const status = priorReviewerStatus(comments, reviews);
 
   const missingRequired = REQUIRED_PRIOR.filter((id) => !status[id]);
   if (missingRequired.length) {
+    if (prCreatedAt) {
+      const age = Date.now() - new Date(prCreatedAt).getTime();
+      if (age >= requiredWaitMs) {
+        return {
+          ready: true,
+          reason: `required reviewer timeout (${missingRequired.join(', ')} silent after ${Math.round(requiredWaitMs / 60000)}m)`,
+          status,
+          requiredTimeout: true,
+        };
+      }
+    }
     return { ready: false, reason: `waiting for ${missingRequired.join(', ')}`, status };
   }
 
@@ -157,8 +170,13 @@ function claudeFinalReady(comments, reviews = [], options = {}) {
   if (!prior.ready) {
     return { ready: false, reason: prior.reason };
   }
-  if (isSkipCopilot(options)) {
-    return { ready: true, reason: 'copilot skipped', copilotSkipped: true };
+  if (isSkipCopilot(options) || prior.requiredTimeout) {
+    return {
+      ready: true,
+      reason: prior.requiredTimeout ? prior.reason : 'copilot skipped',
+      copilotSkipped: true,
+      requiredTimeout: prior.requiredTimeout,
+    };
   }
   const copilot = copilotReviewReady(comments, reviews);
   if (copilot.ready) {
@@ -191,6 +209,7 @@ async function maybeTriggerClaudeFinal(github, owner, repo, prNumber, finalBody,
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const { comments, reviews } = await listCommentsAndReviews(github, owner, repo, prNumber);
   const gate = claudeFinalReady(comments, reviews, {
+    ...options,
     prCreatedAt: pr.created_at,
     optionalWaitMs: options.optionalWaitMs,
     allowCopilotTimeout: options.allowCopilotTimeout !== false,
@@ -205,7 +224,11 @@ async function maybeTriggerClaudeFinal(github, owner, repo, prNumber, finalBody,
     issue_number: prNumber,
     body: finalBody,
   });
-  const note = gate.copilotSkipped ? ' (Copilot timeout fallback)' : '';
+  const note = gate.requiredTimeout
+    ? ' (required reviewer timeout fallback)'
+    : gate.copilotSkipped
+      ? ' (Copilot timeout fallback)'
+      : '';
   core?.info?.(`Posted Claude FINAL on PR #${prNumber}${note}`);
   return { posted: true, reason: '' };
 }
@@ -281,6 +304,7 @@ module.exports = {
   isSkipCopilot,
   REQUIRED_PRIOR,
   OPTIONAL_PRIOR,
+  REQUIRED_PRIOR_WAIT_MS,
   COPILOT_REVIEW_BODY,
   priorReviewerStatus,
   priorReviewersReady,
