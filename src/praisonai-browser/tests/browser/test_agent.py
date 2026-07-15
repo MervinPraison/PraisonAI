@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from praisonai.browser.agent import BrowserAgent, BROWSER_AGENT_SYSTEM_PROMPT
+from praisonai_browser.agent import BrowserAgent, BROWSER_AGENT_SYSTEM_PROMPT
 
 
 class TestBrowserAgent:
@@ -174,7 +174,7 @@ This will submit the form.'''
 class TestBrowserAgentWithMock:
     """Tests for BrowserAgent with mocked PraisonAI agent."""
     
-    @patch("praisonai.browser.agent.BrowserAgent._ensure_agent")
+    @patch("praisonai_browser.agent.BrowserAgent._ensure_agent")
     def test_process_observation(self, mock_ensure):
         """Test processing observation with mocked agent."""
         agent = BrowserAgent()
@@ -198,7 +198,7 @@ class TestBrowserAgentWithMock:
         assert action["selector"] == "#search"
         mock_inner_agent.chat.assert_called_once()
     
-    @patch("praisonai.browser.agent.BrowserAgent._ensure_agent")
+    @patch("praisonai_browser.agent.BrowserAgent._ensure_agent")
     def test_process_observation_error_handling(self, mock_ensure):
         """Test error handling in process_observation."""
         agent = BrowserAgent()

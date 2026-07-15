@@ -3,7 +3,7 @@
 This module provides protocol-driven type definitions for browser automation.
 It is intentionally minimal to keep the core SDK lightweight.
 
-All heavy implementations live in the praisonai wrapper package.
+All heavy implementations live in the ``praisonai-browser`` package (Tier 2).
 """
 
 from dataclasses import dataclass, field
@@ -20,6 +20,8 @@ class BrowserActionType(str, Enum):
     WAIT = "wait"
     SCREENSHOT = "screenshot"
     EVALUATE = "evaluate"
+    SUBMIT = "submit"
+    CLEAR_INPUT = "clear_input"
     DONE = "done"
 
 
@@ -178,7 +180,7 @@ class BrowserSession:
 class BrowserAgentProtocol(Protocol):
     """Protocol for browser agent implementations.
     
-    This is a typing protocol — implementations live in the wrapper.
+    This is a typing protocol — implementations live in ``praisonai-browser`` (Tier 2).
     """
     
     def process_observation(self, observation: BrowserObservation) -> BrowserAction:

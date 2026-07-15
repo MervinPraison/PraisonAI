@@ -3,7 +3,7 @@
 import pytest
 import json
 
-from praisonai.browser.protocol import (
+from praisonai_browser.protocol import (
     WSMessage,
     ObservationMessage,
     ActionMessage,

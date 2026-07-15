@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 from unittest.mock import patch, Mock
 
-from praisonai.browser.cli import app
+from praisonai_browser.cli.commands.browser import app
 
 
 runner = CliRunner()
@@ -51,7 +51,7 @@ class TestCLISessionsCommand:
     
     def test_sessions_empty(self):
         """Test sessions command with no sessions - imports work."""
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
         import tempfile
         import os
         
@@ -80,36 +80,15 @@ class TestCLIClearCommand:
 class TestCLIDoctorCommand:
     """Test doctor diagnostics command."""
     
-    @patch('praisonai.browser.diagnostics.run_all_diagnostics')
-    def test_doctor_runs(self, mock_diagnostics):
+    @patch('praisonai_browser.cli.commands.browser.doctor_flow')
+    def test_doctor_runs(self, mock_doctor_flow):
         """Test doctor command runs without error."""
-        # Mock diagnostics results to pass
-        mock_diagnostics.return_value = {
-            "results": [],
-            "summary": {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "warned": 0,
-                "skipped": 0,
-                "all_pass": True
-            }
-        }
-        
-        # Mock the database path check
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('sqlite3.connect') as mock_conn:
-                mock_cursor = Mock()
-                mock_conn.return_value.__enter__ = Mock(return_value=mock_conn.return_value)
-                mock_conn.return_value.__exit__ = Mock(return_value=False)
-                mock_conn.return_value.cursor.return_value = mock_cursor
-                mock_cursor.fetchone.return_value = [0]
-                mock_cursor.fetchall.return_value = []
-                
-                result = runner.invoke(app, ["doctor"])
-                
-                # Doctor should run and produce output
-                assert result.exit_code == 0
+        mock_doctor_flow.return_value = None
+
+        result = runner.invoke(app, ["doctor"])
+
+        assert result.exit_code == 0
+        mock_doctor_flow.assert_called_once()
 
 
 class TestCLIMessageParsing:
@@ -168,22 +147,22 @@ class TestSmokeImports:
     
     def test_import_sessions(self):
         """Test SessionManager can be imported."""
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
         assert SessionManager is not None
     
     def test_import_agent(self):
         """Test BrowserAgent can be imported."""
-        from praisonai.browser.agent import BrowserAgent
+        from praisonai_browser.agent import BrowserAgent
         assert BrowserAgent is not None
     
     def test_import_server(self):
         """Test BrowserServer can be imported."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         assert BrowserServer is not None
     
     def test_import_cli(self):
         """Test CLI app can be imported."""
-        from praisonai.browser.cli import app
+        from praisonai_browser.cli.commands.browser import app
         assert app is not None
 
 
@@ -199,7 +178,7 @@ class TestSmokeSessions:
             db_path = f.name
         
         try:
-            from praisonai.browser.sessions import SessionManager
+            from praisonai_browser.sessions import SessionManager
             manager = SessionManager(db_path)
             assert manager is not None
             manager.close()
@@ -216,7 +195,7 @@ class TestSmokeSessions:
             db_path = f.name
         
         try:
-            from praisonai.browser.sessions import SessionManager
+            from praisonai_browser.sessions import SessionManager
             manager = SessionManager(db_path)
             
             session = manager.create_session("Test goal")
@@ -236,7 +215,7 @@ class TestSmokeAgent:
     
     def test_agent_creation(self):
         """Test BrowserAgent can be created."""
-        from praisonai.browser.agent import BrowserAgent
+        from praisonai_browser.agent import BrowserAgent
         
         # Should create without error (won't call LLM until used)
         agent = BrowserAgent(model="gpt-4o-mini")
@@ -245,7 +224,7 @@ class TestSmokeAgent:
     
     def test_agent_with_session_id(self):
         """Test BrowserAgent with session_id."""
-        from praisonai.browser.agent import BrowserAgent
+        from praisonai_browser.agent import BrowserAgent
         
         agent = BrowserAgent(
             model="gpt-4o-mini",
@@ -259,7 +238,7 @@ class TestSmokeServer:
     
     def test_server_creation(self):
         """Test BrowserServer can be created."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer(port=8766, model="gpt-4o-mini")
         assert server is not None

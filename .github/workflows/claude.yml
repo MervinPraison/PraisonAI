@@ -96,15 +96,16 @@ jobs:
                   '- Check [existing issues](https://github.com/MervinPraison/PraisonAI/issues) for duplicates',
                   '- Review the [documentation](https://docs.praison.ai) for related guides',
                   '',
-                  '_A maintainer can trigger deeper analysis by commenting `@claude` on this issue._',
+                  '_Bug and enhancement reports are auto-triaged with Claude. Questions and other issues: a maintainer can comment `@claude` to trigger analysis._',
                   '',
                   '**Routing:** Agent-callable tools → [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools); lifecycle plugins (tracing/hooks/guardrails) → [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins).'
                 ].join('\n')
               });
             }
 
-            // --- For owner: add 'claude' label to trigger the code-fix job ---
-            if (isOwner) {
+            // --- Auto-trigger Claude for owner issues and actionable external bug/enhancement reports ---
+            const autoClaude = isOwner || labels.includes('bug') || labels.includes('enhancement');
+            if (autoClaude) {
               await github.rest.issues.addLabels({
                 issue_number: issue.number,
                 owner: context.repo.owner,
@@ -114,7 +115,7 @@ jobs:
             }
 
   # ================================================================
-  # Job 2: Full Claude code-fix (owner/collaborator only)
+  # Job 2: Full Claude code-fix
   # Triggers on: labeled 'claude', @claude comments, assignments
   # ================================================================
   claude-response:
@@ -140,6 +141,7 @@ jobs:
       (github.event_name != 'pull_request_review' || contains(github.event.review.body, '@claude')) &&
       (github.event_name != 'pull_request_review_comment' || contains(github.event.comment.body, '@claude')) &&
       (
+        (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude') ||
         !contains(github.actor, '[bot]') ||
         github.actor == 'github-actions[bot]'
       ) &&

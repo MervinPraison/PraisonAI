@@ -16,6 +16,7 @@ dependencies = [
     "praisonai-code>=0.0.47",
     "praisonai-bot>=0.0.32",
     "praisonai-train>=0.0.3",
+    "praisonai-browser>=0.0.1",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -102,6 +103,7 @@ call = [
 ]
 # C10: training lives in praisonai-train; this extra pulls the heavy ML stack.
 train = ["praisonai-train[llm]"]
+browser = ["praisonai-browser[all]"]
 crewai = ["crewai>=0.157.0", "praisonai-tools>=0.1.0"]  # Task 2: alias to praisonai-frameworks[crewai]
 autogen = ["pyautogen==0.2.29", "praisonai-tools>=0.1.0", "crewai"]  # Task 2: alias to praisonai-frameworks[autogen]
 ag2 = ["ag2>=0.11.0", "praisonai-tools>=0.1.0"]
@@ -274,6 +276,7 @@ praisonai-bot = { path = "../praisonai-bot", editable = true }
 # praisonai-train hosts LLM fine-tuning + agent training (C10); old
 # praisonai.train paths kept via shims.
 praisonai-train = { path = "../praisonai-train", editable = true }
+praisonai-browser = { path = "../praisonai-browser", editable = true }
 
 [tool.uv]
 # Exclude from lock resolution — these cause cross-extra conflicts that

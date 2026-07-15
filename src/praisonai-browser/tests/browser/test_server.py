@@ -10,11 +10,11 @@ class TestBrowserServerInit:
     
     def test_server_initialization(self):
         """Test server initializes with defaults."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer()
         
-        assert server.host == "0.0.0.0"
+        assert server.host == "127.0.0.1"
         assert server.port == 8765
         assert server.model == "gpt-4o-mini"
         assert server.max_steps == 20
@@ -22,7 +22,7 @@ class TestBrowserServerInit:
     
     def test_server_custom_config(self):
         """Test server with custom configuration."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer(
             host="127.0.0.1",
@@ -44,7 +44,7 @@ class TestClientConnection:
     
     def test_client_connection_creation(self):
         """Test creating a client connection."""
-        from praisonai.browser.server import ClientConnection
+        from praisonai_browser.server import ClientConnection
         
         mock_ws = Mock()
         conn = ClientConnection(
@@ -59,7 +59,7 @@ class TestClientConnection:
     
     def test_client_connection_defaults(self):
         """Test client connection default values."""
-        from praisonai.browser.server import ClientConnection
+        from praisonai_browser.server import ClientConnection
         
         mock_ws = Mock()
         conn = ClientConnection(websocket=mock_ws)
@@ -73,7 +73,7 @@ class TestServerAppCreation:
     
     def test_get_app_creates_fastapi(self):
         """Test that _get_app creates FastAPI instance."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer()
         app = server._get_app()
@@ -83,7 +83,7 @@ class TestServerAppCreation:
     
     def test_get_app_singleton(self):
         """Test that _get_app returns same instance."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer()
         app1 = server._get_app()
@@ -93,7 +93,7 @@ class TestServerAppCreation:
     
     def test_health_endpoint_exists(self):
         """Test health endpoint is registered."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer()
         app = server._get_app()
@@ -108,7 +108,7 @@ class TestMessageProcessing:
     @pytest.mark.asyncio
     async def test_process_ping_message(self):
         """Test ping message returns pong."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -120,7 +120,7 @@ class TestMessageProcessing:
     @pytest.mark.asyncio
     async def test_process_unknown_message(self):
         """Test unknown message type returns error."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -133,7 +133,7 @@ class TestMessageProcessing:
     @pytest.mark.asyncio
     async def test_process_start_session_missing_goal(self):
         """Test start session without goal returns error."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -149,7 +149,7 @@ class TestMessageProcessing:
     @pytest.mark.asyncio
     async def test_process_stop_session(self):
         """Test stopping a session."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock(), session_id="test123")
@@ -165,7 +165,7 @@ class TestMessageProcessing:
     @pytest.mark.asyncio
     async def test_process_observation_no_session(self):
         """Test observation without active session returns error."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -184,7 +184,7 @@ class TestServerStartStop:
     
     def test_stop_clears_state(self):
         """Test that stop() clears connections and agents."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer()
         server._agents["test1"] = Mock()
@@ -203,7 +203,7 @@ class TestStartSession:
     @pytest.mark.asyncio
     async def test_handle_start_session_success(self):
         """Test successful session start."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -228,7 +228,7 @@ class TestStartSession:
     @pytest.mark.asyncio
     async def test_handle_start_session_creates_agent(self):
         """Test that start session creates an agent."""
-        from praisonai.browser.server import BrowserServer, ClientConnection
+        from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock())
@@ -250,9 +250,9 @@ class TestIntegration:
     
     def test_server_session_agent_integration(self):
         """Test server creates session and agent correctly."""
-        from praisonai.browser.server import BrowserServer
-        from praisonai.browser.sessions import SessionManager
-        from praisonai.browser.agent import BrowserAgent
+        from praisonai_browser.server import BrowserServer
+        from praisonai_browser.sessions import SessionManager
+        from praisonai_browser.agent import BrowserAgent
         
         server = BrowserServer(model="gpt-4o")
         

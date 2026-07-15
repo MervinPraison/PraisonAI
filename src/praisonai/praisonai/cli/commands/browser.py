@@ -1,20 +1,11 @@
-"""Backward-compatibility shim for :mod:`praisonai.cli.commands.browser`.
-
-The implementation moved to :mod:`praisonai_code.cli.commands.browser` as part
-of the praisonai-code extraction (issue #2516 / parent #2512).
-
-This shim aliases the moved module into ``sys.modules`` under the old dotted
-path so that:
-
-* ``from praisonai.cli.commands.browser import X`` keeps working, and
-* ``unittest.mock.patch("praisonai.cli.commands.browser.X")`` patches the very
-  same module object that the implementation executes against.
-"""
+"""C11 shim: implementation moved to ``praisonai_browser.cli.commands.browser``."""
 
 import sys as _sys
 
-from praisonai_code.cli.commands import browser as _impl
+from praisonai._bootstrap import ensure_praisonai_browser
 
-# Make the old dotted path resolve to the exact same module object so that
-# attribute patching / monkeypatching stays transparent across both paths.
+ensure_praisonai_browser()
+
+import praisonai_browser.cli.commands.browser as _impl
+
 _sys.modules[__name__] = _impl

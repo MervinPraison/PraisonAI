@@ -96,6 +96,7 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "workflow": CATEGORY_TOOLS,
     "mcp": CATEGORY_TOOLS,
     "browser": CATEGORY_TOOLS,
+    "browser-tool": CATEGORY_TOOLS,
     "commit": CATEGORY_TOOLS,
     "docs": CATEGORY_TOOLS,
 

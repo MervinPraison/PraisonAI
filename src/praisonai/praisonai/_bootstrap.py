@@ -59,3 +59,19 @@ def ensure_praisonai_train() -> None:
         root = str(train_src)
         if root not in sys.path:
             sys.path.insert(0, root)
+
+
+def ensure_praisonai_browser() -> None:
+    """Ensure ``praisonai_browser`` can be imported in monorepo dev layouts."""
+    try:
+        import praisonai_browser  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    wrapper_src = Path(__file__).resolve().parents[1]  # .../src/praisonai
+    browser_src = wrapper_src.parent / "praisonai-browser"
+    if (browser_src / "praisonai_browser").is_dir():
+        root = str(browser_src)
+        if root not in sys.path:
+            sys.path.insert(0, root)

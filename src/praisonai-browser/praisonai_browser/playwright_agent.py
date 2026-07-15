@@ -141,6 +141,10 @@ class PlaywrightBrowserAgent:
                 await self.page.mouse.wheel(0, delta)
                 return {"success": True}
             
+            elif action_type == "clear_input":
+                await self.page.fill(selector, "")
+                return {"success": True}
+            
             elif action_type in ("done", "wait"):
                 return {"success": True}
             

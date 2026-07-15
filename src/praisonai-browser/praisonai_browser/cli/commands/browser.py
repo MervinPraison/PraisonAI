@@ -38,7 +38,7 @@ def start_server(
         praisonai browser start --port 8765 --model gpt-4o
     """
     try:
-        from praisonai.browser import BrowserServer
+        from praisonai_browser import BrowserServer
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         console.print("Install required dependencies: pip install fastapi uvicorn")
@@ -73,7 +73,7 @@ def list_sessions(
         praisonai browser sessions --limit 10
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -132,7 +132,7 @@ def show_history(
         praisonai browser history abc12345
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -197,7 +197,7 @@ def clear_sessions(
         praisonai browser clear --all --yes
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -266,7 +266,7 @@ def _run_alternative_engine(
     async def run():
         if engine == "hybrid":
             try:
-                from .cdp_agent import run_hybrid
+                from praisonai_browser.cdp_agent import run_hybrid
             except ImportError as e:
                 console.print(f"[red]Hybrid mode not available:[/red] {e}")
                 raise typer.Exit(1)
@@ -281,7 +281,7 @@ def _run_alternative_engine(
             
         elif engine == "cdp":
             try:
-                from .cdp_agent import run_cdp_only
+                from praisonai_browser.cdp_agent import run_cdp_only
             except ImportError as e:
                 console.print(f"[red]CDP agent not available:[/red] {e}")
                 console.print("Install: pip install aiohttp websockets")
@@ -302,7 +302,7 @@ def _run_alternative_engine(
             
         elif engine == "playwright":
             try:
-                from .playwright_agent import run_playwright
+                from praisonai_browser.playwright_agent import run_playwright
             except ImportError as e:
                 console.print(f"[red]Playwright not available:[/red] {e}")
                 console.print("Install: pip install playwright && playwright install chromium")
@@ -517,7 +517,7 @@ def run_agent(
     # Normal mode - poll session database for progress
     try:
         import websockets
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -730,7 +730,7 @@ def list_pages(
         praisonai browser pages --json
     """
     try:
-        from .cdp_utils import get_pages_sync
+        from praisonai_browser.cdp_utils import get_pages_sync
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         console.print("Install: pip install aiohttp websockets")
@@ -782,7 +782,7 @@ def get_dom_cmd(
     """
     import asyncio
     try:
-        from .cdp_utils import get_dom
+        from praisonai_browser.cdp_utils import get_dom
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -827,7 +827,7 @@ def read_content(
     """
     import asyncio
     try:
-        from .cdp_utils import read_page
+        from praisonai_browser.cdp_utils import read_page
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -858,7 +858,7 @@ def get_console_logs(
     """
     import asyncio
     try:
-        from .cdp_utils import get_console
+        from praisonai_browser.cdp_utils import get_console
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -902,7 +902,7 @@ def execute_javascript(
     """
     import asyncio
     try:
-        from .cdp_utils import execute_js
+        from praisonai_browser.cdp_utils import execute_js
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1843,7 +1843,7 @@ def doctor_test_extension(
     console.print("[bold]Extension Mode Test[/bold]\n")
     
     async def run_test():
-        from .server import test_extension_mode
+        from praisonai_browser.server import test_extension_mode
         return await test_extension_mode(
             goal=goal,
             url=url,
@@ -1953,7 +1953,7 @@ def doctor_bridge(
         praisonai browser doctor bridge --port 8766
     """
     import asyncio
-    from .diagnostics import check_bridge_server, check_bridge_websocket
+    from praisonai_browser.diagnostics import check_bridge_server, check_bridge_websocket
     
     console.print("[bold]Bridge Server Test[/bold]\n")
     
@@ -2000,7 +2000,7 @@ def doctor_api_keys(
         praisonai browser doctor api-keys --validate
         praisonai browser doctor api-keys --model gemini/gemini-2.0-flash --validate
     """
-    from .diagnostics import check_api_keys, check_api_key_valid
+    from praisonai_browser.diagnostics import check_api_keys, check_api_key_valid
     
     console.print("[bold]API Key Check[/bold]\n")
     
@@ -2049,7 +2049,7 @@ def doctor_env():
     Examples:
         praisonai browser doctor env
     """
-    from .diagnostics import get_environment_info
+    from praisonai_browser.diagnostics import get_environment_info
     
     console.print("[bold]Environment Configuration[/bold]\n")
     
@@ -2086,7 +2086,7 @@ def doctor_agent(
         praisonai browser doctor agent --model gemini/gemini-2.0-flash
     """
     import asyncio
-    from .diagnostics import check_agent_llm, check_vision_capability
+    from praisonai_browser.diagnostics import check_agent_llm, check_vision_capability
     
     console.print(f"[bold]Agent LLM Test ({model})[/bold]\n")
     
@@ -2137,7 +2137,7 @@ def doctor_flow(
     """
     import asyncio
     import json as json_lib
-    from .diagnostics import run_all_diagnostics
+    from praisonai_browser.diagnostics import run_all_diagnostics
     
     if not json_output:
         console.print("[bold]Full Automation Flow Diagnostics[/bold]\n")
@@ -2447,7 +2447,7 @@ def launch_browser(
             # Start server in background
             import sys
             server_process = subprocess.Popen(
-                [sys.executable, "-m", "praisonai.browser.server", "--port", str(server_port)],
+                [sys.executable, "-m", "praisonai_browser.server", "--port", str(server_port)],
                 stdout=subprocess.PIPE if not verbose else None,
                 stderr=subprocess.PIPE if not verbose else None,
                 start_new_session=True,
@@ -2613,7 +2613,7 @@ def launch_browser(
             # Initialize profiler if enabled
             profiler_instance = None
             if profile or deep_profile:
-                from .profiling import init_profiler
+                from praisonai_browser.profiling import init_profiler
                 profiler_instance = init_profiler(enabled=True, deep_profile=deep_profile)
                 console.print(f"[cyan]📊 Profiling {'(deep)' if deep_profile else ''} enabled[/cyan]")
             
@@ -2625,7 +2625,7 @@ def launch_browser(
             
             async def run_with_extension():
                 """Run goal using extension via bridge server."""
-                from .server import run_browser_agent_with_progress
+                from praisonai_browser.server import run_browser_agent_with_progress
                 
                 result = await run_browser_agent_with_progress(
                     goal=goal,
@@ -2641,7 +2641,7 @@ def launch_browser(
             
             async def run_with_cdp():
                 """Run goal using direct CDP (fallback)."""
-                from .cdp_agent import run_cdp_only
+                from praisonai_browser.cdp_agent import run_cdp_only
                 
                 result = await run_cdp_only(
                     goal=goal,
@@ -2930,7 +2930,7 @@ def launch_browser(
                 else:
                     # Fallback: create GIF from screenshots
                     try:
-                        from .video import create_video_from_screenshots, check_ffmpeg_available
+                        from praisonai_browser.video import create_video_from_screenshots, check_ffmpeg_available
                         if not check_ffmpeg_available():
                             console.print("[yellow]FFmpeg not installed - creating GIF fallback[/yellow]")
                         video_path = create_video_from_screenshots(str(screenshot_dir))
@@ -2956,7 +2956,7 @@ def launch_browser(
             # Show profiling report if enabled
             if profile or deep_profile:
                 try:
-                    from .profiling import stop_profiler
+                    from praisonai_browser.profiling import stop_profiler
                     profile_report = stop_profiler()
                     if profile_report:
                         console.print(profile_report)
@@ -3052,7 +3052,7 @@ def launch_browser(
                         # Extension mode
                         if selected_engine in ("extension", "auto"):
                             try:
-                                from .server import run_browser_agent_with_progress
+                                from praisonai_browser.server import run_browser_agent_with_progress
                                 result = await run_browser_agent_with_progress(
                                     goal=goal_input,
                                     url=url,  # Can use current page context
@@ -3074,7 +3074,7 @@ def launch_browser(
                                     raise
                         
                         # CDP fallback
-                        from .cdp_agent import run_cdp_only
+                        from praisonai_browser.cdp_agent import run_cdp_only
                         result = await run_cdp_only(
                             goal=goal_input,
                             url=None,  # Use current page
@@ -3094,7 +3094,7 @@ def launch_browser(
                     # Create video if recording
                     if record_video and goal_screenshot_dir:
                         try:
-                            from .video import create_video_from_screenshots
+                            from praisonai_browser.video import create_video_from_screenshots
                             video_path = create_video_from_screenshots(str(goal_screenshot_dir))
                             if video_path:
                                 console.print(f"[green]📹 Video: {video_path}[/green]")
@@ -3151,7 +3151,7 @@ def launch_browser(
 
 # Register benchmark commands
 try:
-    from .benchmark import add_benchmark_commands
+    from praisonai_browser.benchmark import add_benchmark_commands
     add_benchmark_commands(app)
 except ImportError:
     pass  # Benchmark module not available

@@ -18,6 +18,7 @@ PYPI_NAMES = {
     "code": "praisonai-code",
     "bot": "praisonai-bot",
     "train": "praisonai-train",
+    "browser": "praisonai-browser",
     "wrapper": "praisonai",
 }
 
@@ -40,6 +41,10 @@ def bot_dir() -> Path:
 
 def train_dir() -> Path:
     return project_root() / "src/praisonai-train"
+
+
+def browser_dir() -> Path:
+    return project_root() / "src/praisonai-browser"
 
 
 def wrapper_dir() -> Path:
@@ -101,6 +106,7 @@ def read_current_versions() -> dict[str, str]:
         "code": read_pyproject_version(code_dir() / "pyproject.toml"),
         "bot": read_pyproject_version(bot_dir() / "pyproject.toml"),
         "train": read_pyproject_version(train_dir() / "pyproject.toml"),
+        "browser": read_pyproject_version(browser_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -157,6 +163,16 @@ def bump_train_files(new_version: str) -> None:
     current = read_pyproject_version(path)
     write_pyproject_version(path, current, new_version)
     version_py = train_dir() / "praisonai_train/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_browser_files(new_version: str) -> None:
+    path = browser_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = browser_dir() / "praisonai_browser/_version.py"
     version_py.write_text(
         re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
     )

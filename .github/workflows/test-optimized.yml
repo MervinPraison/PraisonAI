@@ -83,6 +83,7 @@ jobs:
           tests/unit/test_c7_1_boundaries.py \
           tests/unit/test_c9_backward_compat.py \
           tests/unit/test_c9_1_boundaries.py \
+          tests/unit/test_c11_browser_backward_compat.py \
           -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
           ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
@@ -211,10 +212,30 @@ jobs:
         "
         bash "$GITHUB_WORKSPACE/scripts/check_c10_train_imports.sh"
 
+    - name: Standalone praisonai-browser smoke (C11)
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-browser-standalone
+        /tmp/praisonai-browser-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-browser
+        /tmp/praisonai-browser-standalone/bin/python -c "
+        import sys
+        from praisonai_browser._version import __version__ as pkg_version
+        import praisonai_browser
+        assert praisonai_browser.__version__ == pkg_version
+        server_cls = praisonai_browser.BrowserServer
+        assert server_cls.__name__ == 'BrowserServer'
+        for heavy in ('fastapi', 'uvicorn', 'playwright'):
+            assert heavy not in sys.modules, f'{heavy} imported eagerly'
+        print('browser standalone ok', praisonai_browser.__version__, server_cls.__name__)
+        "
+        /tmp/praisonai-browser-standalone/bin/praisonai-browser --help
+        bash "$GITHUB_WORKSPACE/scripts/check_c11_browser_imports.sh"
+        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py -q -m "not network"
+
     - name: Audit hybrid module imports (C8 full stack)
       run: |
         set -euo pipefail
-        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai
+        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai
         python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary

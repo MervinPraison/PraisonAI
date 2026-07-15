@@ -23,7 +23,7 @@ This script:
 8. Pushes to GitHub (with rebase if needed)
 9. Creates GitHub release (latest)
 
-Publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai
+Publish order: praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai-browser → praisonai
 
 One-command full release (patch by default):
     python scripts/publish_all.py
@@ -77,6 +77,11 @@ def get_praisonai_bot_dir() -> Path:
 def get_praisonai_train_dir() -> Path:
     """Get the praisonai-train package directory."""
     return get_project_root() / "src/praisonai-train"
+
+
+def get_praisonai_browser_dir() -> Path:
+    """Get the praisonai-browser package directory."""
+    return get_project_root() / "src/praisonai-browser"
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
@@ -197,6 +202,8 @@ def bump_version(
     bot_pin_only: bool = False,
     train_version: Optional[str] = None,
     train_pin_only: bool = False,
+    browser_version: Optional[str] = None,
+    browser_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
@@ -204,6 +211,7 @@ def bump_version(
     code_dir = get_praisonai_code_dir()
     bot_dir = get_praisonai_bot_dir()
     train_dir = get_praisonai_train_dir()
+    browser_dir = get_praisonai_browser_dir()
     
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
@@ -337,6 +345,32 @@ def bump_version(
             root,
         )
 
+    if browser_version:
+        if browser_pin_only:
+            print(f"\n📦 Pinning praisonai-browser dependency to >={browser_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-browser to {browser_version}:")
+            update_file(
+                browser_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{browser_version}"')],
+                root,
+            )
+            update_file(
+                browser_dir / "praisonai_browser/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{browser_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-browser(?:>=[0-9.]+)?"',
+                    f'"praisonai-browser>={browser_version}"',
+                )
+            ],
+            root,
+        )
+
     print("\n✨ Version bump complete!")
 
 
@@ -348,11 +382,12 @@ def validate_dependencies(
     code_version: Optional[str] = None,
     bot_version: Optional[str] = None,
     train_version: Optional[str] = None,
+    browser_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version or bot_version or train_version:
+    if agents_version or code_version or bot_version or train_version or browser_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
@@ -362,6 +397,8 @@ def validate_dependencies(
             lock_cmd.extend(["--upgrade-package", f"praisonai-bot=={bot_version}"])
         if train_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-train=={train_version}"])
+        if browser_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-browser=={browser_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -599,9 +636,19 @@ Examples:
         help="Wait for the specified praisonai-train version to be available on PyPI"
     )
     parser.add_argument(
+        "--browser-pin",
+        help="Pin praisonai-browser>= in wrapper pyproject only (after CI browser publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-browser",
+        action="store_true",
+        help="Wait for the specified praisonai-browser version to be available on PyPI"
+    )
+    parser.add_argument(
         "--wait-all",
         action="store_true",
-        help="Wait for agents, code, bot, and train versions on PyPI (needs --agents and pins)",
+        help="Wait for agents, code, bot, train, and browser versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -653,6 +700,7 @@ Examples:
     code_version = args.code or args.code_pin
     bot_version = args.bot or args.bot_pin
     train_version = args.train or args.train_pin
+    browser_version = args.browser_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
@@ -665,6 +713,11 @@ Examples:
 
     if train_version and not re.match(r'^\d+\.\d+\.\d+$', train_version):
         print(f"❌ Invalid train version format: {train_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.1)")
+        sys.exit(1)
+
+    if browser_version and not re.match(r'^\d+\.\d+\.\d+$', browser_version):
+        print(f"❌ Invalid browser version format: {browser_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.1)")
         sys.exit(1)
     
@@ -687,6 +740,7 @@ Examples:
     wait_code = args.wait_code or args.wait_all
     wait_bot = args.wait_bot or args.wait_all
     wait_train = args.wait_train or args.wait_all
+    wait_browser = args.wait_browser or args.wait_all
 
     if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
@@ -708,6 +762,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-train", train_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-train was published successfully")
             sys.exit(1)
+
+    if wait_browser and browser_version:
+        if not wait_for_pypi_version("praisonai-browser", browser_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-browser was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -719,6 +778,8 @@ Examples:
         bot_pin_only=bool(args.bot_pin and not args.bot),
         train_version=train_version,
         train_pin_only=bool(args.train_pin and not args.train),
+        browser_version=browser_version,
+        browser_pin_only=bool(args.browser_pin),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -731,6 +792,7 @@ Examples:
         code_version=code_version,
         bot_version=bot_version,
         train_version=train_version,
+        browser_version=browser_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")
