@@ -6,7 +6,6 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CODE_ROOT="${C12_CODE_ROOT:-src/praisonai-code/praisonai_code}"
 MCP_ROOT="${C12_MCP_ROOT:-src/praisonai-mcp/praisonai_mcp}"
-BRIDGE_FILES="_wrapper_bridge.py _bootstrap.py _code_bridge.py"
 
 ANY_WRAPPER_RE='(^[[:space:]]*from praisonai([[:space:]]|\.)|^[[:space:]]*import praisonai($|\.))'
 ANY_CODE_RE='(^from praisonai_code([[:space:]]|\.)|^import praisonai_code($|\.))'
@@ -14,7 +13,6 @@ ANY_MCP_RE='(^[[:space:]]*from praisonai_mcp([[:space:]]|\.)|^[[:space:]]*import
 
 echo "== C12 praisonai_mcp wrapper import gate (must be zero outside bridges) =="
 if command -v rg >/dev/null 2>&1; then
-  MATCHES="$(rg -n "$ANY_WRAPPER_RE" "$MCP_ROOT" --glob '*.py' 2>/dev/null | grep -Ev 'praisonai_mcp|praisonaiagents|$(echo $BRIDGE_FILES | tr " " "|")' || true)"
   MATCHES="$(rg -n "$ANY_WRAPPER_RE" "$MCP_ROOT" --glob '*.py' 2>/dev/null | grep -v '_wrapper_bridge.py' | grep -v '_bootstrap.py' | grep -v '_code_bridge.py' || true)"
 else
   MATCHES="$(grep -rEn --include='*.py' "$ANY_WRAPPER_RE" "$MCP_ROOT" 2>/dev/null | grep -v '_wrapper_bridge.py' | grep -v '_bootstrap.py' | grep -v '_code_bridge.py' || true)"

@@ -20,3 +20,8 @@ def configuration_paths():
 
 def configuration_loader_helpers():
     return import_code_module("praisonai_code.cli.configuration.loader")
+
+
+def get_output_controller():
+    fn = import_code_module("praisonai_code.cli.output.console").get_output_controller
+    return fn()

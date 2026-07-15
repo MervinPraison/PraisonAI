@@ -8,12 +8,12 @@ from typing import Optional
 
 import typer
 
-from praisonai_mcp.cli.output.console import get_output_controller
 from praisonai_mcp.cli._configuration import (
     configuration_loader_helpers,
     configuration_paths,
     configuration_schema,
     get_config_loader,
+    get_output_controller,
 )
 
 app = typer.Typer(help="MCP server management")
@@ -242,7 +242,11 @@ def mcp_test(
             if proc.poll() is None:
                 # Process is running
                 proc.terminate()
-                proc.wait(timeout=2)
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
                 
                 if output.is_json_mode:
                     output.print_json({"name": name, "status": "ok", "message": "Server started successfully"})
@@ -302,6 +306,7 @@ def mcp_sync(
         output.print_info(f"Syncing {srv}...")
         srv_config = config.mcp.servers[srv]
         
+        mcp = None
         try:
             # Import schema types for checking
             schema = configuration_schema()
@@ -342,15 +347,18 @@ def mcp_sync(
                     desc = tool_def["function"].get("description", "")[:40]
                     output.print(f"    - {name}: {desc}...")
             
-            # Clean up
-            mcp.shutdown()
-            
         except ImportError:
             output.print_error("  MCP package not installed. Install with: pip install praisonaiagents[mcp]")
             failed_servers.append(srv)
         except Exception as e:
             output.print_error(f"  Failed to sync: {e}")
             failed_servers.append(srv)
+        finally:
+            if mcp is not None:
+                try:
+                    mcp.shutdown()
+                except Exception:
+                    pass
     
     # Summary
     if output.is_json_mode:
@@ -547,7 +555,16 @@ def mcp_run(
                 stderr=sys.stderr,
                 env=env,
             )
-            proc.wait()
+            try:
+                proc.wait()
+            except KeyboardInterrupt:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                raise
         else:
             # SSE mode - would need to wrap the server
             # For now, just run the server and let it handle SSE
@@ -555,6 +572,7 @@ def mcp_run(
             output.print_info("Press Ctrl+C to stop.")
             
             # Try to use praisonaiagents MCP server wrapper
+            mcp = None
             try:
                 from praisonaiagents.mcp import MCP
                 
@@ -577,6 +595,12 @@ def mcp_run(
                 raise typer.Exit(1)
             except KeyboardInterrupt:
                 output.print_info("\nServer stopped.")
+            finally:
+                if mcp is not None:
+                    try:
+                        mcp.shutdown()
+                    except Exception:
+                        pass
     
     except FileNotFoundError:
         output.print_error(f"Command not found: {server.command}")
@@ -687,10 +711,6 @@ def mcp_auth(
         try:
             code = callback_handler.wait_for_callback(state, timeout=timeout)
             
-            # Clear temporary state
-            auth_storage.clear_oauth_state(name)
-            auth_storage.clear_code_verifier(name)
-            
             # Store a placeholder token (real impl would exchange code for tokens)
             auth_storage.set_tokens(name, {
                 "access_token": f"oauth_{code[:20]}...",
@@ -703,10 +723,13 @@ def mcp_auth(
                 output.print_success(f"Successfully authenticated with {name}")
                 
         except TimeoutError:
-            auth_storage.clear_oauth_state(name)
-            auth_storage.clear_code_verifier(name)
             output.print_error(f"Authentication timed out after {timeout} seconds")
             raise typer.Exit(1)
+        finally:
+            # Always clear temporary OAuth state, regardless of success,
+            # timeout, or interruption.
+            auth_storage.clear_oauth_state(name)
+            auth_storage.clear_code_verifier(name)
             
     except ImportError as e:
         output.print_error(f"MCP auth modules not available: {e}")
