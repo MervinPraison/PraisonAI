@@ -185,6 +185,39 @@ class TestHTTPStreamTransportAutoDetection:
         assert get_transport_type('python3 server.py') == 'stdio'
 
 
+class TestHTTPStreamClientURLPreserved:
+    """Test that HTTPStreamMCPClient uses the server URL exactly as provided.
+
+    Regression test for issue #3032: a bare-host URL was silently rewritten to
+    append '/mcp', which POSTed to a non-existent endpoint (HTTP 404) that the
+    official SDK surfaces as "Session terminated" during initialize().
+    """
+
+    def _make_client(self, url):
+        from unittest.mock import patch
+        from praisonaiagents.mcp.mcp_http_stream import HTTPStreamMCPClient
+
+        # Skip the network handshake performed in __init__ so we can inspect
+        # the resolved base_url without contacting a real server.
+        with patch.object(HTTPStreamMCPClient, '_initialize', lambda self: None):
+            return HTTPStreamMCPClient(url)
+
+    def test_bare_host_url_not_rewritten(self):
+        """A bare-host URL must be used verbatim (no '/mcp' suffix)."""
+        client = self._make_client('https://mcp.transform.unstructured.io')
+        assert client.base_url == 'https://mcp.transform.unstructured.io'
+
+    def test_path_url_preserved(self):
+        """A URL that already has a path must be preserved unchanged."""
+        client = self._make_client('https://api.example.com/custom')
+        assert client.base_url == 'https://api.example.com/custom'
+
+    def test_mcp_path_url_preserved(self):
+        """A URL ending in /mcp must be preserved unchanged."""
+        client = self._make_client('https://api.example.com/mcp')
+        assert client.base_url == 'https://api.example.com/mcp'
+
+
 class TestSSEEventParsing:
     """Test SSE event parsing for resumability."""
     
