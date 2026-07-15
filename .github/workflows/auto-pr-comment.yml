@@ -91,8 +91,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for prior reviewers (25 min)
-        run: sleep 1500
+      - name: Wait for prior reviewers (30 min)
+        run: sleep 1800
 
       - name: Post Claude FINAL (skip Copilot)
         uses: actions/github-script@v7

@@ -81,4 +81,27 @@ assert(
   chain.priorReviewersReady([coderabbit, greptile], [geminiReview], { optionalWaitMs: 0 }).ready
 );
 
+const oldPr = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+assert(
+  'prior not ready without coderabbit before timeout',
+  !chain.priorReviewersReady([greptile], [], { prCreatedAt: new Date().toISOString(), requiredWaitMs: 30 * 60 * 1000 }).ready
+);
+assert(
+  'prior timeout when coderabbit silent after 30m',
+  chain.priorReviewersReady([greptile], [], { prCreatedAt: oldPr, requiredWaitMs: 30 * 60 * 1000 }).ready
+);
+assert(
+  'claude FINAL timeout when required reviewer silent and no prior FINAL',
+  chain.claudeFinalReady([greptile], [], { prCreatedAt: oldPr, skipCopilot: true, requiredWaitMs: 30 * 60 * 1000 }).ready
+);
+const finalClaude = {
+  user: { login: 'github-actions[bot]' },
+  body: '@claude You are the FINAL architecture reviewer for this PR.',
+  created_at: '2026-07-02T07:25:00Z',
+};
+assert(
+  'claude FINAL not re-posted when already triggered',
+  !chain.claudeFinalReady([greptile, finalClaude], [], { prCreatedAt: oldPr, skipCopilot: true, requiredWaitMs: 0 }).ready
+);
+
 process.exit(failed ? 1 : 0);
