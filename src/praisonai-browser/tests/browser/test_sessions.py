@@ -5,7 +5,7 @@ import os
 import tempfile
 import time
 
-from praisonai.browser.sessions import SessionManager
+from praisonai_browser.sessions import SessionManager
 
 
 @pytest.fixture

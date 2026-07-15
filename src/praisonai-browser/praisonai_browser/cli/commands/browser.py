@@ -38,7 +38,7 @@ def start_server(
         praisonai browser start --port 8765 --model gpt-4o
     """
     try:
-        from praisonai.browser import BrowserServer
+        from praisonai_browser import BrowserServer
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         console.print("Install required dependencies: pip install fastapi uvicorn")
@@ -73,7 +73,7 @@ def list_sessions(
         praisonai browser sessions --limit 10
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -132,7 +132,7 @@ def show_history(
         praisonai browser history abc12345
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -197,7 +197,7 @@ def clear_sessions(
         praisonai browser clear --all --yes
     """
     try:
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -517,7 +517,7 @@ def run_agent(
     # Normal mode - poll session database for progress
     try:
         import websockets
-        from praisonai.browser.sessions import SessionManager
+        from praisonai_browser.sessions import SessionManager
     except ImportError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -2447,7 +2447,7 @@ def launch_browser(
             # Start server in background
             import sys
             server_process = subprocess.Popen(
-                [sys.executable, "-m", "praisonai.browser.server", "--port", str(server_port)],
+                [sys.executable, "-m", "praisonai_browser.server", "--port", str(server_port)],
                 stdout=subprocess.PIPE if not verbose else None,
                 stderr=subprocess.PIPE if not verbose else None,
                 start_new_session=True,

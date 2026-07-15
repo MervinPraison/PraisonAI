@@ -1,0 +1,48 @@
+[project]
+name = "praisonai-browser"
+version = "0.0.1"
+description = "Browser automation for PraisonAI — Chrome extension bridge, CDP, and Playwright agents extracted from the praisonai wrapper."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.126",
+    "rich>=13.7",
+    "typer>=0.12.0",
+    "click>=8.4.2",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "websockets>=12.0",
+    "aiohttp>=3.9.0",
+]
+playwright = [
+    "playwright>=1.40.0",
+]
+all = [
+    "praisonai-browser[server,playwright]",
+]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[project.scripts]
+praisonai-browser = "praisonai_browser.__main__:main"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_browser*"]

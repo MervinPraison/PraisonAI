@@ -1,5 +1,5 @@
 name: Install PraisonAI monorepo packages
-description: Install praisonai-agents, praisonai-code, praisonai-bot, praisonai-train, and praisonai wrapper from local paths (mirrors PyPI five-package install order).
+description: Install praisonai-agents, praisonai-code, praisonai-bot, praisonai-train, praisonai-browser, and praisonai wrapper from local paths (mirrors PyPI six-package install order).
 
 inputs:
   repo-root:
@@ -37,6 +37,7 @@ runs:
         CODE_PKG="${BASE}src/praisonai-code"
         BOT_PKG="${BASE}src/praisonai-bot"
         TRAIN_PKG="${BASE}src/praisonai-train"
+        BROWSER_PKG="${BASE}src/praisonai-browser"
         WRAPPER_PKG="${BASE}src/praisonai"
 
         normalise_extras() {
@@ -60,6 +61,8 @@ runs:
           uv pip install --system -e .
           cd "$TRAIN_PKG"
           uv pip install --system -e .
+          cd "$BROWSER_PKG"
+          uv pip install --system -e .
           cd "$WRAPPER_PKG"
           uv pip install --system "${WRAPPER_SUFFIX}"
         else
@@ -70,6 +73,8 @@ runs:
           cd "$BOT_PKG"
           pip install -e .
           cd "$TRAIN_PKG"
+          pip install -e .
+          cd "$BROWSER_PKG"
           pip install -e .
           cd "$WRAPPER_PKG"
           pip install -e "${WRAPPER_SUFFIX}"

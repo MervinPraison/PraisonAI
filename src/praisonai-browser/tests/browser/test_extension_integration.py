@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import patch, Mock, AsyncMock, MagicMock
 from typer.testing import CliRunner
 
-from praisonai.browser.cli import app
+from praisonai_browser.cli.commands.browser import app
 
 
 runner = CliRunner()
@@ -48,7 +48,7 @@ class TestEngineSelectionLogic:
     @pytest.mark.asyncio
     async def test_auto_mode_checks_extension_availability(self):
         """Test auto mode checks bridge server health for extension."""
-        from praisonai.browser.server import run_browser_agent_with_progress
+        from praisonai_browser.server import run_browser_agent_with_progress
         
         # Mock websockets to simulate connection refused (no server)
         with patch('websockets.connect', side_effect=ConnectionRefusedError()):
@@ -85,7 +85,7 @@ class TestEngineSelectionLogic:
         mock_connect.__aexit__ = AsyncMock(return_value=None)
         
         with patch('websockets.connect', return_value=mock_connect):
-            from praisonai.browser.server import run_browser_agent_with_progress
+            from praisonai_browser.server import run_browser_agent_with_progress
             
             result = await run_browser_agent_with_progress(
                 goal="test goal",
@@ -103,14 +103,14 @@ class TestRunBrowserAgentWithProgress:
     
     def test_function_exists(self):
         """Test run_browser_agent_with_progress can be imported."""
-        from praisonai.browser.server import run_browser_agent_with_progress
+        from praisonai_browser.server import run_browser_agent_with_progress
         assert run_browser_agent_with_progress is not None
         assert callable(run_browser_agent_with_progress)
     
     def test_function_signature(self):
         """Test function has expected parameters."""
         import inspect
-        from praisonai.browser.server import run_browser_agent_with_progress
+        from praisonai_browser.server import run_browser_agent_with_progress
         
         sig = inspect.signature(run_browser_agent_with_progress)
         params = list(sig.parameters.keys())
@@ -129,7 +129,7 @@ class TestRunBrowserAgentWithProgress:
     async def test_returns_proper_result_structure(self):
         """Test returns dict with expected keys."""
         with patch('websockets.connect', side_effect=ConnectionRefusedError()):
-            from praisonai.browser.server import run_browser_agent_with_progress
+            from praisonai_browser.server import run_browser_agent_with_progress
             
             result = await run_browser_agent_with_progress(goal="test", timeout=1.0)
             
@@ -162,7 +162,7 @@ class TestExtensionModeMessages:
         mock_connect.__aexit__ = AsyncMock(return_value=None)
         
         with patch('websockets.connect', return_value=mock_connect):
-            from praisonai.browser.server import run_browser_agent_with_progress
+            from praisonai_browser.server import run_browser_agent_with_progress
             
             result = await run_browser_agent_with_progress(goal="test", timeout=10.0)
             
@@ -186,7 +186,7 @@ class TestExtensionModeMessages:
         mock_connect.__aexit__ = AsyncMock(return_value=None)
         
         with patch('websockets.connect', return_value=mock_connect):
-            from praisonai.browser.server import run_browser_agent_with_progress
+            from praisonai_browser.server import run_browser_agent_with_progress
             
             result = await run_browser_agent_with_progress(goal="test", timeout=10.0)
             
@@ -199,14 +199,14 @@ class TestCDPFallback:
     
     def test_cdp_agent_exists(self):
         """Test CDPBrowserAgent can be imported."""
-        from praisonai.browser.cdp_agent import CDPBrowserAgent, run_cdp_only
+        from praisonai_browser.cdp_agent import CDPBrowserAgent, run_cdp_only
         assert CDPBrowserAgent is not None
         assert run_cdp_only is not None
     
     def test_run_cdp_only_signature(self):
         """Test run_cdp_only has expected parameters."""
         import inspect
-        from praisonai.browser.cdp_agent import run_cdp_only
+        from praisonai_browser.cdp_agent import run_cdp_only
         
         sig = inspect.signature(run_cdp_only)
         params = list(sig.parameters.keys())
@@ -245,7 +245,7 @@ class TestProgressCallback:
         mock_connect.__aexit__ = AsyncMock(return_value=None)
         
         with patch('websockets.connect', return_value=mock_connect):
-            from praisonai.browser.server import run_browser_agent_with_progress
+            from praisonai_browser.server import run_browser_agent_with_progress
             
             result = await run_browser_agent_with_progress(
                 goal="test",
@@ -275,7 +275,7 @@ class TestEngineIndicator:
     
     def test_extension_engine_value(self):
         """Test extension mode sets engine to 'extension'."""
-        from praisonai.browser.server import run_browser_agent_with_progress
+        from praisonai_browser.server import run_browser_agent_with_progress
         import asyncio
         
         # Force connection error to get default result
@@ -293,20 +293,20 @@ class TestImportCompatibility:
     
     def test_run_browser_agent_still_exists(self):
         """Test original run_browser_agent function still exists."""
-        from praisonai.browser.server import run_browser_agent
+        from praisonai_browser.server import run_browser_agent
         assert run_browser_agent is not None
         assert callable(run_browser_agent)
     
     def test_browser_server_unchanged(self):
         """Test BrowserServer class unchanged."""
-        from praisonai.browser.server import BrowserServer
+        from praisonai_browser.server import BrowserServer
         
         server = BrowserServer(port=9999)
         assert server.port == 9999
     
     def test_cdp_agent_unchanged(self):
         """Test CDPBrowserAgent class unchanged."""
-        from praisonai.browser.cdp_agent import CDPBrowserAgent
+        from praisonai_browser.cdp_agent import CDPBrowserAgent
         
         # Should be able to create (won't connect until run)
         agent = CDPBrowserAgent(port=9999, model="gpt-4o-mini")

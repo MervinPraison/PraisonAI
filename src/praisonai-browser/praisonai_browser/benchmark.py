@@ -364,7 +364,7 @@ class BrowserBenchmark:
         
         try:
             self._server_process = subprocess.Popen(
-                [sys.executable, "-m", "praisonai.browser.server", "--port", str(self._bridge_port)],
+                [sys.executable, "-m", "praisonai_browser.server", "--port", str(self._bridge_port)],
                 stdout=subprocess.PIPE if not self.debug else None,
                 stderr=subprocess.PIPE if not self.debug else None,
                 start_new_session=True,

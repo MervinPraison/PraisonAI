@@ -23,8 +23,8 @@ def browser_status(
     """Check browser status.
     
     Examples:
-        praisonai browser status
-        praisonai browser --profile chrome status
+        praisonai browser-tool status
+        praisonai browser-tool --profile chrome status
     """
     try:
         from rich.console import Console
@@ -54,8 +54,8 @@ def browser_open(
     """Open a URL in the browser.
     
     Examples:
-        praisonai browser open https://example.com
-        praisonai browser open https://example.com --headless
+        praisonai browser-tool open https://example.com
+        praisonai browser-tool open https://example.com --headless
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -83,8 +83,8 @@ def browser_snapshot(
     """Take a snapshot of the current page.
     
     Examples:
-        praisonai browser snapshot
-        praisonai browser snapshot --output snapshot.txt
+        praisonai browser-tool snapshot
+        praisonai browser-tool snapshot --output snapshot.txt
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -119,8 +119,8 @@ def browser_screenshot(
     """Take a screenshot of the current page.
     
     Examples:
-        praisonai browser screenshot
-        praisonai browser screenshot --output page.png --full-page
+        praisonai browser-tool screenshot
+        praisonai browser-tool screenshot --output page.png --full-page
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -153,8 +153,8 @@ def browser_click(
     """Click an element on the page.
     
     Examples:
-        praisonai browser click "#submit-button"
-        praisonai browser click "ref:123" --double
+        praisonai browser-tool click "#submit-button"
+        praisonai browser-tool click "ref:123" --double
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -182,8 +182,8 @@ def browser_type(
     """Type text into an element.
     
     Examples:
-        praisonai browser type "#search-input" "hello world"
-        praisonai browser type "#search-input" "hello world" --submit
+        praisonai browser-tool type "#search-input" "hello world"
+        praisonai browser-tool type "#search-input" "hello world" --submit
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -209,7 +209,7 @@ def browser_navigate(
     """Navigate to a URL.
     
     Examples:
-        praisonai browser navigate https://example.com
+        praisonai browser-tool navigate https://example.com
     """
     try:
         from praisonai_tools import BrowserBaseTool
@@ -234,8 +234,8 @@ def browser_profiles(
     """List available browser profiles.
     
     Examples:
-        praisonai browser profiles
-        praisonai browser profiles --json
+        praisonai browser-tool profiles
+        praisonai browser-tool profiles --json
     """
     profiles = [
         {"name": "default", "description": "Default browser profile"},
@@ -272,7 +272,7 @@ def browser_callback(ctx: typer.Context):
         help_text = """
 [bold cyan]PraisonAI Browser - Browser Control for Agent Automation[/bold cyan]
 
-Control browsers for agent automation with: praisonai browser <command>
+Control browsers for agent automation with: praisonai browser-tool <command>
 
 [bold]Commands:[/bold]
   [green]status[/green]       Check browser status
@@ -285,10 +285,10 @@ Control browsers for agent automation with: praisonai browser <command>
   [green]profiles[/green]     List browser profiles
 
 [bold]Examples:[/bold]
-  praisonai browser status
-  praisonai browser open https://example.com
-  praisonai browser snapshot --output page.txt
-  praisonai browser click "#submit-button"
+  praisonai browser-tool status
+  praisonai browser-tool open https://example.com
+  praisonai browser-tool snapshot --output page.txt
+  praisonai browser-tool click "#submit-button"
 """
         try:
             from rich import print as rprint

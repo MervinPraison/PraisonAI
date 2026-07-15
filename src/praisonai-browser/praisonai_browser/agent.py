@@ -4,7 +4,18 @@ Uses PraisonAI agents to decide browser actions based on observations.
 """
 
 import logging
-from typing import Optional, Dict, Any, List, Literal
+from typing import Optional, Dict, Any, List, Literal, Union
+
+from praisonaiagents.tools.protocols.browser import (
+    BrowserAction as ProtocolBrowserAction,
+    BrowserAgentProtocol,
+    BrowserObservation,
+)
+from praisonai_browser._protocol_bridge import (
+    action_from_agent_dict,
+    action_to_agent_dict,
+    observation_to_dict,
+)
 
 logger = logging.getLogger("praisonai.browser.agent")
 
@@ -18,7 +29,7 @@ def _get_browser_action_model():
     except ImportError:
         return None
     
-    class BrowserAction(BaseModel):
+    class BrowserActionSchema(BaseModel):
         """Structured response for browser automation actions."""
         # === CORE ACTION FIELDS ===
         thought: str = Field(description="Brief reasoning for this action")
@@ -75,7 +86,7 @@ def _get_browser_action_model():
             description="If retrying a failed action, explain what went wrong and why retrying"
         )
     
-    return BrowserAction
+    return BrowserActionSchema
 
 
 
@@ -346,9 +357,9 @@ CRITICAL: After typing a search query, use "submit" action to press Enter.
 
 class BrowserAgent:
     """Agent that processes browser observations and returns actions.
-    
-    This is a thin wrapper that creates a PraisonAI agent with browser-specific
-    configuration and tools.
+
+    Implements :class:`~praisonaiagents.tools.protocols.browser.BrowserAgentProtocol`
+    at the semantic boundary while keeping dict wire format for extension/CDP callers.
     """
     
     def __init__(
@@ -422,28 +433,28 @@ class BrowserAgent:
     
     def process_observation(
         self,
+        observation: Union[Dict[str, Any], BrowserObservation],
+    ) -> Dict[str, Any]:
+        """Process an observation and return the next action."""
+        obs_dict = observation_to_dict(observation)
+        action_dict = self._process_observation_dict(obs_dict)
+        # Protocol boundary: ensure semantic round-trip through agents types.
+        action_to_agent_dict(action_from_agent_dict(action_dict))
+        return action_dict
+
+    def process_observation_protocol(
+        self, observation: BrowserObservation
+    ) -> ProtocolBrowserAction:
+        """Protocol-native entry point (agents-tier types in/out)."""
+        return action_from_agent_dict(
+            self._process_observation_dict(observation.to_dict())
+        )
+
+    def _process_observation_dict(
+        self,
         observation: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Process an observation and return the next action.
-        
-        Args:
-            observation: Dict containing:
-                - task: The user's goal
-                - url: Current page URL
-                - title: Page title
-                - elements: List of actionable elements
-                - screenshot: Base64 screenshot (optional)
-                - step_number: Current step
-        
-        Returns:
-            Action dict containing:
-                - action: Action type
-                - selector: CSS selector (if applicable)
-                - text: Text to type (if applicable)
-                - thought: Agent's reasoning
-                - done: Whether goal is complete
-                - summary: What was accomplished (when done=true)
-        """
+        """Internal dict-based observation processing."""
         self._ensure_agent()
         
         import time

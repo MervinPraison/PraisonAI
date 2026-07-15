@@ -1506,10 +1506,12 @@ class PraisonAI:
                 sys.exit(exit_code)
             
             elif args.command == 'browser':
-                # Browser agent command - delegate to browser CLI Typer app
-                # Uses sys.argv replacement for proper arg passthrough (matches profile command pattern)
-                from praisonai_code._wrapper_bridge import import_wrapper_module
-                _mod = import_wrapper_module('praisonai.browser.cli')
+                # C11: Browser automation — delegate to praisonai-browser CLI
+                from praisonai_code._browser_bridge import browser_package_available, import_browser_module
+                if not browser_package_available():
+                    print("Browser package not installed. pip install praisonai-browser")
+                    sys.exit(1)
+                _mod = import_browser_module('praisonai_browser.cli.app')
                 browser_app = getattr(_mod, 'app')
                 import sys as _sys
                 _sys.argv = ['praisonai', 'browser'] + unknown_args

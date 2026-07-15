@@ -228,7 +228,8 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "mint_link": (".commands.mint_link", "app", "Generate gateway magic links"),
     "dashboard": (".commands.dashboard", "app", "Unified Dashboard (Flow + Claw + UI)"),
 
-    "browser": (".commands.browser", "app", "Browser control for agent automation"),
+    "browser": (".commands.browser", "app", "Browser automation (extension bridge, CDP, Playwright)"),
+    "browser-tool": (".commands.browser_tool", "app", "praisonai-tools browser automation (snapshot/click/navigate)"),
     "plugins": (".commands.plugins", "app", "Plugin management and inspection"),
     "sandbox": (".commands.sandbox", "app", "Sandbox container management"),
     "flow": (".commands.flow", "app", "Visual workflow builder (Langflow)"),
@@ -293,6 +294,13 @@ _TRAIN_RESIDENT_COMMANDS = frozenset({
     "train",
 })
 
+# C11: Browser automation commands implemented in ``praisonai_browser.cli.commands.*``.
+# ``get_command()`` loads them via ``praisonai_browser.cli.commands.{name}`` when the
+# browser package is installed; standalone ``praisonai-code`` hides them from ``--help``.
+_BROWSER_RESIDENT_COMMANDS = frozenset({
+    "browser",
+})
+
 # Backward-compatible alias (C7.1 name).
 _WRAPPER_COMMANDS = _WRAPPER_RESIDENT_COMMANDS
 
@@ -306,6 +314,7 @@ _SPECIAL_COMMANDS = {
 from praisonai_code._wrapper_bridge import wrapper_available
 from praisonai_code._bot_bridge import bot_package_available
 from praisonai_code._train_bridge import train_package_available
+from praisonai_code._browser_bridge import browser_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -322,11 +331,13 @@ class LazyCommandGroup(TyperGroup):
         wrapper_ok = wrapper_available()
         bot_ok = bot_package_available()
         train_ok = train_package_available()
+        browser_ok = browser_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
             and (bot_ok or name not in _BOT_RESIDENT_COMMANDS)
             and (train_ok or name not in _TRAIN_RESIDENT_COMMANDS)
+            and (browser_ok or name not in _BROWSER_RESIDENT_COMMANDS)
         )
         commands.update(_SPECIAL_COMMANDS.keys())
         
@@ -376,6 +387,10 @@ class LazyCommandGroup(TyperGroup):
                     if not train_package_available():
                         return None
                     module = importlib.import_module(f"praisonai_train.cli.commands.{name}")
+                elif name in _BROWSER_RESIDENT_COMMANDS:
+                    if not browser_package_available():
+                        return None
+                    module = importlib.import_module(f"praisonai_browser.cli.commands.{name}")
                 elif name in _WRAPPER_RESIDENT_COMMANDS:
                     if not wrapper_available():
                         return None
