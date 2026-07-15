@@ -240,10 +240,14 @@ class MCPServer:
                 self._cancelled_requests[rid] = None
                 while len(self._cancelled_requests) > self._max_cancelled_requests:
                     self._cancelled_requests.popitem(last=False)  # drop oldest
-                # Cancel the in-flight task if one is registered.
+                # Cancel the in-flight task if one is registered. Once we have
+                # acted on the cancellation we drop the marker so a later request
+                # that reuses the same JSON-RPC id is not spuriously cancelled by
+                # this stale entry.
                 task = self._active_requests.get(rid)
                 if task is not None:
                     task.cancel()
+                    self._cancelled_requests.pop(rid, None)
                     logger.debug(f"Cancelled request: {request_id}")
             return None
         
@@ -273,12 +277,20 @@ class MCPServer:
                 task = asyncio.ensure_future(handler(params))
                 self._active_requests[rid] = task
                 try:
-                    # Honour a cancellation that arrived before we registered.
+                    # Honour a cancellation that arrived before we registered,
+                    # then consume the marker so it cannot cancel a *future*
+                    # request that reuses this id. (Stored values are ``None``,
+                    # so test membership rather than the popped value.)
                     if rid in self._cancelled_requests:
+                        self._cancelled_requests.pop(rid, None)
                         task.cancel()
                     result = await task
                 finally:
-                    self._active_requests.pop(rid, None)
+                    # Only remove *our* registration: a concurrent client that
+                    # reused this id may have already replaced the entry with its
+                    # own task, which must not be evicted by our cleanup.
+                    if self._active_requests.get(rid) is task:
+                        self._active_requests.pop(rid, None)
                 return self._success_response(msg_id, result)
             await handler(params)
             return None
@@ -518,12 +530,13 @@ class MCPServer:
         }
         if level.lower() not in level_map:
             raise ValueError(f"Unknown log level: {level!r}")
-        # Only touch THIS server's namespaced logger, never the process root —
-        # a per-server op must not silence audit / injection-defense telemetry
-        # emitted by unrelated loggers in the host process.
-        logging.getLogger(f"praisonai.mcp_server.{self.name}").setLevel(
-            level_map[level.lower()]
-        )
+        # Scope the change to the MCP-server package logger tree
+        # (``praisonai.mcp_server`` — the parent of the loggers this module and
+        # its siblings actually emit through), never the process root. This
+        # honours the client's request for the server's own log output while
+        # leaving unrelated audit / injection-defense telemetry in the host
+        # process untouched.
+        logging.getLogger("praisonai.mcp_server").setLevel(level_map[level.lower()])
         return {}
     
     def _success_response(self, msg_id: Any, result: Any) -> Dict[str, Any]:
