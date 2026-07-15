@@ -351,7 +351,9 @@ class AgentTrainer:
                 # Early stop if score is high enough
                 if grade_result.score >= 9.5:
                     if self.verbose:
-                        print("  ✓ Excellent score achieved, stopping early")
+                        from .models import console_supports_unicode
+                        mark = "✓" if console_supports_unicode() else "*"
+                        print(f"  {mark} Excellent score achieved, stopping early")
                     break
         
         # Create report
@@ -371,9 +373,14 @@ class AgentTrainer:
         self._storage.save_report(report)
         
         if self.verbose:
-            print("\n" + "="*60)
-            print("Training Complete!")
-            report.print_summary()
+            # Report is already persisted; a console encoding failure here must
+            # not turn a completed session into an error.
+            try:
+                print("\n" + "="*60)
+                print("Training Complete!")
+                report.print_summary()
+            except UnicodeEncodeError as e:
+                logger.warning(f"Summary could not be displayed: {e}")
         
         return report
     

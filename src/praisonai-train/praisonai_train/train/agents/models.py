@@ -9,6 +9,13 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import statistics
+import sys
+
+
+def console_supports_unicode() -> bool:
+    """Return True if stdout can encode non-ASCII symbols (e.g. emoji)."""
+    enc = (getattr(sys.stdout, "encoding", None) or "").upper()
+    return "UTF" in enc
 
 
 @dataclass
@@ -296,6 +303,23 @@ class TrainingReport:
                 return it
         return None
     
+    def _status_label(self) -> str:
+        """Return a Status label, using emoji only when stdout supports it."""
+        if console_supports_unicode():
+            return "✅ PASSED" if self.passed else "❌ NEEDS WORK"
+        return "PASSED" if self.passed else "NEEDS WORK"
+
+    def _print_summary_ascii(self) -> None:
+        """Plain ASCII summary fallback (no Rich, no emoji)."""
+        print("Agent Training Summary")
+        print(f"  Session ID: {self.session_id}")
+        print(f"  Total Iterations: {self.total_iterations}")
+        print(f"  Average Score: {self.avg_score:.2f}")
+        print(f"  Min Score: {self.min_score:.2f}")
+        print(f"  Max Score: {self.max_score:.2f}")
+        print(f"  Improvement: {self.improvement:+.2f}")
+        print(f"  Status: {'PASSED' if self.passed else 'NEEDS WORK'}")
+
     def print_summary(self) -> None:
         """Print a summary of the training results."""
         try:
@@ -314,15 +338,11 @@ class TrainingReport:
             table.add_row("Min Score", f"{self.min_score:.2f}")
             table.add_row("Max Score", f"{self.max_score:.2f}")
             table.add_row("Improvement", f"{self.improvement:+.2f}")
-            table.add_row("Status", "✅ PASSED" if self.passed else "❌ NEEDS WORK")
+            table.add_row("Status", self._status_label())
             
             console.print(table)
         except ImportError:
-            print("Agent Training Summary")
-            print(f"  Session ID: {self.session_id}")
-            print(f"  Total Iterations: {self.total_iterations}")
-            print(f"  Average Score: {self.avg_score:.2f}")
-            print(f"  Min Score: {self.min_score:.2f}")
-            print(f"  Max Score: {self.max_score:.2f}")
-            print(f"  Improvement: {self.improvement:+.2f}")
-            print(f"  Status: {'PASSED' if self.passed else 'NEEDS WORK'}")
+            self._print_summary_ascii()
+        except UnicodeEncodeError:
+            # Rich available but stdout can't encode the output (e.g. cp1252)
+            self._print_summary_ascii()
