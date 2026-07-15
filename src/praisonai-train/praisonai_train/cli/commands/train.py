@@ -45,9 +45,18 @@ def train_llm(
     """
     import sys
 
+    from ..output.console import get_output_controller
     from praisonai_train._code_bridge import import_code_module
 
-    PraisonAI = import_code_module("praisonai_code.cli.main").PraisonAI
+    try:
+        PraisonAI = import_code_module("praisonai_code.cli.main").PraisonAI
+    except ImportError:
+        output = get_output_controller()
+        output.print_error(
+            "LLM fine-tuning dependencies not installed",
+            remediation='pip install "praisonai-train[llm]"',
+        )
+        raise typer.Exit(1)
 
     argv = ['train', dataset]
     if model:
