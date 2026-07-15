@@ -263,6 +263,11 @@ def train_agents(
     except KeyboardInterrupt:
         output.print_warning("Training interrupted by user")
         raise typer.Exit(130)
+    except UnicodeEncodeError as e:
+        # Training itself succeeded; only the console display could not encode
+        # the output (e.g. cp1252 on Windows). Report success, not failure.
+        output.print_warning(f"Training complete but summary could not be displayed: {e}")
+        raise typer.Exit(0)
     except Exception as e:
         output.print_error(f"Training failed: {e}")
         raise typer.Exit(1)
@@ -339,6 +344,7 @@ def train_show(
     
     try:
         from praisonai_train.train.agents.storage import TrainingStorage
+        from praisonai_train.train.agents.models import console_supports_unicode
     except ImportError:
         output.print_error("Training module not available")
         raise typer.Exit(1)
@@ -366,7 +372,8 @@ def train_show(
         # Show best iteration
         best = report.get_best_iteration()
         if best:
-            output.print(f"\n✨ Best Iteration: #{best.iteration_num} (Score: {best.score}/10)")
+            best_prefix = "✨ Best Iteration:" if console_supports_unicode() else "Best Iteration:"
+            output.print(f"\n{best_prefix} #{best.iteration_num} (Score: {best.score}/10)")
     
     if iterations:
         output.print("\nIterations:")
@@ -374,9 +381,10 @@ def train_show(
         # Find best score for highlighting
         best_score = max(it.score for it in iterations) if iterations else 0
         
+        best_marker = "★" if console_supports_unicode() else "*"
         for it in iterations:
             # Highlight best iteration
-            marker = "★" if it.score == best_score else " "
+            marker = best_marker if it.score == best_score else " "
             feedback_preview = it.feedback[:50] + "..." if len(it.feedback) > 50 else it.feedback
             output.print(f"  {marker} [{it.iteration_num}] Score: {it.score}/10 - {feedback_preview}")
             

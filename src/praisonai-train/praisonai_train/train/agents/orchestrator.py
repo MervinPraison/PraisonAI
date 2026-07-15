@@ -351,7 +351,9 @@ class AgentTrainer:
                 # Early stop if score is high enough
                 if grade_result.score >= 9.5:
                     if self.verbose:
-                        print("  ✓ Excellent score achieved, stopping early")
+                        from .models import console_supports_unicode
+                        mark = "✓" if console_supports_unicode() else "*"
+                        print(f"  {mark} Excellent score achieved, stopping early")
                     break
         
         # Create report

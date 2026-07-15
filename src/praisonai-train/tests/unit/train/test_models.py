@@ -217,3 +217,87 @@ class TestTrainingReport:
         
         assert report.avg_score == 0.0
         assert report.improvement == 0.0
+
+
+class TestConsoleEncoding:
+    """Tests for Windows cp1252-safe console output (issue #3040)."""
+
+    def _make_report(self, score):
+        from praisonai_train.train.agents.models import TrainingReport, TrainingIteration
+        iterations = [
+            TrainingIteration(
+                iteration_num=1, scenario_id="s1", input_text="T",
+                output="O", score=score, feedback="F",
+            )
+        ]
+        return TrainingReport(session_id="train-abc", iterations=iterations, total_iterations=1)
+
+    def test_console_supports_unicode_utf8(self, monkeypatch):
+        import sys
+        from praisonai_train.train.agents import models
+
+        class _Stdout:
+            encoding = "utf-8"
+
+        monkeypatch.setattr(sys, "stdout", _Stdout())
+        assert models.console_supports_unicode() is True
+
+    def test_console_supports_unicode_cp1252(self, monkeypatch):
+        import sys
+        from praisonai_train.train.agents import models
+
+        class _Stdout:
+            encoding = "cp1252"
+
+        monkeypatch.setattr(sys, "stdout", _Stdout())
+        assert models.console_supports_unicode() is False
+
+    def test_status_label_ascii_on_cp1252(self, monkeypatch):
+        import sys
+        from praisonai_train.train.agents import models
+
+        class _Stdout:
+            encoding = "cp1252"
+
+        monkeypatch.setattr(sys, "stdout", _Stdout())
+        report = self._make_report(10.0)
+        label = report._status_label()
+        assert label == "PASSED"
+        label.encode("cp1252")  # must not raise
+
+    def test_status_label_emoji_on_utf8(self, monkeypatch):
+        import sys
+        from praisonai_train.train.agents import models
+
+        class _Stdout:
+            encoding = "utf-8"
+
+        monkeypatch.setattr(sys, "stdout", _Stdout())
+        report = self._make_report(2.0)
+        assert "❌" in report._status_label()
+
+    def test_print_summary_no_raise_on_cp1252(self, monkeypatch):
+        import io
+        import sys
+        from praisonai_train.train.agents import models
+
+        class _Cp1252Stdout:
+            encoding = "cp1252"
+
+            def __init__(self):
+                self._buf = io.BytesIO()
+
+            def write(self, s):
+                self._buf.write(s.encode("cp1252", errors="strict"))
+                return len(s)
+
+            def flush(self):
+                pass
+
+            def isatty(self):
+                return False
+
+        monkeypatch.setattr(sys, "stdout", _Cp1252Stdout())
+
+        report = self._make_report(10.0)
+        report.print_summary()  # must not raise UnicodeEncodeError
