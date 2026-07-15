@@ -733,10 +733,50 @@ class BaseAutoGenerator:
             raise error[0]
         return result[0]
 
-    @staticmethod
-    def get_available_tools() -> List[str]:
-        """Return list of available tools for agent assignment."""
-        return AVAILABLE_TOOLS.copy()
+    def _get_tool_resolver(self):
+        """Lazily construct the canonical ToolResolver (single source of truth).
+
+        Uses the shared context-local resolver so every generator in a run
+        (auto phase + AgentsGenerator + workflow/job generators) reuses one
+        warm cache instead of repeating full tool discovery. Kept lazy so
+        importing auto.py stays cheap and so a resolver-construction failure
+        never blocks generation — callers fall back to keyword/legacy hints.
+        """
+        resolver = getattr(self, "_tool_resolver", None)
+        if resolver is None:
+            try:
+                from .tool_resolver import _get_default_resolver
+                resolver = _get_default_resolver()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("ToolResolver unavailable (%s); using keyword hints only.", e)
+                resolver = False  # sentinel: attempted, not available
+            self._tool_resolver = resolver
+        return resolver or None
+
+    def _available_tools(self) -> List[str]:
+        """Return the real, installed tool names from the canonical ToolResolver.
+
+        This is the single source of truth shared with AgentsGenerator. Returns
+        an empty list if the resolver is unavailable so callers can fall back.
+        """
+        resolver = self._get_tool_resolver()
+        if resolver is None:
+            return []
+        try:
+            return sorted(resolver.list_available().keys())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("ToolResolver.list_available() failed (%s).", e)
+            return []
+
+    def get_available_tools(self) -> List[str]:
+        """Return list of available tools for agent assignment.
+
+        Routes through the canonical ToolResolver (single source of truth) so
+        the LLM is shown only tools that are actually installed. Falls back to
+        the frozen ``AVAILABLE_TOOLS`` list solely when the resolver is
+        unavailable or returns nothing.
+        """
+        return self._available_tools() or AVAILABLE_TOOLS.copy()
     
     @staticmethod
     def analyze_complexity(topic: str) -> str:
@@ -1102,38 +1142,6 @@ class AutoGenerator(BaseAutoGenerator):
                 merged_data['roles'][final_role_id]['tasks'][task_id] = self._format_task(task_details)
         
         return merged_data
-
-    def _get_tool_resolver(self):
-        """Lazily construct the canonical ToolResolver (single source of truth).
-
-        Kept lazy so importing auto.py stays cheap and so a resolver-construction
-        failure never blocks generation — callers fall back to keyword hints.
-        """
-        resolver = getattr(self, "_tool_resolver", None)
-        if resolver is None:
-            try:
-                from .tool_resolver import ToolResolver
-                resolver = ToolResolver()
-            except Exception as e:  # pragma: no cover - defensive
-                logger.debug("ToolResolver unavailable (%s); using keyword hints only.", e)
-                resolver = False  # sentinel: attempted, not available
-            self._tool_resolver = resolver
-        return resolver or None
-
-    def _available_tools(self) -> List[str]:
-        """Return the real, installed tool names from the canonical ToolResolver.
-
-        This is the single source of truth shared with AgentsGenerator. Returns
-        an empty list if the resolver is unavailable so callers can fall back.
-        """
-        resolver = self._get_tool_resolver()
-        if resolver is None:
-            return []
-        try:
-            return sorted(resolver.list_available().keys())
-        except Exception as e:  # pragma: no cover - defensive
-            logger.debug("ToolResolver.list_available() failed (%s).", e)
-            return []
 
     def discover_tools_for_topic(self) -> List[str]:
         """

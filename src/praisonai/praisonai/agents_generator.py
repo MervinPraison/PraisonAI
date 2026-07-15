@@ -401,7 +401,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -416,6 +416,7 @@ class AgentsGenerator:
             tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.
             cli_config (dict, optional): CLI configuration to override YAML settings. Defaults to None.
             adapter_registry (FrameworkAdapterRegistry, optional): Registry for framework adapters. Defaults to process default.
+            tool_resolver (ToolResolver, optional): Canonical tool resolver. Defaults to the shared context-local resolver so discovery runs once per run.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -448,9 +449,14 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Initialize tool resolver (single source of truth for tool resolution)
-        from .tool_resolver import ToolResolver
-        self.tool_resolver = ToolResolver()
+        # Initialize tool resolver (single source of truth for tool resolution).
+        # DI-friendly: callers (e.g. AutoGenerator hand-off, tests) may pass a
+        # resolver; otherwise share the context-local default so tool discovery
+        # runs once per run instead of once per generator construction.
+        if tool_resolver is None:
+            from .tool_resolver import _get_default_resolver
+            tool_resolver = _get_default_resolver()
+        self.tool_resolver = tool_resolver
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
