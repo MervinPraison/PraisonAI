@@ -74,18 +74,22 @@ class AgentTrainer:
         storage_dir: Optional[Path] = None,
         storage_backend: Optional[Any] = None,
         verbose: bool = True,
+        no_early_stop: bool = False,
     ):
         """
         Initialize the trainer.
         
         Args:
             agent: Agent, Agents, or callable to train
-            iterations: Number of training iterations (default: 3)
+            iterations: Maximum number of training iterations (default: 3).
+                In LLM mode, training stops early when a score reaches 9.5.
             human_mode: Use human feedback instead of LLM grading (default: False)
             grader: Custom grader instance (default: TrainingGrader())
             storage_dir: Directory for storing training data
             storage_backend: Storage backend (FileBackend, SQLiteBackend, RedisBackend)
             verbose: Print progress during training (default: True)
+            no_early_stop: Run all `iterations` even if a score reaches 9.5
+                (default: False, i.e. early stop is enabled)
         """
         self.agent = agent
         self.iterations = iterations
@@ -94,6 +98,7 @@ class AgentTrainer:
         self.storage_dir = storage_dir
         self.storage_backend = storage_backend
         self.verbose = verbose
+        self.no_early_stop = no_early_stop
         
         self.session_id = f"train-{uuid.uuid4().hex[:8]}"
         self.scenarios: List[TrainingScenario] = []
@@ -273,6 +278,7 @@ class AgentTrainer:
         
         all_iterations: List[TrainingIteration] = []
         started_at = datetime.utcnow().isoformat()
+        early_stopped = False
         
         if self.verbose:
             mode = "Human-in-the-Loop" if self.human_mode else "LLM-as-Judge"
@@ -348,8 +354,21 @@ class AgentTrainer:
                 previous_output = output
                 previous_grade = grade_result
                 
-                # Early stop if score is high enough
-                if grade_result.score >= 9.5:
+                # Early stop if score is high enough (unless disabled).
+                # Only counts as "early" when there are remaining iterations
+                # to skip; reaching 9.5 on the final iteration is a full run.
+                if (
+                    grade_result.score >= 9.5
+                    and not self.no_early_stop
+                    and iteration_num < self.iterations
+                ):
+                    early_stopped = True
+                    logger.info(
+                        "Early stop after iteration %d/%d "
+                        "(score %.1f >= 9.5 threshold). "
+                        "Use no_early_stop=True to run all iterations.",
+                        iteration_num, self.iterations, grade_result.score,
+                    )
                     if self.verbose:
                         from .models import console_supports_unicode
                         mark = "✓" if console_supports_unicode() else "*"
@@ -367,6 +386,7 @@ class AgentTrainer:
                 "mode": "human" if self.human_mode else "llm",
                 "scenarios_count": len(self.scenarios),
                 "target_iterations": self.iterations,
+                "early_stopped": early_stopped,
             }
         )
         

@@ -35,8 +35,8 @@ setup-conda-env   # or: bash praisonai_train/setup/setup_conda_env.sh
 ```bash
 export OPENAI_API_KEY=sk-...
 
-# One input, three improvement iterations, LLM-as-judge
-praisonai-train agents --input "What is the capital of France?" --iterations 3
+# Up to three improvement iterations, LLM-as-judge
+praisonai-train agents --input "Explain quantum entanglement to a 10-year-old" --iterations 3
 
 # See what happened
 praisonai-train list
@@ -45,6 +45,11 @@ praisonai-train show <session-id>
 # Apply the best iteration and chat with the improved agent
 praisonai-train apply <session-id> --run "And what about Germany?"
 ```
+
+> **Note:** `--iterations` sets the **maximum** number of training loops. In
+> LLM-as-judge mode, training **stops early** when any iteration scores **≥ 9.5**
+> (excellent), so easy prompts may finish in a single iteration. Pass
+> `--no-early-stop` to force all iterations, or `--verbose` to see when it stops.
 
 Python API:
 

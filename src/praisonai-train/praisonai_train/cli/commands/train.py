@@ -90,7 +90,13 @@ def train_agents(
     iterations: int = typer.Option(
         3,
         "--iterations", "-n",
-        help="Number of training iterations"
+        help="Maximum training iterations (default: 3). "
+             "In LLM mode, stops early when a score reaches 9.5."
+    ),
+    no_early_stop: bool = typer.Option(
+        False,
+        "--no-early-stop",
+        help="Run all iterations even if a score reaches 9.5"
     ),
     human: bool = typer.Option(
         False,
@@ -246,6 +252,7 @@ def train_agents(
         storage_dir=storage_dir,
         storage_backend=backend,
         verbose=verbose,
+        no_early_stop=no_early_stop,
     )
     
     # Add scenarios
