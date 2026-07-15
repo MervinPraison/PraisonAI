@@ -315,7 +315,7 @@ class TrainingReport:
         early_stopped = self.metadata.get("early_stopped", False)
         print("Agent Training Summary")
         print(f"  Session ID: {self.session_id}")
-        if requested is not None and requested > self.total_iterations:
+        if early_stopped and requested is not None:
             print(f"  Requested Iterations: {requested}")
         print(f"  Total Iterations: {self.total_iterations}")
         if early_stopped:
