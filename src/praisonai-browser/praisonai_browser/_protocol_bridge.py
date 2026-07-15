@@ -26,12 +26,14 @@ def observation_to_dict(observation: Union[BrowserObservation, Dict[str, Any]]) 
     return observation
 
 
-def _action_type_from_name(name: str) -> BrowserActionType:
+def _action_type_from_name(name: str) -> Union[BrowserActionType, str]:
     try:
         return BrowserActionType(name)
     except ValueError:
+        # Extra actions extend the base protocol enum; pass them through as
+        # strings (BrowserActionType is a str subclass, so this stays compatible).
         if name in _EXTRA_ACTIONS:
-            return BrowserActionType(name)
+            return name
         return BrowserActionType.WAIT
 
 

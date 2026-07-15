@@ -438,9 +438,9 @@ class BrowserAgent:
         """Process an observation and return the next action."""
         obs_dict = observation_to_dict(observation)
         action_dict = self._process_observation_dict(obs_dict)
-        # Protocol boundary: ensure semantic round-trip through agents types.
-        action_to_agent_dict(action_from_agent_dict(action_dict))
-        return action_dict
+        # Protocol boundary: round-trip through agents types so executors always
+        # receive a normalized ``value`` field (populated from ``text`` if needed).
+        return action_to_agent_dict(action_from_agent_dict(action_dict))
 
     def process_observation_protocol(
         self, observation: BrowserObservation

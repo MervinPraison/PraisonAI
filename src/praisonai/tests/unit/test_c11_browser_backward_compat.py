@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 BROWSER_PKG = REPO / "src" / "praisonai-browser"
 WRAPPER_PKG = REPO / "src" / "praisonai"
 

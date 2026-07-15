@@ -688,6 +688,18 @@ class CDPBrowserAgent:
                 await asyncio.sleep(0.5)
                 return {"success": True}
             
+            elif action_type == "clear_input":
+                # Focus element and clear its value entirely
+                await self._send("Runtime.evaluate", {
+                    "expression": (
+                        f"(function(){{const el=document.querySelector('{selector}');"
+                        f"if(el){{el.focus();el.value='';"
+                        f"el.dispatchEvent(new Event('input',{{bubbles:true}}));}}}})()"
+                    )
+                })
+                await asyncio.sleep(0.2)
+                return {"success": True}
+            
             elif action_type in ("done", "wait"):
                 return {"success": True}
             
