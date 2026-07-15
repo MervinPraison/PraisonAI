@@ -202,6 +202,11 @@ def _looks_like_framework_tool(tool) -> bool:
     return has_schema and has_exec_method
 
 
+# Marker attribute stamped on wrappers produced by ``_wrap_with_timeout`` so a
+# shared framework tool object (or a plain callable) is never wrapped twice.
+_TIMEOUT_MARKER = "__praisonai_timeout_wrapped__"
+
+
 def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
@@ -284,9 +289,22 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
         for method_name in ("_run", "run"):
             method = getattr(tool, method_name, None)
             if callable(method):
+                # Idempotency guard: shared framework tool objects (cached by
+                # ToolResolver / passed via plugin registries) can be wrapped by
+                # several generators and re-wrapped on every
+                # generate_crew_and_kickoff(). Stacking wrappers enforces the
+                # timeout N times, grows memory monotonically, and captures a
+                # foreign generator's executor. Never wrap an already-wrapped
+                # method twice.
+                if getattr(method, _TIMEOUT_MARKER, False):
+                    return tool
                 wrapped = _wrap_callable(method)
                 if wrapped is method:
                     continue
+                try:
+                    setattr(wrapped, _TIMEOUT_MARKER, True)
+                except (AttributeError, TypeError):
+                    pass
                 try:
                     object.__setattr__(tool, method_name, wrapped)  # bypass pydantic frozen
                     return tool
@@ -298,7 +316,15 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
             return tool
 
     # Plain callable — safe to wrap as a function.
-    return _wrap_callable(tool)
+    if getattr(tool, _TIMEOUT_MARKER, False):
+        return tool
+    wrapped = _wrap_callable(tool)
+    if wrapped is not tool:
+        try:
+            setattr(wrapped, _TIMEOUT_MARKER, True)
+        except (AttributeError, TypeError):
+            pass
+    return wrapped
 
 
 def noop(*args, **kwargs):
