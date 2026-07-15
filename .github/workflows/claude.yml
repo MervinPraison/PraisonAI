@@ -118,19 +118,30 @@ jobs:
   # Triggers on: labeled 'claude', @claude comments, assignments
   # ================================================================
   claude-response:
-    # Allow: human users, github-actions[bot] (auto-comments/labels)
-    # Block: dependabot, cursor, renovate, other bots
+    # Allow: human users, github-actions[bot] (FINAL @claude / CI-fix comments only)
+    # Block: praisonai-triage-agent (merge-gate scan mentions @claude as status text)
     # Skip 'opened' events — triage job handles those above
     if: |
       github.event.action != 'opened' &&
       (github.event.action != 'labeled' || github.event.label.name == 'claude') &&
-      (github.event_name != 'issue_comment' || contains(github.event.comment.body, '@claude')) &&
+      (github.event_name != 'issue_comment' || (
+        contains(github.event.comment.body, '@claude') &&
+        !contains(github.event.comment.body, 'Merge gate scan') &&
+        !contains(github.event.comment.body, 'MERGE_GATE_VERDICT') &&
+        !contains(github.event.comment.body, 'Merged by **Claude PR merge gate**') &&
+        (
+          !contains(github.actor, '[bot]') ||
+          contains(github.event.comment.body, 'FINAL architecture reviewer') ||
+          contains(github.event.comment.body, 'lead engineer') ||
+          contains(github.event.comment.body, 'merge conflict') ||
+          contains(github.event.comment.body, 'CI failed on HEAD')
+        )
+      )) &&
       (github.event_name != 'pull_request_review' || contains(github.event.review.body, '@claude')) &&
       (github.event_name != 'pull_request_review_comment' || contains(github.event.comment.body, '@claude')) &&
       (
         !contains(github.actor, '[bot]') ||
-        github.actor == 'github-actions[bot]' ||
-        github.actor == 'praisonai-triage-agent[bot]'
+        github.actor == 'github-actions[bot]'
       ) &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&
