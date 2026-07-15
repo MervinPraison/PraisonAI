@@ -247,30 +247,33 @@ def train_agents(
             expected_output=expected,
         ))
     
-    # Run training
+    # Run training. Keep trainer.run() outside the UnicodeEncodeError=success
+    # handler so a genuine mid-run encoding failure (before the report is
+    # persisted) is still reported as a failure rather than a false success.
     try:
         report = trainer.run()
-        
+    except KeyboardInterrupt:
+        output.print_warning("Training interrupted by user")
+        raise typer.Exit(130)
+    except Exception as e:
+        output.print_error(f"Training failed: {e}")
+        raise typer.Exit(1)
+
+    # Training (and report persistence) succeeded. Displaying the summary must
+    # never turn a completed session into a false failure, so a display-only
+    # encoding error (e.g. cp1252 on Windows) is downgraded to a warning.
+    try:
         if not verbose:
             report.print_summary()
-        
+
         output.print_success(
             f"Training complete! Session: {report.session_id}\n"
             f"Average score: {report.avg_score:.1f}/10\n"
             f"Improvement: {report.improvement:+.1f}"
         )
-        
-    except KeyboardInterrupt:
-        output.print_warning("Training interrupted by user")
-        raise typer.Exit(130)
     except UnicodeEncodeError as e:
-        # Training itself succeeded; only the console display could not encode
-        # the output (e.g. cp1252 on Windows). Report success, not failure.
         output.print_warning(f"Training complete but summary could not be displayed: {e}")
         raise typer.Exit(0)
-    except Exception as e:
-        output.print_error(f"Training failed: {e}")
-        raise typer.Exit(1)
 
 
 @app.command("list")
