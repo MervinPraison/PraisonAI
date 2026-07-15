@@ -104,7 +104,9 @@ jobs:
             }
 
             // --- Auto-trigger Claude for owner issues and actionable external bug/enhancement reports ---
-            const autoClaude = isOwner || labels.includes('bug') || labels.includes('enhancement');
+            const titleLower = (issue.title || '').toLowerCase();
+            const hasActionableTitle = /^(bug:|fix[:(]|feat:|ux:|enhancement:)/.test(titleLower);
+            const autoClaude = isOwner || (hasActionableTitle && (labels.includes('bug') || labels.includes('enhancement')));
             if (autoClaude) {
               await github.rest.issues.addLabels({
                 issue_number: issue.number,
@@ -119,8 +121,9 @@ jobs:
   # Triggers on: labeled 'claude', @claude comments, assignments
   # ================================================================
   claude-response:
-    # Allow: human users, github-actions[bot] (FINAL @claude / CI-fix comments only)
-    # Block: praisonai-triage-agent (merge-gate scan mentions @claude as status text)
+    # Allow: human users, github-actions[bot] (FINAL @claude / CI-fix comments)
+    # Allow: praisonai-triage-agent[bot] only for issues labeled 'claude' (auto-triage)
+    # Block: praisonai-triage-agent on issue_comment (merge-gate scan mentions @claude)
     # Skip 'opened' events — triage job handles those above
     if: |
       github.event.action != 'opened' &&
@@ -141,9 +144,9 @@ jobs:
       (github.event_name != 'pull_request_review' || contains(github.event.review.body, '@claude')) &&
       (github.event_name != 'pull_request_review_comment' || contains(github.event.comment.body, '@claude')) &&
       (
-        (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude') ||
         !contains(github.actor, '[bot]') ||
-        github.actor == 'github-actions[bot]'
+        github.actor == 'github-actions[bot]' ||
+        (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude' && github.actor == 'praisonai-triage-agent[bot]')
       ) &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&
