@@ -10,6 +10,9 @@ authors = [
 ]
 dependencies = [
     "praisonaiagents>=1.6.126",
+    # Required at runtime for agent training (LLM-as-judge grading via
+    # praisonaiagents BaseLLMGrader -> litellm.completion()).
+    "litellm>=1.0",
     "rich>=13.7",
     "typer>=0.12.0",
     "click>=8.4.2",

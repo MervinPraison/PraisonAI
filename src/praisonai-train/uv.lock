@@ -2327,6 +2327,7 @@ version = "0.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "litellm" },
     { name = "praisonaiagents" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -2388,6 +2389,7 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'llm'", specifier = ">=2.19.0" },
     { name = "hf-transfer", marker = "extra == 'llm'" },
     { name = "huggingface-hub", marker = "extra == 'llm'", specifier = ">=0.23.0" },
+    { name = "litellm", specifier = ">=1.0" },
     { name = "peft", marker = "extra == 'llm'", specifier = ">=0.10.0" },
     { name = "praisonai-code", marker = "extra == 'llm'", specifier = ">=0.0.1" },
     { name = "praisonai-train", extras = ["llm"], marker = "extra == 'all'" },
