@@ -17,6 +17,7 @@ dependencies = [
     "praisonai-bot>=0.0.33",
     "praisonai-train>=0.0.4",
     "praisonai-browser>=0.0.1",
+    "praisonai-mcp>=0.0.1",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -32,6 +33,11 @@ dependencies = [
 praisonai = "praisonai.__main__:main"
 setup-conda-env = "praisonai.setup.setup_conda_env:main"
 praisonai-call = "praisonai.api.call:main"
+
+[project.entry-points."praisonai.framework_adapters"]
+crewai = "praisonai.framework_adapters.crewai_adapter:CrewAIAdapter"
+autogen = "praisonai.framework_adapters.autogen_adapter:AutoGenFamilyAdapter"
+autogen_v2 = "praisonai.framework_adapters.autogen_adapter:AutoGenAdapter"
 
 [project.optional-dependencies]
 ui = [
@@ -60,6 +66,7 @@ chat = [
     "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
+    # Playwright also ships via praisonai-browser[all]; pin here for crawl4ai without [browser]
     "playwright>=1.47.0",
     "rich"
 ]
@@ -67,6 +74,7 @@ code = [
     "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
+    # Playwright also ships via praisonai-browser[all]; pin here for crawl4ai without [browser]
     "playwright>=1.47.0"
 ]
 sandbox = [
@@ -104,6 +112,7 @@ call = [
 # C10: training lives in praisonai-train; this extra pulls the heavy ML stack.
 train = ["praisonai-train[llm]"]
 browser = ["praisonai-browser[all]"]
+mcp = ["praisonai-mcp[all]"]
 crewai = ["crewai>=0.157.0", "praisonai-tools>=0.1.0"]  # Task 2: alias to praisonai-frameworks[crewai]
 autogen = ["pyautogen==0.2.29", "praisonai-tools>=0.1.0", "crewai"]  # Task 2: alias to praisonai-frameworks[autogen]
 ag2 = ["ag2>=0.11.0", "praisonai-tools>=0.1.0"]
@@ -277,6 +286,7 @@ praisonai-bot = { path = "../praisonai-bot", editable = true }
 # praisonai.train paths kept via shims.
 praisonai-train = { path = "../praisonai-train", editable = true }
 praisonai-browser = { path = "../praisonai-browser", editable = true }
+praisonai-mcp = { path = "../praisonai-mcp", editable = true }
 
 [tool.uv]
 # Exclude from lock resolution — these cause cross-extra conflicts that

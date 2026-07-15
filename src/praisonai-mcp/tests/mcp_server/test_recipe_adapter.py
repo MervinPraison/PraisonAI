@@ -12,7 +12,7 @@ class TestRecipeMCPConfig:
     
     def test_default_config(self):
         """Test default configuration values."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="test-recipe")
         
@@ -31,7 +31,7 @@ class TestRecipeMCPConfig:
     
     def test_custom_config(self):
         """Test custom configuration values."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPConfig
         
         config = RecipeMCPConfig(
             recipe_name="my-recipe",
@@ -49,7 +49,7 @@ class TestRecipeMCPConfig:
     
     def test_default_denylist(self):
         """Test default tool denylist is populated."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="test")
         
@@ -63,7 +63,7 @@ class TestRecipeMCPAdapter:
     
     def test_init(self):
         """Test adapter initialization."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter
         
         adapter = RecipeMCPAdapter("test-recipe")
         
@@ -73,7 +73,7 @@ class TestRecipeMCPAdapter:
     
     def test_init_with_config(self):
         """Test adapter initialization with custom config."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(
             recipe_name="test-recipe",
@@ -85,7 +85,7 @@ class TestRecipeMCPAdapter:
     
     def test_sanitize_name(self):
         """Test name sanitization."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter
         
         adapter = RecipeMCPAdapter("test")
         
@@ -96,7 +96,7 @@ class TestRecipeMCPAdapter:
     
     def test_namespace_tool_prefixed(self):
         """Test tool namespacing with prefixed mode."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="my-recipe", tool_namespace="prefixed")
         adapter = RecipeMCPAdapter("my-recipe", config)
@@ -109,7 +109,7 @@ class TestRecipeMCPAdapter:
     
     def test_namespace_tool_flat(self):
         """Test tool namespacing with flat mode."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="my-recipe", tool_namespace="flat")
         adapter = RecipeMCPAdapter("my-recipe", config)
@@ -119,7 +119,7 @@ class TestRecipeMCPAdapter:
     
     def test_namespace_tool_nested(self):
         """Test tool namespacing with nested mode."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="my-recipe", tool_namespace="nested")
         adapter = RecipeMCPAdapter("my-recipe", config)
@@ -129,7 +129,7 @@ class TestRecipeMCPAdapter:
     
     def test_is_tool_allowed_safe_mode(self):
         """Test tool allowlist in safe mode."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="test", safe_mode=True)
         adapter = RecipeMCPAdapter("test", config)
@@ -140,7 +140,7 @@ class TestRecipeMCPAdapter:
     
     def test_is_tool_allowed_unsafe_mode(self):
         """Test all tools allowed in unsafe mode."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(recipe_name="test", safe_mode=False)
         adapter = RecipeMCPAdapter("test", config)
@@ -150,7 +150,7 @@ class TestRecipeMCPAdapter:
     
     def test_is_tool_allowed_explicit_allowlist(self):
         """Test explicit tool allowlist."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter, RecipeMCPConfig
         
         config = RecipeMCPConfig(
             recipe_name="test",
@@ -165,8 +165,8 @@ class TestRecipeMCPAdapter:
     
     def test_get_registries(self):
         """Test getting registries."""
-        from praisonai.mcp_server.recipe_adapter import RecipeMCPAdapter
-        from praisonai.mcp_server.registry import MCPToolRegistry, MCPResourceRegistry, MCPPromptRegistry
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeMCPAdapter
+        from praisonai_mcp.mcp_server.registry import MCPToolRegistry, MCPResourceRegistry, MCPPromptRegistry
         
         adapter = RecipeMCPAdapter("test")
         
@@ -180,7 +180,7 @@ class TestRecipeToolWrapper:
     
     def test_tool_wrapper(self):
         """Test tool wrapper creation."""
-        from praisonai.mcp_server.recipe_adapter import RecipeToolWrapper
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeToolWrapper
         
         wrapper = RecipeToolWrapper(
             name="test-tool",
@@ -195,7 +195,7 @@ class TestRecipeToolWrapper:
     
     def test_tool_wrapper_with_annotations(self):
         """Test tool wrapper with annotations."""
-        from praisonai.mcp_server.recipe_adapter import RecipeToolWrapper
+        from praisonai_mcp.mcp_server.recipe_adapter import RecipeToolWrapper
         
         wrapper = RecipeToolWrapper(
             name="test-tool",
@@ -215,10 +215,10 @@ class TestRecipeToolWrapper:
 class TestCreateRecipeMCPServer:
     """Tests for create_recipe_mcp_server function."""
     
-    @patch('praisonai.mcp_server.recipe_adapter.RecipeMCPAdapter')
+    @patch('praisonai_mcp.mcp_server.recipe_adapter.RecipeMCPAdapter')
     def test_create_server(self, mock_adapter_class):
         """Test creating MCP server from recipe."""
-        from praisonai.mcp_server.recipe_adapter import create_recipe_mcp_server
+        from praisonai_mcp.mcp_server.recipe_adapter import create_recipe_mcp_server
         
         mock_adapter = MagicMock()
         mock_server = MagicMock()

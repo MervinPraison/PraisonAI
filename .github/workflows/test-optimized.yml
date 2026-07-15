@@ -84,6 +84,7 @@ jobs:
           tests/unit/test_c9_backward_compat.py \
           tests/unit/test_c9_1_boundaries.py \
           tests/unit/test_c11_browser_backward_compat.py \
+          tests/unit/test_c12_mcp_backward_compat.py \
           -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
           ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
@@ -232,10 +233,28 @@ jobs:
         bash "$GITHUB_WORKSPACE/scripts/check_c11_browser_imports.sh"
         python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py -q -m "not network"
 
+    - name: Standalone praisonai-mcp smoke (C12)
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-mcp-standalone
+        /tmp/praisonai-mcp-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-mcp
+        /tmp/praisonai-mcp-standalone/bin/python -c "
+        import sys
+        from praisonai_mcp._version import __version__ as pkg_version
+        import praisonai_mcp
+        assert praisonai_mcp.__version__ == pkg_version
+        for heavy in ('fastapi', 'uvicorn'):
+            assert heavy not in sys.modules, f'{heavy} imported eagerly'
+        print('mcp standalone ok', praisonai_mcp.__version__)
+        "
+        /tmp/praisonai-mcp-standalone/bin/praisonai-mcp --help
+        bash "$GITHUB_WORKSPACE/scripts/check_c12_mcp_imports.sh"
+        python -m pytest src/praisonai-mcp/tests/mcp_server -q -m "not network"
+
     - name: Audit hybrid module imports (C8 full stack)
       run: |
         set -euo pipefail
-        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai
+        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai-mcp -e src/praisonai
         python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary

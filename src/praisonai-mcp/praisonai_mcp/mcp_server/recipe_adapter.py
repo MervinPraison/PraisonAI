@@ -173,7 +173,8 @@ class RecipeMCPAdapter:
     def _load_recipe_config(self) -> Optional[Dict[str, Any]]:
         """Load recipe configuration from template."""
         try:
-            from ..recipe.core import _load_recipe
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            _load_recipe = wrapper_callable("praisonai.recipe.core", "_load_recipe")
             recipe = _load_recipe(self.recipe_name, offline=False)
             if recipe:
                 return recipe.to_dict() if hasattr(recipe, 'to_dict') else recipe.raw
@@ -182,7 +183,8 @@ class RecipeMCPAdapter:
         
         # Fallback: try loading directly from templates
         try:
-            from ..templates.discovery import TemplateDiscovery
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            TemplateDiscovery = wrapper_callable("praisonai.templates.discovery", "TemplateDiscovery")
             discovery = TemplateDiscovery()
             template = discovery.find_template(self.recipe_name)
             if template:
@@ -461,7 +463,8 @@ class RecipeMCPAdapter:
     ) -> Dict[str, Any]:
         """Execute the recipe."""
         try:
-            from ..recipe.core import run as recipe_run
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            recipe_run = wrapper_callable("praisonai.recipe.core", "run")
             
             result = recipe_run(
                 name=self.recipe_name,

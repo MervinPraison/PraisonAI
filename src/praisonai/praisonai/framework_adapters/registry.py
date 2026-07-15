@@ -42,12 +42,9 @@ def _praisonai_loader():
     from .praisonai_adapter import PraisonAIAdapter
     return PraisonAIAdapter
 
-# Built-in framework adapters with lazy loading.
-# autogen_v4 / ag2 loaders remain for entry-point packages; not registered until implemented.
+# Built-in: native PraisonAI adapter only. CrewAI/AutoGen register via entry points
+# (wrapper shims below, or external ``praisonai-frameworks`` when installed).
 _BUILTIN_ADAPTERS = {
-    "crewai": _crewai_loader,
-    "autogen": _autogen_loader,       # Family adapter for version resolution
-    "autogen_v2": _autogen_v2_loader,  # Direct access to v0.2
     "praisonai": _praisonai_loader,
 }
 
@@ -69,7 +66,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     # ``ag2`` is intentionally omitted: its adapter is an unimplemented stub and
     # is not registered in ``_BUILTIN_ADAPTERS``, so advertising it as a default
     # dispatch target would let ``pick_default`` route to a NotImplementedError.
-    DEFAULT_PRIORITY: tuple[str, ...] = ("crewai", "praisonai", "autogen")
+    DEFAULT_PRIORITY: tuple[str, ...] = ("praisonai", "crewai", "autogen")
 
     def __init__(self, *, discover_entry_points: bool = True) -> None:
         """Initialize the registry with built-in adapters."""

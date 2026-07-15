@@ -2,8 +2,8 @@
 """
 One-command monorepo PyPI release (patch by default).
 
-Publishes all six packages in order:
-  praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai-browser → praisonai (wrapper)
+Publishes all seven packages in order:
+  praisonaiagents → praisonai-code → praisonai-bot → praisonai-train → praisonai-browser → praisonai-mcp → praisonai (wrapper)
 
 Usage (from repo root or src/praisonai):
   python scripts/publish_all.py                  # patch bump + publish all
@@ -38,7 +38,7 @@ def _wait(package: str, version: str, max_wait: int, interval: int = 30) -> None
 def _plan_versions(bump_type: str, overrides: dict[str, str | None]) -> dict[str, str]:
     current = lib.read_current_versions()
     planned: dict[str, str] = {}
-    for key in ("agents", "code", "bot", "train", "browser", "wrapper"):
+    for key in ("agents", "code", "bot", "train", "browser", "mcp", "wrapper"):
         planned[key] = overrides.get(key) or lib.bump_semver(current[key], bump_type)
     return planned
 
@@ -51,6 +51,7 @@ def _print_plan(planned: dict[str, str], skip: dict[str, bool]) -> None:
         ("bot", lib.PYPI_NAMES["bot"]),
         ("train", lib.PYPI_NAMES["train"]),
         ("browser", lib.PYPI_NAMES["browser"]),
+        ("mcp", lib.PYPI_NAMES["mcp"]),
         ("wrapper", lib.PYPI_NAMES["wrapper"]),
     ]
     current = lib.read_current_versions()
@@ -83,12 +84,14 @@ def main() -> None:
     parser.add_argument("--skip-bot", action="store_true")
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--skip-browser", action="store_true")
+    parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-wrapper", action="store_true")
     parser.add_argument("--agents-version", default=None)
     parser.add_argument("--code-version", default=None)
     parser.add_argument("--bot-version", default=None)
     parser.add_argument("--train-version", default=None)
     parser.add_argument("--browser-version", default=None)
+    parser.add_argument("--mcp-version", default=None)
     parser.add_argument("--wrapper-version", default=None)
     args = parser.parse_args()
 
@@ -98,6 +101,7 @@ def main() -> None:
         "bot": args.skip_bot,
         "train": args.skip_train,
         "browser": args.skip_browser,
+        "mcp": args.skip_mcp,
         "wrapper": args.skip_wrapper,
     }
     overrides = {
@@ -106,6 +110,7 @@ def main() -> None:
         "bot": args.bot_version,
         "train": args.train_version,
         "browser": args.browser_version,
+        "mcp": args.mcp_version,
         "wrapper": args.wrapper_version,
     }
     planned = _plan_versions(args.bump, overrides)
@@ -236,7 +241,30 @@ def main() -> None:
                     root,
                 )
 
-    # --- 6. praisonai wrapper ---
+    # --- 6. praisonai-mcp ---
+    if not skip["mcp"]:
+        pkg = lib.PYPI_NAMES["mcp"]
+        ver = planned["mcp"]
+        if lib.pypi_has_version(pkg, ver):
+            print(f"⏭️  {pkg}=={ver} already on PyPI")
+        else:
+            print(f"\n📦 Publishing {pkg} {ver}")
+            _wait(lib.PYPI_NAMES["browser"], planned["browser"], args.max_wait)
+            lib.bump_mcp_files(ver)
+            lib.publish_package(lib.mcp_dir())
+            _wait(pkg, ver, args.max_wait)
+            if not args.no_git:
+                lib.git_commit_files(
+                    f"Bump praisonai-mcp to {ver}",
+                    [
+                        "src/praisonai-mcp/pyproject.toml",
+                        "src/praisonai-mcp/uv.lock",
+                        "src/praisonai-mcp/praisonai_mcp/_version.py",
+                    ],
+                    root,
+                )
+
+    # --- 7. praisonai wrapper ---
     if not skip["wrapper"]:
         pkg = lib.PYPI_NAMES["wrapper"]
         ver = planned["wrapper"]
@@ -249,6 +277,7 @@ def main() -> None:
             _wait(lib.PYPI_NAMES["bot"], planned["bot"], args.max_wait)
             _wait(lib.PYPI_NAMES["train"], planned["train"], args.max_wait)
             _wait(lib.PYPI_NAMES["browser"], planned["browser"], args.max_wait)
+            _wait(lib.PYPI_NAMES["mcp"], planned["mcp"], args.max_wait)
 
             bump.bump_version(
                 ver,
@@ -257,6 +286,7 @@ def main() -> None:
                 bot_version=planned["bot"],
                 train_version=planned["train"],
                 browser_version=planned["browser"],
+                mcp_version=planned["mcp"],
             )
             if not bump.validate_dependencies(
                 max_retries=3,
@@ -266,6 +296,7 @@ def main() -> None:
                 bot_version=planned["bot"],
                 train_version=planned["train"],
                 browser_version=planned["browser"],
+                mcp_version=planned["mcp"],
             ):
                 sys.exit(1)
 
@@ -281,6 +312,7 @@ def main() -> None:
     print(f"   praisonai-bot     {planned['bot']}")
     print(f"   praisonai-train   {planned['train']}")
     print(f"   praisonai-browser {planned['browser']}")
+    print(f"   praisonai-mcp     {planned['mcp']}")
     print(f"   praisonai         {planned['wrapper']}")
 
 

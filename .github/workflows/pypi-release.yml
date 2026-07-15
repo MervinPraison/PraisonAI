@@ -51,6 +51,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_mcp:
+        description: 'Skip praisonai-mcp publish (recovery if already on PyPI)'
+        required: false
+        default: false
+        type: boolean
       agents_version:
         description: 'Override agents version (empty = auto bump from pyproject.toml)'
         required: false
@@ -78,6 +83,11 @@ on:
         type: string
       browser_version:
         description: 'Override praisonai-browser version (empty = auto bump from pyproject.toml)'
+        required: false
+        default: ''
+        type: string
+      mcp_version:
+        description: 'Override praisonai-mcp version (empty = auto bump from pyproject.toml)'
         required: false
         default: ''
         type: string
@@ -156,11 +166,13 @@ jobs:
           BOT_OVERRIDE: ${{ inputs.bot_version }}
           TRAIN_OVERRIDE: ${{ inputs.train_version }}
           BROWSER_OVERRIDE: ${{ inputs.browser_version }}
+          MCP_OVERRIDE: ${{ inputs.mcp_version }}
           SKIP_AGENTS: ${{ inputs.skip_agents }}
           SKIP_CODE: ${{ inputs.skip_code }}
           SKIP_BOT: ${{ inputs.skip_bot }}
           SKIP_TRAIN: ${{ inputs.skip_train }}
           SKIP_BROWSER: ${{ inputs.skip_browser }}
+          SKIP_MCP: ${{ inputs.skip_mcp }}
         run: |
           python <<'PY'
           import os
@@ -195,12 +207,14 @@ jobs:
           bot_override = os.environ.get("BOT_OVERRIDE", "").strip()
           train_override = os.environ.get("TRAIN_OVERRIDE", "").strip()
           browser_override = os.environ.get("BROWSER_OVERRIDE", "").strip()
+          mcp_override = os.environ.get("MCP_OVERRIDE", "").strip()
           validate_version("agents_version", agents_override)
           validate_version("wrapper_version", wrapper_override)
           validate_version("code_version", code_override)
           validate_version("bot_version", bot_override)
           validate_version("train_version", train_override)
           validate_version("browser_version", browser_override)
+          validate_version("mcp_version", mcp_override)
 
           agents_pyproject = root / "src/praisonai-agents/pyproject.toml"
           agents_content = agents_pyproject.read_text()
@@ -242,6 +256,14 @@ jobs:
               sys.exit(1)
           current_browser = browser_match.group(1)
 
+          mcp_pyproject = root / "src/praisonai-mcp/pyproject.toml"
+          mcp_content = mcp_pyproject.read_text()
+          mcp_match = re.search(r'^version\s*=\s*"([^"]+)"', mcp_content, re.MULTILINE)
+          if not mcp_match:
+              print("Could not read praisonai-mcp version from pyproject.toml", file=sys.stderr)
+              sys.exit(1)
+          current_mcp = mcp_match.group(1)
+
           wrapper_version_py = root / "src/praisonai/praisonai/version.py"
           wrapper_content = wrapper_version_py.read_text()
           wrapper_match = re.search(r'__version__ = "([^"]+)"', wrapper_content)
@@ -256,6 +278,7 @@ jobs:
               ("bot", current_bot),
               ("train", current_train),
               ("browser", current_browser),
+              ("mcp", current_mcp),
               ("wrapper", current_wrapper),
           ):
               if not SEMVER.match(value):
@@ -267,6 +290,7 @@ jobs:
           skip_bot = os.environ.get("SKIP_BOT", "false").lower() == "true"
           skip_train = os.environ.get("SKIP_TRAIN", "false").lower() == "true"
           skip_browser = os.environ.get("SKIP_BROWSER", "false").lower() == "true"
+          skip_mcp = os.environ.get("SKIP_MCP", "false").lower() == "true"
 
           if agents_override:
               agents_version = agents_override
@@ -303,6 +327,13 @@ jobs:
           else:
               browser_version = bump_version(current_browser)
 
+          if mcp_override:
+              mcp_version = mcp_override
+          elif skip_mcp:
+              mcp_version = current_mcp
+          else:
+              mcp_version = bump_version(current_mcp)
+
           if wrapper_override:
               wrapper_version = wrapper_override
           else:
@@ -315,12 +346,14 @@ jobs:
               fh.write(f"bot_version={bot_version}\n")
               fh.write(f"train_version={train_version}\n")
               fh.write(f"browser_version={browser_version}\n")
+              fh.write(f"mcp_version={mcp_version}\n")
               fh.write(f"wrapper_version={wrapper_version}\n")
               fh.write(f"current_agents={current_agents}\n")
               fh.write(f"current_code={current_code}\n")
               fh.write(f"current_bot={current_bot}\n")
               fh.write(f"current_train={current_train}\n")
               fh.write(f"current_browser={current_browser}\n")
+              fh.write(f"current_mcp={current_mcp}\n")
               fh.write(f"current_wrapper={current_wrapper}\n")
 
           print(f"Agents:  {current_agents} -> {agents_version}")
@@ -328,6 +361,7 @@ jobs:
           print(f"Bot:     {current_bot} -> {bot_version}")
           print(f"Train:   {current_train} -> {train_version}")
           print(f"Browser: {current_browser} -> {browser_version}")
+          print(f"MCP:     {current_mcp} -> {mcp_version}")
           print(f"Wrapper: {current_wrapper} -> {wrapper_version}")
           PY
 
@@ -340,12 +374,14 @@ jobs:
           BOT_VERSION: ${{ steps.versions.outputs.bot_version }}
           TRAIN_VERSION: ${{ steps.versions.outputs.train_version }}
           BROWSER_VERSION: ${{ steps.versions.outputs.browser_version }}
+          MCP_VERSION: ${{ steps.versions.outputs.mcp_version }}
           WRAPPER_VERSION: ${{ steps.versions.outputs.wrapper_version }}
           INPUT_SKIP_AGENTS: ${{ inputs.skip_agents }}
           INPUT_SKIP_CODE: ${{ inputs.skip_code }}
           INPUT_SKIP_BOT: ${{ inputs.skip_bot }}
           INPUT_SKIP_TRAIN: ${{ inputs.skip_train }}
           INPUT_SKIP_BROWSER: ${{ inputs.skip_browser }}
+          INPUT_SKIP_MCP: ${{ inputs.skip_mcp }}
           INPUT_SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
         run: |
           set -euo pipefail
@@ -354,6 +390,7 @@ jobs:
           skip_bot="${INPUT_SKIP_BOT}"
           skip_train="${INPUT_SKIP_TRAIN}"
           skip_browser="${INPUT_SKIP_BROWSER}"
+          skip_mcp="${INPUT_SKIP_MCP}"
           skip_wrapper="${INPUT_SKIP_WRAPPER}"
           if [ "$skip_agents" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonaiagents/${AGENTS_VERSION}/json" >/dev/null && skip_agents=true || true
@@ -370,6 +407,9 @@ jobs:
           if [ "$skip_browser" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonai-browser/${BROWSER_VERSION}/json" >/dev/null && skip_browser=true || true
           fi
+          if [ "$skip_mcp" != "true" ]; then
+            curl -fsSL "https://pypi.org/pypi/praisonai-mcp/${MCP_VERSION}/json" >/dev/null && skip_mcp=true || true
+          fi
           if [ "$skip_wrapper" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonai/${WRAPPER_VERSION}/json" >/dev/null && skip_wrapper=true || true
           fi
@@ -378,8 +418,9 @@ jobs:
           echo "skip_bot=${skip_bot}" >> "$GITHUB_OUTPUT"
           echo "skip_train=${skip_train}" >> "$GITHUB_OUTPUT"
           echo "skip_browser=${skip_browser}" >> "$GITHUB_OUTPUT"
+          echo "skip_mcp=${skip_mcp}" >> "$GITHUB_OUTPUT"
           echo "skip_wrapper=${skip_wrapper}" >> "$GITHUB_OUTPUT"
-          if [ "$skip_agents" = "true" ] && [ "$skip_code" = "true" ] && [ "$skip_bot" = "true" ] && [ "$skip_train" = "true" ] && [ "$skip_browser" = "true" ] && [ "$skip_wrapper" = "true" ]; then
+          if [ "$skip_agents" = "true" ] && [ "$skip_code" = "true" ] && [ "$skip_bot" = "true" ] && [ "$skip_train" = "true" ] && [ "$skip_browser" = "true" ] && [ "$skip_mcp" = "true" ] && [ "$skip_wrapper" = "true" ]; then
             echo "All target versions already on PyPI — nothing to publish."
           fi
 
@@ -391,6 +432,7 @@ jobs:
           steps.pypi_exists.outputs.skip_bot == 'true' &&
           steps.pypi_exists.outputs.skip_train == 'true' &&
           steps.pypi_exists.outputs.skip_browser == 'true' &&
+          steps.pypi_exists.outputs.skip_mcp == 'true' &&
           steps.pypi_exists.outputs.skip_wrapper == 'true'
         run: echo "Idempotent skip — target versions already on PyPI."
 
@@ -403,6 +445,7 @@ jobs:
           echo "Bot version:     ${{ steps.versions.outputs.bot_version }}"
           echo "Train version:   ${{ steps.versions.outputs.train_version }}"
           echo "Browser version: ${{ steps.versions.outputs.browser_version }}"
+          echo "MCP version:     ${{ steps.versions.outputs.mcp_version }}"
           echo "Wrapper version: ${{ steps.versions.outputs.wrapper_version }}"
           echo ""
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
@@ -420,8 +463,11 @@ jobs:
           if [ "${{ inputs.skip_browser }}" != "true" ]; then
             echo "Would publish praisonai-browser ${{ steps.versions.outputs.browser_version }}"
           fi
+          if [ "${{ inputs.skip_mcp }}" != "true" ]; then
+            echo "Would publish praisonai-mcp ${{ steps.versions.outputs.mcp_version }}"
+          fi
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
-            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }}"
+            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }} --mcp-pin ${{ steps.versions.outputs.mcp_version }}"
             echo "Would uv publish praisonai ${{ steps.versions.outputs.wrapper_version }}"
           fi
 
@@ -771,6 +817,76 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
+      - name: Publish praisonai-mcp
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_mcp != true &&
+          steps.pypi_exists.outputs.skip_mcp != 'true'
+        working-directory: src/praisonai-mcp
+        env:
+          NEW_VERSION: ${{ steps.versions.outputs.mcp_version }}
+          CURRENT: ${{ steps.versions.outputs.current_mcp }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          new = os.environ["NEW_VERSION"]
+          current = os.environ["CURRENT"]
+          pyproject = Path("pyproject.toml")
+          content = pyproject.read_text()
+          pyproject.write_text(content.replace(f'version = "{current}"', f'version = "{new}"', 1))
+          version_py = Path("praisonai_mcp/_version.py")
+          version_content = version_py.read_text()
+          version_py.write_text(re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new}"', version_content, count=1))
+          PY
+
+          rm -rf dist
+          uv lock
+          uv build
+          uv publish
+
+      - name: Wait for praisonai-mcp on PyPI
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_mcp != true &&
+          steps.pypi_exists.outputs.skip_mcp != 'true'
+        run: |
+          set -euo pipefail
+          PACKAGE="praisonai-mcp"
+          VERSION="${{ steps.versions.outputs.mcp_version }}"
+          MAX_WAIT=600
+          INTERVAL=30
+          START=$(date +%s)
+
+          while true; do
+            if curl -fsSL "https://pypi.org/pypi/${PACKAGE}/${VERSION}/json" >/dev/null; then
+              echo "✅ ${PACKAGE}==${VERSION} is available on PyPI"
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "❌ Timeout waiting for ${PACKAGE}==${VERSION} on PyPI"
+              exit 1
+            fi
+            echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
+            sleep "$INTERVAL"
+          done
+
+      - name: Commit praisonai-mcp version bump
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_mcp != true &&
+          steps.pypi_exists.outputs.skip_mcp != 'true'
+        run: |
+          set -euo pipefail
+          git add src/praisonai-mcp/pyproject.toml src/praisonai-mcp/uv.lock src/praisonai-mcp/praisonai_mcp/_version.py
+          git diff --cached --quiet && { echo "No mcp files to commit"; exit 0; }
+          git commit -m "Bump praisonai-mcp to ${{ steps.versions.outputs.mcp_version }}"
+          git pull --rebase origin main
+          git push origin main
+
       - name: Bump and release wrapper
         if: >-
           inputs.dry_run != true &&
@@ -784,6 +900,7 @@ jobs:
             --bot-pin "${{ steps.versions.outputs.bot_version }}" \
             --train-pin "${{ steps.versions.outputs.train_version }}" \
             --browser-pin "${{ steps.versions.outputs.browser_version }}" \
+            --mcp-pin "${{ steps.versions.outputs.mcp_version }}" \
             --wait --max-wait 600 --no-add-all
 
       - name: Publish praisonai wrapper to PyPI
@@ -830,6 +947,7 @@ jobs:
           BOT="${{ steps.versions.outputs.bot_version }}"
           TRAIN="${{ steps.versions.outputs.train_version }}"
           BROWSER="${{ steps.versions.outputs.browser_version }}"
+          MCP="${{ steps.versions.outputs.mcp_version }}"
           WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
 
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
@@ -850,6 +968,10 @@ jobs:
 
           if [ "${{ inputs.skip_browser }}" != "true" ]; then
             echo "✅ praisonai-browser==${BROWSER}"
+          fi
+
+          if [ "${{ inputs.skip_mcp }}" != "true" ]; then
+            echo "✅ praisonai-mcp==${MCP}"
           fi
 
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then

@@ -12,7 +12,7 @@ class TestTaskState:
     
     def test_task_states(self):
         """Test task state values."""
-        from praisonai.mcp_server.tasks import TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskState
         
         assert TaskState.PENDING.value == "pending"
         assert TaskState.WORKING.value == "working"
@@ -26,7 +26,7 @@ class TestTaskProgress:
     
     def test_progress_basic(self):
         """Test basic progress creation."""
-        from praisonai.mcp_server.tasks import TaskProgress
+        from praisonai_mcp.mcp_server.tasks import TaskProgress
         
         progress = TaskProgress(current=50.0, total=100.0)
         
@@ -35,7 +35,7 @@ class TestTaskProgress:
     
     def test_progress_to_dict(self):
         """Test progress serialization."""
-        from praisonai.mcp_server.tasks import TaskProgress
+        from praisonai_mcp.mcp_server.tasks import TaskProgress
         
         progress = TaskProgress(current=50.0, total=100.0, message="Processing...")
         result = progress.to_dict()
@@ -50,7 +50,7 @@ class TestTask:
     
     def test_task_creation(self):
         """Test task creation."""
-        from praisonai.mcp_server.tasks import Task, TaskState
+        from praisonai_mcp.mcp_server.tasks import Task, TaskState
         
         task = Task(
             id="task-123",
@@ -65,7 +65,7 @@ class TestTask:
     
     def test_task_to_dict(self):
         """Test task serialization."""
-        from praisonai.mcp_server.tasks import Task, TaskState
+        from praisonai_mcp.mcp_server.tasks import Task, TaskState
         
         task = Task(
             id="task-123",
@@ -86,7 +86,7 @@ class TestTaskStore:
     
     def test_create_task(self):
         """Test task creation."""
-        from praisonai.mcp_server.tasks import TaskStore, TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskStore, TaskState
         
         store = TaskStore()
         task = store.create("tools/call", {"name": "search"})
@@ -97,7 +97,7 @@ class TestTaskStore:
     
     def test_get_task(self):
         """Test getting a task."""
-        from praisonai.mcp_server.tasks import TaskStore
+        from praisonai_mcp.mcp_server.tasks import TaskStore
         
         store = TaskStore()
         created = store.create("test", {})
@@ -109,7 +109,7 @@ class TestTaskStore:
     
     def test_get_nonexistent_task(self):
         """Test getting nonexistent task."""
-        from praisonai.mcp_server.tasks import TaskStore
+        from praisonai_mcp.mcp_server.tasks import TaskStore
         
         store = TaskStore()
         result = store.get("nonexistent")
@@ -118,7 +118,7 @@ class TestTaskStore:
     
     def test_update_task(self):
         """Test updating a task."""
-        from praisonai.mcp_server.tasks import TaskStore, TaskState, TaskProgress
+        from praisonai_mcp.mcp_server.tasks import TaskStore, TaskState, TaskProgress
         
         store = TaskStore()
         task = store.create("test", {})
@@ -131,7 +131,7 @@ class TestTaskStore:
     
     def test_cancel_task(self):
         """Test cancelling a task."""
-        from praisonai.mcp_server.tasks import TaskStore, TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskStore, TaskState
         
         store = TaskStore()
         task = store.create("test", {})
@@ -142,7 +142,7 @@ class TestTaskStore:
     
     def test_delete_task(self):
         """Test deleting a task."""
-        from praisonai.mcp_server.tasks import TaskStore
+        from praisonai_mcp.mcp_server.tasks import TaskStore
         
         store = TaskStore()
         task = store.create("test", {})
@@ -154,7 +154,7 @@ class TestTaskStore:
     
     def test_list_tasks(self):
         """Test listing tasks."""
-        from praisonai.mcp_server.tasks import TaskStore
+        from praisonai_mcp.mcp_server.tasks import TaskStore
         
         store = TaskStore()
         store.create("test1", {})
@@ -167,7 +167,7 @@ class TestTaskStore:
     
     def test_list_tasks_with_filter(self):
         """Test listing tasks with state filter."""
-        from praisonai.mcp_server.tasks import TaskStore, TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskStore, TaskState
         
         store = TaskStore()
         task1 = store.create("test1", {})
@@ -182,7 +182,7 @@ class TestTaskStore:
     
     def test_list_tasks_with_session(self):
         """Test listing tasks by session."""
-        from praisonai.mcp_server.tasks import TaskStore
+        from praisonai_mcp.mcp_server.tasks import TaskStore
         
         store = TaskStore()
         store.create("test1", {}, session_id="session-1")
@@ -199,7 +199,7 @@ class TestTaskManager:
     
     def test_create_task(self):
         """Test creating a task via manager."""
-        from praisonai.mcp_server.tasks import TaskManager
+        from praisonai_mcp.mcp_server.tasks import TaskManager
         
         manager = TaskManager()
         
@@ -214,7 +214,7 @@ class TestTaskManager:
     
     def test_get_task(self):
         """Test getting a task via manager."""
-        from praisonai.mcp_server.tasks import TaskManager
+        from praisonai_mcp.mcp_server.tasks import TaskManager
         
         manager = TaskManager()
         
@@ -228,7 +228,7 @@ class TestTaskManager:
     
     def test_update_progress(self):
         """Test updating task progress."""
-        from praisonai.mcp_server.tasks import TaskManager
+        from praisonai_mcp.mcp_server.tasks import TaskManager
         
         manager = TaskManager()
         
@@ -245,7 +245,7 @@ class TestTaskManager:
     
     def test_cancel_task(self):
         """Test cancelling a task via manager."""
-        from praisonai.mcp_server.tasks import TaskManager, TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskManager, TaskState
         
         manager = TaskManager()
         
@@ -260,7 +260,7 @@ class TestTaskManager:
     
     def test_list_tasks(self):
         """Test listing tasks via manager."""
-        from praisonai.mcp_server.tasks import TaskManager
+        from praisonai_mcp.mcp_server.tasks import TaskManager
         
         manager = TaskManager()
         
@@ -276,7 +276,7 @@ class TestTaskManager:
     
     def test_task_execution(self):
         """Test task execution with executor."""
-        from praisonai.mcp_server.tasks import TaskManager, TaskState
+        from praisonai_mcp.mcp_server.tasks import TaskManager, TaskState
         
         async def executor(method, params):
             return {"result": f"executed {method}"}
@@ -300,7 +300,7 @@ class TestGlobalTaskManager:
     
     def test_get_task_manager(self):
         """Test getting global task manager."""
-        from praisonai.mcp_server.tasks import get_task_manager, TaskManager
+        from praisonai_mcp.mcp_server.tasks import get_task_manager, TaskManager
         
         manager = get_task_manager()
         
@@ -308,7 +308,7 @@ class TestGlobalTaskManager:
     
     def test_set_task_manager(self):
         """Test setting global task manager."""
-        from praisonai.mcp_server.tasks import get_task_manager, set_task_manager, TaskManager
+        from praisonai_mcp.mcp_server.tasks import get_task_manager, set_task_manager, TaskManager
         
         custom_manager = TaskManager()
         set_task_manager(custom_manager)

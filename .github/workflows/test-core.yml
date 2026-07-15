@@ -100,12 +100,18 @@ jobs:
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
+          - shard: mcp
+            workdir: src/praisonai-mcp
+            paths: >-
+              tests/mcp_server/
+            extra_ignore: ""
+            pythonpath: >-
+              ${{ github.workspace }}/src/praisonai-agents
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
               tests/unit/integrations/
               tests/unit/deploy/
-              tests/unit/mcp_server/
               tests/unit/mcp/
               tests/unit/knowledge/
               tests/unit/llm/

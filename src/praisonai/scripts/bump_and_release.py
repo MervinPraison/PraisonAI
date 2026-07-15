@@ -84,6 +84,11 @@ def get_praisonai_browser_dir() -> Path:
     return get_project_root() / "src/praisonai-browser"
 
 
+def get_praisonai_mcp_dir() -> Path:
+    """Get the praisonai-mcp package directory."""
+    return get_project_root() / "src/praisonai-mcp"
+
+
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
     """Run a command and print it."""
     if not silent:
@@ -204,6 +209,8 @@ def bump_version(
     train_pin_only: bool = False,
     browser_version: Optional[str] = None,
     browser_pin_only: bool = False,
+    mcp_version: Optional[str] = None,
+    mcp_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
@@ -212,6 +219,7 @@ def bump_version(
     bot_dir = get_praisonai_bot_dir()
     train_dir = get_praisonai_train_dir()
     browser_dir = get_praisonai_browser_dir()
+    mcp_dir = get_praisonai_mcp_dir()
     
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
@@ -371,6 +379,32 @@ def bump_version(
             root,
         )
 
+    if mcp_version:
+        if mcp_pin_only:
+            print(f"\n📦 Pinning praisonai-mcp dependency to >={mcp_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-mcp to {mcp_version}:")
+            update_file(
+                mcp_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{mcp_version}"')],
+                root,
+            )
+            update_file(
+                mcp_dir / "praisonai_mcp/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{mcp_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-mcp(?:>=[0-9.]+)?"',
+                    f'"praisonai-mcp>={mcp_version}"',
+                )
+            ],
+            root,
+        )
+
     print("\n✨ Version bump complete!")
 
 
@@ -383,11 +417,12 @@ def validate_dependencies(
     bot_version: Optional[str] = None,
     train_version: Optional[str] = None,
     browser_version: Optional[str] = None,
+    mcp_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version or bot_version or train_version or browser_version:
+    if agents_version or code_version or bot_version or train_version or browser_version or mcp_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
@@ -399,6 +434,8 @@ def validate_dependencies(
             lock_cmd.extend(["--upgrade-package", f"praisonai-train=={train_version}"])
         if browser_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-browser=={browser_version}"])
+        if mcp_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-mcp=={mcp_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -488,6 +525,12 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai-train/pyproject.toml",
         "src/praisonai-train/praisonai_train/_version.py",
         "src/praisonai-train/uv.lock",
+        "src/praisonai-browser/pyproject.toml",
+        "src/praisonai-browser/praisonai_browser/_version.py",
+        "src/praisonai-browser/uv.lock",
+        "src/praisonai-mcp/pyproject.toml",
+        "src/praisonai-mcp/praisonai_mcp/_version.py",
+        "src/praisonai-mcp/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -646,9 +689,19 @@ Examples:
         help="Wait for the specified praisonai-browser version to be available on PyPI"
     )
     parser.add_argument(
+        "--mcp-pin",
+        help="Pin praisonai-mcp>= in wrapper pyproject only (after CI mcp publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-mcp",
+        action="store_true",
+        help="Wait for the specified praisonai-mcp version to be available on PyPI"
+    )
+    parser.add_argument(
         "--wait-all",
         action="store_true",
-        help="Wait for agents, code, bot, train, and browser versions on PyPI (needs --agents and pins)",
+        help="Wait for agents, code, bot, train, browser, and mcp versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -701,6 +754,7 @@ Examples:
     bot_version = args.bot or args.bot_pin
     train_version = args.train or args.train_pin
     browser_version = args.browser_pin
+    mcp_version = args.mcp_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
@@ -718,6 +772,11 @@ Examples:
 
     if browser_version and not re.match(r'^\d+\.\d+\.\d+$', browser_version):
         print(f"❌ Invalid browser version format: {browser_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.1)")
+        sys.exit(1)
+
+    if mcp_version and not re.match(r'^\d+\.\d+\.\d+$', mcp_version):
+        print(f"❌ Invalid mcp version format: {mcp_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.1)")
         sys.exit(1)
     
@@ -741,6 +800,7 @@ Examples:
     wait_bot = args.wait_bot or args.wait_all
     wait_train = args.wait_train or args.wait_all
     wait_browser = args.wait_browser or args.wait_all
+    wait_mcp = args.wait_mcp or args.wait_all
 
     if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
@@ -767,6 +827,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-browser", browser_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-browser was published successfully")
             sys.exit(1)
+
+    if wait_mcp and mcp_version:
+        if not wait_for_pypi_version("praisonai-mcp", mcp_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-mcp was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -780,6 +845,8 @@ Examples:
         train_pin_only=bool(args.train_pin and not args.train),
         browser_version=browser_version,
         browser_pin_only=bool(args.browser_pin),
+        mcp_version=mcp_version,
+        mcp_pin_only=bool(args.mcp_pin),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -793,6 +860,7 @@ Examples:
         bot_version=bot_version,
         train_version=train_version,
         browser_version=browser_version,
+        mcp_version=mcp_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

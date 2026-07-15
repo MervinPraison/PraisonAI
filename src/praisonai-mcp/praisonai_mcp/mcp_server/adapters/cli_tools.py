@@ -103,7 +103,8 @@ def register_cli_tools() -> None:
     def workflow_auto(topic: str, pattern: str = "sequential") -> str:
         """Auto-generate a workflow for a topic."""
         try:
-            from praisonai.auto import AutoGenerator
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            AutoGenerator = wrapper_callable("praisonai.auto", "AutoGenerator")
             generator = AutoGenerator(topic=topic)
             result = generator.generate(pattern=pattern)
             return str(result)
@@ -463,7 +464,8 @@ def register_cli_tools() -> None:
     def deploy_status(deployment_name: Optional[str] = None) -> str:
         """Get deployment status."""
         try:
-            from praisonai.deploy import get_deployment_status
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            get_deployment_status = wrapper_callable("praisonai.deploy", "get_deployment_status")
             status = get_deployment_status(deployment_name)
             return str(status)
         except ImportError:

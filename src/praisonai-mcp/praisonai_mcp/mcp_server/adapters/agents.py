@@ -64,7 +64,8 @@ def register_agent_tools() -> None:
         """Run a workflow from YAML definition."""
         try:
             import yaml
-            from praisonai.agents_generator import AgentsGenerator
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            AgentsGenerator = wrapper_callable("praisonai.agents_generator", "AgentsGenerator")
             
             # Parse YAML to validate
             yaml.safe_load(yaml_content)
@@ -90,7 +91,8 @@ def register_agent_tools() -> None:
     ) -> str:
         """Run a workflow from YAML file path."""
         try:
-            from praisonai.agents_generator import AgentsGenerator
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            AgentsGenerator = wrapper_callable("praisonai.agents_generator", "AgentsGenerator")
             
             generator = AgentsGenerator(
                 agent_file=file_path,

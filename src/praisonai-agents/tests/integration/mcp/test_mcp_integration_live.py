@@ -151,12 +151,13 @@ class TestMCPErrorHandlingLive:
             llm="gpt-4o-mini"
         )
         
-        # Test error handling
-        result = agent.start("Process this data that might cause an error: error condition")
-        
-        # Assertions - should handle error gracefully
+        # Test error handling — agent should not raise; may use fallback or explain failure
+        result = agent.start(
+            "If the MCP tool fails, use fallback_tool to process: sample payload"
+        )
+
         assert result is not None
-        assert len(result) > 0
+        assert len(str(result)) > 0
         
         print(f"MCP error handling result: {result}")
 

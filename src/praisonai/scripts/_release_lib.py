@@ -19,6 +19,7 @@ PYPI_NAMES = {
     "bot": "praisonai-bot",
     "train": "praisonai-train",
     "browser": "praisonai-browser",
+    "mcp": "praisonai-mcp",
     "wrapper": "praisonai",
 }
 
@@ -45,6 +46,10 @@ def train_dir() -> Path:
 
 def browser_dir() -> Path:
     return project_root() / "src/praisonai-browser"
+
+
+def mcp_dir() -> Path:
+    return project_root() / "src/praisonai-mcp"
 
 
 def wrapper_dir() -> Path:
@@ -107,6 +112,7 @@ def read_current_versions() -> dict[str, str]:
         "bot": read_pyproject_version(bot_dir() / "pyproject.toml"),
         "train": read_pyproject_version(train_dir() / "pyproject.toml"),
         "browser": read_pyproject_version(browser_dir() / "pyproject.toml"),
+        "mcp": read_pyproject_version(mcp_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -173,6 +179,16 @@ def bump_browser_files(new_version: str) -> None:
     current = read_pyproject_version(path)
     write_pyproject_version(path, current, new_version)
     version_py = browser_dir() / "praisonai_browser/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_mcp_files(new_version: str) -> None:
+    path = mcp_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = mcp_dir() / "praisonai_mcp/_version.py"
     version_py.write_text(
         re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
     )
