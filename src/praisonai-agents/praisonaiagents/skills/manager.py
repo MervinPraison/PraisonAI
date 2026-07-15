@@ -550,6 +550,10 @@ version: 1.0.0
             # Load the new skill
             skill = self.add_skill(str(skill_path))
             if skill:
+                logger.info(
+                    "Skill created: %s (SKILL.md at %s)",
+                    skill.properties.name, skill_file,
+                )
                 return {"success": True, "skill": skill.properties.name, "path": str(skill_path)}
             else:
                 return {"success": False, "error": "Failed to load created skill"}
@@ -1217,22 +1221,37 @@ version: 1.0.0
         return bool(propose)
 
     def _skills_base_dir(self):
-        """Return the base skills directory where mutations are written.
+        """Return the base skills directory where skill mutations are written.
 
-        Always targets the user-owned skills directory (honours
-        ``PRAISONAI_HOME``). ``get_default_skill_dirs()`` is intentionally not
-        used here because its first entry can be a project-scoped or
-        admin-managed (e.g. ``/etc/praison/skills``) location that mutations
-        must never write into.
+        Prefers the project-scoped ``./.praisonai/skills/`` directory when it
+        already exists in the current working directory, so writes land where
+        skill discovery reads and where users look. Falls back to the
+        user-owned skills directory (honours ``PRAISONAI_HOME``) otherwise.
+
+        ``get_default_skill_dirs()`` is intentionally not used here because its
+        entries can include admin-managed (e.g. ``/etc/praison/skills``) or
+        ancestor locations that mutations must never write into.
         """
-        from ..paths import get_skills_dir
-        base = get_skills_dir()
+        from ..paths import get_skills_dir, get_project_data_dir
+        project_skills = get_project_data_dir() / "skills"
+        if project_skills.is_dir():
+            base = project_skills
+        else:
+            base = get_skills_dir()
         base.mkdir(parents=True, exist_ok=True)
         return base
 
     def _pending_store_path(self):
-        """Return the path to the JSON-backed pending-mutation store."""
-        return self._skills_base_dir() / ".pending_skills.json"
+        """Return the path to the JSON-backed pending-mutation store.
+
+        The pending store lives in the user-owned skills directory regardless
+        of cwd so proposals remain discoverable for approval independent of the
+        working directory the create was staged from.
+        """
+        from ..paths import get_skills_dir
+        base = get_skills_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        return base / ".pending_skills.json"
 
     def _audit_log_path(self):
         """Return the path to the append-only skill-mutation audit log."""

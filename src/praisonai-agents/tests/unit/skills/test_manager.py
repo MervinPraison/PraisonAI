@@ -431,6 +431,44 @@ class TestSkillApprovalGate:
             assert result.get("status") != "pending"
             assert "direct-skill" in manager
 
+    def test_write_prefers_project_dir_when_present(self, monkeypatch):
+        """Writes land in project ./.praisonai/skills/ when that dir exists."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            project_skills = Path(tmpdir) / ".praisonai" / "skills"
+            project_skills.mkdir(parents=True)
+
+            manager = SkillManager()
+            result = manager.create_skill("proj-skill", "# body", propose=False)
+
+            assert result["success"] is True
+            assert (project_skills / "proj-skill" / "SKILL.md").exists()
+            home_skill = Path(tmpdir) / "home" / "skills" / "proj-skill"
+            assert not home_skill.exists()
+
+    def test_write_falls_back_to_home_without_project_dir(self, monkeypatch):
+        """Without a project skills dir, writes go to the user home dir."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.create_skill("home-skill", "# body", propose=False)
+
+            assert result["success"] is True
+            home_skill = Path(tmpdir) / "home" / "skills" / "home-skill" / "SKILL.md"
+            assert home_skill.exists()
+
     def test_env_disables_approval(self, monkeypatch):
         """SKILL_WRITE_APPROVAL=0 makes writes direct by default."""
         from praisonaiagents.skills.manager import SkillManager
