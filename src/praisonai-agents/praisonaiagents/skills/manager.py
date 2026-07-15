@@ -482,7 +482,8 @@ class SkillManager:
 
     def create_skill(self, name: str, content: str, category: str = None,
                      agent_created: bool = True,
-                     propose: Optional[bool] = None) -> dict:
+                     propose: Optional[bool] = None,
+                     base_dir: Optional[str] = None) -> dict:
         """Create a new skill with the given content.
         
         Args:
@@ -497,14 +498,22 @@ class SkillManager:
                 writing to disk. Defaults to the manager's ``write_approval``
                 policy (safe-by-default). Pass ``propose=False`` to write
                 directly in trusted/local contexts.
+            base_dir: Internal override for the destination skills directory.
+                Used when applying an approved proposal so the skill lands in
+                the directory it was staged from, independent of the approving
+                process's cwd. When None, the destination is resolved via
+                :meth:`_skills_base_dir`.
             
         Returns:
             Dict with success status and skill info
         """
         if self._should_propose(propose):
+            # Pin the destination at staging time so approval from a different
+            # working directory writes the skill where it was proposed.
             return self._stage_pending(
                 "create", name, content=content, category=category,
                 agent_created=agent_created,
+                base_dir=str(self._skills_base_dir()),
             )
         try:
             # Validate name
@@ -519,8 +528,15 @@ class SkillManager:
             if len(content) > 100_000:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
-            # Create skill directory (same base as the pending store target)
-            base_path = self._skills_base_dir()
+            # Create skill directory. Prefer the destination pinned at staging
+            # time (base_dir) so an approved proposal lands where it was
+            # proposed; otherwise resolve the base (same as the pending store).
+            if base_dir:
+                from pathlib import Path
+                base_path = Path(base_dir).expanduser()
+                base_path.mkdir(parents=True, exist_ok=True)
+            else:
+                base_path = self._skills_base_dir()
             
             skill_path = base_path / name
             skill_path.mkdir(exist_ok=True)
@@ -550,6 +566,10 @@ version: 1.0.0
             # Load the new skill
             skill = self.add_skill(str(skill_path))
             if skill:
+                logger.info(
+                    "Skill created: %s (SKILL.md at %s)",
+                    skill.properties.name, skill_file,
+                )
                 return {"success": True, "skill": skill.properties.name, "path": str(skill_path)}
             else:
                 return {"success": False, "error": "Failed to load created skill"}
@@ -1217,22 +1237,37 @@ version: 1.0.0
         return bool(propose)
 
     def _skills_base_dir(self):
-        """Return the base skills directory where mutations are written.
+        """Return the base skills directory where skill mutations are written.
 
-        Always targets the user-owned skills directory (honours
-        ``PRAISONAI_HOME``). ``get_default_skill_dirs()`` is intentionally not
-        used here because its first entry can be a project-scoped or
-        admin-managed (e.g. ``/etc/praison/skills``) location that mutations
-        must never write into.
+        Prefers the project-scoped ``./.praisonai/skills/`` directory when it
+        already exists in the current working directory, so writes land where
+        skill discovery reads and where users look. Falls back to the
+        user-owned skills directory (honours ``PRAISONAI_HOME``) otherwise.
+
+        ``get_default_skill_dirs()`` is intentionally not used here because its
+        entries can include admin-managed (e.g. ``/etc/praison/skills``) or
+        ancestor locations that mutations must never write into.
         """
-        from ..paths import get_skills_dir
-        base = get_skills_dir()
+        from ..paths import get_skills_dir, get_project_data_dir
+        project_skills = get_project_data_dir() / "skills"
+        if project_skills.is_dir():
+            base = project_skills
+        else:
+            base = get_skills_dir()
         base.mkdir(parents=True, exist_ok=True)
         return base
 
     def _pending_store_path(self):
-        """Return the path to the JSON-backed pending-mutation store."""
-        return self._skills_base_dir() / ".pending_skills.json"
+        """Return the path to the JSON-backed pending-mutation store.
+
+        The pending store lives in the user-owned skills directory regardless
+        of cwd so proposals remain discoverable for approval independent of the
+        working directory the create was staged from.
+        """
+        from ..paths import get_skills_dir
+        base = get_skills_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        return base / ".pending_skills.json"
 
     def _audit_log_path(self):
         """Return the path to the append-only skill-mutation audit log."""
@@ -1426,6 +1461,7 @@ version: 1.0.0
                 payload.get("category"),
                 agent_created=payload.get("agent_created", True),
                 propose=False,
+                base_dir=payload.get("base_dir"),
             )
         if action == "edit":
             return self.edit_skill(name, payload.get("content", ""), propose=False)
