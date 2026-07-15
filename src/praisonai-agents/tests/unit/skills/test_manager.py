@@ -469,6 +469,43 @@ class TestSkillApprovalGate:
             home_skill = Path(tmpdir) / "home" / "skills" / "home-skill" / "SKILL.md"
             assert home_skill.exists()
 
+    def test_approve_writes_to_staged_project_dir_from_other_cwd(self, monkeypatch):
+        """An approved create lands in the project it was staged from.
+
+        Regression: staging a create inside project A then approving from a
+        different working directory must still write the skill into project A,
+        not the approver's cwd (or user home).
+        """
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_a = Path(tmpdir) / "project_a"
+            project_b = Path(tmpdir) / "project_b"
+            (project_a / ".praisonai" / "skills").mkdir(parents=True)
+            (project_b / ".praisonai" / "skills").mkdir(parents=True)
+
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+
+            # Stage the create while cwd == project A.
+            monkeypatch.chdir(project_a)
+            staged = manager.create_skill("moved-skill", "# body")
+            request_id = staged["id"]
+            assert staged["status"] == "pending"
+
+            # Approve from a different cwd (project B).
+            monkeypatch.chdir(project_b)
+            result = manager.approve(request_id)
+
+            assert result["success"] is True
+            assert (project_a / ".praisonai" / "skills"
+                    / "moved-skill" / "SKILL.md").exists()
+            assert not (project_b / ".praisonai" / "skills"
+                        / "moved-skill").exists()
+
     def test_env_disables_approval(self, monkeypatch):
         """SKILL_WRITE_APPROVAL=0 makes writes direct by default."""
         from praisonaiagents.skills.manager import SkillManager

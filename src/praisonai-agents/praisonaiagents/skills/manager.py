@@ -482,7 +482,8 @@ class SkillManager:
 
     def create_skill(self, name: str, content: str, category: str = None,
                      agent_created: bool = True,
-                     propose: Optional[bool] = None) -> dict:
+                     propose: Optional[bool] = None,
+                     base_dir: Optional[str] = None) -> dict:
         """Create a new skill with the given content.
         
         Args:
@@ -497,14 +498,22 @@ class SkillManager:
                 writing to disk. Defaults to the manager's ``write_approval``
                 policy (safe-by-default). Pass ``propose=False`` to write
                 directly in trusted/local contexts.
+            base_dir: Internal override for the destination skills directory.
+                Used when applying an approved proposal so the skill lands in
+                the directory it was staged from, independent of the approving
+                process's cwd. When None, the destination is resolved via
+                :meth:`_skills_base_dir`.
             
         Returns:
             Dict with success status and skill info
         """
         if self._should_propose(propose):
+            # Pin the destination at staging time so approval from a different
+            # working directory writes the skill where it was proposed.
             return self._stage_pending(
                 "create", name, content=content, category=category,
                 agent_created=agent_created,
+                base_dir=str(self._skills_base_dir()),
             )
         try:
             # Validate name
@@ -519,8 +528,15 @@ class SkillManager:
             if len(content) > 100_000:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
-            # Create skill directory (same base as the pending store target)
-            base_path = self._skills_base_dir()
+            # Create skill directory. Prefer the destination pinned at staging
+            # time (base_dir) so an approved proposal lands where it was
+            # proposed; otherwise resolve the base (same as the pending store).
+            if base_dir:
+                from pathlib import Path
+                base_path = Path(base_dir).expanduser()
+                base_path.mkdir(parents=True, exist_ok=True)
+            else:
+                base_path = self._skills_base_dir()
             
             skill_path = base_path / name
             skill_path.mkdir(exist_ok=True)
@@ -1445,6 +1461,7 @@ version: 1.0.0
                 payload.get("category"),
                 agent_created=payload.get("agent_created", True),
                 propose=False,
+                base_dir=payload.get("base_dir"),
             )
         if action == "edit":
             return self.edit_skill(name, payload.get("content", ""), propose=False)
