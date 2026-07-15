@@ -324,6 +324,11 @@ def train_list(
         if backend is None:
             raise typer.Exit(1)
         sessions = list_sessions_from_backend(backend, limit=limit)
+    elif storage_backend == "file" and storage_path:
+        # Custom file directory: scan the requested path, not the default dir.
+        sessions = list_training_sessions(
+            storage_dir=Path(storage_path).expanduser(), limit=limit
+        )
     else:
         sessions = list_training_sessions(limit=limit)
     
@@ -647,11 +652,16 @@ def _resolve_backend(backend_type: Optional[str], storage_path: Optional[str], o
     """
     Resolve a storage backend from CLI flags, or None for the default JSON dir.
 
-    Returns None when no backend (or the plain ``file`` backend) is requested so
-    that existing default-directory behaviour is preserved. Exits with an error
-    if a backend is requested but cannot be created.
+    Returns None when no backend is requested, or when the plain ``file`` backend
+    is requested without a custom path, so that existing default-directory
+    behaviour is preserved. When ``file`` is combined with a custom
+    ``storage_path`` a FileBackend for that directory is returned so sessions
+    written there are discoverable. Exits with an error if a backend is
+    requested but cannot be created.
     """
-    if not backend_type or backend_type == "file":
+    if not backend_type:
+        return None
+    if backend_type == "file" and not storage_path:
         return None
     backend = _create_storage_backend(backend_type, storage_path, output)
     if backend is None:
