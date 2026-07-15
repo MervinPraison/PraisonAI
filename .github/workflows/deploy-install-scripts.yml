@@ -1,7 +1,7 @@
 name: Deploy install scripts to praison.ai
 
-# When install.sh or install.ps1 change on main, trigger praison.ai CI which
-# syncs scripts at build time and deploys to Azure AKS (existing azure-pipeline.yaml).
+# Production praison.ai runs on Hestia (185.249.73.167), not Azure AKS.
+# Sync install.sh / install.ps1 to /home/hestiaadmin/web/praison.ai/pa/web/
 
 on:
   push:
@@ -19,34 +19,40 @@ permissions:
   contents: read
 
 jobs:
-  trigger-website-deploy:
+  deploy-to-hestia:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger praison.ai CI
+      - uses: actions/checkout@v4
+
+      - name: Sync install scripts to Hestia
         env:
-          GH_TOKEN: ${{ secrets.SECRETS_ADMIN_PAT }}
+          SSH_PRIVATE_KEY: ${{ secrets.MIGRATION_TARGET_SSH_KEY }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "SECRETS_ADMIN_PAT is not configured in this repository"
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "MIGRATION_TARGET_SSH_KEY is not configured on this repository"
+            echo "Add the migration-target (185.249.73.167) SSH private key as a GitHub secret"
             exit 1
           fi
 
-          gh workflow run CI \
-            --repo MervinPraison/praison.ai \
-            --ref master
+          HESTIA_HOST="185.249.73.167"
+          HESTIA_USER="root"
+          REMOTE_WEB="/home/hestiaadmin/web/praison.ai/pa/web"
 
-          echo "Triggered praison.ai CI for PraisonAI commit ${SOURCE_SHA}"
-          echo "Monitor: https://github.com/MervinPraison/praison.ai/actions/workflows/azure-pipeline.yaml"
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HESTIA_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          sleep 10
-          RUN_URL=$(gh run list \
-            --repo MervinPraison/praison.ai \
-            --workflow CI \
-            --limit 1 \
-            --json url,status,createdAt \
-            --jq '.[0].url' 2>/dev/null || true)
-          if [ -n "${RUN_URL}" ]; then
-            echo "Latest praison.ai CI run: ${RUN_URL}"
-          fi
+          for f in install.sh install.ps1; do
+            echo "Syncing $f..."
+            scp "src/praisonai/scripts/$f" "${HESTIA_USER}@${HESTIA_HOST}:${REMOTE_WEB}/${f}"
+          done
+
+          ssh "${HESTIA_USER}@${HESTIA_HOST}" \
+            "chown hestiaadmin:hestiaadmin ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1 && \
+             chmod 644 ${REMOTE_WEB}/install.sh ${REMOTE_WEB}/install.ps1"
+
+          echo "Deployed install scripts for commit ${SOURCE_SHA}"
+          echo "Verify: curl -fsSL https://praison.ai/install.ps1 | head -5"
