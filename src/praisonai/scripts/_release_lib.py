@@ -23,6 +23,19 @@ PYPI_NAMES = {
     "wrapper": "praisonai",
 }
 
+PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "wrapper")
+
+# Path prefixes used to detect which packages changed in git (longest match wins).
+PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "agents": ("src/praisonai-agents/",),
+    "code": ("src/praisonai-code/",),
+    "bot": ("src/praisonai-bot/",),
+    "train": ("src/praisonai-train/",),
+    "browser": ("src/praisonai-browser/",),
+    "mcp": ("src/praisonai-mcp/",),
+    "wrapper": ("src/praisonai/", "docker/"),
+}
+
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent
@@ -115,6 +128,59 @@ def read_current_versions() -> dict[str, str]:
         "mcp": read_pyproject_version(mcp_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
+
+
+def resolve_since_ref(root: Optional[Path] = None) -> str:
+    """Git ref to diff against for change detection (last release tag, else main)."""
+    root = root or project_root()
+    for cmd in (
+        ["git", "describe", "--tags", "--match", "v*", "--abbrev=0"],
+        ["git", "rev-parse", "origin/main"],
+        ["git", "rev-parse", "HEAD~1"],
+    ):
+        result = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    return "HEAD~1"
+
+
+def _package_for_path(path: str) -> Optional[str]:
+    matches = [
+        (pkg, prefix)
+        for pkg, prefixes in PACKAGE_PATH_PREFIXES.items()
+        for prefix in prefixes
+        if path.startswith(prefix)
+    ]
+    if not matches:
+        return None
+    # Prefer the longest prefix (e.g. praisonai-mcp over praisonai wrapper).
+    matches.sort(key=lambda item: len(item[1]), reverse=True)
+    return matches[0][0]
+
+
+def detect_changed_packages(since_ref: str, root: Optional[Path] = None) -> set[str]:
+    """Return package keys with file changes between since_ref and HEAD."""
+    root = root or project_root()
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"{since_ref}..HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git diff failed ({since_ref}..HEAD): {result.stderr.strip() or result.stdout}"
+        )
+    changed: set[str] = set()
+    for line in result.stdout.splitlines():
+        path = line.strip()
+        if not path:
+            continue
+        pkg = _package_for_path(path)
+        if pkg:
+            changed.add(pkg)
+    return changed
 
 
 def pypi_has_version(package: str, version: str) -> bool:
