@@ -30,6 +30,42 @@ from praisonaiagents.gateway import (
 logger = logging.getLogger(__name__)
 
 
+def _closest_match(key: str, candidates) -> Optional[str]:
+    """Return the closest candidate name to ``key`` for typo suggestions."""
+    import difflib
+
+    matches = difflib.get_close_matches(key, list(candidates), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _value_matches_field(value: Any, field_type: Any) -> bool:
+    """Best-effort check that ``value`` is compatible with a dataclass field type.
+
+    Handles the plain and string ("from __future__ import annotations") forms of
+    the primitive/container types used by ``GatewayConfig``. bools are rejected
+    where an int is expected. Unknown/complex types are treated as valid so we
+    never reject something we cannot confidently validate.
+    """
+    type_name = field_type if isinstance(field_type, str) else getattr(field_type, "__name__", str(field_type))
+    type_name = type_name.replace("typing.", "")
+    if type_name.startswith("Optional[") and type_name.endswith("]"):
+        type_name = type_name[len("Optional["):-1]
+
+    if type_name.startswith("int"):
+        return isinstance(value, int) and not isinstance(value, bool)
+    if type_name.startswith("float"):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if type_name.startswith("bool"):
+        return isinstance(value, bool)
+    if type_name.startswith("str"):
+        return isinstance(value, str)
+    if type_name.startswith("List") or type_name.startswith("list"):
+        return isinstance(value, list)
+    if type_name.startswith("Dict") or type_name.startswith("dict"):
+        return isinstance(value, dict)
+    return True
+
+
 @dataclass
 class GatewaySession:
     """A gateway session tracking a conversation between client and agent."""
@@ -1357,6 +1393,42 @@ class WebSocketGateway:
                         f"Channel '{cname}' missing 'token' "
                         "(use ${{ENV_VAR}} syntax for env vars)"
                     )
+
+        # Validate the optional 'gateway:' server block field-by-field,
+        # reusing the typed GatewayConfig dataclass as the single source of
+        # truth so misspelled or wrongly-typed server settings are caught at
+        # load time instead of being silently ignored at runtime (see #3050).
+        gw_block = raw.get("gateway")
+        if gw_block is not None:
+            if not isinstance(gw_block, dict):
+                errors.append("'gateway' must be a dictionary")
+            else:
+                import dataclasses
+
+                allowed_fields = {f.name: f for f in dataclasses.fields(GatewayConfig)}
+                # session_config is a nested dataclass configured elsewhere.
+                allowed_fields.pop("session_config", None)
+                for key, value in gw_block.items():
+                    if key not in allowed_fields:
+                        suggestion = _closest_match(key, allowed_fields.keys())
+                        hint = f" (did you mean '{suggestion}'?)" if suggestion else ""
+                        errors.append(
+                            f"Unknown gateway setting '{key}'{hint}. "
+                            f"Allowed: {', '.join(sorted(allowed_fields))}"
+                        )
+                        continue
+                    if value is None:
+                        continue
+                    field_type = allowed_fields[key].type
+                    if not _value_matches_field(value, field_type):
+                        errors.append(
+                            f"Gateway setting '{key}' has invalid type "
+                            f"'{type(value).__name__}' (expected {field_type})"
+                        )
+                    elif isinstance(value, int) and not isinstance(value, bool) and value < 0:
+                        errors.append(
+                            f"Gateway setting '{key}' must not be negative (got {value})"
+                        )
 
         if errors:
             msg = (
