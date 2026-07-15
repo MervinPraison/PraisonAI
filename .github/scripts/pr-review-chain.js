@@ -170,7 +170,7 @@ function claudeFinalReady(comments, reviews = [], options = {}) {
   if (!prior.ready) {
     return { ready: false, reason: prior.reason };
   }
-  if (isSkipCopilot(options)) {
+  if (isSkipCopilot(options) || prior.requiredTimeout) {
     return {
       ready: true,
       reason: prior.requiredTimeout ? prior.reason : 'copilot skipped',
@@ -209,6 +209,7 @@ async function maybeTriggerClaudeFinal(github, owner, repo, prNumber, finalBody,
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const { comments, reviews } = await listCommentsAndReviews(github, owner, repo, prNumber);
   const gate = claudeFinalReady(comments, reviews, {
+    ...options,
     prCreatedAt: pr.created_at,
     optionalWaitMs: options.optionalWaitMs,
     allowCopilotTimeout: options.allowCopilotTimeout !== false,

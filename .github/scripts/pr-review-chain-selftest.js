@@ -92,7 +92,11 @@ assert(
 );
 assert(
   'claude FINAL timeout when required reviewer silent and no prior FINAL',
-  chain.claudeFinalReady([greptile], [], { prCreatedAt: oldPr, skipCopilot: true, requiredWaitMs: 30 * 60 * 1000 }).ready
+  chain.claudeFinalReady([greptile], [], { prCreatedAt: oldPr, requiredWaitMs: 30 * 60 * 1000 }).ready
+);
+assert(
+  'claude FINAL timeout auto-skips copilot without explicit skipCopilot',
+  chain.claudeFinalReady([greptile], [], { prCreatedAt: oldPr, requiredWaitMs: 30 * 60 * 1000 }).copilotSkipped
 );
 const finalClaude = {
   user: { login: 'github-actions[bot]' },
@@ -101,7 +105,7 @@ const finalClaude = {
 };
 assert(
   'claude FINAL not re-posted when already triggered',
-  !chain.claudeFinalReady([greptile, finalClaude], [], { prCreatedAt: oldPr, skipCopilot: true, requiredWaitMs: 0 }).ready
+  !chain.claudeFinalReady([greptile, finalClaude], [], { prCreatedAt: oldPr, requiredWaitMs: 0 }).ready
 );
 
 process.exit(failed ? 1 : 0);
