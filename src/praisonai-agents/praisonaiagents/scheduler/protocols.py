@@ -8,7 +8,7 @@ Any object implementing these methods can be used as a schedule store.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, List, Optional, Protocol, runtime_checkable
 
 
 @dataclass
@@ -47,6 +47,51 @@ class JobConditionProtocol(Protocol):
 
     def should_run(self, job: Any) -> "GateResult":
         """Return a :class:`GateResult` deciding whether ``job`` should run."""
+        ...
+
+
+@runtime_checkable
+class SchedulerProviderProtocol(Protocol):
+    """Protocol for a scheduler *trigger* backend — decides **when** to fire.
+
+    Complements :class:`ScheduleStoreProtocol`: the store owns *where* jobs
+    live and *what* is due (via ``claim_due``); a provider owns *when* the
+    firing check happens. The provider NEVER decides what fires or how a result
+    is delivered — it just calls ``on_due`` whenever a tick should occur, and
+    the shared ``ScheduleRunner`` + store then claim and fire due jobs.
+
+    This makes the firing mechanism as pluggable as the store already is:
+        - ``InProcessScheduleProvider`` (the built-in ``ScheduleLoop``) — an
+          always-on daemon thread polling every ``tick_seconds`` [default].
+        - An external provider — a systemd/launchd timer, a cloud scheduler
+          POSTing a gateway endpoint, an APScheduler cron trigger, or a
+          Kubernetes ``CronJob`` — that fires event-driven / serverless with no
+          always-on poll thread. Heavy provider implementations live in the
+          wrapper behind optional deps.
+
+    Any object implementing ``start`` + ``stop`` satisfies this contract and can
+    drive firing uniformly.
+    """
+
+    def start(
+        self,
+        on_due: Callable[[], None],
+        store: Optional["ScheduleStoreProtocol"] = None,
+    ) -> None:
+        """Begin driving firing.
+
+        Args:
+            on_due: Called whenever a tick should occur. The shared runner then
+                claims and fires due jobs. A provider MAY call this on a poll
+                interval (in-process) or on an inbound external signal
+                (event-driven / serverless).
+            store: Optional schedule store the provider may inspect. Firing
+                logic stays in the runner/store regardless of provider.
+        """
+        ...
+
+    def stop(self) -> None:
+        """Stop driving firing and release any resources (threads, timers)."""
         ...
 
 
