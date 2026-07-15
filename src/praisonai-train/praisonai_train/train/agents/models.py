@@ -311,9 +311,18 @@ class TrainingReport:
 
     def _print_summary_ascii(self) -> None:
         """Plain ASCII summary fallback (no Rich, no emoji)."""
+        requested = self.metadata.get("target_iterations")
+        early_stopped = self.metadata.get("early_stopped", False)
         print("Agent Training Summary")
         print(f"  Session ID: {self.session_id}")
+        if requested is not None and requested > self.total_iterations:
+            print(f"  Requested Iterations: {requested}")
         print(f"  Total Iterations: {self.total_iterations}")
+        if early_stopped:
+            print(
+                f"  Stopped Early: Yes (score {self.max_score:.1f} >= 9.5; "
+                "use --no-early-stop to run all)"
+            )
         print(f"  Average Score: {self.avg_score:.2f}")
         print(f"  Min Score: {self.min_score:.2f}")
         print(f"  Max Score: {self.max_score:.2f}")
@@ -322,6 +331,17 @@ class TrainingReport:
 
     def print_summary(self) -> None:
         """Print a summary of the training results."""
+        requested = self.metadata.get("target_iterations")
+        early_stopped = self.metadata.get("early_stopped", False)
+        show_requested = (
+            requested is not None and requested > self.total_iterations
+        )
+        early_stop_note = None
+        if early_stopped:
+            early_stop_note = (
+                f"Yes (score {self.max_score:.1f} >= 9.5; "
+                "use --no-early-stop to run all)"
+            )
         try:
             from rich.console import Console
             from rich.table import Table
@@ -333,7 +353,11 @@ class TrainingReport:
             table.add_column("Value", style="green")
             
             table.add_row("Session ID", self.session_id)
+            if show_requested:
+                table.add_row("Requested Iterations", str(requested))
             table.add_row("Total Iterations", str(self.total_iterations))
+            if early_stop_note:
+                table.add_row("Stopped Early", early_stop_note)
             table.add_row("Average Score", f"{self.avg_score:.2f}")
             table.add_row("Min Score", f"{self.min_score:.2f}")
             table.add_row("Max Score", f"{self.max_score:.2f}")
