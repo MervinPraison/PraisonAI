@@ -60,6 +60,10 @@ class ScheduleLoop:
         self._on_due: Optional[Callable[[], None]] = None
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Serialize ticks so an external fire_due() and the loop thread (or two
+        # overlapping external calls) never claim+fire the same due job twice on
+        # stores using the non-atomic get_due_jobs fallback.
+        self._tick_lock = threading.Lock()
         # Stable per-process identity for atomic job claims (host:pid:uuid) so a
         # due job fires at most once across tickers/processes/hosts when the
         # backing store supports ``claim_due``.
@@ -95,14 +99,17 @@ class ScheduleLoop:
                 happens while the runner/store still decide *what* fires.
             store: Optional store override applied before starting.
         """
+        # Never reconfigure an already-running loop: applying on_due/store to a
+        # live loop would swap its callback or claim from one store and update
+        # through another mid-tick. Guard first so start() is a true no-op.
+        if self.is_running:
+            return
+
         if store is not None:
             self._store = store
             self._runner = ScheduleRunner(self._store)
             self._atomic_claim = self._runner.supports_atomic_claim()
         self._on_due = on_due
-
-        if self.is_running:
-            return
 
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -133,35 +140,40 @@ class ScheduleLoop:
         timer, webhook, or cron trigger) without an always-on poll thread. The
         built-in loop simply calls this once per ``tick_seconds``.
         """
-        # Reserve due jobs atomically when the store supports it, so a
-        # due job fires at most once across processes/hosts; only jobs
-        # this ticker won are returned. Falls back to the non-atomic
-        # get_due_jobs path when unsupported.
-        due = self._runner.claim_due_jobs(self._owner_id, lease_seconds=300)
-        for job in due:
-            try:
-                self._on_trigger(job)
-                # Update last_run_at so the job won't re-fire
-                # until the next interval elapses.
-                job.last_run_at = time.time()
-                self._store.update(job)
-                self._emit_hook(job)
-            except Exception:
-                logger.exception(
-                    "Error triggering schedule job %s (%s)",
-                    job.name, job.id,
-                )
-            finally:
-                # Release the lease so it does not linger until expiry.
-                if self._atomic_claim:
-                    try:
-                        self._runner.complete_run(job.id, self._owner_id)
-                    except Exception:
-                        logger.exception(
-                            "Error releasing lease for schedule job "
-                            "%s (%s)",
-                            job.name, job.id,
-                        )
+        # Serialize the whole claim+fire tick: overlapping callers (an external
+        # provider driving fire_due() alongside the loop thread, or two external
+        # calls) must not both read the same due job before either updates
+        # last_run_at on a non-atomic store, which would double-fire the trigger.
+        with self._tick_lock:
+            # Reserve due jobs atomically when the store supports it, so a
+            # due job fires at most once across processes/hosts; only jobs
+            # this ticker won are returned. Falls back to the non-atomic
+            # get_due_jobs path when unsupported.
+            due = self._runner.claim_due_jobs(self._owner_id, lease_seconds=300)
+            for job in due:
+                try:
+                    self._on_trigger(job)
+                    # Update last_run_at so the job won't re-fire
+                    # until the next interval elapses.
+                    job.last_run_at = time.time()
+                    self._store.update(job)
+                    self._emit_hook(job)
+                except Exception:
+                    logger.exception(
+                        "Error triggering schedule job %s (%s)",
+                        job.name, job.id,
+                    )
+                finally:
+                    # Release the lease so it does not linger until expiry.
+                    if self._atomic_claim:
+                        try:
+                            self._runner.complete_run(job.id, self._owner_id)
+                        except Exception:
+                            logger.exception(
+                                "Error releasing lease for schedule job "
+                                "%s (%s)",
+                                job.name, job.id,
+                            )
 
     def _run(self) -> None:
         """Loop body executed on the daemon thread."""
