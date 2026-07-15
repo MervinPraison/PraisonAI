@@ -323,6 +323,39 @@ class TestAgentTrainerEarlyStop:
         assert report.metadata["early_stopped"] is False
 
     @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
+    def test_score_9_5_on_final_iteration_not_early_stopped(self, mock_grader_class):
+        """Reaching 9.5 on the last iteration is a full run, not early stop."""
+        from praisonai_train.train.agents.orchestrator import AgentTrainer
+        from praisonai_train.train.agents.models import TrainingScenario
+        from praisonai_train.train.agents.grader import GradeResult
+
+        mock_agent = Mock()
+        mock_agent.chat = Mock(return_value="Great response")
+
+        mock_grader = Mock()
+        mock_grader.grade = Mock(return_value=GradeResult(
+            score=10.0,
+            reasoning="Perfect",
+            suggestions=[],
+            input_text="Test",
+            output="Great response",
+        ))
+        mock_grader_class.return_value = mock_grader
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trainer = AgentTrainer(
+                agent=mock_agent,
+                iterations=1,
+                storage_dir=Path(tmpdir),
+                verbose=False,
+            )
+            trainer.add_scenario(TrainingScenario(id="s1", input_text="Test"))
+            report = trainer.run()
+
+        assert len(report.iterations) == 1
+        assert report.metadata["early_stopped"] is False
+
+    @patch("praisonai_train.train.agents.orchestrator.TrainingGrader")
     def test_continues_below_threshold(self, mock_grader_class):
         """Scores below 9.5 run all requested iterations."""
         from praisonai_train.train.agents.orchestrator import AgentTrainer

@@ -333,9 +333,10 @@ class TrainingReport:
         """Print a summary of the training results."""
         requested = self.metadata.get("target_iterations")
         early_stopped = self.metadata.get("early_stopped", False)
-        show_requested = (
-            requested is not None and requested > self.total_iterations
-        )
+        # Only surface the requested count when the loop was actually
+        # truncated. Comparing against total_iterations is unreliable with
+        # multiple scenarios (per-scenario limit vs. cross-scenario total).
+        show_requested = early_stopped and requested is not None
         early_stop_note = None
         if early_stopped:
             early_stop_note = (

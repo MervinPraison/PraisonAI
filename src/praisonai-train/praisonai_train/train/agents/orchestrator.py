@@ -354,8 +354,14 @@ class AgentTrainer:
                 previous_output = output
                 previous_grade = grade_result
                 
-                # Early stop if score is high enough (unless disabled)
-                if grade_result.score >= 9.5 and not self.no_early_stop:
+                # Early stop if score is high enough (unless disabled).
+                # Only counts as "early" when there are remaining iterations
+                # to skip; reaching 9.5 on the final iteration is a full run.
+                if (
+                    grade_result.score >= 9.5
+                    and not self.no_early_stop
+                    and iteration_num < self.iterations
+                ):
                     early_stopped = True
                     logger.info(
                         "Early stop after iteration %d/%d "
