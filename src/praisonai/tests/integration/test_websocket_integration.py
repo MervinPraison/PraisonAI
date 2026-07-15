@@ -135,6 +135,78 @@ class TestWebSocketIntegration:
         assert cfg["channels"]["telegram"]["token"] == "test123"
 
     @pytest.mark.asyncio
+    async def test_gateway_block_rejects_unknown_key(self, tmp_path):
+        """Misspelled gateway server settings are rejected with a suggestion."""
+        try:
+            from praisonai.gateway.server import WebSocketGateway
+        except ImportError:
+            pytest.skip("praisonai.gateway not available")
+
+        bad_config = tmp_path / "bad.yaml"
+        bad_config.write_text(
+            "agents:\n  bot:\n    instructions: hi\n"
+            "channels:\n  telegram:\n    token: test123\n"
+            "gateway:\n  reconnect_timout: 60\n"
+        )
+
+        with pytest.raises(ValueError, match="reconnect_timeout"):
+            WebSocketGateway.load_gateway_config(str(bad_config))
+
+    @pytest.mark.asyncio
+    async def test_gateway_block_rejects_wrong_type(self, tmp_path):
+        """A string where an int is expected is rejected at load time."""
+        try:
+            from praisonai.gateway.server import WebSocketGateway
+        except ImportError:
+            pytest.skip("praisonai.gateway not available")
+
+        bad_config = tmp_path / "bad.yaml"
+        bad_config.write_text(
+            "agents:\n  bot:\n    instructions: hi\n"
+            "channels:\n  telegram:\n    token: test123\n"
+            "gateway:\n  port: notaport\n"
+        )
+
+        with pytest.raises(ValueError, match="invalid type"):
+            WebSocketGateway.load_gateway_config(str(bad_config))
+
+    @pytest.mark.asyncio
+    async def test_gateway_block_rejects_negative(self, tmp_path):
+        """Negative numeric server settings are rejected."""
+        try:
+            from praisonai.gateway.server import WebSocketGateway
+        except ImportError:
+            pytest.skip("praisonai.gateway not available")
+
+        bad_config = tmp_path / "bad.yaml"
+        bad_config.write_text(
+            "agents:\n  bot:\n    instructions: hi\n"
+            "channels:\n  telegram:\n    token: test123\n"
+            "gateway:\n  max_connections: -5\n"
+        )
+
+        with pytest.raises(ValueError, match="must not be negative"):
+            WebSocketGateway.load_gateway_config(str(bad_config))
+
+    @pytest.mark.asyncio
+    async def test_gateway_block_valid(self, tmp_path):
+        """A valid gateway server block loads successfully."""
+        try:
+            from praisonai.gateway.server import WebSocketGateway
+        except ImportError:
+            pytest.skip("praisonai.gateway not available")
+
+        good_config = tmp_path / "good.yaml"
+        good_config.write_text(
+            "agents:\n  bot:\n    instructions: hi\n"
+            "channels:\n  telegram:\n    token: test123\n"
+            "gateway:\n  host: 127.0.0.1\n  port: 8765\n  max_connections: 100\n"
+        )
+
+        cfg = WebSocketGateway.load_gateway_config(str(good_config))
+        assert cfg["gateway"]["port"] == 8765
+
+    @pytest.mark.asyncio
     async def test_websocket_connect_and_message(self):
         """Test actual WebSocket connection to gateway server.
 
