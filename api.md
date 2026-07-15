@@ -493,7 +493,7 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">bundles</a>() -> List['BundleManifest']</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">clear</a>() -> None</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">create</a>(name: str, content: str, category: Optional[str] = None, propose: Optional[bool] = None) -> dict</code>
-* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">create_skill</a>(name: str, content: str, category: str = None, agent_created: bool = True, propose: Optional[bool] = None) -> dict</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">create_skill</a>(name: str, content: str, category: str = None, agent_created: bool = True, propose: Optional[bool] = None, base_dir: Optional[str] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">delete</a>(name: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">delete_skill</a>(name: str, hard: bool = False, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">discover</a>(skill_dirs: Optional[List[str]] = None, include_defaults: bool = True) -> int</code>
