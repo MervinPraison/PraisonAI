@@ -300,6 +300,101 @@ def test_self_improve_truthy_strings_enable_inline():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Per-turn tool tracking feeds the review hook (issue #3037)
+# ---------------------------------------------------------------------------
+
+
+def test_turn_tools_used_initialized_empty():
+    agent = Agent(instructions="x", self_improve=True)
+    assert agent._turn_tools_used == []
+
+
+def test_execute_tool_records_turn_tool():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    agent._execute_tool_with_context("read_file", {}, None, None)
+    assert "read_file" in agent._turn_tools_used
+
+
+def test_execute_tool_skips_tracking_during_review():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    agent._in_skill_review = True
+    agent._execute_tool_with_context("read_file", {}, None, None)
+    assert agent._turn_tools_used == []
+
+
+def test_execute_tool_async_records_turn_tool():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    asyncio.run(agent.execute_tool_async("read_file", {}))
+    assert "read_file" in agent._turn_tools_used
+
+
+def test_execute_tool_async_skips_tracking_during_review():
+    def read_file():
+        return "contents"
+
+    agent = Agent(instructions="x", self_improve=True, tools=[read_file])
+    agent._in_skill_review = True
+    asyncio.run(agent.execute_tool_async("read_file", {}))
+    assert agent._turn_tools_used == []
+
+
+def test_after_agent_hook_uses_turn_tools_used_when_not_passed():
+    agent = Agent(instructions="x", self_improve=True)
+    captured = {}
+
+    def fake_review(prompt, response, tools_used):
+        captured["tools_used"] = tools_used
+
+    agent._run_skill_review = fake_review
+    agent._turn_tools_used = ["read_file", "read_file"]
+
+    agent._trigger_after_agent_hook("prompt", "response", 0.0)
+
+    # Hook defaults tools_used from the buffer so the review policy sees them.
+    assert captured.get("tools_used") == ["read_file", "read_file"]
+
+
+def test_after_agent_hook_resets_turn_tools_used():
+    agent = Agent(instructions="x", self_improve=True)
+    agent._run_skill_review = lambda p, r, t: None
+    agent._turn_tools_used = ["shell"]
+    agent._trigger_after_agent_hook("p", "r", 0.0)
+    # Buffer consumed so the next turn starts clean.
+    assert agent._turn_tools_used == []
+
+
+def test_after_agent_hook_explicit_tools_used_wins():
+    agent = Agent(instructions="x", self_improve=True)
+    captured = {}
+    agent._run_skill_review = lambda p, r, t: captured.setdefault("t", t)
+    agent._turn_tools_used = ["buffered"]
+    agent._trigger_after_agent_hook("p", "r", 0.0, tools_used=["explicit"])
+    assert captured["t"] == ["explicit"]
+
+
+def test_atrigger_after_agent_hook_uses_turn_tools_used():
+    agent = Agent(instructions="x", self_improve=True)
+    captured = {}
+
+    async def fake_areview(prompt, response, tools_used):
+        captured["tools_used"] = tools_used
+
+    agent._arun_skill_review = fake_areview
+    agent._turn_tools_used = ["shell"]
+    asyncio.run(agent._atrigger_after_agent_hook("p", "r", 0.0))
+    assert captured.get("tools_used") == ["shell"]
+
+
 def test_schedule_self_improvement_uses_unique_job_ids(monkeypatch):
     agent = Agent(instructions="x", self_improve="background")
     agent._session_id = "sess"

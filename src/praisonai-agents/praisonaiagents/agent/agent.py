@@ -2186,6 +2186,10 @@ Your Goal: {self.goal}
             self._self_improve = True
             self._self_improve_policy = self_improve
         self._in_skill_review = False
+        # Per-turn tool-name buffer feeding the self-improve review policy.
+        # Populated in _execute_tool_with_context, reset each chat turn, and
+        # read by _trigger_after_agent_hook when tools_used is not passed.
+        self._turn_tools_used = []
 
         # Database persistence (lazy - no imports until used)
         self._db = db

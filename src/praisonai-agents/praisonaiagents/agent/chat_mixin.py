@@ -2058,7 +2058,7 @@ Your Goal: {self.goal}"""
                         and isinstance(t.get("function"), dict)
                         and "name" in t["function"]
                         else getattr(t, "__name__", str(t))
-                        for t in (tools if tools is not None else self.tools or [])
+                        for t in (self.tools or [])
                     ]
                     or None
                 ),
@@ -2346,6 +2346,10 @@ Your Goal: {self.goal}"""
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal chat implementation (extracted for trace wrapping)."""
+        # Reset the per-turn tool buffer so the self-improve review policy only
+        # sees tools used in this turn (not during a nested skill-review turn).
+        if not getattr(self, "_in_skill_review", False):
+            self._turn_tools_used = []
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -2944,6 +2948,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
+        # Reset the per-turn tool buffer so the self-improve review policy only
+        # sees tools used in this turn (not during a nested skill-review turn).
+        if not getattr(self, "_in_skill_review", False):
+            self._turn_tools_used = []
         # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():

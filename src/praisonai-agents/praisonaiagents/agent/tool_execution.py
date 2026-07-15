@@ -443,6 +443,16 @@ class ToolExecutionMixin:
         from ..streaming.events import StreamEvent, StreamEventType, tool_progress_channel
         import time as _time
         
+        # Record the tool name for this turn so the self-improve review policy
+        # can see what ran (issue #3037). Skipped during a guarded review turn
+        # to avoid tracking the review's own tool calls or recursing.
+        if not getattr(self, "_in_skill_review", False):
+            turn_tools = getattr(self, "_turn_tools_used", None)
+            if turn_tools is None:
+                self._turn_tools_used = []
+                turn_tools = self._turn_tools_used
+            turn_tools.append(function_name)
+
         # Emit tool call start event (zero overhead when not set)
         _trace_emitter = get_context_emitter()
         _trace_emitter.tool_call_start(self.name, function_name, arguments)
@@ -1070,6 +1080,13 @@ class ToolExecutionMixin:
         # these effects or recurse into another review.
         if getattr(self, "_in_skill_review", False):
             return response
+        # Default tools_used from the per-turn buffer when the caller did not
+        # pass it explicitly (issue #3037). Chat paths return without wiring
+        # tools_used, so without this the review policy always sees an empty
+        # list and never runs. Consume the buffer so the next turn starts clean.
+        if tools_used is None:
+            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
+        self._turn_tools_used = []
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
@@ -1122,6 +1139,11 @@ class ToolExecutionMixin:
         # side-effect pipeline (see sync variant for rationale).
         if getattr(self, "_in_skill_review", False):
             return response
+        # Default tools_used from the per-turn buffer when the caller did not
+        # pass it explicitly (issue #3037); mirrors the sync path.
+        if tools_used is None:
+            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
+        self._turn_tools_used = []
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
