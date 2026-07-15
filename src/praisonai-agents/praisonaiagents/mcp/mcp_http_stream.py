@@ -15,7 +15,6 @@ import time
 import uuid
 import weakref
 from typing import List, Dict, Any, Optional, Callable, Iterable, Union
-from urllib.parse import urlparse, urljoin
 
 try:
     from mcp import ClientSession
@@ -493,15 +492,12 @@ class HTTPStreamMCPClient:
                 "Upgrade it with: pip install -U 'mcp'"
             )
 
-        # Parse URL to extract base URL and endpoint
-        parsed = urlparse(server_url)
-
-        # If the URL already has a path, use it; otherwise use default /mcp endpoint
-        if parsed.path and parsed.path != '/':
-            self.base_url = server_url
-        else:
-            # Default endpoint is /mcp
-            self.base_url = urljoin(server_url, '/mcp')
+        # Use the server URL exactly as provided. The official
+        # streamablehttp_client posts to this URL directly, so silently
+        # rewriting a bare-host URL (e.g. appending '/mcp') would POST to a
+        # non-existent endpoint, yielding HTTP 404 which the SDK surfaces as
+        # "Session terminated" during initialize().
+        self.base_url = server_url
         
         self.debug = debug
         self.timeout = timeout
