@@ -14,6 +14,31 @@ from dataclasses import dataclass
 logger = logging.getLogger("praisonai.browser.server")
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """Return True if a TCP server is already listening on host:port.
+
+    Resolves the address family via ``getaddrinfo`` so IPv6 hosts (e.g. ``::1``)
+    are probed correctly instead of assuming IPv4.
+    """
+    import socket
+
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    try:
+        infos = socket.getaddrinfo(probe_host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+
+    for family, socktype, proto, _canonname, sockaddr in infos:
+        try:
+            with socket.socket(family, socktype, proto) as s:
+                s.settimeout(1)
+                if s.connect_ex(sockaddr) == 0:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 @dataclass
 class ClientConnection:
     """Represents a connected WebSocket client."""
@@ -566,11 +591,11 @@ class BrowserServer:
         signal.signal(signal.SIGTERM, handle_signal)
         
         logger.info(f"Starting PraisonAI Browser Server on {self.host}:{self.port}")
-        print(f"\n🌐 PraisonAI Browser Server")
+        print("\nPraisonAI Browser Server")
         print(f"   WebSocket: ws://{self.host}:{self.port}/ws")
         print(f"   Health:    http://{self.host}:{self.port}/health")
         print(f"   Model:     {self.model}")
-        print(f"\n   Press Ctrl+C to stop\n")
+        print("\n   Press Ctrl+C to stop\n")
         
         uvicorn.run(
             app,
