@@ -1844,32 +1844,62 @@ def doctor_chrome(
 @doctor_app.command("extension")
 def doctor_extension(
     port: int = typer.Option(9222, "--port", "-p", help="Chrome debug port"),
+    server_port: int = typer.Option(8765, "--server-port", help="Bridge server port"),
 ):
-    """Check PraisonAI extension status."""
+    """Check PraisonAI extension status.
+
+    Reports two independent signals:
+      - Bridge connection (ground truth): the extension's side panel connects to
+        the bridge server via /health, regardless of which Chrome profile it runs in.
+      - CDP :9222 (optional): only relevant when Chrome was launched with
+        --remote-debugging-port. This is empty when using your daily "Work" Chrome,
+        which is normal and NOT a failure.
+    """
     import requests
-    
+
+    # Ground truth: is the extension connected to the bridge server?
+    # Prefer the extension-specific count; fall back to raw connections only
+    # when talking to an older server that doesn't report it.
+    bridge_connected = False
+    try:
+        resp = requests.get(f"http://localhost:{server_port}/health", timeout=5)
+        data = resp.json()
+        ext_connections = data.get("extension_connections")
+        if ext_connections is None:
+            ext_connections = data.get("connections", 0)
+        if ext_connections >= 1:
+            bridge_connected = True
+            console.print(f"[green]✅ Extension connected to bridge ({ext_connections} connection(s))[/green]")
+        else:
+            console.print("[yellow]⚠️ No extension connected to bridge (extension connections: 0)[/yellow]")
+            console.print("   Open the PraisonAI side panel in your daily Chrome, then re-check.")
+    except requests.exceptions.ConnectionError:
+        console.print(f"[yellow]⚠️ Bridge server not running on port {server_port}[/yellow]")
+        console.print("   Start with: praisonai browser start")
+    except Exception as e:
+        console.print(f"[yellow]⚠️ Bridge check error:[/yellow] {e}")
+
+    # Optional: CDP debug-profile check (only meaningful for CDP/launch users).
     try:
         resp = requests.get(f"http://localhost:{port}/json", timeout=5)
         targets = resp.json()
-        
-        # Find extension service worker
-        sw = next((t for t in targets if t.get('type') == 'service_worker' 
-                   and ('praisonai' in t.get('url', '').lower() or 
+
+        sw = next((t for t in targets if t.get('type') == 'service_worker'
+                   and ('praisonai' in t.get('url', '').lower() or
                         'fkmfdklcegbbpipbcimbokpfcfamhpdc' in t.get('url', ''))), None)
-        
+
         if sw:
-            console.print("[green]✅ Extension loaded[/green]")
+            console.print(f"[green]✅ Extension present in CDP Chrome (port {port})[/green]")
             console.print(f"   URL: {sw['url'][:60]}...")
-            console.print(f"   Status: {sw.get('type', 'unknown')}")
         else:
-            console.print("[yellow]⚠️ Extension not found[/yellow]")
-            console.print("   Install from: chrome://extensions (load unpacked)")
-            
+            console.print(f"[dim]ℹ️ Extension not in CDP Chrome on port {port} (normal for daily 'Work' Chrome).[/dim]")
     except requests.exceptions.ConnectionError:
-        console.print(f"[red]❌ Cannot connect to Chrome on port {port}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[dim]ℹ️ No Chrome with --remote-debugging-port={port} (optional).[/dim]")
     except Exception as e:
-        console.print(f"[red]❌ Error checking extension:[/red] {e}")
+        console.print(f"[dim]ℹ️ CDP check skipped:[/dim] {e}")
+
+    # Fail only when the ground-truth bridge connection is absent.
+    if not bridge_connected:
         raise typer.Exit(1)
 
 
@@ -2875,7 +2905,9 @@ def launch_browser(
                                 ) as resp:
                                     if resp.status == 200:
                                         health = await resp.json()
-                                        connections = health.get("connections", 0)
+                                        connections = health.get("extension_connections")
+                                        if connections is None:
+                                            connections = health.get("connections", 0)
                                         sessions = health.get("sessions", 0)
                                         if connections >= 1:
                                             extension_connected = True
@@ -2898,7 +2930,18 @@ def launch_browser(
                     if not extension_connected:
                         elapsed = int(asyncio.get_event_loop().time() - wait_start)
                         console.print(f"[red]✗ Extension did not connect after {elapsed}s[/red]")
-                        console.print("[yellow]Hint: Open Chrome DevTools -> Extensions -> PraisonAI -> Background page to check console[/yellow]")
+                        console.print("[yellow]Auto-load extension failed (common on Chrome 137+ / Windows).[/yellow]")
+                        console.print("[bold]Manual setup — load into your daily Chrome:[/bold]")
+                        console.print("  1. Open your normal Chrome (Work profile)")
+                        console.print("  2. Go to chrome://extensions and enable 'Developer mode'")
+                        console.print(f"  3. Click 'Load unpacked' and select: {extension_path}")
+                        if no_server:
+                            console.print("  4. Start the bridge first: praisonai browser start")
+                            console.print(f"     (you ran with --no-server, so no bridge is listening on port {server_port})")
+                            console.print("  5. Open the side panel, then verify with: praisonai browser doctor extension")
+                        else:
+                            console.print(f"  4. Open the side panel and confirm connection to ws://127.0.0.1:{server_port}/ws")
+                            console.print(f"  5. Verify with: curl http://127.0.0.1:{server_port}/health  (expect extension_connections >= 1)")
                         
                         # Additional debug info
                         if debug:
@@ -2906,7 +2949,7 @@ def launch_browser(
                             console.print("[dim]   [DEBUG] The service worker may terminate before connecting to bridge[/dim]")
                             console.print("[dim]   [DEBUG] Workaround: Use --engine cdp for reliable automation[/dim]")
                         
-                        raise Exception(f"Extension not connected to bridge server after {elapsed}s. Try: 1) Reload the extension 2) Check extension console for errors")
+                        raise Exception(f"Extension not connected to bridge server after {elapsed}s. Manual: Load unpacked from {extension_path}")
                     
                     try:
                         result = await run_with_extension()

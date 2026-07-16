@@ -45,6 +45,7 @@ class ClientConnection:
     websocket: object  # WebSocket instance
     session_id: Optional[str] = None
     connected_at: float = 0.0
+    is_extension: bool = False
 
 
 class BrowserServer:
@@ -153,9 +154,13 @@ class BrowserServer:
         
         @app.get("/health")
         async def health():
+            extension_connections = sum(
+                1 for c in self._connections.values() if c.is_extension
+            )
             return {
                 "status": "ok",
                 "connections": len(self._connections),
+                "extension_connections": extension_connections,
                 "sessions": len(self._agents),
             }
         
@@ -218,11 +223,14 @@ class BrowserServer:
 
         await websocket.accept()
         
-        # Create connection tracking
+        # Create connection tracking. The extension identifies itself via a
+        # chrome-extension:// Origin header (validated above); CLI clients do not.
+        is_extension = bool(origin) and origin.startswith("chrome-extension://")
         conn_id = str(uuid.uuid4())[:8]
         conn = ClientConnection(
             websocket=websocket,
             connected_at=time.time(),
+            is_extension=is_extension,
         )
         self._connections[conn_id] = conn
         
