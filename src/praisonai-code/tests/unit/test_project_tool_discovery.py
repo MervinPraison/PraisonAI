@@ -13,6 +13,7 @@ from praisonai_code.cli.features.custom_definitions import (
     CustomDefinitionsDiscovery,
     count_project_tool_files,
     discover_project_tools,
+    local_tools_enabled,
 )
 
 
@@ -117,6 +118,27 @@ class TestToolDiscovery:
         assert discover_project_tools() == []
 
 
+class TestLocalToolsEnabled:
+    def test_true_is_enabled(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        assert local_tools_enabled() is True
+
+    def test_case_insensitive_true(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "TRUE")
+        assert local_tools_enabled() is True
+
+    def test_unset_is_disabled(self, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        assert local_tools_enabled() is False
+
+    @pytest.mark.parametrize("value", ["false", "0", "no", "1", "yes", ""])
+    def test_non_true_values_are_disabled(self, value, monkeypatch):
+        # Mirrors the loader's exact acceptance (lower() == "true"); any other
+        # value must be treated as disabled so the hint/loader never disagree.
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", value)
+        assert local_tools_enabled() is False
+
+
 class TestCountProjectToolFiles:
     def test_counts_files_without_executing(self, project, monkeypatch):
         # No opt-in: discovery loads nothing, but the count still sees the file.
@@ -124,11 +146,12 @@ class TestCountProjectToolFiles:
         (project / "greet.py").write_text(GREET_TOOL)
 
         assert discover_project_tools() == []
-        assert count_project_tool_files() == 1
+        # (project_count, user_count)
+        assert count_project_tool_files()[0] == 1
 
     def test_empty_dir_counts_zero(self, project, monkeypatch):
         monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
-        assert count_project_tool_files() == 0
+        assert count_project_tool_files()[0] == 0
 
     def test_no_tools_dir_counts_zero(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -136,14 +159,14 @@ class TestCountProjectToolFiles:
             "praisonai_code.cli.features.custom_definitions.get_git_root",
             lambda: tmp_path,
         )
-        assert count_project_tool_files() == 0
+        assert count_project_tool_files() == (0, 0)
 
     def test_underscore_files_excluded(self, project, monkeypatch):
         monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
         (project / "_ignored.py").write_text(GREET_TOOL)
         (project / "greet.py").write_text(GREET_TOOL)
 
-        assert count_project_tool_files() == 1
+        assert count_project_tool_files()[0] == 1
 
 
 class TestAutoDiscoverHint:
@@ -164,7 +187,26 @@ class TestAutoDiscoverHint:
         result = _auto_discover_project_tools([])
         assert result == []
         assert any("PRAISONAI_ALLOW_LOCAL_TOOLS" in m for m in messages)
-        assert any("1 project tool file" in m for m in messages)
+        assert any("1 local tool file" in m for m in messages)
+        assert any(".praisonai/tools/" in m for m in messages)
+
+    def test_hint_printed_when_opt_in_is_false(self, project, monkeypatch):
+        # A truthy-but-not-"true" value (false/0) is rejected by the loader, so
+        # the hint must still fire instead of silently loading nothing.
+        from praisonai_code.cli.commands.run import _auto_discover_project_tools
+
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "false")
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        messages = []
+        monkeypatch.setattr(
+            "praisonai_code.cli.commands.run.get_output_controller",
+            lambda: type("O", (), {"print_info": lambda self, m: messages.append(m)})(),
+        )
+
+        result = _auto_discover_project_tools([])
+        assert result == []
+        assert any("local tools are disabled" in m for m in messages)
 
     def test_no_hint_when_no_files(self, project, monkeypatch):
         from praisonai_code.cli.commands.run import _auto_discover_project_tools

@@ -17,6 +17,8 @@ app = typer.Typer(help="Run agents")
 
 _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 
+_ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
+
 
 def _is_yaml_file(target: Optional[str]) -> bool:
     """Return True when ``target`` is an existing YAML file path.
@@ -313,7 +315,10 @@ def _resolve_tools_arg(value: Optional[str], verbose: bool = False) -> list:
             else:
                 # tools.py present on disk but produced no callables.
                 from ..output import get_output_controller
-                if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+                from praisonai_code.cli.features.custom_definitions import (
+                    local_tools_enabled,
+                )
+                if not local_tools_enabled():
                     get_output_controller().print_info(
                         f"Skipped '{item}': set PRAISONAI_ALLOW_LOCAL_TOOLS=true to load local tools."
                     )
@@ -354,24 +359,35 @@ def _auto_discover_project_tools(existing: list, verbose: bool = False) -> list:
         from praisonai_code.cli.features.custom_definitions import (
             count_project_tool_files,
             discover_project_tools,
+            local_tools_enabled,
         )
     except Exception:
         return []
 
-    import os as _os
-
     # Files present but the opt-in is unset: tell the user exactly how to
     # enable them rather than silently skipping. Say nothing when there are no
-    # local tool files.
-    if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+    # local tool files. ``local_tools_enabled`` mirrors the loader's exact
+    # acceptance semantics (``lower() == "true"``), so a truthy-but-not-``true``
+    # value like ``false``/``0`` still surfaces the hint instead of being
+    # treated as enabled and then silently skipped by the loader.
+    if not local_tools_enabled():
         try:
-            file_count = count_project_tool_files()
+            project_count, user_count = count_project_tool_files()
         except Exception:
-            file_count = 0
-        if file_count:
-            plural = "s" if file_count != 1 else ""
+            project_count, user_count = 0, 0
+        total = project_count + user_count
+        if total:
+            plural = "s" if total != 1 else ""
+            # Name the actual source(s) so a user with only ~/.praisonai/tools/
+            # global files is not pointed at a project dir that may not exist.
+            locations = []
+            if project_count:
+                locations.append(".praisonai/tools/")
+            if user_count:
+                locations.append("~/.praisonai/tools/")
+            where = " and ".join(locations)
             get_output_controller().print_info(
-                f"Found {file_count} project tool file{plural} in .praisonai/tools/ "
+                f"Found {total} local tool file{plural} in {where} "
                 "but local tools are disabled. Enable with "
                 "PRAISONAI_ALLOW_LOCAL_TOOLS=true or --allow-local-tools."
             )
@@ -705,12 +721,10 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
-    # --allow-local-tools is a discoverable equivalent to the env-var opt-in:
-    # set the shared gate so project-local .praisonai/tools/*.py load without
-    # requiring the user to export PRAISONAI_ALLOW_LOCAL_TOOLS out of band.
-    if allow_local_tools:
-        import os as _os
-        _os.environ["PRAISONAI_ALLOW_LOCAL_TOOLS"] = "true"
+    # --allow-local-tools is a discoverable equivalent to the env-var opt-in.
+    # It is a per-invocation grant: the actual gate is applied (and restored)
+    # only around tool discovery below, so a later in-process run_main() call
+    # without the flag never inherits the authorization to exec local Python.
 
     # Rewind: restore the workspace to a prior checkpoint and exit. Handled
     # before any execution (and before stdin ingestion) so `praisonai run
@@ -902,6 +916,7 @@ def run_main(
             fork=fork,
             no_save=no_save,
             thinking_budget=thinking_budget,
+            allow_local_tools=allow_local_tools,
         )
         return
     
@@ -1052,6 +1067,7 @@ def run_main(
             no_save=no_save,
             attach_session=attach,
             thinking_budget=thinking_budget,
+            allow_local_tools=allow_local_tools,
         )
 
 
@@ -1186,12 +1202,22 @@ def _run_prompt(
     no_save: bool = False,
     attach_session: Optional[str] = None,
     thinking_budget: Optional[int] = None,
+    allow_local_tools: bool = False,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
     
     # Note: Credential check already done in run_main() entry point
-    
+
+    # Scope the --allow-local-tools grant to this run so the opt-in never leaks
+    # into a later in-process invocation (embedded/notebook/test reuse). The
+    # loader reads PRAISONAI_ALLOW_LOCAL_TOOLS at tool-exec time, so set it for
+    # the duration of the run and always restore the prior value below.
+    import os as _os
+    _prev_allow_local_tools = _os.environ.get(_ALLOW_LOCAL_TOOLS_ENV)
+    if allow_local_tools:
+        _os.environ[_ALLOW_LOCAL_TOOLS_ENV] = "true"
+
     try:
         # Handle session continuity first (before any execution mode)
         from praisonai_code.cli.main import PraisonAI
@@ -1428,6 +1454,12 @@ def _run_prompt(
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
+    finally:
+        # Restore the prior opt-in state so the grant is strictly per-invocation.
+        if _prev_allow_local_tools is None:
+            _os.environ.pop(_ALLOW_LOCAL_TOOLS_ENV, None)
+        else:
+            _os.environ[_ALLOW_LOCAL_TOOLS_ENV] = _prev_allow_local_tools
 
 
 def _record_session_usage(session_id, model, output) -> None:
