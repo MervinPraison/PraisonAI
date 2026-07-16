@@ -9,6 +9,7 @@ Examples:
     praisonai checkpoint save "before refactor"
     praisonai checkpoint list
     praisonai checkpoint restore <id|last>
+    praisonai checkpoint rewind [steps]
     praisonai checkpoint diff [from] [to]
     praisonai checkpoint delete
 """
@@ -123,6 +124,17 @@ def restore(
         return await handler.restore(resolved)
 
     if not asyncio.run(_run()):
+        raise typer.Exit(1)
+
+
+@app.command("rewind")
+def rewind(
+    steps: int = typer.Argument(1, help="How many turns/checkpoints to step back (default: 1 = undo last turn)"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+):
+    """Rewind the workspace back N turns (default 1 = undo the last turn's file changes)."""
+    handler = _handler(workspace)
+    if not asyncio.run(handler.rewind(steps)):
         raise typer.Exit(1)
 
 

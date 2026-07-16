@@ -316,6 +316,88 @@ class TestCheckpointService:
         assert len(checkpoints) >= 2
     
     @pytest.mark.asyncio
+    async def test_service_rewind_one_turn(self, temp_workspace, temp_storage):
+        """Rewinding one turn restores the state before the last checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+
+        with open(test_file, "w") as f:
+            f.write("turn 1")
+        await service.save("Turn 1")
+
+        with open(test_file, "w") as f:
+            f.write("turn 2")
+        await service.save("Turn 2")
+
+        # rewind(1) undoes Turn 2, restoring the Turn 1 state.
+        result = await service.rewind(1)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_multiple_turns(self, temp_workspace, temp_storage):
+        """Rewinding N turns restores exactly the pre-turn-N working tree."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in range(1, 4):
+            with open(test_file, "w") as f:
+                f.write(f"turn {i}")
+            await service.save(f"Turn {i}")
+
+        # rewind(2) steps back two checkpoints from Turn 3 -> Turn 1 state.
+        result = await service.rewind(2)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_too_far(self, temp_workspace, temp_storage):
+        """Rewinding beyond available checkpoints fails gracefully."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("only turn")
+        await service.save("Only turn")
+
+        # Only initial + 1 checkpoint exist; rewinding 5 turns is impossible.
+        result = await service.rewind(5)
+
+        assert not result.success
+        assert "Cannot rewind" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_rewind_invalid_steps(self, temp_workspace, temp_storage):
+        """Rewinding with steps < 1 is rejected."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.rewind(0)
+
+        assert not result.success
+        assert "steps must be >= 1" in result.error
+
+    @pytest.mark.asyncio
     async def test_service_diff(self, temp_workspace, temp_storage):
         """Test getting diff between checkpoints."""
         service = CheckpointService(

@@ -351,6 +351,38 @@ class CheckpointService:
             self._emit(CheckpointEvent.ERROR, {"error": error_msg})
             return CheckpointResult.fail(error_msg)
     
+    async def rewind(self, steps: int = 1) -> CheckpointResult:
+        """
+        Rewind the workspace back ``steps`` checkpoints from the latest.
+
+        Checkpoints form an ordered sequence (newest first), so each
+        automatic/manual checkpoint marks the state after a turn. ``rewind(1)``
+        undoes the most recent turn's file changes by restoring the checkpoint
+        immediately before it; ``rewind(n)`` steps back ``n`` checkpoints.
+
+        Args:
+            steps: How many checkpoints to step back (must be >= 1).
+
+        Returns:
+            CheckpointResult with the checkpoint restored to.
+        """
+        if not self._initialized:
+            return CheckpointResult.fail("Service not initialized")
+
+        if steps < 1:
+            return CheckpointResult.fail("steps must be >= 1")
+
+        checkpoints = await self.list_checkpoints(limit=self.config.max_checkpoints)
+        if steps >= len(checkpoints):
+            return CheckpointResult.fail(
+                f"Cannot rewind {steps} step(s): only {len(checkpoints)} checkpoint(s) available"
+            )
+
+        # list_checkpoints is newest-first, so index ``steps`` is the checkpoint
+        # ``steps`` turns back from the latest.
+        target = checkpoints[steps]
+        return await self.restore(target.id)
+
     async def diff(
         self,
         from_id: Optional[str] = None,
