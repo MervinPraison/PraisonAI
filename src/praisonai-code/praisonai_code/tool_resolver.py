@@ -1066,8 +1066,17 @@ class ToolResolver:
         try:
             from praisonai_code.cli.features.custom_definitions import (
                 discover_project_tools,
+                local_tools_enabled,
             )
-        except Exception:
+        except ImportError:
+            return {}
+
+        # Cheap opt-in gate first: discovery walks up directories and shells out
+        # to ``git rev-parse`` to find the project root, so short-circuit before
+        # that work when local tools are disabled (the default). Loading is gated
+        # anyway and would return nothing, so this avoids adding a git subprocess
+        # to every YAML resolution for no benefit.
+        if not local_tools_enabled():
             return {}
 
         try:

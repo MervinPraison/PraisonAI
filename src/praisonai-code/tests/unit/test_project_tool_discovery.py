@@ -342,6 +342,27 @@ class TestResolveAllFromYamlDiscovery:
         tools = self._resolver().resolve_all_from_yaml({})
         assert "add" not in tools
 
+    def test_gate_short_circuits_before_discovery(self, project, monkeypatch):
+        # When local tools are disabled (default) the resolver must not do the
+        # directory walk-up / git subprocess work at all — it is gated to load
+        # nothing anyway, so paying that cost on every YAML resolution is waste.
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+
+        called = {"discover": False}
+
+        def _fail_discovery():
+            called["discover"] = True
+            raise AssertionError("discover_project_tools must not be called")
+
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.discover_project_tools",
+            _fail_discovery,
+        )
+
+        tools = self._resolver().resolve_all_from_yaml({})
+        assert "add" not in tools
+        assert called["discover"] is False
+
     def test_no_tools_dir_is_noop(self, tmp_path, monkeypatch):
         monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
         monkeypatch.chdir(tmp_path)
