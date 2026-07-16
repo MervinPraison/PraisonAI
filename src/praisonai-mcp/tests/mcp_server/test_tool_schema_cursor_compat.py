@@ -8,6 +8,7 @@ offerings batch when any tool fails. See issue #3111.
 """
 
 import json
+from typing import Optional
 
 from praisonai_mcp.mcp_server.registry import (
     MCPToolDefinition,
@@ -21,7 +22,7 @@ def _no_arg_tool():
     return "ok"
 
 
-def _optional_arg_tool(session_id: str = None):
+def _optional_arg_tool(session_id: Optional[str] = None):
     """A tool whose only argument is optional."""
     return session_id
 
