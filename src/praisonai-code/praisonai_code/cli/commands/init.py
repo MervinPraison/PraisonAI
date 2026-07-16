@@ -8,12 +8,14 @@ Project scaffolding command for the `.praisonai/` convention.
       config.yaml            # sensible defaults (model, output mode)
       agents/assistant.md    # working starter agent (frontmatter + body)
       commands/review.md     # working starter command using $ARGUMENTS / @file
-      tools/example.py       # commented @tool example, auto-discovered on run
+      tools/example.py       # commented @tool example (opt-in to load)
 
 The scaffolded files are immediately discoverable and runnable via
 `praisonai run --agent assistant ...` and `praisonai run --command review ...`.
-Tools dropped in `.praisonai/tools/*.py` are auto-loaded on every `run`
-(gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
+Tools dropped in `.praisonai/tools/*.py` execute local code, so loading them is
+opt-in: pass `--allow-local-tools` (or set `PRAISONAI_ALLOW_LOCAL_TOOLS=true`)
+on `run` to enable them. Without the opt-in, `run` prints a one-line hint when
+tool files are present so the enable step is never a silent no-op.
 """
 
 from pathlib import Path
@@ -68,15 +70,17 @@ If a file path is provided, here are its contents:
 STARTER_TOOL_PY = '''\
 """Project-local tools for this .praisonai/ project.
 
-Every public callable in this directory is auto-discovered and made available
-to the agent on `praisonai run` — no --tools flag required. Decorate a function
-with @tool for a rich schema, or just define a plain function.
+Every public callable in this directory is made available to the agent on
+`praisonai run` — no --tools flag required. Decorate a function with @tool for
+a rich schema, or just define a plain function.
 
-Loading executes this file, so it is gated by the PRAISONAI_ALLOW_LOCAL_TOOLS
-opt-in (set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable local tool loading).
-Uncomment the example below to try it:
+Loading executes this file, so it is OPT-IN. Enable it on `run` with either:
 
-    praisonai run "use the greet tool to greet Ada"
+    praisonai run --allow-local-tools "use the greet tool to greet Ada"
+    # or: export PRAISONAI_ALLOW_LOCAL_TOOLS=true
+
+Without the opt-in, `run` prints a one-line hint (it never silently skips).
+Uncomment the example below to try it.
 """
 
 # from praisonaiagents import tool
@@ -199,6 +203,10 @@ def init(
         output.print_info("You can now run:")
         output.print_info('  praisonai run --agent assistant "hello"')
         output.print_info('  praisonai run --command review "src/foo.py"')
+        output.print_info(
+            "Project-local tools are opt-in — add --allow-local-tools "
+            "(or set PRAISONAI_ALLOW_LOCAL_TOOLS=true) to load .praisonai/tools/*.py."
+        )
     elif skipped:
         output.print_info(
             "Nothing to do — .praisonai/ already initialised. Use --force to overwrite."

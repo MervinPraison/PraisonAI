@@ -792,6 +792,58 @@ def discover_project_tools() -> List[Any]:
     return [t.callable for t in discovery.list_tools()]
 
 
+def local_tools_enabled() -> bool:
+    """Return whether the ``PRAISONAI_ALLOW_LOCAL_TOOLS`` opt-in is enabled.
+
+    Mirrors the exact acceptance semantics of the safe loader
+    (``value.lower() == "true"``) so callers agree with what the loader will
+    actually honour. Truthy-but-not-``true`` values such as ``false``/``0`` are
+    correctly treated as *disabled*, avoiding a hint/loader mismatch that would
+    otherwise re-introduce a silent skip.
+    """
+    return os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() == "true"
+
+
+def count_project_tool_files() -> Tuple[int, int]:
+    """Count local ``tools/*.py`` files *without executing them*.
+
+    Walks the same user-global + project walk-up layers as
+    :func:`discover_project_tools` but only inspects the filesystem, so it is
+    safe to call regardless of the ``PRAISONAI_ALLOW_LOCAL_TOOLS`` opt-in. This
+    lets the ``run`` path tell whether tool files are present-but-skipped and
+    surface the enable step instead of silently loading nothing.
+
+    Returns:
+        A ``(project_count, user_count)`` tuple so callers can name the correct
+        source (``.praisonai/tools/`` vs the user-global ``~/.praisonai/tools/``)
+        instead of mislabelling user-global files as project files.
+    """
+    discovery = CustomDefinitionsDiscovery()
+    user_dir = discovery._get_user_dir()
+    project_dirs = discovery._find_project_dirs()
+
+    seen: set = set()
+
+    def _count(base_dir) -> int:
+        tools_dir = base_dir / "tools"
+        if not (tools_dir.exists() and tools_dir.is_dir()):
+            return 0
+        found = 0
+        for file_path in tools_dir.iterdir():
+            if file_path.suffix != ".py" or file_path.name.startswith("_"):
+                continue
+            resolved = file_path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found += 1
+        return found
+
+    project_count = sum(_count(base_dir) for base_dir in project_dirs)
+    user_count = _count(user_dir)
+    return project_count, user_count
+
+
 def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     """
     Load an agent configuration by name.
