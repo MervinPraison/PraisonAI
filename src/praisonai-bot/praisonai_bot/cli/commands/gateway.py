@@ -195,12 +195,45 @@ def gateway_status(
 
 
 def _resolve_env_token(value):
-    """Resolve a ``${VAR}`` placeholder to its env value (pass-through otherwise)."""
+    """Resolve a credential input to its value for probing.
+
+    Handles ``${VAR}`` placeholders and the additive secret-reference form
+    ``{source: file|env|exec, id: ...}`` (Issue #3102). Resolved values are
+    registered for log redaction. Plain strings pass through unchanged.
+    """
     import os
 
+    if isinstance(value, dict) and "source" in value and "id" in value:
+        try:
+            from praisonaiagents.secrets import resolve_secret
+
+            result = resolve_secret(value)
+            return result.value or ""
+        except Exception:  # pragma: no cover — defensive
+            return ""
     if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
         return os.environ.get(value[2:-1], "")
     return value
+
+
+def _secret_availability(value) -> str:
+    """Report a credential's availability WITHOUT printing its value (#3102).
+
+    Returns ``available`` | ``configured-but-unavailable`` | ``missing`` for a
+    reference/`${ENV}`/plaintext input so operators can validate secret wiring
+    before start.
+    """
+    try:
+        from praisonaiagents.secrets import resolve_secret, AVAILABLE, MISSING
+
+        result = resolve_secret(value, redact=False)
+        if result.available:
+            return AVAILABLE
+        if result.status == MISSING:
+            return MISSING
+        return result.status
+    except Exception:  # pragma: no cover — defensive
+        return "missing"
 
 
 def _is_ssl_error(result) -> bool:
@@ -338,6 +371,41 @@ async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
     return dict(results)
 
 
+def _render_secret_availability(channels: dict, json_output: bool = False) -> None:
+    """Print per-channel credential availability without revealing values (#3102).
+
+    Reports the ``token`` (and Slack ``app_token`` / WhatsApp ``verify_token``
+    when present) as ``available`` | ``configured-but-unavailable`` | ``missing``.
+    """
+    _fields = ("token", "app_token", "verify_token")
+    report: dict = {}
+    for name, ch_cfg in channels.items():
+        ch_cfg = ch_cfg or {}
+        fields = {
+            f: _secret_availability(ch_cfg[f])
+            for f in _fields
+            if f in ch_cfg and ch_cfg[f] not in (None, "")
+        }
+        if fields:
+            report[name] = fields
+
+    if not report:
+        return
+
+    if json_output:
+        import json
+
+        print(json.dumps({"secrets": report}, indent=2))
+        return
+
+    print("Credential availability (values never shown):")
+    for name, fields in report.items():
+        for f, status in fields.items():
+            mark = "✓" if status == "available" else "✗"
+            print(f"{name:<12} {f:<13} {mark}  {status}")
+    print()
+
+
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:
     """Print per-channel probe verdicts. Returns True if all channels passed."""
     all_ok = all(getattr(r, "ok", False) for r in results.values())
@@ -398,6 +466,11 @@ def gateway_doctor(
     if not channels:
         print("No channels configured.")
         raise typer.Exit(0)
+
+    # Report credential source availability first, WITHOUT printing any value
+    # (Issue #3102): operators can validate file/env/exec secret wiring even
+    # when the network probe cannot run.
+    _render_secret_availability(channels, json_output=json_output)
 
     results = asyncio.run(_probe_channels(channels))
     all_ok = _render_probe_results(results, json_output=json_output)
