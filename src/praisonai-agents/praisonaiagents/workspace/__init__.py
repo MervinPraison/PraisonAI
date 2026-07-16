@@ -186,3 +186,33 @@ def has_traversal_component(path: str) -> bool:
     suspicious_patterns = ['%2e%2e', '..%2f', '..%5c', '%252e%252e']
     path_lower = path.lower()
     return any(pattern in path_lower for pattern in suspicious_patterns)
+
+
+_LAZY_ISOLATION = {
+    "WorkspaceIsolationProtocol": ("protocols", "WorkspaceIsolationProtocol"),
+    "NoIsolationAdapter": ("adapters", "NoIsolationAdapter"),
+    "GitWorktreeAdapter": ("adapters", "GitWorktreeAdapter"),
+}
+
+
+def __getattr__(name):
+    """Lazily expose isolation protocol/adapters (keeps import cheap)."""
+    target = _LAZY_ISOLATION.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    module = import_module(f"{__name__}.{target[0]}")
+    return getattr(module, target[1])
+
+
+__all__ = [
+    "GitWorktreeAdapter",
+    "NoIsolationAdapter",
+    "Workspace",
+    "WorkspaceAccess",
+    "WorkspaceIsolationProtocol",
+    "WorkspaceScope",
+    "has_traversal_component",
+    "validate_within_dir",
+]
