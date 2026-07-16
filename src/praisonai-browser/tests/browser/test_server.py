@@ -320,6 +320,31 @@ class TestStartSession:
             server._sessions.close()
     
     @pytest.mark.asyncio
+    async def test_handle_start_session_side_panel_self(self):
+        """Side panel (extension) starting its own session must not self-exclude."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        # The extension itself is the caller and the only connection.
+        ext = ClientConnection(websocket=AsyncMock(), is_cli=False)
+        server._connections["ext"] = ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            ext
+        )
+        
+        assert response["type"] == "status"
+        assert response["status"] == "running"
+        assert response.get("start_automation_sent") is True
+        # The delivery loop claims the extension connection.
+        assert ext.session_id is not None
+        ext.websocket.send_text.assert_awaited()
+        
+        if server._sessions:
+            server._sessions.close()
+    
+    @pytest.mark.asyncio
     async def test_start_session_skips_non_extension_peer(self):
         """A non-extension peer must not receive start_automation."""
         from unittest.mock import AsyncMock
@@ -331,7 +356,7 @@ class TestStartSession:
         peer_ws = Mock()
         peer_ws.send_text = AsyncMock()
         peer_ws.send_json = AsyncMock()
-        peer = ClientConnection(websocket=peer_ws, is_extension=False)
+        peer = ClientConnection(websocket=peer_ws, is_extension=False, is_cli=True)
         ext_ws = Mock()
         ext_ws.send_text = AsyncMock()
         ext = ClientConnection(websocket=ext_ws, is_extension=True)
@@ -351,6 +376,26 @@ class TestStartSession:
         
         if server._sessions:
             server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_handle_start_session_ignores_idle_cli(self):
+        """Delivery must never target an idle CLI connection."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        caller = ClientConnection(websocket=Mock(), is_cli=True)
+        idle_cli = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        server._connections["idle_cli"] = idle_cli
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            caller
+        )
+        
+        # No extension exists, so the idle CLI must not be treated as one.
+        assert response["type"] == "error"
+        assert response["code"] == "NO_EXTENSION"
+        idle_cli.websocket.send_text.assert_not_called()
 
 
 class TestHealthEndpoint:
@@ -375,6 +420,45 @@ class TestHealthEndpoint:
         
         assert data["connections"] == 2
         assert data["extension_connections"] == 1
+
+
+class TestCancelSession:
+    """Tests for cancel_session routing and cleanup."""
+    
+    @pytest.mark.asyncio
+    async def test_cancel_session_routes_to_stop(self):
+        """cancel_session must route through stop handling and return stopped."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock(), session_id="abc123")
+        server._connections["c1"] = conn
+        
+        response = await server._process_message(
+            {"type": "cancel_session"},
+            conn
+        )
+        
+        assert response["type"] == "status"
+        assert response["status"] == "stopped"
+        assert conn.session_id is None
+    
+    def test_cancelled_status_records_ended_at(self):
+        """update_session must stamp ended_at for cancelled sessions too."""
+        import tempfile
+        from praisonai_browser.sessions import SessionManager
+        
+        with tempfile.NamedTemporaryFile(suffix=".db") as f:
+            manager = SessionManager(f.name)
+            session = manager.create_session("Test goal")
+            sid = session["session_id"]
+            
+            manager.update_session(sid, status="cancelled")
+            
+            fetched = manager.get_session(sid)
+            assert fetched["status"] == "cancelled"
+            assert fetched["ended_at"] is not None
+            manager.close()
 
 
 class TestIntegration:
