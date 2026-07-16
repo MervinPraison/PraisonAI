@@ -175,8 +175,21 @@ class LoopGuard:
         self.detector.start_session()
         self._last_progress_count = 0
         
-    def record(self, tool_name: str, args: Dict[str, Any], success: bool) -> None:
-        """Record a tool execution for loop detection."""
+    def record(
+        self,
+        tool_name: str,
+        args: Dict[str, Any],
+        success: bool,
+        result: Any = None,
+    ) -> None:
+        """Record a tool execution for loop detection.
+
+        The actual tool ``result`` is used (when provided) to fingerprint the
+        output so that legitimate progress is recognised. Async status-polling
+        tools that return changing output (e.g. ``IN_PROGRESS`` -> ``COMPLETE``)
+        are therefore not flagged as "no progress"; only genuinely identical
+        repeated results are.
+        """
         if not self.config.enabled:
             return
             
@@ -184,11 +197,12 @@ class LoopGuard:
         if self._turn_start_time is None:
             self.reset_turn()
             
-        # Record in underlying detector
+        # Record in underlying detector. Prefer the real tool result for
+        # fingerprinting; fall back to the success flag when unavailable.
         self.detector.record_action(
             action_type=tool_name,
             args=args,
-            result=success,  # Simple success flag for now
+            result=result if result is not None else success,
             success=success,
         )
         
@@ -331,25 +345,60 @@ class LoopGuard:
             )
             
     def _check_no_progress(self) -> Optional[LoopGuardDecision]:
-        """Check for no-progress patterns."""
-        current_progress = len(self.detector._progress_markers)
-        actions_since_progress = len(self.detector._actions) - self._last_progress_count
-        
-        if actions_since_progress >= self.config.no_progress_halt:
+        """Check for no-progress patterns.
+
+        "No progress" means the agent keeps producing the *same* tool results
+        without moving forward. It is measured by the length of the trailing run
+        of consecutive identical tool results, not by the raw tool-call count.
+        This ensures legitimate long-running / async workflows (e.g. polling a
+        job status that transitions ``IN_PROGRESS`` -> ``COMPLETE``, or pacing
+        with a ``wait`` tool) are not penalised: any change in results, or an
+        explicit progress marker, resets the streak.
+        """
+        # Explicit progress markers always count as progress.
+        if len(self.detector._progress_markers) > self._last_progress_count:
+            return None
+
+        stuck_run = self._trailing_identical_result_run()
+
+        if stuck_run >= self.config.no_progress_halt:
             return LoopGuardDecision(
                 action=GuardAction.HALT,
                 code="no_progress_halt",
-                message=f"No progress detected in {actions_since_progress} tool calls. Agent may be stuck.",
-                metadata={"actions_since_progress": actions_since_progress}
+                message=f"No progress detected in {stuck_run} tool calls. Agent may be stuck.",
+                metadata={"actions_since_progress": stuck_run}
             )
-        elif actions_since_progress >= self.config.no_progress_warn:
+        elif stuck_run >= self.config.no_progress_warn:
             return LoopGuardDecision(
                 action=GuardAction.WARN,
                 code="no_progress_warn",
-                message=f"Limited progress in {actions_since_progress} tool calls. Consider changing approach.",
-                metadata={"actions_since_progress": actions_since_progress}
+                message=f"Limited progress in {stuck_run} tool calls. Consider changing approach.",
+                metadata={"actions_since_progress": stuck_run}
             )
         return None
+
+    def _trailing_identical_result_run(self) -> int:
+        """Count trailing tool calls that produced the same result fingerprint.
+
+        A change in ``result_hash`` (distinct tool output) breaks the streak and
+        is treated as progress. Actions without a result fingerprint do not
+        extend a stuck streak.
+        """
+        actions = self.detector._actions
+        if not actions:
+            return 0
+
+        last_hash = actions[-1].result_hash
+        if last_hash is None:
+            return 0
+
+        run = 0
+        for action in reversed(actions):
+            if action.result_hash == last_hash:
+                run += 1
+            else:
+                break
+        return run
         
     def mark_progress(self, marker: str) -> None:
         """Mark that meaningful progress has been made."""

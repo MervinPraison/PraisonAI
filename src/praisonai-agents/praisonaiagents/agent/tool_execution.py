@@ -987,7 +987,7 @@ class ToolExecutionMixin:
             if hasattr(self, '_ensure_loop_guard'):
                 loop_guard = self._ensure_loop_guard()
                 is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
-                loop_guard.record(function_name, arguments, is_success)
+                loop_guard.record(function_name, arguments, is_success, result=result)
                 # Handle warning injection for WARN decisions
                 decision = loop_guard.check(function_name, arguments, is_pre_execution=False) 
                 if decision.action.value == "warn":
