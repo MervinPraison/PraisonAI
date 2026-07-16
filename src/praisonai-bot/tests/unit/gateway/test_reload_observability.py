@@ -110,6 +110,23 @@ def test_record_reload_status_failure():
     assert d["last_at"] is not None
 
 
+def test_health_watcher_reflects_live_state_after_reload():
+    """health() overlays live watcher liveness onto the recorded snapshot.
+
+    Regression: a reload recorded while the watcher was active must not keep
+    reporting ``watcher='active'`` after the watcher exits (Issue #3049).
+    """
+    gw = WebSocketGateway()
+    gw._config_path = "/tmp/does-not-exist-gateway.yaml"
+    # Reload recorded while the watcher was alive.
+    gw._reload_watcher_active = True
+    gw._record_reload_status("ok")
+    assert gw.health()["reload"]["watcher"] == "active"
+    # Watcher later exits — health must now report it as disabled.
+    gw._reload_watcher_active = False
+    assert gw.health()["reload"]["watcher"] == "disabled"
+
+
 def test_reload_failure_recorded_via_locked(tmp_path):
     """_reload_config_locked records 'failed' when config is invalid."""
     gw = WebSocketGateway()

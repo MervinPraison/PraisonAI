@@ -3585,7 +3585,15 @@ class WebSocketGateway:
                 watcher="active" if self._reload_watcher_active else "disabled",
             )
         if reload_status is not None:
-            result["reload"] = reload_status.to_dict()
+            reload_data = reload_status.to_dict()
+            # The ``watcher`` field on ``_reload_status`` is a snapshot taken at
+            # record time; overlay the *live* liveness flag so a watcher that
+            # exited after the last reload is reported as ``disabled`` rather
+            # than stale ``active`` — the failure this surface exists to expose.
+            reload_data["watcher"] = (
+                "active" if self._reload_watcher_active else "disabled"
+            )
+            result["reload"] = reload_data
         if self._applied_config_revision is not None:
             result["applied_config_revision"] = self._applied_config_revision
         if self._config_path is not None:
@@ -5326,31 +5334,42 @@ class WebSocketGateway:
         
         # First time loading - do full setup
         if self._loaded_config is None:
+            # Issue #3049: don't publish the applied revision until the runtime
+            # (channels + agents) has actually been brought up. If any awaited
+            # step below raises, we record a ``failed`` outcome and leave the
+            # applied revision unset instead of falsely reporting the new config
+            # as live.
+            try:
+                await self.stop_channels()
+
+                # Create agents
+                agents_cfg = new_cfg.get("agents", {})
+                provider_cfg = new_cfg.get("provider", {})
+                default_model = provider_cfg.get("model") if provider_cfg else None
+                guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+                if agents_cfg:
+                    self._agents.clear()
+                    self._create_agents_from_config(
+                        agents_cfg,
+                        default_model=default_model,
+                        guardrails_cfg=guardrails_cfg,
+                    )
+
+                # Register inbound trigger hooks (Issue #2281).
+                self._apply_hooks_from_config(new_cfg)
+
+                # Start channels
+                channels_cfg = new_cfg.get("channels", {})
+                if channels_cfg:
+                    await self.start_channels(channels_cfg)
+            except Exception as e:
+                logger.error(f"Initial config load failed during setup: {e}")
+                self._record_reload_status("failed", error=str(e))
+                raise
+
+            # Setup succeeded — now the runtime genuinely reflects this config.
             self._loaded_config = new_cfg
             self._applied_config_revision = compute_config_revision(new_cfg)
-            await self.stop_channels()
-            
-            # Create agents
-            agents_cfg = new_cfg.get("agents", {})
-            provider_cfg = new_cfg.get("provider", {})
-            default_model = provider_cfg.get("model") if provider_cfg else None
-            guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
-            if agents_cfg:
-                self._agents.clear()
-                self._create_agents_from_config(
-                    agents_cfg,
-                    default_model=default_model,
-                    guardrails_cfg=guardrails_cfg,
-                )
-            
-            # Register inbound trigger hooks (Issue #2281).
-            self._apply_hooks_from_config(new_cfg)
-
-            # Start channels
-            channels_cfg = new_cfg.get("channels", {})
-            if channels_cfg:
-                await self.start_channels(channels_cfg)
-            
             logger.info("Initial config load complete")
             self._record_reload_status("ok")
             return
