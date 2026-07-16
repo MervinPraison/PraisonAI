@@ -5,13 +5,21 @@ Implements the MCP STDIO transport protocol:
 - JSON-RPC 2.0 messages over stdin/stdout
 - Messages delimited by newlines
 - Logs go to stderr only
+
+Reads stdin in a daemon thread and hands lines to the asyncio loop via
+``run_in_executor``. This avoids ``loop.connect_read_pipe(sys.stdin)`` which
+crashes on Windows ``ProactorEventLoop`` + Python 3.13 with
+``OSError: [WinError 6] The handle is invalid`` when an MCP client (Cursor,
+Claude Desktop, ...) spawns the server with redirected pipe handles.
 """
 
 import asyncio
 import json
 import logging
+import queue
 import sys
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ..server import MCPServer
@@ -48,38 +56,44 @@ class StdioTransport:
         
         logger.info(f"MCP server '{self.server.name}' starting on STDIO transport")
         
-        # Use asyncio streams for non-blocking I/O
-        loop = asyncio.get_event_loop()
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-        
-        # Create writer for stdout
-        write_transport, write_protocol = await loop.connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout
+        loop = asyncio.get_running_loop()
+        line_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
+
+        def _blocking_reader() -> None:
+            """Read stdin in a dedicated thread; ``None`` signals EOF."""
+            try:
+                for raw in sys.stdin.buffer:
+                    if not self._running:
+                        break
+                    line_queue.put(raw)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error(f"Error reading stdin: {exc}")
+            finally:
+                line_queue.put(None)
+
+        reader_thread = threading.Thread(
+            target=_blocking_reader, name="mcp-stdio-reader", daemon=True
         )
-        writer = asyncio.StreamWriter(write_transport, write_protocol, reader, loop)
+        reader_thread.start()
         
         try:
             while self._running:
+                raw = await loop.run_in_executor(None, line_queue.get)
+                if raw is None:
+                    # EOF reached
+                    break
+
+                line = raw.decode("utf-8").strip()
+                if not line:
+                    continue
+
+                # Parse JSON-RPC message
                 try:
-                    # Read a line (JSON-RPC message)
-                    line = await reader.readline()
-                    if not line:
-                        # EOF reached
-                        break
-                    
-                    line = line.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    
-                    # Parse JSON-RPC message
-                    try:
-                        message = json.loads(line)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"JSON parse error: {e}")
-                        error_response = {
+                    message = json.loads(line)
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON parse error: {e}")
+                    self._write_message(
+                        {
                             "jsonrpc": "2.0",
                             "id": None,
                             "error": {
@@ -87,32 +101,31 @@ class StdioTransport:
                                 "message": f"Parse error: {e}",
                             },
                         }
-                        await self._write_message(writer, error_response)
-                        continue
-                    
-                    # Handle message
+                    )
+                    continue
+
+                # Handle message
+                try:
                     response = await self.server.handle_message(message)
-                    
-                    # Write response if not a notification
-                    if response is not None:
-                        await self._write_message(writer, response)
-                        
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
                     logger.exception(f"Error processing message: {e}")
-                    
+                    continue
+
+                # Write response if not a notification
+                if response is not None:
+                    self._write_message(response)
         finally:
             self._running = False
-            writer.close()
             logger.info("MCP server stopped")
     
-    async def _write_message(self, writer: asyncio.StreamWriter, message: dict) -> None:
+    def _write_message(self, message: dict) -> None:
         """Write a JSON-RPC message to stdout."""
         try:
-            data = json.dumps(message) + "\n"
-            writer.write(data.encode("utf-8"))
-            await writer.drain()
+            data = (json.dumps(message) + "\n").encode("utf-8")
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
         except Exception as e:
             logger.error(f"Error writing message: {e}")
     
