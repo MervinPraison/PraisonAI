@@ -1123,7 +1123,14 @@ Write the complete compiled report:"""
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
-        """Async version of execute_tool with retry policy support"""
+        """Async version of execute_tool with retry policy support.
+
+        Routes through the user-supplied tool middleware (``Agent(hooks=[...])``)
+        when present so ``before_tool``/``after_tool``/``wrap_tool_call`` gate
+        async tool calls exactly as they do sync ones (security parity). The
+        fast path (no tool hooks) calls straight into the retry loop with zero
+        overhead.
+        """
 
         # Record the tool name for this turn so the self-improve review policy
         # sees async tool usage too (issue #3037). Mirrors the sync path in
@@ -1135,6 +1142,63 @@ Write the complete compiled report:"""
                 self._turn_tools_used = []
                 turn_tools = self._turn_tools_used
             turn_tools.append(function_name)
+
+        # Route async tool calls through the same tool middleware chain as the
+        # sync path. The chain (before_tool/after_tool/wrap_tool_call) is
+        # synchronous, so we run it in a worker thread and bridge its final
+        # handler back to this event loop via run_coroutine_threadsafe.
+        manager = self._get_tool_middleware_manager()
+        if manager is not None:
+            return await self._execute_tool_async_via_middleware(
+                manager, function_name, arguments, tool_call_id, tools_override
+            )
+        return await self._execute_tool_async_with_retry(
+            function_name, arguments, tool_call_id, tools_override
+        )
+
+    async def _execute_tool_async_via_middleware(
+        self, manager, function_name, arguments, tool_call_id, tools_override
+    ):
+        """Drive the (sync) tool middleware chain around an async tool call.
+
+        The middleware manager and its ``wrap_tool_call`` chain are synchronous
+        by contract, so they run in a thread-pool worker; the innermost handler
+        schedules the actual async execution back on the current running loop
+        and blocks the worker on the result. This preserves short-circuit,
+        audit, and argument-mutation semantics for async tools.
+        """
+        from ..hooks import ToolRequest, ToolResponse, InvocationContext
+
+        loop = asyncio.get_running_loop()
+        request = ToolRequest(
+            tool_name=function_name,
+            arguments=arguments,
+            context=InvocationContext(
+                agent_id=self.name,
+                run_id=getattr(self, '_current_run_id', 'unknown'),
+                session_id=getattr(self, '_session_id', None) or 'default',
+                tool_name=function_name,
+            ),
+        )
+
+        def _final_handler(req):
+            future = asyncio.run_coroutine_threadsafe(
+                self._execute_tool_async_with_retry(
+                    req.tool_name, req.arguments, tool_call_id, tools_override
+                ),
+                loop,
+            )
+            result = future.result()
+            return ToolResponse(tool_name=req.tool_name, result=result)
+
+        def _run_chain():
+            return manager.execute_tool_call(request, _final_handler)
+
+        response = await loop.run_in_executor(None, _run_chain)
+        return response.result if isinstance(response, ToolResponse) else response
+
+    async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Async tool execution with retry policy (middleware-agnostic core)."""
 
         # Get retry policy (tool-level > agent-level > default)
         retry_policy = self._get_tool_retry_policy(function_name)

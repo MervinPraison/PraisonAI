@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -40,6 +41,11 @@ logger = get_logger(__name__)
 
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
+
+# Guards lazy creation of each Workflow's per-instance _run_lock so two threads
+# entering run()/astart() concurrently on a fresh instance cannot each create
+# and acquire a *different* lock object (which would defeat the run guard).
+_RUN_LOCK_INIT_GUARD = threading.Lock()
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
@@ -648,7 +654,27 @@ class AgentFlow:
     _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     # Gap 3c: Cross-step handoff cycle detection
     _handoff_chain: List[str] = field(default_factory=list, repr=False)
-    
+    # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
+    # shared Workflow instance cannot be corrupted by concurrent run() calls.
+    _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
+
+    @property
+    def _execution_lock(self):
+        """Lazily-created re-entrancy lock for run()/astart() (zero overhead until used).
+
+        Creation is serialized through a module-level guard so two threads that
+        first reach run()/astart() concurrently observe the *same* lock object
+        (double-checked locking) rather than each minting and acquiring its own.
+        """
+        lock = self._run_lock
+        if lock is None:
+            with _RUN_LOCK_INIT_GUARD:
+                lock = self._run_lock
+                if lock is None:
+                    lock = threading.Lock()
+                    self._run_lock = lock
+        return lock
+
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
         from .workflow_configs import (
@@ -1063,6 +1089,29 @@ class AgentFlow:
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
         """
+        # Gap 3: refuse concurrent re-entrancy on the same instance. Per-run
+        # mutable state (status/step_statuses/_handoff_chain) is not safe to
+        # share across concurrent run()/astart() calls, so acquire a lock for
+        # the whole run and raise a clear error instead of silently corrupting.
+        if not self._execution_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "This Workflow instance is already running; a Workflow is not "
+                "safe to run() concurrently on the same object. Create a "
+                "separate Workflow instance per concurrent run."
+            )
+        try:
+            return self._run_impl(input, llm, verbose, stream)
+        finally:
+            self._execution_lock.release()
+
+    def _run_impl(
+        self,
+        input: str = "",
+        llm: Optional[str] = None,
+        verbose: bool = False,
+        stream: bool = None
+    ) -> Dict[str, Any]:
+        """Internal run implementation (see run() for the concurrency guard)."""
         # Gap 3c: Clear handoff chain at start of new workflow run  
         self._handoff_chain.clear()
         
@@ -2246,31 +2295,29 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             }
         
         normalized = self._normalize_single_step(step, index)
-        
-        context = WorkflowContext(
-            input=input,
-            previous_result=str(previous_output) if previous_output else None,
-            current_step=normalized.name,
-            variables=all_variables.copy()
-        )
-        
-        output = None
-        stop = False
-        
-        if normalized.handler:
-            try:
+
+        state = {"stop": False}
+
+        def _run_body(validation_feedback: Optional[str]) -> Any:
+            """Execute the step body once; used by the shared policy wrapper."""
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=normalized.name,
+                variables=all_variables.copy()
+            )
+            if validation_feedback:
+                context.variables["validation_feedback"] = validation_feedback
+
+            if normalized.handler:
                 result = normalized.handler(context)
                 if isinstance(result, StepResult):
-                    output = result.output
-                    stop = result.stop_workflow
                     if result.variables:
                         all_variables.update(result.variables)
-                else:
-                    output = str(result)
-            except Exception as e:
-                output = f"Error: {e}"
-        elif normalized.agent:
-            try:
+                    state["stop"] = result.stop_workflow
+                    return result.output
+                return str(result)
+            elif normalized.agent:
                 # Propagate context management to existing agent if workflow has it enabled
                 if self.context and hasattr(normalized.agent, '_context_manager_initialized'):
                     if not normalized.agent._context_manager_initialized:
@@ -2281,25 +2328,24 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                         # Also set on existing context manager if already initialized
                         if normalized.agent._context_manager and hasattr(normalized.agent._context_manager, '_session_cache'):
                             normalized.agent._context_manager._session_cache = self._session_dedup_cache
-                
+
                 action = normalized.action or input
                 # Substitute variables
                 action = _substitute_action_variables(action, all_variables, previous_output, input)
-                
+                if validation_feedback:
+                    action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+
                 # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
                 agent_class_name = normalized.agent.__class__.__name__
-                output = self._execute_specialized_agent(
+                out = self._execute_specialized_agent(
                     normalized.agent, agent_class_name, action, normalized, all_variables, stream
                 )
-                
                 # Parse JSON output if output_json was requested
                 step_output_json = getattr(normalized, '_output_json', None)
-                if step_output_json and output and isinstance(output, str):
-                    output = _parse_json_output(output, normalized.name)
-            except Exception as e:
-                output = f"Error: {e}"
-        elif normalized.action:
-            try:
+                if step_output_json and out and isinstance(out, str):
+                    out = _parse_json_output(out, normalized.name)
+                return out
+            elif normalized.action:
                 from ..agent.agent import Agent
                 config = normalized.agent_config or self.default_agent_config or {}
                 temp_agent = Agent(
@@ -2320,25 +2366,102 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 )
                 action = normalized.action
                 action = _substitute_action_variables(action, all_variables, previous_output, input)
-                
-                output = temp_agent.chat(action, stream=stream)
-                
-                # Parse JSON output if output_json was requested
+                if validation_feedback:
+                    action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+
+                out = temp_agent.chat(action, stream=stream)
                 step_output_json = getattr(normalized, '_output_json', None)
-                if step_output_json and output and isinstance(output, str):
-                    output = _parse_json_output(output, normalized.name)
-            except Exception as e:
-                output = f"Error: {e}"
-        
+                if step_output_json and out and isinstance(out, str):
+                    out = _parse_json_output(out, normalized.name)
+                return out
+            return None
+
+        # Apply the same retry / guardrail / output_file policies used by the
+        # top-level run() loop so nested patterns (Parallel/Loop/Route/If/Repeat)
+        # and hierarchical mode don't silently drop these guarantees (Gap 2).
+        output = self._apply_step_policies(
+            normalized, _run_body, all_variables, verbose
+        )
+
         if verbose:
             print(f"✅ {normalized.name}: {str(output)}")
-        
+
         return {
             "step": normalized.name,
             "output": output,
-            "stop": stop,
+            "stop": state["stop"],
             "variables": all_variables
         }
+
+    def _apply_step_policies(self, step, run_body, all_variables, verbose):
+        """Run a step body with retry, guardrail-retry and output_file handling.
+
+        Shared by the top-level loop and nested-pattern execution so guarded /
+        retrying / file-writing steps behave identically wherever they appear.
+
+        Args:
+            step: The normalized step (provides max_retries/guardrails/output_file).
+            run_body: Callable(validation_feedback) -> output. Raises on error.
+            all_variables: Current workflow variables (for output_file substitution).
+            verbose: Whether to print progress.
+        """
+        max_retries = getattr(step, 'max_retries', 3)
+        retry_count = 0
+        validation_feedback = None
+        output = None
+        step_error = None
+
+        while retry_count <= max_retries:
+            step_error = None
+            try:
+                output = run_body(validation_feedback)
+            except Exception as e:
+                step_error = e
+                output = f"Error: {e}"
+                is_retryable = getattr(e, 'is_retryable', True)
+                if not is_retryable:
+                    break
+                retry_count += 1
+                if retry_count <= max_retries:
+                    backoff_seconds = 2 ** (retry_count - 1)
+                    if verbose:
+                        print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
+                    time.sleep(backoff_seconds)
+                    continue
+
+            # Guardrail check (guardrails canonical, guardrail deprecated)
+            guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
+            if guardrail and output and not step_error:
+                try:
+                    is_valid, feedback = guardrail(StepResult(output=output))
+                    if not is_valid:
+                        validation_feedback = str(feedback)
+                        retry_count += 1
+                        if verbose:
+                            print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
+                        if retry_count <= max_retries:
+                            continue
+                        break
+                except Exception as e:
+                    logger.error(f"Guardrail failed for {step.name}: {e}")
+
+            break
+
+        # Handle output_file - save output to file
+        if hasattr(step, 'output_file') and step.output_file and output and not step_error:
+            try:
+                output_path = step.output_file
+                for key, value in all_variables.items():
+                    output_path = output_path.replace(f"{{{{{key}}}}}", str(value))
+                os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+                with open(output_path, "w") as f:
+                    f.write(str(output))
+                if verbose:
+                    print(f"📁 Saved output to: {output_path}")
+            except Exception as e:
+                logger.error(f"Failed to save output to file: {e}")
+
+        return output
     
     def _execute_route(
         self,
