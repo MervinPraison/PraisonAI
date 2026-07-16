@@ -1161,7 +1161,12 @@ Your Goal: {self.goal}"""
             f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
-        
+
+        # Issue #2741/#3062: persist the summary so async resume is cheap too,
+        # matching the sync proactive-compaction path above. No-op unless a
+        # session store + session_id are bound and a summary was produced.
+        self._persist_compaction_checkpoint(result)
+
         try:
             await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
         except Exception as e:

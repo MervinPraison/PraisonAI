@@ -305,7 +305,8 @@ class ContextCompactor:
             messages_kept=len(compacted),
             strategy_used=self.strategy,
             tool_results_pruned=tool_results_pruned,
-            previous_summary_reused=getattr(self, '_used_previous_summary', False)
+            previous_summary_reused=getattr(self, '_used_previous_summary', False),
+            summary=self._extract_summary_text(compacted),
         )
         result.calculate_savings_pct()
         
@@ -397,7 +398,8 @@ class ContextCompactor:
             messages_kept=len(compacted),
             strategy_used=self.strategy,
             tool_results_pruned=tool_results_pruned,
-            previous_summary_reused=getattr(self, '_used_previous_summary', False)
+            previous_summary_reused=getattr(self, '_used_previous_summary', False),
+            summary=self._extract_summary_text(compacted),
         )
         result.calculate_savings_pct()
         
@@ -409,7 +411,35 @@ class ContextCompactor:
             self._low_savings_streak += 1
         
         return compacted, result
-    
+
+    def _extract_summary_text(self, compacted: List[Dict[str, Any]]) -> str:
+        """Surface the summary text produced by summarizing strategies.
+
+        ``CompactionResult.summary`` was historically left at ``""``, so the
+        distilled summary was only reachable as an in-list system message and
+        never propagated to hooks or the durable session checkpoint. This
+        returns the summary the strategy just injected (LLM or naive), so
+        callers/persisters (e.g. ``_persist_compaction_checkpoint``) can make
+        it durable. Returns ``""`` for non-summarizing strategies.
+        """
+        # Summarizing strategies tag their injected message with ``_compacted``.
+        for msg in reversed(compacted):
+            if msg.get("_compacted") and isinstance(msg.get("content"), str):
+                return msg["content"]
+        # LLM iterative path keeps the raw summary on the instance.
+        if isinstance(getattr(self, "_previous_summary", None), str):
+            return self._previous_summary
+        # Naive ``_summarize`` injects an untagged system summary line.
+        for msg in reversed(compacted):
+            content = msg.get("content")
+            if (
+                msg.get("role") == "system"
+                and isinstance(content, str)
+                and content.startswith("[Previous conversation summary]")
+            ):
+                return content
+        return ""
+
     def _prune_tool_results(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
         """
         Delegate tool result pruning to injected protocol implementation.
