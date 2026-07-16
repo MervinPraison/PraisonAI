@@ -130,6 +130,47 @@ class TestCLIDoctorExtension:
         result = runner.invoke(app, ["doctor", "extension"])
         assert result.exit_code == 1
 
+    @patch("requests.get")
+    def test_doctor_extension_uses_extension_specific_count(self, mock_get):
+        """Prefers extension_connections over raw connections when present."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {
+                    "status": "ok",
+                    "connections": 2,
+                    "extension_connections": 1,
+                    "sessions": 0,
+                }
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 0
+        assert "connected to bridge" in result.output
+
+    @patch("requests.get")
+    def test_doctor_extension_fails_when_only_cli_connected(self, mock_get):
+        """A stray non-extension client must not pass the check (issue #3098 P1)."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {
+                    "status": "ok",
+                    "connections": 1,
+                    "extension_connections": 0,
+                    "sessions": 0,
+                }
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 1
+
 
 class TestCLIMessageParsing:
     """Test that CLI handles various message types correctly."""

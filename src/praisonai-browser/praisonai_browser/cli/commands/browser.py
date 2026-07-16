@@ -1803,16 +1803,20 @@ def doctor_extension(
     import requests
 
     # Ground truth: is the extension connected to the bridge server?
+    # Prefer the extension-specific count; fall back to raw connections only
+    # when talking to an older server that doesn't report it.
     bridge_connected = False
     try:
         resp = requests.get(f"http://localhost:{server_port}/health", timeout=5)
         data = resp.json()
-        connections = data.get("connections", 0)
-        if connections >= 1:
+        ext_connections = data.get("extension_connections")
+        if ext_connections is None:
+            ext_connections = data.get("connections", 0)
+        if ext_connections >= 1:
             bridge_connected = True
-            console.print(f"[green]✅ Extension connected to bridge ({connections} connection(s))[/green]")
+            console.print(f"[green]✅ Extension connected to bridge ({ext_connections} connection(s))[/green]")
         else:
-            console.print("[yellow]⚠️ No extension connected to bridge (connections: 0)[/yellow]")
+            console.print("[yellow]⚠️ No extension connected to bridge (extension connections: 0)[/yellow]")
             console.print("   Open the PraisonAI side panel in your daily Chrome, then re-check.")
     except requests.exceptions.ConnectionError:
         console.print(f"[yellow]⚠️ Bridge server not running on port {server_port}[/yellow]")
@@ -2846,7 +2850,9 @@ def launch_browser(
                                 ) as resp:
                                     if resp.status == 200:
                                         health = await resp.json()
-                                        connections = health.get("connections", 0)
+                                        connections = health.get("extension_connections")
+                                        if connections is None:
+                                            connections = health.get("connections", 0)
                                         sessions = health.get("sessions", 0)
                                         if connections >= 1:
                                             extension_connected = True
@@ -2874,8 +2880,13 @@ def launch_browser(
                         console.print("  1. Open your normal Chrome (Work profile)")
                         console.print("  2. Go to chrome://extensions and enable 'Developer mode'")
                         console.print(f"  3. Click 'Load unpacked' and select: {extension_path}")
-                        console.print(f"  4. Open the side panel and confirm connection to ws://127.0.0.1:{server_port}/ws")
-                        console.print(f"  5. Verify with: curl http://127.0.0.1:{server_port}/health  (expect connections >= 1)")
+                        if no_server:
+                            console.print("  4. Start the bridge first: praisonai browser start")
+                            console.print(f"     (you ran with --no-server, so no bridge is listening on port {server_port})")
+                            console.print("  5. Open the side panel, then verify with: praisonai browser doctor extension")
+                        else:
+                            console.print(f"  4. Open the side panel and confirm connection to ws://127.0.0.1:{server_port}/ws")
+                            console.print(f"  5. Verify with: curl http://127.0.0.1:{server_port}/health  (expect extension_connections >= 1)")
                         
                         # Additional debug info
                         if debug:
