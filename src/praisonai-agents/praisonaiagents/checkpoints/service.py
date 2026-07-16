@@ -403,6 +403,47 @@ class CheckpointService:
             self._emit(CheckpointEvent.ERROR, {"error": error_msg})
             return CheckpointResult.fail(error_msg)
     
+    async def rewind(self, steps: int = 1) -> CheckpointResult:
+        """
+        Rewind the workspace back ``steps`` checkpoints from the latest.
+
+        Checkpoints form an ordered sequence (newest first). ``rewind(1)``
+        restores the checkpoint immediately before the current one (undoing the
+        most recent checkpointed change); ``rewind(n)`` steps back ``n``
+        checkpoints.
+
+        Note: a checkpoint is not guaranteed to correspond 1:1 with an agent
+        turn — manual saves and auto-checkpoints both create checkpoints — so
+        ``steps`` counts checkpoints, which is the closest turn-addressable
+        primitive available without persisting a turn↔checkpoint map.
+
+        Args:
+            steps: How many checkpoints to step back (must be >= 1).
+
+        Returns:
+            CheckpointResult with the checkpoint restored to.
+        """
+        if not self._initialized:
+            return CheckpointResult.fail("Service not initialized")
+
+        if steps < 1:
+            return CheckpointResult.fail("steps must be >= 1")
+
+        # Query only as many checkpoints as we need to reach the target.
+        # Shadow-git retains every commit (pruning only trims the in-memory
+        # list), so we must not cap the lookup at ``max_checkpoints`` or valid
+        # older targets would become unreachable.
+        checkpoints = await self.list_checkpoints(limit=steps + 1)
+        if steps >= len(checkpoints):
+            return CheckpointResult.fail(
+                f"Cannot rewind {steps} step(s): only {len(checkpoints)} checkpoint(s) available"
+            )
+
+        # list_checkpoints is newest-first, so index ``steps`` is the checkpoint
+        # ``steps`` positions back from the latest.
+        target = checkpoints[steps]
+        return await self.restore(target.id)
+
     async def diff(
         self,
         from_id: Optional[str] = None,

@@ -6,6 +6,7 @@ Provides CLI commands for managing file-level checkpoints.
 Commands:
 - praisonai checkpoint save <message>     # Save a checkpoint
 - praisonai checkpoint restore <id>       # Restore to a checkpoint
+- praisonai checkpoint rewind [steps]     # Rewind N turns (undo last turn)
 - praisonai checkpoint list               # List all checkpoints
 - praisonai checkpoint diff [from] [to]   # Show diff between checkpoints
 - praisonai checkpoint delete             # Delete all checkpoints
@@ -98,6 +99,32 @@ class CheckpointsHandler:
             self._print_error(f"Failed to restore: {result.error}")
             return False
     
+    async def rewind(self, steps: int = 1) -> bool:
+        """
+        Rewind the workspace back ``steps`` checkpoints.
+
+        ``steps=1`` restores the checkpoint immediately before the current one,
+        undoing the most recent checkpointed change. Checkpoints form an ordered
+        sequence, so ``steps`` is an index into it.
+
+        Args:
+            steps: How many checkpoints to step back.
+
+        Returns:
+            True if successful
+        """
+        service = await self._get_service()
+        result = await service.rewind(steps)
+
+        if result.success:
+            self._print_success(
+                f"Rewound {steps} checkpoint(s) to: {result.checkpoint.short_id}"
+            )
+            return True
+        else:
+            self._print_error(f"Failed to rewind: {result.error}")
+            return False
+
     async def list_checkpoints(self, limit: int = 20) -> List[dict]:
         """
         List all checkpoints.
@@ -265,6 +292,7 @@ def handle_checkpoint_command(args: List[str], workspace_dir: Optional[str] = No
         print("\nCommands:")
         print("  save <message>           Save a checkpoint with message")
         print("  restore <id>             Restore to a checkpoint")
+        print("  rewind [steps]           Rewind N turns (default: 1 = undo last turn)")
         print("  list [--limit N]         List checkpoints (default: 20)")
         print("  diff [from] [to]         Show diff between checkpoints")
         print("  delete                   Delete all checkpoints")
@@ -304,6 +332,17 @@ def handle_checkpoint_command(args: List[str], workspace_dir: Optional[str] = No
             return
         
         asyncio.run(handler.restore(args[1]))
+    
+    elif command == "rewind":
+        steps = 1
+        if len(args) > 1:
+            try:
+                steps = int(args[1])
+            except ValueError:
+                print("Usage: praisonai checkpoint rewind [steps]")
+                return
+        
+        asyncio.run(handler.rewind(steps))
     
     elif command == "list":
         limit = 20
@@ -348,6 +387,8 @@ def handle_checkpoint_command(args: List[str], workspace_dir: Optional[str] = No
         print("    Options: --allow-empty  Allow checkpoint with no changes")
         print("\n  praisonai checkpoint restore <id>")
         print("    Restore workspace to a specific checkpoint")
+        print("\n  praisonai checkpoint rewind [steps]")
+        print("    Rewind the workspace back N turns (default: 1 = undo last turn)")
         print("\n  praisonai checkpoint list [--limit N]")
         print("    List all checkpoints (default limit: 20)")
         print("\n  praisonai checkpoint diff [from_id] [to_id]")
