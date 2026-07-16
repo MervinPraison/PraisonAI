@@ -342,14 +342,39 @@ def _auto_discover_project_tools(existing: list, verbose: bool = False) -> list:
     ``PRAISONAI_ALLOW_LOCAL_TOOLS`` opt-in, so this returns an empty list when
     the opt-in is not set.
 
+    When tool files are present but skipped because the opt-in is unset, a
+    single concise hint is printed on the default path (not just ``--verbose``)
+    so a ``praisonai init`` -> add-tool -> ``run`` flow explains the one step
+    needed instead of silently loading nothing.
+
     Discovery is additive: explicit ``--tools`` items already in ``existing``
     take precedence and are not re-added (dedup by callable identity).
     """
     try:
         from praisonai_code.cli.features.custom_definitions import (
+            count_project_tool_files,
             discover_project_tools,
         )
     except Exception:
+        return []
+
+    import os as _os
+
+    # Files present but the opt-in is unset: tell the user exactly how to
+    # enable them rather than silently skipping. Say nothing when there are no
+    # local tool files.
+    if not _os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+        try:
+            file_count = count_project_tool_files()
+        except Exception:
+            file_count = 0
+        if file_count:
+            plural = "s" if file_count != 1 else ""
+            get_output_controller().print_info(
+                f"Found {file_count} project tool file{plural} in .praisonai/tools/ "
+                "but local tools are disabled. Enable with "
+                "PRAISONAI_ALLOW_LOCAL_TOOLS=true or --allow-local-tools."
+            )
         return []
 
     try:
@@ -369,7 +394,6 @@ def _auto_discover_project_tools(existing: list, verbose: bool = False) -> list:
         merged.append(tool)
 
     if merged and verbose:
-        from ..output import get_output_controller
         get_output_controller().print_info(
             f"Loaded {len(merged)} project tool(s) from .praisonai/tools/"
         )
@@ -636,6 +660,7 @@ def run_main(
     memory: bool = typer.Option(False, "--memory", help="Enable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Comma-separated tool names (e.g. web_search,github) or a tools.py file path"),
     toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
+    allow_local_tools: bool = typer.Option(False, "--allow-local-tools", help="Load project-local .praisonai/tools/*.py (equivalent to PRAISONAI_ALLOW_LOCAL_TOOLS=true)"),
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
@@ -679,6 +704,13 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+
+    # --allow-local-tools is a discoverable equivalent to the env-var opt-in:
+    # set the shared gate so project-local .praisonai/tools/*.py load without
+    # requiring the user to export PRAISONAI_ALLOW_LOCAL_TOOLS out of band.
+    if allow_local_tools:
+        import os as _os
+        _os.environ["PRAISONAI_ALLOW_LOCAL_TOOLS"] = "true"
 
     # Rewind: restore the workspace to a prior checkpoint and exit. Handled
     # before any execution (and before stdin ingestion) so `praisonai run

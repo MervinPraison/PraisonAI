@@ -11,6 +11,7 @@ import pytest
 
 from praisonai_code.cli.features.custom_definitions import (
     CustomDefinitionsDiscovery,
+    count_project_tool_files,
     discover_project_tools,
 )
 
@@ -114,6 +115,80 @@ class TestToolDiscovery:
             lambda: tmp_path,
         )
         assert discover_project_tools() == []
+
+
+class TestCountProjectToolFiles:
+    def test_counts_files_without_executing(self, project, monkeypatch):
+        # No opt-in: discovery loads nothing, but the count still sees the file.
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        assert discover_project_tools() == []
+        assert count_project_tool_files() == 1
+
+    def test_empty_dir_counts_zero(self, project, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        assert count_project_tool_files() == 0
+
+    def test_no_tools_dir_counts_zero(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.get_git_root",
+            lambda: tmp_path,
+        )
+        assert count_project_tool_files() == 0
+
+    def test_underscore_files_excluded(self, project, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "_ignored.py").write_text(GREET_TOOL)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        assert count_project_tool_files() == 1
+
+
+class TestAutoDiscoverHint:
+    def test_hint_printed_when_files_present_and_opt_in_unset(
+        self, project, monkeypatch
+    ):
+        from praisonai_code.cli.commands.run import _auto_discover_project_tools
+
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        messages = []
+        monkeypatch.setattr(
+            "praisonai_code.cli.commands.run.get_output_controller",
+            lambda: type("O", (), {"print_info": lambda self, m: messages.append(m)})(),
+        )
+
+        result = _auto_discover_project_tools([])
+        assert result == []
+        assert any("PRAISONAI_ALLOW_LOCAL_TOOLS" in m for m in messages)
+        assert any("1 project tool file" in m for m in messages)
+
+    def test_no_hint_when_no_files(self, project, monkeypatch):
+        from praisonai_code.cli.commands.run import _auto_discover_project_tools
+
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+
+        messages = []
+        monkeypatch.setattr(
+            "praisonai_code.cli.commands.run.get_output_controller",
+            lambda: type("O", (), {"print_info": lambda self, m: messages.append(m)})(),
+        )
+
+        assert _auto_discover_project_tools([]) == []
+        assert messages == []
+
+    def test_tools_loaded_when_opt_in_set(self, project, monkeypatch):
+        from praisonai_code.cli.commands.run import _auto_discover_project_tools
+
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        result = _auto_discover_project_tools([])
+        assert len(result) == 1
+        assert result[0]("Ada") == "Hello, Ada!"
 
 
 class TestUserGlobalTools:

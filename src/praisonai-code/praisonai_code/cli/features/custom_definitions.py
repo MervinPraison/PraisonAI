@@ -792,6 +792,38 @@ def discover_project_tools() -> List[Any]:
     return [t.callable for t in discovery.list_tools()]
 
 
+def count_project_tool_files() -> int:
+    """Count project-local ``.praisonai/tools/*.py`` files *without executing them*.
+
+    Walks the same user-global + project walk-up layers as
+    :func:`discover_project_tools` but only inspects the filesystem, so it is
+    safe to call regardless of the ``PRAISONAI_ALLOW_LOCAL_TOOLS`` opt-in. This
+    lets the ``run`` path tell whether tool files are present-but-skipped and
+    surface the enable step instead of silently loading nothing.
+
+    Returns:
+        The number of loadable tool files found (public ``*.py``).
+    """
+    discovery = CustomDefinitionsDiscovery()
+    dirs = [discovery._get_user_dir(), *discovery._find_project_dirs()]
+
+    count = 0
+    seen: set = set()
+    for base_dir in dirs:
+        tools_dir = base_dir / "tools"
+        if not (tools_dir.exists() and tools_dir.is_dir()):
+            continue
+        for file_path in tools_dir.iterdir():
+            if file_path.suffix != ".py" or file_path.name.startswith("_"):
+                continue
+            resolved = file_path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            count += 1
+    return count
+
+
 def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     """
     Load an agent configuration by name.
