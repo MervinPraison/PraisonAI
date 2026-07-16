@@ -476,6 +476,77 @@ class TestCheckpointService:
         assert await service.get_checkpoint_by_step(5) is None
 
     @pytest.mark.asyncio
+    async def test_service_explicit_step_overrides_message_tag(self, temp_workspace, temp_storage):
+        """An explicit step wins over any step tag already in the message."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+
+        result = await service.save("[step-2] retry", step=1)
+        assert result.success
+        assert result.checkpoint.step == 1
+        assert result.checkpoint.message == "[step-1] retry"
+        assert await service.get_checkpoint_by_step(2) is None
+        assert (await service.get_checkpoint_by_step(1)).step == 1
+
+    @pytest.mark.asyncio
+    async def test_service_save_negative_step_rejected(self, temp_workspace, temp_storage):
+        """Negative steps are rejected rather than silently unrecoverable."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.save("edit", step=-1)
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_service_restore_rejects_both_id_and_step(self, temp_workspace, temp_storage):
+        """checkpoint_id and step are mutually exclusive on restore."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+        saved = await service.save("edit", step=1)
+
+        result = await service.restore(checkpoint_id=saved.checkpoint.id, step=1)
+        assert not result.success
+        assert "not both" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_restore_result_carries_step(self, temp_workspace, temp_storage):
+        """restore(step=N) surfaces the step on the returned checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v1")
+        await service.save("edit", step=1)
+        with open(test_file, "w") as f:
+            f.write("v2")
+        await service.save("edit", step=2)
+
+        result = await service.restore(step=1)
+        assert result.success
+        assert result.checkpoint.step == 1
+
+    @pytest.mark.asyncio
     async def test_service_delete_all(self, temp_workspace, temp_storage):
         """Test deleting all checkpoints."""
         service = CheckpointService(

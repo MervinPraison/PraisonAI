@@ -285,6 +285,20 @@ def handle_checkpoint_command(args: List[str], workspace_dir: Optional[str] = No
         asyncio.run(handler.save(message, allow_empty=allow_empty))
     
     elif command == "restore":
+        # Support rewind-to-step: `restore --step N`
+        if "--step" in args:
+            idx = args.index("--step")
+            if idx + 1 >= len(args):
+                print("Usage: praisonai checkpoint restore --step <N>")
+                return
+            try:
+                step = int(args[idx + 1])
+            except ValueError:
+                print(f"Invalid step: {args[idx + 1]}")
+                return
+            asyncio.run(handler.restore(step=step))
+            return
+
         if len(args) < 2:
             print("Usage: praisonai checkpoint restore <checkpoint_id>")
             return

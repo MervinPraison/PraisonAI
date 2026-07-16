@@ -283,10 +283,15 @@ class CheckpointService:
         if not self._initialized:
             return CheckpointResult.fail("Service not initialized")
         
+        if step is not None and step < 0:
+            return CheckpointResult.fail("step must be a non-negative integer")
+        
         # Encode the step index into the message so it can be recovered later
-        # without any extra storage (reuses the shadow-git commit log).
-        if step is not None and _extract_step(message) is None:
-            message = f"[step-{step}] {message}"
+        # without any extra storage (reuses the shadow-git commit log). An
+        # explicit step always wins: strip any existing tag before prepending
+        # so save("[step-2] retry", step=1) is indexed as step 1.
+        if step is not None:
+            message = f"[step-{step}] {_STEP_TAG_RE.sub('', message)}"
         
         try:
             # Stage all changes
@@ -355,6 +360,11 @@ class CheckpointService:
         if not self._initialized:
             return CheckpointResult.fail("Service not initialized")
         
+        if checkpoint_id is not None and step is not None:
+            return CheckpointResult.fail(
+                "Provide either checkpoint_id or step, not both"
+            )
+        
         if step is not None:
             checkpoint = await self.get_checkpoint_by_step(step)
             if checkpoint is None:
@@ -379,7 +389,8 @@ class CheckpointService:
                 id=checkpoint_id,
                 short_id=checkpoint_id[:8],
                 message=message,
-                timestamp=_parse_iso_timestamp(timestamp)
+                timestamp=_parse_iso_timestamp(timestamp),
+                step=_extract_step(message)
             )
             
             self._emit(CheckpointEvent.CHECKPOINT_RESTORED, checkpoint)

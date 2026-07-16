@@ -117,6 +117,9 @@ def restore(
     handler = _handler(workspace)
 
     async def _run() -> bool:
+        if step is not None and checkpoint_id is not None:
+            handler._print_error("Provide either a checkpoint id/'last' or --step N, not both")
+            return False
         if step is not None:
             ok = await handler.restore(step=step)
             if not ok:
