@@ -313,6 +313,52 @@ class TestRequireBridge:
         with patch("urllib.request.urlopen", return_value=resp):
             _require_bridge(port=8765)
 
+    def _bridge_resp(self, body: str):
+        from unittest.mock import MagicMock
+
+        resp = MagicMock()
+        resp.read.return_value = body.encode()
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        return resp
+
+    def test_require_bridge_malformed_json(self):
+        """Invalid JSON from the bridge is treated as an infra failure (exit 2)."""
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp("not json {")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+
+    def test_require_bridge_non_object(self):
+        """Valid JSON that isn't an object exits with code 2."""
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp("[1, 2, 3]")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+
+    def test_require_bridge_invalid_count_type(self):
+        """A non-integer connection count exits with code 2."""
+        import json
+        import typer
+        from unittest.mock import patch
+        from praisonai_browser.cli.commands.browser import _require_bridge
+
+        resp = self._bridge_resp(json.dumps({"extension_connections": "many"}))
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(typer.Exit) as exc:
+                _require_bridge(port=8765)
+        assert exc.value.exit_code == 2
+
 
 # Smoke tests - minimal checks that things don't crash
 

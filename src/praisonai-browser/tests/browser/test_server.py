@@ -289,6 +289,39 @@ class TestStartSession:
         
         if server._sessions:
             server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_start_session_skips_non_extension_peer(self):
+        """A non-extension peer must not receive start_automation."""
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock())
+        # A second CLI-like peer (not an extension) registered BEFORE the ext.
+        peer_ws = Mock()
+        peer_ws.send_text = AsyncMock()
+        peer_ws.send_json = AsyncMock()
+        peer = ClientConnection(websocket=peer_ws, is_extension=False)
+        ext_ws = Mock()
+        ext_ws.send_text = AsyncMock()
+        ext = ClientConnection(websocket=ext_ws, is_extension=True)
+        server._connections["cli"] = conn
+        server._connections["peer"] = peer
+        server._connections["ext"] = ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            conn
+        )
+        
+        assert response["start_automation_sent"] is True
+        ext_ws.send_text.assert_awaited()
+        peer_ws.send_text.assert_not_awaited()
+        peer_ws.send_json.assert_not_awaited()
+        
+        if server._sessions:
+            server._sessions.close()
 
 
 class TestHealthEndpoint:
