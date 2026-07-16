@@ -155,7 +155,7 @@ class BrowserServer:
         @app.get("/health")
         async def health():
             extension_connections = sum(
-                1 for c in self._connections.values() if c.is_extension
+                1 for c in self._connections.values() if getattr(c, "is_extension", False)
             )
             return {
                 "status": "ok",
@@ -440,11 +440,18 @@ class BrowserServer:
                     except Exception as e:
                         logger.error(f"Retry failed for {client_id}: {e}")
         
+        if not sent_to_extension:
+            logger.warning(
+                "[SERVER][START] start_automation was NOT delivered to any extension "
+                "(no extension connected or all busy)"
+            )
+
         return {
             "type": "status",
             "status": "running",
             "session_id": session_id,
             "message": f"Session started with goal: {goal}",
+            "start_automation_sent": sent_to_extension,
         }
     
     async def _handle_observation(
