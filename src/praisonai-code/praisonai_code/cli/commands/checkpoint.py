@@ -109,13 +109,25 @@ def list_checkpoints(
 
 @app.command("restore")
 def restore(
-    checkpoint_id: str = typer.Argument(..., help="Checkpoint id, short id, or 'last'"),
+    checkpoint_id: Optional[str] = typer.Argument(None, help="Checkpoint id, short id, or 'last'"),
+    step: Optional[int] = typer.Option(None, "--step", help="Rewind to the per-step checkpoint with this step index"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ):
-    """Restore the workspace to a checkpoint (accepts 'last')."""
+    """Restore the workspace to a checkpoint (accepts 'last' or --step N)."""
     handler = _handler(workspace)
 
     async def _run() -> bool:
+        if step is not None and checkpoint_id is not None:
+            handler._print_error("Provide either a checkpoint id/'last' or --step N, not both")
+            return False
+        if step is not None:
+            ok = await handler.restore(step=step)
+            if not ok:
+                handler._print_error(f"No checkpoint found for step: {step}")
+            return ok
+        if checkpoint_id is None:
+            handler._print_error("Provide a checkpoint id/'last' or --step N")
+            return False
         resolved = await _resolve_checkpoint_id(handler, checkpoint_id)
         if resolved is None:
             handler._print_error(f"No checkpoint found for: {checkpoint_id}")

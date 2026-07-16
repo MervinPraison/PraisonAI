@@ -5,6 +5,7 @@ Implements shadow git repository for file-level checkpointing.
 """
 
 import os
+import re
 import asyncio
 import logging
 from praisonaiagents._logging import get_logger
@@ -26,6 +27,17 @@ def _parse_iso_timestamp(timestamp: str) -> datetime:
     if timestamp.endswith('Z'):
         timestamp = timestamp[:-1] + '+00:00'
     return datetime.fromisoformat(timestamp)
+
+# Prefix used to encode a step index into a checkpoint message so per-step
+# checkpoints can be rewound with restore(step=N) without any extra storage.
+_STEP_TAG_RE = re.compile(r"^\[step-(\d+)\]\s*")
+
+
+def _extract_step(message: str) -> Optional[int]:
+    """Return the step index encoded in a checkpoint message, or None."""
+    match = _STEP_TAG_RE.match(message or "")
+    return int(match.group(1)) if match else None
+
 
 # Protected paths that should never be checkpointed
 PROTECTED_PATHS = [
@@ -249,19 +261,37 @@ class CheckpointService:
         
         return env
     
-    async def save(self, message: str, allow_empty: bool = False) -> CheckpointResult:
+    async def save(
+        self,
+        message: str,
+        allow_empty: bool = False,
+        step: Optional[int] = None,
+    ) -> CheckpointResult:
         """
         Save a checkpoint.
         
         Args:
             message: Checkpoint message
             allow_empty: Allow checkpoint even if no changes
+            step: Optional step index. When provided, the checkpoint is tagged
+                as a per-step checkpoint and can be rewound with
+                ``restore(step=...)``.
             
         Returns:
             CheckpointResult with the created checkpoint
         """
         if not self._initialized:
             return CheckpointResult.fail("Service not initialized")
+        
+        if step is not None and step < 0:
+            return CheckpointResult.fail("step must be a non-negative integer")
+        
+        # Encode the step index into the message so it can be recovered later
+        # without any extra storage (reuses the shadow-git commit log). An
+        # explicit step always wins: strip any existing tag before prepending
+        # so save("[step-2] retry", step=1) is indexed as step 1.
+        if step is not None:
+            message = f"[step-{step}] {_STEP_TAG_RE.sub('', message)}"
         
         try:
             # Stage all changes
@@ -292,7 +322,8 @@ class CheckpointService:
                 id=commit_hash,
                 short_id=commit_hash[:8],
                 message=message,
-                timestamp=_parse_iso_timestamp(timestamp)
+                timestamp=_parse_iso_timestamp(timestamp),
+                step=_extract_step(message)
             )
             
             self._checkpoints.append(checkpoint)
@@ -310,18 +341,38 @@ class CheckpointService:
             self._emit(CheckpointEvent.ERROR, {"error": error_msg})
             return CheckpointResult.fail(error_msg)
     
-    async def restore(self, checkpoint_id: str) -> CheckpointResult:
+    async def restore(
+        self,
+        checkpoint_id: Optional[str] = None,
+        step: Optional[int] = None,
+    ) -> CheckpointResult:
         """
         Restore workspace to a checkpoint.
         
         Args:
             checkpoint_id: Checkpoint ID (commit hash) to restore
+            step: Restore the per-step checkpoint tagged with this step index.
+                Mutually exclusive with ``checkpoint_id``.
             
         Returns:
             CheckpointResult indicating success/failure
         """
         if not self._initialized:
             return CheckpointResult.fail("Service not initialized")
+        
+        if checkpoint_id is not None and step is not None:
+            return CheckpointResult.fail(
+                "Provide either checkpoint_id or step, not both"
+            )
+        
+        if step is not None:
+            checkpoint = await self.get_checkpoint_by_step(step)
+            if checkpoint is None:
+                return CheckpointResult.fail(f"No checkpoint found for step {step}")
+            checkpoint_id = checkpoint.id
+        
+        if checkpoint_id is None:
+            return CheckpointResult.fail("No checkpoint id or step provided")
         
         try:
             # Clean untracked files
@@ -338,7 +389,8 @@ class CheckpointService:
                 id=checkpoint_id,
                 short_id=checkpoint_id[:8],
                 message=message,
-                timestamp=_parse_iso_timestamp(timestamp)
+                timestamp=_parse_iso_timestamp(timestamp),
+                step=_extract_step(message)
             )
             
             self._emit(CheckpointEvent.CHECKPOINT_RESTORED, checkpoint)
@@ -467,7 +519,8 @@ class CheckpointService:
                         id=parts[0],
                         short_id=parts[0][:8],
                         message=parts[1],
-                        timestamp=_parse_iso_timestamp(parts[2])
+                        timestamp=_parse_iso_timestamp(parts[2]),
+                        step=_extract_step(parts[1])
                     ))
             
             return checkpoints
@@ -501,6 +554,14 @@ class CheckpointService:
         """Get a specific checkpoint by ID."""
         for cp in self._checkpoints:
             if cp.id.startswith(checkpoint_id) or cp.short_id == checkpoint_id:
+                return cp
+        return None
+    
+    async def get_checkpoint_by_step(self, step: int) -> Optional[Checkpoint]:
+        """Get the most recent checkpoint tagged with the given step index."""
+        checkpoints = await self.list_checkpoints(limit=self.config.max_checkpoints)
+        for cp in checkpoints:  # newest-first, so returns the latest match
+            if cp.step == step:
                 return cp
         return None
     
