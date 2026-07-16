@@ -166,6 +166,7 @@ class LoopGuard:
         self._turn_start_time: Optional[float] = None
         self._tool_counts: Dict[str, int] = {}
         self._last_progress_count = 0
+        self._last_progress_action_index = 0
         
     def reset_turn(self) -> None:
         """Reset tracking for a new chat turn."""
@@ -174,6 +175,7 @@ class LoopGuard:
         # Reset the underlying DoomLoopDetector to clear cross-turn state
         self.detector.start_session()
         self._last_progress_count = 0
+        self._last_progress_action_index = 0
         
     def record(
         self,
@@ -199,10 +201,20 @@ class LoopGuard:
             
         # Record in underlying detector. Prefer the real tool result for
         # fingerprinting; fall back to the success flag when unavailable.
+        # The upstream detector drops the fingerprint for falsy results
+        # (``if result else None``), so wrap falsy primitives in their ``repr``
+        # to keep them fingerprintable — otherwise tools that repeatedly return
+        # ``""`` / ``[]`` / ``{}`` / ``0`` / ``False`` would silently bypass the
+        # no-progress guard.
+        safe_result = result if result is not None else success
+        if not safe_result and isinstance(
+            safe_result, (str, list, dict, tuple, set, bool, int, float)
+        ):
+            safe_result = f"__loopguard_falsy__:{safe_result!r}"
         self.detector.record_action(
             action_type=tool_name,
             args=args,
-            result=result if result is not None else success,
+            result=safe_result,
             success=success,
         )
         
@@ -253,12 +265,34 @@ class LoopGuard:
         no_progress_decision = self._check_no_progress()
         if no_progress_decision and no_progress_decision.action != GuardAction.ALLOW:
             return no_progress_decision
-            
+
+        # Count-based thresholds are only meaningful as a *loop* signal when the
+        # tool is actually stuck (repeating identical results). A tool that is
+        # called many times but keeps producing changing output (distinct args
+        # or async polling that transitions state) is making progress and must
+        # not be blocked/halted purely on frequency — that is the #3073 class of
+        # false positive. So block/halt only when there is a genuine
+        # identical-result streak; otherwise cap the count-based verdict at WARN.
+        stuck_run = self._trailing_identical_result_run()
+
         # Classify tool and apply appropriate thresholds
         if self._is_idempotent_tool(tool_name):
-            return self._check_idempotent_tool(tool_name, current_count, args)
+            decision = self._check_idempotent_tool(tool_name, current_count, args)
         else:
-            return self._check_mutating_tool(tool_name, current_count, args)
+            decision = self._check_mutating_tool(tool_name, current_count, args)
+
+        if decision.should_block() and stuck_run < self.config.no_progress_warn:
+            return LoopGuardDecision(
+                action=GuardAction.WARN,
+                code=decision.code.replace("_halt", "_warn").replace("_block", "_warn"),
+                message=(
+                    f"Tool '{tool_name}' called {current_count} times this turn. "
+                    "Results are still changing (progress detected); continuing, "
+                    "but consider whether this many calls are necessary."
+                ),
+                metadata=decision.metadata,
+            )
+        return decision
             
     def _is_idempotent_tool(self, tool_name: str) -> bool:
         """Check if a tool is classified as idempotent."""
@@ -355,10 +389,6 @@ class LoopGuard:
         with a ``wait`` tool) are not penalised: any change in results, or an
         explicit progress marker, resets the streak.
         """
-        # Explicit progress markers always count as progress.
-        if len(self.detector._progress_markers) > self._last_progress_count:
-            return None
-
         stuck_run = self._trailing_identical_result_run()
 
         if stuck_run >= self.config.no_progress_halt:
@@ -381,29 +411,42 @@ class LoopGuard:
         """Count trailing tool calls that produced the same result fingerprint.
 
         A change in ``result_hash`` (distinct tool output) breaks the streak and
-        is treated as progress. Actions without a result fingerprint do not
-        extend a stuck streak.
+        is treated as progress. The streak also requires the *same tool* so that
+        unrelated tools returning a common value (e.g. ``"ok"`` / ``True``) are
+        not lumped into one stuck run. Actions without a result fingerprint do
+        not extend a stuck streak, and any action recorded before the most
+        recent explicit progress marker is excluded from the run.
         """
         actions = self.detector._actions
-        if not actions:
+        limit = self._last_progress_action_index
+        if not actions or len(actions) <= limit:
             return 0
 
-        last_hash = actions[-1].result_hash
-        if last_hash is None:
+        last = actions[-1]
+        if last.result_hash is None:
             return 0
 
         run = 0
-        for action in reversed(actions):
-            if action.result_hash == last_hash:
+        for idx in range(len(actions) - 1, limit - 1, -1):
+            action = actions[idx]
+            if (
+                action.result_hash == last.result_hash
+                and action.action_type == last.action_type
+            ):
                 run += 1
             else:
                 break
         return run
         
     def mark_progress(self, marker: str) -> None:
-        """Mark that meaningful progress has been made."""
+        """Mark that meaningful progress has been made.
+
+        Records the current action index as a boundary so that only tool calls
+        made *after* this marker can contribute to a future no-progress streak.
+        """
         self.detector.mark_progress(marker)
         self._last_progress_count = len(self.detector._progress_markers)
+        self._last_progress_action_index = len(self.detector._actions)
         
     def get_stats(self) -> Dict[str, Any]:
         """Get loop guard statistics."""

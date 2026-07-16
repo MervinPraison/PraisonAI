@@ -73,3 +73,62 @@ def test_disabled_guard_never_halts():
     decision = _run_to_halt(guard, "check_status", ["SAME"] * 20)
 
     assert decision is None
+
+
+def test_falsy_results_still_halt():
+    """Repeated falsy outputs (e.g. empty search results) must still halt.
+
+    The upstream detector drops the fingerprint for falsy results, so the guard
+    wraps them; otherwise a tool repeatedly returning ``[]`` / ``""`` would
+    silently bypass no-progress detection.
+    """
+    for falsy in ("", [], {}, 0, False):
+        guard = LoopGuard(LoopGuardConfig())
+        guard.reset_turn()
+
+        results = [falsy] * 12
+        decision = _run_to_halt(guard, "search_files", results)
+
+        assert decision is not None, f"falsy result {falsy!r} bypassed the guard"
+        assert decision.code == "no_progress_halt"
+
+
+def test_distinct_tools_same_value_not_halted():
+    """Different tools returning a common value must not share one stuck streak."""
+    guard = LoopGuard(LoopGuardConfig())
+    guard.reset_turn()
+
+    # 10 distinct tools each returning "ok" — changing tool == progress.
+    decision = None
+    for n in range(10):
+        tool = f"tool_{n}"
+        guard.record(tool, {"n": n}, True, result="ok")
+        d = guard.check(tool, {"n": n}, is_pre_execution=False)
+        if d.action == GuardAction.HALT:
+            decision = d
+            break
+
+    assert decision is None
+
+
+def test_mark_progress_resets_streak():
+    """An explicit progress marker resets the no-progress streak."""
+    guard = LoopGuard(LoopGuardConfig())
+    guard.reset_turn()
+
+    # 5 identical polls, then mark progress, then 5 more — neither run reaches
+    # the halt threshold of 8 once the marker resets the boundary.
+    decision = None
+    for i in range(5):
+        guard.record("check_status", {"i": i}, True, result="IN_PROGRESS")
+        d = guard.check("check_status", {"i": i}, is_pre_execution=False)
+        if d.action == GuardAction.HALT:
+            decision = d
+    guard.mark_progress("step-done")
+    for i in range(5, 10):
+        guard.record("check_status", {"i": i}, True, result="IN_PROGRESS")
+        d = guard.check("check_status", {"i": i}, is_pre_execution=False)
+        if d.action == GuardAction.HALT:
+            decision = d
+
+    assert decision is None
