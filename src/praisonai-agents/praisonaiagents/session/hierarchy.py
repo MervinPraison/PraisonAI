@@ -224,11 +224,16 @@ class HierarchicalSessionStore(DefaultSessionStore):
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> bool:
         """
         Add a message to a session, preserving extended fields.
         
-        Overrides parent to preserve extended session data.
+        Overrides parent to preserve extended session data. Accepts the
+        optional ``tool_calls`` / ``tool_call_id`` fields (Issue #3089) so a
+        tool-using session resumed from a hierarchical store replays the same
+        transcript the model saw before.
         """
 
         message = SessionMessage(
@@ -236,6 +241,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             content=content,
             timestamp=time.time(),
             metadata=metadata or {},
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
         )
 
         def _apply(session: SessionData) -> None:
