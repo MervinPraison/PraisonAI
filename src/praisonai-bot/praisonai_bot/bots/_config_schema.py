@@ -439,11 +439,11 @@ class HealthMonitorSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    check_interval: float = Field(30.0, gt=0)
-    failure_threshold: int = Field(3, ge=1)
-    recovery_threshold: int = Field(2, ge=1)
-    restart_backoff: float = Field(5.0, ge=0)
-    max_restart_backoff: float = Field(300.0, ge=0)
+    interval: float = Field(300.0, gt=0)
+    startup_grace: float = Field(60.0, ge=0)
+    stale_after: float = Field(120.0, gt=0)
+    stuck_after: float = Field(900.0, gt=0)
+    max_restarts_per_hour: int = Field(10, ge=0)
 
 
 class GatewayServerSchema(BaseModel):

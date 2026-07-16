@@ -167,7 +167,7 @@ def test_gateway_server_block_rejects_typos_and_bad_types():
 
     # Nested health-monitor typo -> rejected.
     with pytest.raises(Exception):
-        GatewayConfigSchema(gateway={"health": {"failure_threshld": 5}}, **base)
+        GatewayConfigSchema(gateway={"health": {"intervl": 5}}, **base)
 
     # Invalid hook action -> rejected; empty path -> rejected.
     with pytest.raises(Exception):
@@ -207,15 +207,57 @@ def test_gateway_server_block_accepts_full_valid_config():
             "api": {"openai": True},
             "liveness": {"enabled": True},
             "forensics": {"enabled": True},
-            "health": {"enabled": True, "failure_threshold": 5},
+            "health": {"enabled": True, "interval": 60, "stale_after": 90},
         },
         hooks=[{"path": "gmail", "agent": "assistant", "custom_extra": "kept"}],
     )
     # Still a plain dict for downstream ``.get(...)`` consumers.
     assert isinstance(cfg.gateway, dict)
     assert cfg.gateway["max_concurrent_runs"] == 5
+    assert cfg.gateway["health"]["interval"] == 60
     assert cfg.hooks[0]["path"] == "gmail"
     print("✓ Full valid gateway block validates and stays dict-accessible")
+
+
+def test_gateway_health_block_matches_runtime_consumer():
+    """``gateway.health`` schema keys must match ``HealthMonitorConfig.from_dict``.
+
+    Regression guard: the health block is passed verbatim to
+    ``HealthMonitorConfig.from_dict`` at runtime (``gateway/server.py``), which
+    only reads ``interval``/``startup_grace``/``stale_after``/``stuck_after``/
+    ``max_restarts_per_hour``/``enabled``. If the schema drifts to invented
+    keys, a real ``interval: 60`` is rejected by ``extra="forbid"`` while a
+    meaningless key passes and is silently ignored — the exact silent-drop bug
+    this validation exists to prevent.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return
+
+    from praisonai_bot.bots._config_schema import HealthMonitorSchema
+
+    # Every field the runtime actually consumes must validate.
+    runtime_keys = {
+        "enabled": True,
+        "interval": 60,
+        "startup_grace": 30,
+        "stale_after": 90,
+        "stuck_after": 600,
+        "max_restarts_per_hour": 5,
+    }
+    validated = HealthMonitorSchema(**runtime_keys)
+    for key, value in runtime_keys.items():
+        assert getattr(validated, key) == value
+
+    # The schema's own field names must be a subset of what the runtime reads,
+    # so validation can never accept a key the runtime ignores.
+    consumed = {
+        "enabled", "interval", "startup_grace", "stale_after",
+        "stuck_after", "max_restarts_per_hour",
+    }
+    assert set(HealthMonitorSchema.model_fields) <= consumed
+    print("✓ gateway.health schema matches runtime HealthMonitorConfig keys")
 
 
 def test_doctor_checks():
