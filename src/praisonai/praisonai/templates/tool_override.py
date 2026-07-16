@@ -326,48 +326,44 @@ def create_tool_registry_with_overrides(
 ) -> Dict[str, Callable]:
     """
     Create a tool registry with custom overrides.
-    
+
+    This builds the wrapper-unique tool sources -- the ones the canonical
+    :class:`praisonai_code.tool_resolver.ToolResolver` does not already own:
+
     Resolution order (highest priority first):
     1. Override files (explicit CLI --tools)
     2. Override directories (explicit CLI --tools-dir)
     3. Template tools_sources (from TEMPLATE.yaml)
-    4. Template-local tools.py
-    4.5. Current working directory tools.py (./tools.py)
+    4. Template-local tools.py / cwd tools.py (security-gated autoload)
     5. Default custom dirs (~/.praison/tools, etc.)
-    6. Package discovery (praisonai-tools if installed)
-    7. Built-in tools
-    
+
+    ``praisonai-tools`` package discovery is intentionally NOT re-implemented
+    here: it is fully owned by :meth:`ToolResolver._resolve_from_praisonai_tools`,
+    which :func:`resolve_tools` consults after this registry. Removing the
+    duplicate keeps a single discovery implementation for external tools while
+    the template/cwd ``tools.py`` autoload stays here because it carries the
+    wrapper-specific ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` gate (distinct from the
+    resolver's ``PRAISONAI_ALLOW_LOCAL_TOOLS`` gate), which must be preserved.
+
     Args:
         override_files: Explicit tool files to load
         override_dirs: Directories to scan for tools
         include_defaults: Whether to include default tool directories
         tools_sources: Template-declared tool sources (modules or paths)
         template_dir: Template directory for local tools.py
-        
+
     Returns:
         Dict mapping tool names to callable functions
     """
     registry = {}
     loader = ToolOverrideLoader()
-    
-    # 7. Start with built-in tools (lowest priority)
-    # Note: We don't copy TOOL_MAPPINGS directly because it contains tuples
-    # (module_path, class_name) that need to be resolved via __getattr__.
-    # The tools will be resolved on-demand in resolve_tools() via getattr().
-    pass
-    
-    # 6. Package discovery - try praisonai-tools if installed
-    try:
-        import praisonai_tools.tools as external_tools
-        # Get all exported tools from praisonai_tools
-        for name in dir(external_tools):
-            if not name.startswith('_'):
-                obj = getattr(external_tools, name, None)
-                if callable(obj) or (hasattr(obj, 'run') and callable(getattr(obj, 'run', None))):
-                    registry[name] = obj
-    except ImportError:
-        pass
-    
+
+    # Note: ``praisonai-tools`` package discovery and the built-in
+    # praisonaiagents tool mappings are owned by the canonical ToolResolver
+    # (see ToolResolver._resolve_from_praisonai_tools /
+    # _resolve_from_praisonaiagents), which resolve_tools() consults after
+    # this registry. We deliberately do not re-implement that discovery here.
+
     # 5. Add default custom dirs
     if include_defaults:
         for dir_path in loader.get_default_tool_dirs():
@@ -377,14 +373,21 @@ def create_tool_registry_with_overrides(
                     registry.update(tools)
                 except Exception:
                     pass
-    
-    # 4.5/4. Implicit ``tools.py`` autoload is only honored when the operator
+
+    # 4. Implicit ``tools.py`` autoload is only honored when the operator
     # explicitly opts in via the ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` environment
     # variable. This prevents arbitrary code execution when recipes are
     # fetched from remote registries (e.g. GitHub) where ``tools.py`` cannot
     # be considered trusted. Explicit ``override_files`` / ``override_dirs``
     # / ``tools_sources`` continue to work and are the supported way to load
     # custom tool modules.
+    #
+    # This autoload is kept in the wrapper (rather than delegated to
+    # ToolResolver._load_local_tools) precisely because it carries the
+    # ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` gate with a skip-on-error contract and
+    # allows an explicit template directory outside CWD -- semantics the
+    # canonical loader's ``PRAISONAI_ALLOW_LOCAL_TOOLS`` + CWD-boundary gate
+    # does not provide.
     if _autoload_tools_enabled():
         # 4.5. Current working directory tools.py (if exists)
         cwd_tools_py = Path.cwd() / "tools.py"
@@ -413,7 +416,7 @@ def create_tool_registry_with_overrides(
                         "failed to autoload template tools.py at %s", tools_py,
                         exc_info=True,
                     )
-    
+
     # 3. Template tools_sources (from TEMPLATE.yaml)
     if tools_sources:
         for source in tools_sources:
