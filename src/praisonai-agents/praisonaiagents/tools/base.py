@@ -427,7 +427,29 @@ def validate_tool(tool: Any) -> bool:
     raise ToolValidationError(f"Invalid tool type: {type(tool)}")
 
 
-def validate_tool_schema_consistency(tools: List[Any]) -> bool:
+def _extract_schema(tool: Any) -> Optional[Dict[str, Any]]:
+    """Resolve a tool's schema from its supported shapes.
+
+    Supports BaseTool instances, objects exposing a callable ``get_schema``,
+    and plain callables (via the ``@tool`` decorator schema builder).
+
+    Args:
+        tool: Tool object to extract a schema from
+
+    Returns:
+        The tool's schema dict, or None if the tool shape is unsupported
+    """
+    from .decorator import get_tool_schema
+    if isinstance(tool, BaseTool):
+        return tool.get_schema()
+    elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
+        return tool.get_schema()
+    elif callable(tool):
+        return get_tool_schema(tool)
+    return None
+
+
+def validate_tool_schema_consistency(tools: List[Any], return_schemas: bool = False):
     """Validate a list of tools for schema consistency with OpenAI format.
     
     This function ensures all tools in a list can be properly serialized
@@ -435,18 +457,20 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
     
     Args:
         tools: List of tool objects to validate
+        return_schemas: If True, return the list of built schemas instead of
+            just a boolean, so callers can reuse them without rebuilding.
         
     Returns:
-        True if all tools are valid and consistent
+        True if all tools are valid and consistent (or the built schemas list
+        when ``return_schemas`` is True)
         
     Raises:
         ToolValidationError: If validation fails
     """
     if not tools:
-        return True
+        return [] if return_schemas else True
         
     import json
-    from .decorator import get_tool_schema
     schemas = []
     
     for i, tool in enumerate(tools):
@@ -455,13 +479,8 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
             validate_tool(tool)
             
             # Get schema from different tool types
-            if isinstance(tool, BaseTool):
-                schema = tool.get_schema()
-            elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
-                schema = tool.get_schema()
-            elif callable(tool):
-                schema = get_tool_schema(tool)
-            else:
+            schema = _extract_schema(tool)
+            if schema is None:
                 raise ToolValidationError(f"Cannot extract schema from tool at index {i}: {type(tool)}")
             
             if not schema:
@@ -486,7 +505,7 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
             raise ToolValidationError(f"Duplicate tool name '{name}' found in tool list")
         names.add(name)
     
-    return True
+    return schemas if return_schemas else True
 
 
 def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
@@ -506,25 +525,8 @@ def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
     if not tools:
         return []
         
-    # First validate all tools (reuse existing validation logic)
-    validate_tool_schema_consistency(tools)
-    
-    from .decorator import get_tool_schema
-    schemas = []
-    
-    for tool in tools:
-        # Get schema from different tool types
-        if isinstance(tool, BaseTool):
-            schema = tool.get_schema()
-        elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
-            schema = tool.get_schema()
-        elif callable(tool):
-            schema = get_tool_schema(tool)
-        else:
-            continue  # Skip invalid tools (validation already happened)
-            
-        if schema:
-            schemas.append(schema)
+    # Validate all tools once and reuse the schemas built during validation
+    schemas = validate_tool_schema_consistency(tools, return_schemas=True)
     
     # Sort schemas by function name for deterministic ordering
     def sort_key(schema):
