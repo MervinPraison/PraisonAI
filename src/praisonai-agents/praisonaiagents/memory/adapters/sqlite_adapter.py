@@ -202,6 +202,46 @@ class SqliteMemoryAdapter:
         
         return results
     
+    def delete_memory(self, memory_id: str, **kwargs) -> bool:
+        """Delete a memory by ID from short-term and long-term tables."""
+        deleted = False
+        with self._write_lock:
+            try:
+                stm = self._get_stm_conn()
+                cur = stm.execute(
+                    "DELETE FROM short_term_memory WHERE id = ?", (memory_id,)
+                )
+                if cur.rowcount > 0:
+                    deleted = True
+                stm.commit()
+            except Exception as e:
+                logger.warning(f"Adapter delete_memory (short_term) failed: {e}")
+            try:
+                ltm = self._get_ltm_conn()
+                cur = ltm.execute(
+                    "DELETE FROM long_term_memory WHERE id = ?", (memory_id,)
+                )
+                if cur.rowcount > 0:
+                    deleted = True
+                ltm.commit()
+            except Exception as e:
+                logger.warning(f"Adapter delete_memory (long_term) failed: {e}")
+        return deleted
+
+    def reset_short_term(self) -> None:
+        """Clear all short-term memories."""
+        conn = self._get_stm_conn()
+        with self._write_lock:
+            conn.execute("DELETE FROM short_term_memory")
+            conn.commit()
+
+    def reset_long_term(self) -> None:
+        """Clear all long-term memories."""
+        conn = self._get_ltm_conn()
+        with self._write_lock:
+            conn.execute("DELETE FROM long_term_memory")
+            conn.commit()
+
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from both short-term and long-term."""
         short_memories = self.search_short_term("", limit=1000)

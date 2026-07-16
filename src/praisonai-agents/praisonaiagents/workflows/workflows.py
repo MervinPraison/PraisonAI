@@ -1458,7 +1458,25 @@ class AgentFlow:
                 if hasattr(step, 'status'):
                     step.status = "completed"
                 self.step_statuses[step.name] = "completed"
-            
+
+            # Honor the step's on_error flow-control setting. When a step
+            # exhausts its retries and on_error == "stop" (the Task default),
+            # abort the workflow and mark it failed instead of feeding the
+            # error string forward into the next step and falsely reporting
+            # overall success.
+            if step_error and getattr(step, 'on_error', 'stop') == 'stop':
+                self.status = "failed"
+                results.append({
+                    "step": step.name,
+                    "output": output,
+                    "status": "failed",
+                    "retries": retry_count,
+                    "error": str(step_error),
+                })
+                if verbose:
+                    print(f"🛑 Workflow stopped: step '{step.name}' failed (on_error='stop')")
+                break
+
             # Create step result for callback
             step_result = StepResult(output=output or "", stop_workflow=stop)
             
@@ -1530,8 +1548,16 @@ class AgentFlow:
             
             i += 1
         
-        # Update workflow status
-        self.status = "completed"
+        # Update workflow status. Reflect any unresolved step failure (e.g. a
+        # step with on_error="continue" that still failed) instead of always
+        # reporting "completed". A prior on_error="stop" break already set
+        # self.status = "failed".
+        if self.status != "failed" and any(
+            r.get("status") == "failed" for r in results
+        ):
+            self.status = "failed"
+        elif self.status != "failed":
+            self.status = "completed"
         
         # Reset YAML-approved tools context if it was set
         if _approval_token is not None:

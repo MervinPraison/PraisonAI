@@ -587,6 +587,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
+        return ident
 
     def search_short_term(
         self, 
@@ -753,6 +754,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_short_term(self):
         """Completely clears short-term memory."""
+        # Delegate to the active adapter when provider falls back to
+        # sqlite/in_memory, mirroring search_short_term. The adapter creates
+        # short_term_memory; the legacy short_mem table below is never created
+        # by the adapter, so DELETE FROM short_mem would raise.
+        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
+                and getattr(self, "memory_adapter", None)):
+            if hasattr(self.memory_adapter, "reset_short_term"):
+                self.memory_adapter.reset_short_term()
+            return
         conn = self._get_stm_conn()
         with self._write_lock:  # Serialize write operations
             conn.execute("DELETE FROM short_mem")
@@ -913,6 +923,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "long_term", len(text), metadata=metadata)
+        return ident
 
     def search_long_term(
         self, 
@@ -1115,6 +1126,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
+        # Delegate to the active adapter when provider falls back to
+        # sqlite/in_memory, mirroring search_long_term. The adapter creates
+        # long_term_memory; the legacy long_mem table below is never created
+        # by the adapter, so DELETE FROM long_mem would raise.
+        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
+                and getattr(self, "memory_adapter", None)):
+            if hasattr(self.memory_adapter, "reset_long_term"):
+                self.memory_adapter.reset_long_term()
+            return
         conn = self._get_ltm_conn()
         with self._write_lock:  # Serialize write operations
             conn.execute("DELETE FROM long_mem")
@@ -1147,6 +1167,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
+        # Delegate to the active adapter when provider falls back to
+        # sqlite/in_memory, mirroring search_short_term. Data written through
+        # the adapter lives in short_term_memory, not the legacy short_mem
+        # table, so a direct DELETE below would silently match zero rows.
+        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
+                and getattr(self, "memory_adapter", None)
+                and hasattr(self.memory_adapter, "delete_memory")):
+            return self.memory_adapter.delete_memory(memory_id)
+
         deleted = False
         
         # Delete from SQLite (with write lock for concurrency safety)
@@ -1188,6 +1217,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
+        # Delegate to the active adapter when provider falls back to
+        # sqlite/in_memory, mirroring search_long_term. Data written through
+        # the adapter lives in long_term_memory, not the legacy long_mem
+        # table, so a direct DELETE below would silently match zero rows.
+        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
+                and getattr(self, "memory_adapter", None)
+                and hasattr(self.memory_adapter, "delete_memory")):
+            return self.memory_adapter.delete_memory(memory_id)
+
         deleted = False
         
         # Delete from SQLite (with write lock for concurrency safety)

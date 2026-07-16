@@ -685,7 +685,7 @@ class ToolExecutionMixin:
                             # For other error dicts: approval/permission denials are legitimate
                             # non-retryable outcomes; everything else represents a tool failure
                             # that should engage the outer retry/backoff loop.
-                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error"):
+                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error") or result.get("policy_denied") or result.get("guardrail_denied"):
                                 break
                             else:
                                 # Avoid compounding with the inner retry loop in
@@ -1712,6 +1712,8 @@ class ToolExecutionMixin:
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
                         result.get("approval_error") or
+                        result.get("policy_denied") or
+                        result.get("guardrail_denied") or
                         result.get("circuit_open")):
                         return result
                     
@@ -1828,7 +1830,9 @@ class ToolExecutionMixin:
                 if isinstance(result, dict) and result.get("error") and \
                    not result.get("approval_denied") and \
                    not result.get("permission_denied") and \
-                   not result.get("approval_error"):
+                   not result.get("approval_error") and \
+                   not result.get("policy_denied") and \
+                   not result.get("guardrail_denied"):
                     # Create a sentinel exception to register failure with circuit breaker
                     class _ToolFailure(Exception):
                         def __init__(self, error_dict):
@@ -1857,6 +1861,51 @@ class ToolExecutionMixin:
                 "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
             }
 
+    def _check_tool_policy_and_guardrails(self, function_name, arguments):
+        """Gate a tool call through the attached PolicyEngine and tool guardrails.
+
+        Consults ``self._policy`` (a ``PolicyEngine``) via ``check_tool`` and any
+        tool-call guardrails exposing ``validate_tool_call``. Returns an error
+        dict when the call is denied, or ``(None, arguments)`` (arguments possibly
+        rewritten by a guardrail) when allowed. Zero overhead when neither is set.
+        """
+        policy = getattr(self, "_policy", None)
+        if policy is not None and hasattr(policy, "check_tool"):
+            try:
+                result = policy.check_tool(function_name, arguments)
+                if not getattr(result, "allowed", True):
+                    reason = getattr(result, "reason", "denied by policy")
+                    logging.warning(
+                        f"Tool '{function_name}' denied by policy: {reason}"
+                    )
+                    return {
+                        "error": f"Tool '{function_name}' denied by policy: {reason}",
+                        "policy_denied": True,
+                    }
+            except Exception as e:  # noqa: BLE001 — never break exec on policy bug
+                logging.debug(f"Policy check_tool raised; skipping: {e}")
+
+        for guardrail in getattr(self, "_tool_call_guardrails", None) or []:
+            validate = getattr(guardrail, "validate_tool_call", None)
+            if validate is None:
+                continue
+            try:
+                is_valid, processed = validate(function_name, arguments)
+            except Exception as e:  # noqa: BLE001 — never break exec on guardrail bug
+                logging.debug(f"Guardrail validate_tool_call raised; skipping: {e}")
+                continue
+            if not is_valid:
+                logging.warning(
+                    f"Tool '{function_name}' rejected by tool-call guardrail"
+                )
+                return {
+                    "error": f"Tool '{function_name}' rejected by guardrail",
+                    "guardrail_denied": True,
+                }
+            if isinstance(processed, dict):
+                arguments = processed
+        return None, arguments
+
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
@@ -1870,6 +1919,14 @@ class ToolExecutionMixin:
             error_msg = f"Error during approval process: {str(e)}"
             logging.error(error_msg)
             return {"error": error_msg, "approval_error": True}
+
+        # Policy/guardrail gate (protocol-driven). Runs after approval so an
+        # explicit PolicyEngine deny or a tool-call guardrail can block a tool
+        # before dispatch (native + MCP, uniform). Zero overhead when unset.
+        policy_result = self._check_tool_policy_and_guardrails(function_name, arguments)
+        if isinstance(policy_result, dict):
+            return policy_result  # Error dict
+        _, arguments = policy_result
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
