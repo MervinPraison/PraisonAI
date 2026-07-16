@@ -183,3 +183,85 @@ def test_conflict_routes_to_blocked(git_repo):
     assert any("merge conflict" in c[2] for c in store.comments)
     # Base branch not silently overwritten: original base edit intact.
     assert (git_repo / "shared.txt").read_text().startswith("BASE-EDIT")
+
+
+def test_uncommitted_worker_edits_are_preserved(git_repo):
+    """A worker that leaves edits uncommitted still has them integrated."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_u", "worktree"), store)
+    d._worktrees = {"t_u": (path, "kanban/t_u")}
+    # Worker edits a NEW file but never commits it.
+    (git_repo / ".wt" / "t_u" / "worker.txt").write_text("uncommitted work\n")
+
+    conflicted = d._integrate_worktree("t_u", store)
+
+    assert conflicted is False
+    # The uncommitted edit was committed and merged into base, not discarded.
+    assert (git_repo / "worker.txt").exists()
+    assert (git_repo / "worker.txt").read_text() == "uncommitted work\n"
+    assert not os.path.exists(path)
+
+
+def test_failed_integration_commit_blocks(git_repo, monkeypatch):
+    """A rejected integration commit blocks the task instead of reporting done."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_c", "worktree"), store)
+    d._worktrees = {"t_c": (path, "kanban/t_c")}
+    (git_repo / ".wt" / "t_c" / "c.txt").write_text("c\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "add c")
+
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        # Force the integration commit (run against base) to fail.
+        if args and args[0] == "commit" and cwd is None:
+            class _R:
+                returncode = 1
+                stdout = ""
+                stderr = "commit rejected by hook"
+            return _R()
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    conflicted = d._integrate_worktree("t_c", store)
+
+    assert conflicted is True
+    assert ("t_c", "blocked") in store.moves
+    # Worktree left in place for inspection on failure.
+    assert os.path.exists(path)
+
+
+def test_integration_exception_blocks_task(git_repo):
+    """An unexpected error during integration blocks, never marks done."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_e", "worktree"), store)
+    d._worktrees = {"t_e": (path, "kanban/t_e")}
+
+    def _boom(*a, **k):
+        raise RuntimeError("git blew up")
+
+    d._commit_worktree_changes = _boom
+
+    conflicted = d._integrate_worktree("t_e", store)
+
+    assert conflicted is True
+    assert ("t_e", "blocked") in store.moves
+
+
+def test_unsafe_task_id_refused(git_repo):
+    """Traversal / invalid-ref ids do not create a worktree (no fail-open)."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    for bad in ("../escape", "a/b", ".hidden", "with space", ""):
+        assert d._safe_task_id(bad) is None
+        assert d._prepare_worktree(_FakeTask(bad, "worktree"), store) is None
+    assert d._safe_task_id("task_abc-123.v2") == "task_abc-123.v2"

@@ -9,6 +9,7 @@ system and follows Hermes patterns for worker management.
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import time
 from typing import Dict, Any, List, Optional
@@ -383,8 +384,34 @@ class KanbanDispatcher:
                 'worker_id': self.worker_id,
             })
 
+    _SAFE_TASK_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+    def _safe_task_id(self, task_id: str) -> Optional[str]:
+        """Validate a task id for safe use as a path component and git ref.
+
+        A store accepts caller-supplied ids, so before an id is used as both a
+        filesystem path segment and a ``kanban/<id>`` branch suffix it must be
+        constrained to a conservative charset. Reject traversal (``..``, ``/``,
+        leading ``.``) and any character git refs disallow so isolation setup
+        cannot escape the worktree root or fail open.
+        """
+        if not task_id or not self._SAFE_TASK_ID.match(task_id):
+            return None
+        if task_id in ('.', '..') or task_id.startswith('.'):
+            return None
+        return task_id
+
+    def _repo_dir(self) -> str:
+        """The base repository all git worktree/merge operations run inside.
+
+        Anchoring to an explicit directory (env override, else the process
+        cwd resolved once) keeps branch discovery, worktree creation, merge and
+        commit consistent even if the process working directory later changes.
+        """
+        return os.environ.get("PRAISONAI_KANBAN_REPO_DIR") or os.getcwd()
+
     def _run_git(self, *args: str, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
-        """Run a git command in ``cwd`` (defaults to the dispatcher directory).
+        """Run a git command, defaulting to the base repository directory.
 
         A thin subprocess wrapper so worktree isolation stays self-contained in
         the wrapper without pulling in a Tier-2 package dependency.
@@ -393,7 +420,7 @@ class KanbanDispatcher:
             ["git", *args],
             capture_output=True,
             text=True,
-            cwd=cwd,
+            cwd=cwd or self._repo_dir(),
         )
 
     def _worktree_root(self) -> str:
@@ -412,12 +439,27 @@ class KanbanDispatcher:
         """Create a dedicated git worktree + branch for an isolated task.
 
         Returns the worktree path on success, or ``None`` when isolation could
-        not be set up (caller then falls back to the shared cwd).
+        not be set up (caller then blocks the task rather than silently sharing
+        the workspace).
         """
-        path = os.path.join(self._worktree_root(), task.id)
-        branch = f"kanban/{task.id}"
+        safe_id = self._safe_task_id(task.id)
+        if safe_id is None:
+            logger.warning(
+                "Refusing to create worktree for task %s: unsafe id for path/ref",
+                task.id,
+            )
+            return None
+        root = os.path.realpath(self._worktree_root())
+        path = os.path.realpath(os.path.join(root, safe_id))
+        # Defence in depth: the resolved path must stay under the root.
+        if os.path.commonpath([root, path]) != root:
+            logger.warning(
+                "Refusing to create worktree for task %s: path escapes root", task.id,
+            )
+            return None
+        branch = f"kanban/{safe_id}"
         try:
-            os.makedirs(self._worktree_root(), exist_ok=True)
+            os.makedirs(root, exist_ok=True)
             base = self._base_branch()
             result = self._run_git("worktree", "add", path, "-b", branch, base)
             if result.returncode != 0:
@@ -448,45 +490,82 @@ class KanbanDispatcher:
         except Exception as e:
             logger.debug(f"Error removing worktree {path}: {e}")
 
+    def _commit_worktree_changes(self, path: str, branch: str) -> None:
+        """Commit any uncommitted edits the worker left in its worktree.
+
+        A worker may finish successfully without committing (it just edits
+        files). Without this, the branch would equal base, the merge would be a
+        no-op, and tearing the worktree down would silently discard the work.
+        Committing first makes the edits part of ``branch`` so integration can
+        merge them. No-op when the tree is clean.
+        """
+        status = self._run_git("status", "--porcelain", cwd=path)
+        if status.returncode != 0 or not status.stdout.strip():
+            return
+        self._run_git("add", "-A", cwd=path)
+        self._run_git(
+            "-c", "user.email=kanban@praisonai.local",
+            "-c", "user.name=PraisonAI Kanban",
+            "commit", "--no-edit", "-m", f"kanban worker output for {branch}",
+            cwd=path,
+        )
+
     def _try_integrate(self, branch: str) -> tuple:
         """Merge ``branch`` into the base branch; detect conflicts.
 
         Returns ``(ok, conflicted_files)``. On conflict the merge is aborted so
-        the base branch is left untouched rather than silently overwritten.
+        the base branch is left untouched rather than silently overwritten. A
+        merge that leaves the index in an unfinished state, or a failed commit,
+        also returns ``ok=False`` so the caller never marks such a task done.
         """
-        base = self._base_branch()
-        result = self._run_git(
-            "merge", "--no-ff", "--no-commit", branch
-        )
+        result = self._run_git("merge", "--no-ff", "--no-commit", branch)
         if result.returncode != 0:
             diff = self._run_git("diff", "--name-only", "--diff-filter=U")
             files = [f for f in diff.stdout.splitlines() if f.strip()]
             self._run_git("merge", "--abort")
+            # A non-conflict merge failure (dirty tree, lock, missing branch)
+            # leaves no unmerged files; surface it as a non-clean integration
+            # with the git error so the task is blocked rather than lost.
+            if not files:
+                files = [f"merge failed: {result.stderr.strip()}"]
             return False, files
-        self._run_git("commit", "--no-edit", "-m", f"integrate {branch}")
+        commit = self._run_git("commit", "--no-edit", "-m", f"integrate {branch}")
+        if commit.returncode != 0:
+            # The merge staged cleanly but the commit was rejected (hook,
+            # missing identity, signing, disk). Do not report success and do
+            # not leave the base checkout mid-merge: abort back to a clean base.
+            self._run_git("merge", "--abort")
+            return False, [f"integration commit failed: {commit.stderr.strip()}"]
         return True, []
 
     def _integrate_worktree(self, task_id: str, store: Any, run_id: Any = None) -> bool:
         """Integrate a completed task's worktree branch back into base.
 
-        Returns True only when a merge conflict routed the task to 'blocked'
-        (so the caller skips marking it 'done'). Returns False when there is no
-        worktree or the merge was clean (caller proceeds with the normal
-        completion path). On a clean merge the worktree is torn down.
+        Returns True when the task must NOT be marked 'done' (a merge conflict
+        or an integration failure routed it to 'blocked'). Returns False only
+        when there is no worktree or the branch merged cleanly (caller proceeds
+        with the normal completion path). On a clean merge the worktree is torn
+        down; on any failure it is left in place for inspection.
         """
         entry = getattr(self, '_worktrees', {}).get(task_id)
         if not entry:
             return False
         path, branch = entry
         try:
+            # Capture uncommitted worker edits before integrating, otherwise a
+            # clean-but-empty merge would tear the worktree down and lose them.
+            self._commit_worktree_changes(path, branch)
             ok, files = self._try_integrate(branch)
         except Exception as e:
+            # An unexpected integration error (e.g. git missing) must block the
+            # task, never fall through to 'done' with an unmerged branch.
             logger.error(f"Error integrating worktree for task {task_id}: {e}")
-            return False
+            ok, files = False, [f"integration error: {e}"]
 
         if not ok:
-            # Conflict: route to blocked with detail, leave the worktree in
-            # place for inspection instead of silently overwriting base.
+            # Conflict / failure: route to blocked with detail, leave the
+            # worktree in place for inspection instead of overwriting base or
+            # discarding work.
             try:
                 store.move_task(task_id, 'blocked')
             except Exception as move_err:
@@ -545,7 +624,11 @@ class KanbanDispatcher:
                 if worktree_path:
                     if not hasattr(self, '_worktrees'):
                         self._worktrees = {}
-                    self._worktrees[task.id] = (worktree_path, f"kanban/{task.id}")
+                    # Track under the same (validated) id used to build the
+                    # branch/path so integration resolves the right entry.
+                    self._worktrees[task.id] = (
+                        worktree_path, f"kanban/{self._safe_task_id(task.id)}"
+                    )
 
             # Build command to execute task
             # This could be configurable, but for now use a simple approach

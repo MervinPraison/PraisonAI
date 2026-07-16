@@ -331,7 +331,7 @@ class SQLiteKanbanStore:
             values = []
             
             for field, value in updates.items():
-                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata', 'branch', 'worktree_path']:
+                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata', 'branch', 'worktree_path', 'workspace_kind']:
                     if field == 'status' and isinstance(value, str):
                         value = TaskStatus(value).value
                     elif field == 'metadata':
