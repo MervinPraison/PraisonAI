@@ -28,6 +28,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 @dataclass
+class _MetricScore:
+    """Minimal score result for the numeric-metric path (Judge-shaped)."""
+    score: float
+    reasoning: str = "numeric metric"
+    suggestions: List[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.suggestions is None:
+            self.suggestions = []
+
+@dataclass
 class EvaluationLoopConfig:
     """Configuration for EvaluationLoop."""
     criteria: str = ""
@@ -36,6 +47,7 @@ class EvaluationLoopConfig:
     mode: str = "optimize"
     model: str = "gpt-4o-mini"
     verbose: bool = False
+    metric: Optional[Callable[[str], float]] = None
 
 class EvaluationLoop:
     """
@@ -79,6 +91,7 @@ class EvaluationLoop:
         on_iteration: Optional[Callable[[Any], None]] = None,
         verbose: bool = False,
         model: str = "gpt-4o-mini",
+        metric: Optional[Callable[[str], float]] = None,
     ):
         self.agent = agent
         self.criteria = criteria
@@ -89,6 +102,7 @@ class EvaluationLoop:
         self.on_iteration = on_iteration
         self.verbose = verbose
         self.model = model
+        self.metric = metric
         
         if mode not in ("optimize", "review"):
             raise ValueError(f"mode must be 'optimize' or 'review', got '{mode}'")
@@ -104,6 +118,26 @@ class EvaluationLoop:
             )
         return self._judge
     
+    def _score(self, output: str):
+        """Score an output via a numeric metric (if set) or the Judge.
+
+        Returns a lightweight result object exposing ``score``, ``reasoning``
+        and ``suggestions`` so the loop can treat both paths uniformly.
+        """
+        if self.metric is not None:
+            score = float(self.metric(output))
+            return _MetricScore(score=score)
+        return self.judge.run(output=output, criteria=self.criteria)
+
+    async def _score_async(self, output: str):
+        """Async twin of :meth:`_score`."""
+        if self.metric is not None:
+            score = float(self.metric(output))
+            return _MetricScore(score=score)
+        if hasattr(self.judge, 'run_async'):
+            return await self.judge.run_async(output=output, criteria=self.criteria)
+        return self.judge.run(output=output, criteria=self.criteria)
+
     def _get_agent_output(self, prompt: str, iteration: int, feedback: str = "") -> str:
         """Get output from agent, optionally including feedback from previous iteration."""
         if iteration == 1 or not feedback:
@@ -146,10 +180,7 @@ class EvaluationLoop:
             
             output = self._get_agent_output(prompt, i, feedback)
             
-            judge_result = self.judge.run(
-                output=output,
-                criteria=self.criteria,
-            )
+            judge_result = self._score(output)
             
             findings = getattr(judge_result, 'suggestions', []) or []
             
@@ -157,7 +188,7 @@ class EvaluationLoop:
                 iteration=i,
                 output=output,
                 score=judge_result.score,
-                reasoning=judge_result.reasoning,
+                reasoning=getattr(judge_result, 'reasoning', ''),
                 findings=findings,
             )
             iterations.append(iteration_result)
@@ -173,12 +204,13 @@ class EvaluationLoop:
                     logger.info(f"Threshold met at iteration {i}: {judge_result.score} >= {self.threshold}")
                 break
             
-            feedback = judge_result.reasoning
+            feedback = getattr(judge_result, 'reasoning', '')
             if findings:
                 feedback += "\nSuggestions:\n" + "\n".join(f"- {s}" for s in findings)
         
         total_duration = time.time() - start_time
-        success = iterations[-1].score >= self.threshold if iterations else False
+        best = max(iterations, key=lambda it: it.score) if iterations else None
+        success = best.score >= self.threshold if best else False
         
         result = EvaluationLoopResult(
             iterations=iterations,
@@ -186,6 +218,7 @@ class EvaluationLoop:
             total_duration_seconds=total_duration,
             threshold=self.threshold,
             mode=self.mode,
+            best=best,
         )
         
         if self.verbose:
@@ -215,16 +248,7 @@ class EvaluationLoop:
             
             output = await self._get_agent_output_async(prompt, i, feedback)
             
-            if hasattr(self.judge, 'run_async'):
-                judge_result = await self.judge.run_async(
-                    output=output,
-                    criteria=self.criteria,
-                )
-            else:
-                judge_result = self.judge.run(
-                    output=output,
-                    criteria=self.criteria,
-                )
+            judge_result = await self._score_async(output)
             
             findings = getattr(judge_result, 'suggestions', []) or []
             
@@ -232,7 +256,7 @@ class EvaluationLoop:
                 iteration=i,
                 output=output,
                 score=judge_result.score,
-                reasoning=judge_result.reasoning,
+                reasoning=getattr(judge_result, 'reasoning', ''),
                 findings=findings,
             )
             iterations.append(iteration_result)
@@ -248,12 +272,13 @@ class EvaluationLoop:
                     logger.info(f"Threshold met at iteration {i}: {judge_result.score} >= {self.threshold}")
                 break
             
-            feedback = judge_result.reasoning
+            feedback = getattr(judge_result, 'reasoning', '')
             if findings:
                 feedback += "\nSuggestions:\n" + "\n".join(f"- {s}" for s in findings)
         
         total_duration = time.time() - start_time
-        success = iterations[-1].score >= self.threshold if iterations else False
+        best = max(iterations, key=lambda it: it.score) if iterations else None
+        success = best.score >= self.threshold if best else False
         
         result = EvaluationLoopResult(
             iterations=iterations,
@@ -261,6 +286,7 @@ class EvaluationLoop:
             total_duration_seconds=total_duration,
             threshold=self.threshold,
             mode=self.mode,
+            best=best,
         )
         
         if self.verbose:

@@ -985,6 +985,83 @@ Write the complete compiled report:"""
         """Backward-compatible async alias for :meth:`alearn_skill`."""
         return await self.alearn_skill(request, **kwargs)
 
+    def optimize_instructions(
+        self,
+        evalset: List[Any],
+        *,
+        metric: Optional[Any] = None,
+        scorer: Optional[Any] = None,
+        criteria: str = "",
+        n_candidates: int = 6,
+        apply: bool = True,
+    ) -> Any:
+        """Optimise this agent's own ``instructions`` against an eval set.
+
+        Opt-in, off by default. Generates ``n_candidates`` instruction variants,
+        scores each over ``evalset`` (LLM ``Judge`` by default, or a numeric
+        ``metric`` you supply), keeps the highest-scoring one, and — when
+        ``apply=True`` — writes it back to ``self.instructions``.
+
+        Args:
+            evalset: List of ``(prompt, expected)`` cases to score candidates on.
+            metric: Optional numeric metric ``(output, expected) -> float``.
+                When set, empirical scoring replaces the LLM Judge.
+            scorer: Optional custom ``Judge`` instance (ignored if ``metric`` set).
+            criteria: Optional criteria for the default Judge.
+            n_candidates: Number of instruction variants to try (default: 6).
+            apply: Write the winning instructions back to the agent (default: True).
+
+        Returns:
+            ``OptimizeResult`` with ``best_instructions``, ``best_score``,
+            ``base_score`` and the full ``trials`` list.
+
+        Example::
+
+            result = agent.optimize_instructions(
+                evalset=[("summarise X", gold_x)], metric=rouge_l,
+            )
+            print(result.best_score, result.best_instructions)
+        """
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        return PromptOptimizer(
+            self,
+            evalset,
+            scorer=scorer,
+            metric=metric,
+            criteria=criteria,
+            n_candidates=n_candidates,
+            apply=apply,
+        ).optimize()
+
+    async def aoptimize_instructions(
+        self,
+        evalset: List[Any],
+        *,
+        metric: Optional[Any] = None,
+        scorer: Optional[Any] = None,
+        criteria: str = "",
+        n_candidates: int = 6,
+        apply: bool = True,
+    ) -> Any:
+        """Async twin of :meth:`optimize_instructions`.
+
+        The optimiser runs synchronous agent calls internally; this variant
+        offloads the run to a worker thread so async callers never block the
+        event loop.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.optimize_instructions,
+            evalset,
+            metric=metric,
+            scorer=scorer,
+            criteria=criteria,
+            n_candidates=n_candidates,
+            apply=apply,
+        )
+
     def _ensure_skill_management_tools(self) -> None:
         """Ensure the agent has the ``skill_manage`` tool for authoring skills.
 

@@ -694,7 +694,29 @@ class EvaluationLoopResult:
     total_duration_seconds: float = 0.0
     threshold: float = 8.0
     mode: str = "optimize"
+    best: Optional[IterationResult] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def best_iteration(self) -> Optional[IterationResult]:
+        """Get the highest-scoring iteration (keep-the-best, not the last)."""
+        if self.best is not None:
+            return self.best
+        if not self.iterations:
+            return None
+        return max(self.iterations, key=lambda it: it.score)
+    
+    @property
+    def best_score(self) -> float:
+        """Get the highest score achieved across iterations."""
+        best = self.best_iteration
+        return best.score if best is not None else 0.0
+    
+    @property
+    def best_output(self) -> str:
+        """Get the output of the highest-scoring iteration."""
+        best = self.best_iteration
+        return best.output if best is not None else ""
     
     @property
     def final_score(self) -> float:
@@ -733,6 +755,8 @@ class EvaluationLoopResult:
         return {
             "success": self.success,
             "final_score": self.final_score,
+            "best_score": self.best_score,
+            "best_output": self.best_output,
             "score_history": self.score_history,
             "final_output": self.final_output,
             "accumulated_findings": self.accumulated_findings,

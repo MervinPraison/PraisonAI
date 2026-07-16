@@ -104,6 +104,9 @@ __all__ = [
     # LoopEvaluator (loop health: convergence, waste, doom-loop guards)
     "LoopEvaluator",
     "LoopHealthResult",
+    # PromptOptimizer (optimise agent.instructions against an eval, keep best)
+    "PromptOptimizer",
+    "OptimizeResult",
 ]
 
 _LAZY_IMPORTS = {
@@ -185,6 +188,9 @@ _LAZY_IMPORTS = {
     # LoopEvaluator (loop health: convergence, waste, doom-loop guards)
     "LoopEvaluator": ("loop_eval", "LoopEvaluator"),
     "LoopHealthResult": ("loop_eval", "LoopHealthResult"),
+    # PromptOptimizer (optimise agent.instructions against an eval, keep best)
+    "PromptOptimizer": ("prompt_optimizer", "PromptOptimizer"),
+    "OptimizeResult": ("prompt_optimizer", "OptimizeResult"),
 }
 
 
