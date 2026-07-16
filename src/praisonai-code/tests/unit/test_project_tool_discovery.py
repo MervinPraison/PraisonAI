@@ -208,6 +208,40 @@ class TestCustomAgentToolWiring:
         tools = captured["config"].get("tools", [])
         assert tools == ["internet_search"]
 
+    def test_run_custom_agent_dedupes_internal_duplicates(self, project, monkeypatch):
+        """Internal duplicates within the resolved extra tools (e.g. overlapping
+        --tools/--toolset) must be de-duplicated by identity, not just against
+        the frontmatter list."""
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+
+        import praisonaiagents
+        from praisonai_code.cli.commands import run as run_mod
+
+        captured = {}
+
+        class _FakeAgent:
+            def __init__(self, **config):
+                captured["config"] = config
+
+            def start(self, prompt):
+                return "done"
+
+        def _dup_tool():
+            return "dup"
+
+        monkeypatch.setattr(praisonaiagents, "Agent", _FakeAgent)
+        monkeypatch.setattr(run_mod, "_record_session_usage", lambda *a, **k: None)
+        # Same callable resolved twice (overlapping sources).
+        monkeypatch.setattr(
+            run_mod, "_resolve_tools_arg", lambda *a, **k: [_dup_tool, _dup_tool]
+        )
+
+        agent_config = {"name": "assistant", "tools": []}
+        run_mod._run_custom_agent(agent_config, "hi", tools="x", no_save=True)
+
+        tools = captured["config"].get("tools", [])
+        assert tools.count(_dup_tool) == 1
+
 
 class TestAgentsCommandsUnaffected:
     def test_agents_still_discovered_alongside_tools(self, project, monkeypatch):

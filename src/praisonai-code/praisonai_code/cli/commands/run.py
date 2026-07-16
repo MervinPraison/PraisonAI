@@ -1623,9 +1623,13 @@ def _run_custom_agent(
         extra_tools.extend(_auto_discover_project_tools(extra_tools, verbose=verbose))
         if extra_tools:
             seen = {id(t) for t in existing_tools}
-            existing_tools = list(existing_tools) + [
-                t for t in extra_tools if id(t) not in seen
-            ]
+            merged_extra: list = []
+            for t in extra_tools:
+                if id(t) in seen:
+                    continue
+                seen.add(id(t))
+                merged_extra.append(t)
+            existing_tools = list(existing_tools) + merged_extra
         if existing_tools:
             agent_config["tools"] = existing_tools
 
