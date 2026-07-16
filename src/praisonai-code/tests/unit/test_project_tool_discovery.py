@@ -42,6 +42,16 @@ def helper():
     return "helper"
 '''
 
+NAMED_TOOL = '''\
+from praisonaiagents import tool
+
+
+@tool(name="weather_lookup")
+def weather(city: str) -> str:
+    """Get the weather for a city."""
+    return f"sunny in {city}"
+'''
+
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
@@ -373,3 +383,85 @@ class TestAgentsCommandsUnaffected:
         discovery = CustomDefinitionsDiscovery()
         assert discovery.get_agent("helper") is not None
         assert discovery.get_tool("greet.greet") is not None
+
+
+class TestResolveAllFromYamlDiscovery:
+    """The YAML agents-generator path (resolve_all_from_yaml) must also pick up
+    ``.praisonai/tools/*.py`` @tool functions, keyed by their tool name, so a
+    dropped-in tool file is available to YAML-defined agents.
+    """
+
+    def _resolver(self):
+        from praisonai_code.tool_resolver import ToolResolver
+
+        return ToolResolver()
+
+    def test_function_tool_discovered_from_praisonai_tools_dir(
+        self, project, monkeypatch
+    ):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "mixed.py").write_text(DECORATED_TOOL)
+
+        tools = self._resolver().resolve_all_from_yaml({})
+        # Keyed by the @tool function name, not the module-namespaced name.
+        assert "add" in tools
+        assert tools["add"](a=2, b=3) == 5
+
+    def test_explicit_tool_name_respected(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "weather.py").write_text(NAMED_TOOL)
+
+        tools = self._resolver().resolve_all_from_yaml({})
+        assert "weather_lookup" in tools
+        assert "weather" not in tools
+
+    def test_additive_with_yaml_named_tools(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "mixed.py").write_text(DECORATED_TOOL)
+
+        config = {
+            "roles": {
+                "r": {"tools": ["duckduckgo"]}
+            }
+        }
+        tools = self._resolver().resolve_all_from_yaml(config)
+        # Folder tool coexists with a YAML-named built-in tool (no XOR).
+        assert "add" in tools
+        assert "duckduckgo" in tools
+
+    def test_gate_blocks_yaml_discovery(self, project, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "mixed.py").write_text(DECORATED_TOOL)
+
+        tools = self._resolver().resolve_all_from_yaml({})
+        assert "add" not in tools
+
+    def test_gate_short_circuits_before_discovery(self, project, monkeypatch):
+        # When local tools are disabled (default) the resolver must not do the
+        # directory walk-up / git subprocess work at all — it is gated to load
+        # nothing anyway, so paying that cost on every YAML resolution is waste.
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+
+        called = {"discover": False}
+
+        def _fail_discovery():
+            called["discover"] = True
+            raise AssertionError("discover_project_tools must not be called")
+
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.discover_project_tools",
+            _fail_discovery,
+        )
+
+        tools = self._resolver().resolve_all_from_yaml({})
+        assert "add" not in tools
+        assert called["discover"] is False
+
+    def test_no_tools_dir_is_noop(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "praisonai_code.cli.features.custom_definitions.get_git_root",
+            lambda: tmp_path,
+        )
+        assert self._resolver().resolve_all_from_yaml({}) == {}
