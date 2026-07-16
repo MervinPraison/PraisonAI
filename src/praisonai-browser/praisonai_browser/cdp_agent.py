@@ -1190,7 +1190,7 @@ Respond in this exact JSON format:
                 # FULLY DYNAMIC: Let LLM decide ALL actions including consent handling
                 # LLM has access to: screenshot, elements (including consent buttons), action history
                 llm_start = _time.perf_counter()
-                action = agent.process_observation(observation)
+                action = await agent.aprocess_observation(observation)
                 action = normalize_action(action)
                 llm_duration = _time.perf_counter() - llm_start
                 
