@@ -91,6 +91,46 @@ class TestCLIDoctorCommand:
         mock_doctor_flow.assert_called_once()
 
 
+class TestCLIDoctorExtension:
+    """Test doctor extension bridge-vs-CDP split (issue #3098)."""
+
+    def test_doctor_extension_help(self):
+        """doctor extension help renders without error."""
+        result = runner.invoke(app, ["doctor", "extension", "--help"])
+        assert result.exit_code == 0
+
+    @patch("requests.get")
+    def test_doctor_extension_passes_when_bridge_connected(self, mock_get):
+        """Passes on bridge connection even when CDP Chrome is empty."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {"status": "ok", "connections": 1, "sessions": 0}
+            else:
+                resp.json.return_value = []  # No CDP targets (daily Work Chrome)
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 0
+        assert "connected to bridge" in result.output
+
+    @patch("requests.get")
+    def test_doctor_extension_fails_when_no_bridge_connection(self, mock_get):
+        """Fails when the extension is not connected to the bridge."""
+        def side_effect(url, *args, **kwargs):
+            resp = Mock()
+            if "/health" in url:
+                resp.json.return_value = {"status": "ok", "connections": 0, "sessions": 0}
+            else:
+                resp.json.return_value = []
+            return resp
+
+        mock_get.side_effect = side_effect
+        result = runner.invoke(app, ["doctor", "extension"])
+        assert result.exit_code == 1
+
+
 class TestCLIMessageParsing:
     """Test that CLI handles various message types correctly."""
     
