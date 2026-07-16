@@ -9,6 +9,7 @@ import ast
 import importlib
 import logging
 import os
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
@@ -21,7 +22,14 @@ logger = logging.getLogger(__name__)
 # registry object) reuse one resolver and its per-instance caches instead of
 # rebuilding the registry+resolver and re-executing local tools.py per agent.
 # The registry object is also stored to guard against id() reuse after GC.
-_resolver_cache: Dict[Any, Any] = {}
+#
+# The cache is a bounded LRU (``OrderedDict``): each workflow build passes a
+# fresh registry object, so an unbounded dict would retain every registry,
+# its tool callables/modules and the resolver's internal caches for the
+# process lifetime. Capping it keeps the memoisation win for the current
+# build while ensuring memory does not grow with the number of builds.
+_RESOLVER_CACHE_MAXSIZE = 8
+_resolver_cache: "OrderedDict[Any, Any]" = OrderedDict()
 
 
 def _load_user_module_safe(path: Path, *, name: str):
@@ -483,18 +491,25 @@ def _get_resolver(
     from ..tool_resolver import ToolResolver
     from ..tool_registry import ToolRegistry
 
-    # Build registry if not provided (for backward compat with existing callers)
+    # Build registry if not provided (for backward compat with existing
+    # callers). A registry built here is a fresh object on every call, so its
+    # id() is never stable across calls -- caching it would only leak memory
+    # and never produce a hit. We therefore skip the cache entirely in that
+    # case (see ``cacheable`` below).
+    cacheable = registry is not None
     if registry is None:
         registry = create_tool_registry_with_overrides(include_defaults=True)
 
     autoload = _autoload_tools_enabled()
     cache_key = (id(registry), template_dir, autoload)
 
-    cached = _resolver_cache.get(cache_key)
-    # Guard against id() reuse after GC: verify the stored registry is the same
-    # object we were passed before returning the cached resolver.
-    if cached is not None and cached[0] is registry:
-        return cached[1]
+    if cacheable:
+        cached = _resolver_cache.get(cache_key)
+        # Guard against id() reuse after GC: verify the stored registry is the
+        # same object we were passed before returning the cached resolver.
+        if cached is not None and cached[0] is registry:
+            _resolver_cache.move_to_end(cache_key)
+            return cached[1]
 
     # Create a ToolRegistry instance for high-priority overrides
     tool_registry = ToolRegistry()
@@ -526,7 +541,14 @@ def _get_resolver(
         registry=tool_registry
     )
 
-    _resolver_cache[cache_key] = (registry, resolver)
+    if cacheable:
+        _resolver_cache[cache_key] = (registry, resolver)
+        _resolver_cache.move_to_end(cache_key)
+        # Bound the cache: evict least-recently-used entries so memory does
+        # not grow with the number of workflow builds over the process life.
+        while len(_resolver_cache) > _RESOLVER_CACHE_MAXSIZE:
+            _resolver_cache.popitem(last=False)
+
     return resolver
 
 
