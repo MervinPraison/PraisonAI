@@ -1606,6 +1606,29 @@ def _run_custom_agent(
         if model:
             agent_config["llm"] = model
 
+        # Compose the agent's toolset: frontmatter ``tools:`` (name strings)
+        # + explicit --tools/--toolset + auto-discovered project-local
+        # .praisonai/tools/*.py callables. Discovery mirrors the default and
+        # actions run paths so `--agent` runs honour the same zero-registration
+        # convention (gated by PRAISONAI_ALLOW_LOCAL_TOOLS in the safe loader).
+        existing_tools = agent_config.get("tools") or []
+        if not isinstance(existing_tools, list):
+            existing_tools = [existing_tools]
+        extra_tools = _resolve_tools_arg(tools, verbose=verbose)
+        if toolset:
+            from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
+            toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
+            if toolset_names:
+                extra_tools.extend(_resolve_toolsets(toolset_names))
+        extra_tools.extend(_auto_discover_project_tools(extra_tools, verbose=verbose))
+        if extra_tools:
+            seen = {id(t) for t in existing_tools}
+            existing_tools = list(existing_tools) + [
+                t for t in extra_tools if id(t) not in seen
+            ]
+        if existing_tools:
+            agent_config["tools"] = existing_tools
+
         # Offer discovered named agents as delegation targets. The primary
         # agent can then call spawn_subagent(agent_name="researcher", ...) to
         # hand a sub-task to a user-defined .praisonai/agents/*.md agent, which

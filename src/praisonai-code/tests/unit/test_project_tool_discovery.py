@@ -149,6 +149,66 @@ class TestUserGlobalTools:
         assert greet.callable("Ada") == "Hello, Ada!"
 
 
+class TestCustomAgentToolWiring:
+    """`praisonai run --agent ...` must also auto-load project-local tools,
+    unioned with the frontmatter ``tools:`` list (regression: `_run_custom_agent`
+    previously ignored --tools and never auto-discovered)."""
+
+    def test_run_custom_agent_merges_project_tools(self, project, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        import praisonaiagents
+        from praisonai_code.cli.commands import run as run_mod
+
+        captured = {}
+
+        class _FakeAgent:
+            def __init__(self, **config):
+                captured["config"] = config
+
+            def start(self, prompt):
+                return "done"
+
+        monkeypatch.setattr(praisonaiagents, "Agent", _FakeAgent)
+        # Keep the event bridge and session usage recording inert.
+        monkeypatch.setattr(run_mod, "_record_session_usage", lambda *a, **k: None)
+
+        agent_config = {"name": "assistant", "tools": ["internet_search"]}
+        run_mod._run_custom_agent(agent_config, "hi", no_save=True)
+
+        tools = captured["config"].get("tools", [])
+        # Frontmatter tool name string preserved.
+        assert "internet_search" in tools
+        # Auto-discovered project callable appended.
+        assert any(callable(t) and getattr(t, "__name__", "") == "greet" for t in tools)
+
+    def test_run_custom_agent_no_discovery_without_optin(self, project, monkeypatch):
+        monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
+        (project / "greet.py").write_text(GREET_TOOL)
+
+        import praisonaiagents
+        from praisonai_code.cli.commands import run as run_mod
+
+        captured = {}
+
+        class _FakeAgent:
+            def __init__(self, **config):
+                captured["config"] = config
+
+            def start(self, prompt):
+                return "done"
+
+        monkeypatch.setattr(praisonaiagents, "Agent", _FakeAgent)
+        monkeypatch.setattr(run_mod, "_record_session_usage", lambda *a, **k: None)
+
+        agent_config = {"name": "assistant", "tools": ["internet_search"]}
+        run_mod._run_custom_agent(agent_config, "hi", no_save=True)
+
+        tools = captured["config"].get("tools", [])
+        assert tools == ["internet_search"]
+
+
 class TestAgentsCommandsUnaffected:
     def test_agents_still_discovered_alongside_tools(self, project, monkeypatch):
         monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
