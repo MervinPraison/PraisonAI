@@ -1179,7 +1179,6 @@
         "WebSearchProvider"
       ],
       "config_loader": [
-        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1801,7 +1800,6 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
-        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1815,6 +1813,9 @@
       "sandbox": [],
       "session": [],
       "skills": [],
+      "specialized": [
+        "AutoRagConfig"
+      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
@@ -1823,6 +1824,7 @@
       "tools": [
         "FunctionTool",
         "Tool",
+        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
