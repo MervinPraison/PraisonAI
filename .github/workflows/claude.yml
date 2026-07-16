@@ -105,7 +105,7 @@ jobs:
 
             // --- Auto-trigger Claude for owner issues and actionable external bug/enhancement reports ---
             const titleLower = (issue.title || '').toLowerCase();
-            const hasActionableTitle = /^(bug:|fix[:(]|feat:|ux:|enhancement:)/.test(titleLower);
+            const hasActionableTitle = /^(\[bug\]|bug:|fix[:(]|feat:|ux:|enhancement:)/i.test(titleLower);
             const autoClaude = isOwner || (hasActionableTitle && (labels.includes('bug') || labels.includes('enhancement')));
             if (autoClaude) {
               await github.rest.issues.addLabels({
