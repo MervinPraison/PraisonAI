@@ -168,18 +168,32 @@ def list_registered_agents() -> list:
     return list(_agent_registry.keys())
 
 
+def _is_real_agent(agent: Any) -> bool:
+    """Return True when ``agent`` is a genuine ``praisonaiagents`` ``Agent``.
+
+    Uses ``isinstance`` against the real ``Agent`` class so **subclasses defined
+    in application code** are recognised too (they inherit the per-session
+    machinery and ``clone_for_channel``). Plain mocks / lightweight callables are
+    not ``Agent`` instances, so they fall back to the shared instance for
+    backward compatibility. If ``praisonaiagents`` cannot be imported we treat
+    the object as non-isolatable.
+    """
+    try:
+        from praisonaiagents import Agent
+    except Exception:
+        return False
+    return isinstance(agent, Agent)
+
+
 def _supports_session_isolation(agent: Any) -> bool:
     """Return True when ``agent`` can be safely cloned per session.
 
-    Only real ``praisonaiagents`` ``Agent`` instances expose the per-session
-    machinery (``_session_id`` binding, ``chat_history`` and a safe clone path).
-    Plain mocks / lightweight callables do not (a bare ``Mock`` auto-vivifies
-    every attribute), so we gate on the concrete class living in the
-    ``praisonaiagents`` package and leave everything else on the shared
-    instance to preserve backward compatibility.
+    A real ``Agent`` (or any subclass) exposes the per-session machinery
+    (``_session_id`` binding, ``chat_history`` and a safe clone path). Plain
+    mocks / lightweight callables do not, so they stay on the shared instance to
+    preserve backward compatibility.
     """
-    module = type(agent).__module__ or ""
-    if not module.startswith("praisonaiagents"):
+    if not _is_real_agent(agent):
         return False
     if not hasattr(agent, "_session_id"):
         return False
@@ -227,12 +241,16 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
 
     try:
         agent = _clone_agent(template)
-    except Exception as e:  # pragma: no cover - defensive fallback
-        logger.warning(
-            f"Failed to clone agent '{agent_id}' for session isolation: {e}; "
-            "falling back to shared instance"
+    except Exception as e:
+        # A clone failure must never silently fall back to the shared template:
+        # doing so would leak one session's chat_history into another. Fail the
+        # request instead so isolation is guaranteed.
+        logger.error(
+            f"Failed to clone agent '{agent_id}' for session isolation: {e}"
         )
-        return template
+        raise RuntimeError(
+            f"Failed to isolate agent '{agent_id}' for session: {e}"
+        ) from e
 
     # Reset per-request conversation state so the clone starts clean and
     # (re)loads the requested session's history lazily on first chat.
@@ -306,7 +324,14 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         # Resolve a per-session isolated agent view so concurrent callers never
         # share mutable chat_history. A provided session_id gives continuity via
         # the shared session store; its absence yields an ephemeral conversation.
-        agent = resolve_session_agent(agent_id, request.session_id)
+        try:
+            agent = resolve_session_agent(agent_id, request.session_id)
+        except Exception as e:
+            logger.error(f"Failed to isolate agent {agent_id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Agent execution failed: {str(e)}"
+            )
         if not agent:
             logger.error(f"Agent not found: {agent_id}")
             raise HTTPException(
@@ -456,10 +481,12 @@ async def invoke_agent_standalone(
             "available_agents": list_registered_agents()
         }
 
-    # Per-session isolated agent view (see resolve_session_agent).
-    agent = resolve_session_agent(agent_id, session_id)
-
     try:
+        # Per-session isolated agent view (see resolve_session_agent). Done
+        # inside the try so a clone/isolation failure returns a clean error
+        # rather than leaking one session's history into another.
+        agent = resolve_session_agent(agent_id, session_id)
+
         # Apply config if provided
         if agent_config:
             logger.debug(f"Agent config provided: {agent_config}")

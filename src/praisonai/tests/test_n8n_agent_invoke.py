@@ -413,6 +413,60 @@ class TestSessionIsolation:
         finally:
             unregister_agent("ephemeral-agent")
 
+    def test_agent_subclass_is_isolated(self):
+        """Application-defined ``Agent`` subclasses are isolated, not shared."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        class MyAgent(praisonaiagents.Agent):
+            pass
+
+        agent = MyAgent(name="sub-agent", instructions="test", llm="gpt-4o-mini")
+        register_agent("sub-agent", agent)
+        try:
+            a = resolve_session_agent("sub-agent", "A")
+            b = resolve_session_agent("sub-agent", "B")
+            # Subclass must be recognised and cloned per session, not shared.
+            assert a is not agent
+            assert isinstance(a, MyAgent)
+            assert a is not b
+            assert a._session_id == "A"
+            assert b._session_id == "B"
+            assert a.chat_history is not b.chat_history
+        finally:
+            unregister_agent("sub-agent")
+
+    def test_clone_failure_raises_instead_of_sharing(self, monkeypatch):
+        """A clone failure must raise, never fall back to the shared template."""
+        praisonaiagents = pytest.importorskip("praisonaiagents")
+        from praisonai.api import agent_invoke
+        from praisonai.api.agent_invoke import (
+            register_agent,
+            unregister_agent,
+            resolve_session_agent,
+        )
+
+        agent = praisonaiagents.Agent(
+            name="clonefail-agent",
+            instructions="test",
+            llm="gpt-4o-mini",
+        )
+        register_agent("clonefail-agent", agent)
+
+        def _boom(_agent):
+            raise RuntimeError("clone exploded")
+
+        monkeypatch.setattr(agent_invoke, "_clone_agent", _boom)
+        try:
+            with pytest.raises(RuntimeError):
+                resolve_session_agent("clonefail-agent", "A")
+        finally:
+            unregister_agent("clonefail-agent")
+
 
 def test_agent_invoke_smoke_test():
     """Smoke test to verify agent invoke module can be imported and used."""
