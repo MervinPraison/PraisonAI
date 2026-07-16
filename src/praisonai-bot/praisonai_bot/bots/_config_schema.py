@@ -429,6 +429,129 @@ class DaemonConfigSchema(BaseModel):
         return v
 
 
+class HealthMonitorSchema(BaseModel):
+    """Schema for the gateway channel health-monitor block (``gateway.health``).
+
+    Mirrors the knobs read by ``gateway/server.py`` (via
+    ``HealthMonitorConfig.from_dict``) so a misspelled threshold is caught at
+    load time instead of silently falling back to the default.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    check_interval: float = Field(30.0, gt=0)
+    failure_threshold: int = Field(3, ge=1)
+    recovery_threshold: int = Field(2, ge=1)
+    restart_backoff: float = Field(5.0, ge=0)
+    max_restart_backoff: float = Field(300.0, ge=0)
+
+
+class GatewayServerSchema(BaseModel):
+    """Typed schema for the ``gateway:`` server block (issue #3050).
+
+    Replaces the previous opaque ``Dict[str, Any]`` so a misspelled or
+    mistyped server knob (``drain_timout``, ``"10s"`` instead of ``10``) is
+    rejected at load time with a friendly, field-named error instead of being
+    silently dropped and running with the default. Field names/types/ranges
+    mirror core's ``praisonaiagents.gateway.config.GatewayConfig`` so there is
+    one definition of a gateway server setting.
+
+    ``extra="forbid"`` surfaces unknown keys; ``hooks`` is validated as a
+    nested list here too since the runtime accepts hooks nested under
+    ``gateway:``.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    host: Optional[str] = None
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    bind_host: Optional[str] = None
+    cors_origins: Optional[List[str]] = None
+    allowed_origins: Optional[List[str]] = None
+    auth_token: Optional[str] = None
+    auth: Optional[Dict[str, Any]] = None
+    auth_scopes: Optional[Dict[str, List[str]]] = None
+    max_connections: Optional[int] = Field(None, ge=0)
+    max_sessions_per_agent: Optional[int] = Field(None, ge=0)
+    session_config: Optional[Dict[str, Any]] = None
+    heartbeat_interval: Optional[int] = Field(None, ge=0)
+    reconnect_timeout: Optional[int] = Field(None, ge=0)
+    ssl_cert: Optional[str] = None
+    ssl_key: Optional[str] = None
+    max_buffered_bytes: Optional[int] = Field(None, ge=0)
+    max_queued_frames: Optional[int] = Field(None, ge=0)
+    # Admission control (#2454)
+    max_concurrent_runs: Optional[int] = Field(None, ge=0)
+    queue_depth: Optional[int] = Field(None, ge=0)
+    overflow_policy: Optional[str] = None
+    preauth_max_connections_per_ip: Optional[int] = Field(None, ge=0)
+    max_unauthorized_frames: Optional[int] = Field(None, ge=0)
+    # Graceful-drain windows (#2375 / #2533)
+    drain_timeout: Optional[float] = Field(None, ge=0)
+    reload_drain_timeout: Optional[float] = Field(None, ge=0)
+    # Single-switch reliability preset (#2531)
+    reliability: Optional[str] = None
+    # Additive protocol surfaces (#2715), liveness (#2798), health monitor
+    api: Optional[Dict[str, Any]] = None
+    liveness: Optional[Dict[str, Any]] = None
+    health: Optional[HealthMonitorSchema] = None
+    # Crash/shutdown forensics (#2436)
+    forensics: Optional[Dict[str, Any]] = None
+    # Hooks may be nested under ``gateway:`` for grouping
+    hooks: Optional[List["HookSchema"]] = None
+
+    @field_validator("overflow_policy")
+    @classmethod
+    def validate_overflow_policy(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("reject", "queue", "shed_oldest"):
+            raise ValueError(
+                "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
+            )
+        return v
+
+
+class HookSchema(BaseModel):
+    """Schema for a single inbound trigger hook (``hooks:`` entries, #2281).
+
+    Mirrors ``praisonaiagents.gateway.hooks.HookConfig``; ``extra="allow"``
+    keeps free-form extras (folded into ``metadata`` by ``HookConfig.from_dict``)
+    while still requiring a non-empty ``path`` and a valid ``action``.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    agent: Optional[str] = None
+    action: str = "agent"
+    auth: Optional[str] = None
+    session_key: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    deliver_to: Optional[str] = None
+    message: Optional[str] = None
+    enabled: bool = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        if not (v or "").strip().strip("/"):
+            raise ValueError("hook 'path' must be a non-empty path segment")
+        return v
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        allowed = {"agent", "wake"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid hook action '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
+
+
+# Resolve the forward reference to ``HookSchema`` in
+# ``GatewayServerSchema.hooks`` now that ``HookSchema`` is defined.
+GatewayServerSchema.model_rebuild()
+
+
 class GatewayConfigSchema(BaseModel):
     """Unified schema for gateway.yaml/bot.yaml configuration.
     
@@ -456,17 +579,28 @@ class GatewayConfigSchema(BaseModel):
     daemon: Optional[DaemonConfigSchema] = None
 
     # Gateway server settings (host/port, drain_timeout, admission control,
-    # etc.) and inbound trigger hooks. These are read by
-    # ``gateway/server.py::load_gateway_config`` / ``_apply_hooks_from_config``
-    # rather than modelled field-by-field here; kept permissive so a real
-    # ``gateway.yaml`` with a top-level ``gateway:``/``hooks:`` block validates
-    # through this single schema instead of being rejected. See issue #2585.
+    # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so
+    # downstream consumers (``gateway/server.py`` reads them via ``.get(...)``)
+    # and existing dict-style access keep working, but validated field-by-field
+    # in ``normalize_and_validate`` via ``GatewayServerSchema``/``HookSchema``
+    # so a misspelled or mistyped server knob is rejected at load time with a
+    # friendly, field-named error instead of being silently dropped (#3050).
     gateway: Optional[Dict[str, Any]] = None
     hooks: Optional[List[Dict[str, Any]]] = None
     
     @model_validator(mode="after")
     def normalize_and_validate(self):
         """Normalize different config formats to canonical form and validate."""
+        # Validate the gateway server block + inbound hooks field-by-field
+        # (#3050). These are stored as dicts for downstream dict access, but a
+        # typo/wrong-type/out-of-range value must fail closed here instead of
+        # silently running with the default. ``GatewayServerSchema`` forbids
+        # unknown keys, so ``drain_timout`` names itself in the error.
+        if self.gateway is not None:
+            GatewayServerSchema(**self.gateway)
+        if self.hooks is not None:
+            for entry in self.hooks:
+                HookSchema(**entry)
         # Migrate single-bot format (platform + token at top level)
         if self.platform and self.token and not self.channels:
             self.channels = {

@@ -121,6 +121,103 @@ def test_schema_accepts_gateway_and_hooks_blocks():
     print("✓ Schema accepts gateway:/hooks: blocks")
 
 
+def test_gateway_server_block_rejects_typos_and_bad_types():
+    """The ``gateway:`` server block is validated field-by-field (issue #3050).
+
+    Previously modelled as an opaque ``Dict[str, Any]``, so a misspelled or
+    mistyped server knob validated fine at load time and was then silently
+    dropped at runtime (the gateway ran with the default the operator believed
+    they had overridden). Now a typo/wrong-type/out-of-range value fails closed
+    with a friendly, field-named error.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return  # schema requires pydantic; skip when unavailable
+
+    import pytest
+
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    base = dict(
+        agents={"assistant": {"name": "assistant", "instructions": "Help"}},
+        channels={"telegram": {"token": "fake-token"}},
+    )
+
+    # Misspelled server knob ("timout") -> rejected, names the offending key.
+    with pytest.raises(Exception) as excinfo:
+        GatewayConfigSchema(gateway={"drain_timout": 30}, **base)
+    assert "drain_timout" in str(excinfo.value)
+
+    # Wrong type (string where a float is expected) -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(gateway={"reload_drain_timeout": "quick"}, **base)
+
+    # Out-of-range port -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(gateway={"port": 99999}, **base)
+
+    # Negative drain_timeout -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(gateway={"drain_timeout": -1}, **base)
+
+    # Invalid overflow_policy -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(gateway={"overflow_policy": "nonsense"}, **base)
+
+    # Nested health-monitor typo -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(gateway={"health": {"failure_threshld": 5}}, **base)
+
+    # Invalid hook action -> rejected; empty path -> rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(hooks=[{"path": "gmail", "action": "nope"}], **base)
+    with pytest.raises(Exception):
+        GatewayConfigSchema(hooks=[{"path": ""}], **base)
+
+    print("✓ Gateway server block rejects typos, bad types, and bad ranges")
+
+
+def test_gateway_server_block_accepts_full_valid_config():
+    """A complete, correct ``gateway:`` block validates and stays dict-accessible.
+
+    Guards backward compatibility: downstream code (``gateway/server.py``)
+    reads these via ``.get(...)`` on a plain dict, so the block must remain a
+    dict after validation.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return
+
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    cfg = GatewayConfigSchema(
+        agents={"assistant": {"name": "assistant", "instructions": "Help"}},
+        channels={"telegram": {"token": "fake-token"}},
+        gateway={
+            "host": "0.0.0.0",
+            "port": 8000,
+            "drain_timeout": 30,
+            "reload_drain_timeout": 10,
+            "max_concurrent_runs": 5,
+            "queue_depth": 10,
+            "overflow_policy": "queue",
+            "reliability": "balanced",
+            "api": {"openai": True},
+            "liveness": {"enabled": True},
+            "forensics": {"enabled": True},
+            "health": {"enabled": True, "failure_threshold": 5},
+        },
+        hooks=[{"path": "gmail", "agent": "assistant", "custom_extra": "kept"}],
+    )
+    # Still a plain dict for downstream ``.get(...)`` consumers.
+    assert isinstance(cfg.gateway, dict)
+    assert cfg.gateway["max_concurrent_runs"] == 5
+    assert cfg.hooks[0]["path"] == "gmail"
+    print("✓ Full valid gateway block validates and stays dict-accessible")
+
+
 def test_doctor_checks():
     """Test doctor check structure."""
     print("\n=== Testing Doctor Checks ===")
