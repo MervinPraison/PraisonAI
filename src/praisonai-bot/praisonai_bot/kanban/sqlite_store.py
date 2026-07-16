@@ -55,6 +55,8 @@ class SQLiteKanbanStore:
                     tenant TEXT DEFAULT 'default',
                     board TEXT DEFAULT 'default',
                     workspace_kind TEXT DEFAULT 'default',
+                    branch TEXT,  -- per-task integration branch (worktree isolation)
+                    worktree_path TEXT,  -- filesystem path of the task's git worktree
                     claim_lock TEXT,
                     claim_expires TIMESTAMP,  -- Claim lease expiry (TTL)
                     worker_pid INTEGER,  -- PID of claiming worker for liveness checks
@@ -157,6 +159,9 @@ class SQLiteKanbanStore:
             "claim_expires": "TIMESTAMP",
             "worker_pid": "INTEGER",
             "last_heartbeat_at": "TIMESTAMP",
+            "workspace_kind": "TEXT DEFAULT 'default'",
+            "branch": "TEXT",
+            "worktree_path": "TEXT",
         })
 
         # Drop a pre-existing idempotency index that is not tenant-scoped so the
@@ -245,6 +250,8 @@ class SQLiteKanbanStore:
             tenant=tenant,
             board=board,
             workspace_kind=task_data.get('workspace_kind', 'default'),
+            branch=task_data.get('branch'),
+            worktree_path=task_data.get('worktree_path'),
             metadata=task_data.get('metadata', {}),
             max_retries=max_retries,
             created_at=now,
@@ -271,15 +278,15 @@ class SQLiteKanbanStore:
                 conn.execute("""
                     INSERT INTO tasks (
                         id, title, body, status, assignee, priority,
-                        tenant, board, workspace_kind, metadata,
-                        idempotency_key, max_retries, consecutive_failures,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        tenant, board, workspace_kind, branch, worktree_path,
+                        metadata, idempotency_key, max_retries,
+                        consecutive_failures, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task.id, task.title, task.body, task.status.value,
                     task.assignee, task.priority, task.tenant, task.board,
-                    task.workspace_kind, json.dumps(task.metadata),
-                    idempotency_key, max_retries, 0,
+                    task.workspace_kind, task.branch, task.worktree_path,
+                    json.dumps(task.metadata), idempotency_key, max_retries, 0,
                     task.created_at.isoformat(), task.updated_at.isoformat()
                 ))
             except sqlite3.IntegrityError:
@@ -324,7 +331,7 @@ class SQLiteKanbanStore:
             values = []
             
             for field, value in updates.items():
-                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata']:
+                if field in ['status', 'title', 'body', 'assignee', 'priority', 'claim_lock', 'metadata', 'branch', 'worktree_path']:
                     if field == 'status' and isinstance(value, str):
                         value = TaskStatus(value).value
                     elif field == 'metadata':
