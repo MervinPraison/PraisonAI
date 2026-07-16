@@ -1,5 +1,7 @@
 """Unit tests for the addressed agent-to-agent mailbox (issue #3063)."""
 
+import pytest
+
 from praisonaiagents.messaging import (
     AgentMailboxProtocol,
     AgentMessage,
@@ -31,7 +33,7 @@ def test_receive_respects_max_and_order():
     mb = InProcessMailbox()
     for i in range(5):
         mb.send("b", i, sender="a")
-    first = mb.receive("b", max=2)
+    first = mb.receive("b", limit=2)
     assert [m.body for m in first] == [0, 1]
     rest = mb.receive("b")
     assert [m.body for m in rest] == [2, 3, 4]
@@ -78,7 +80,7 @@ def test_pending_count():
     mb.send("b", 1, sender="a")
     mb.send("b", 2, sender="a")
     assert mb.pending("b") == 2
-    mb.receive("b", max=1)
+    mb.receive("b", limit=1)
     assert mb.pending("b") == 1
 
 
@@ -112,3 +114,11 @@ def test_subscriber_exception_does_not_break_delivery():
     mb.subscribe("b", boom)
     mb.send("b", "still-delivered", sender="a")
     assert mb.receive("b")[0].body == "still-delivered"
+
+
+def test_non_positive_max_inbox_rejected():
+    """A zero/negative max_inbox is rejected instead of silently dropping."""
+    with pytest.raises(ValueError):
+        InProcessMailbox(max_inbox=0)
+    with pytest.raises(ValueError):
+        InProcessMailbox(max_inbox=-1)

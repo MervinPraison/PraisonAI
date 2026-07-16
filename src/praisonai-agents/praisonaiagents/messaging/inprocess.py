@@ -31,7 +31,12 @@ class InProcessMailbox:
 
         Args:
             max_inbox: Maximum queued messages per recipient (oldest dropped).
+
+        Raises:
+            ValueError: If ``max_inbox`` is not a positive integer.
         """
+        if max_inbox <= 0:
+            raise ValueError("max_inbox must be greater than zero")
         self._max_inbox = max_inbox
         self._inboxes: Dict[str, Deque[AgentMessage]] = defaultdict(
             lambda: deque(maxlen=max_inbox)
@@ -70,17 +75,22 @@ class InProcessMailbox:
                 import logging
 
                 logging.getLogger(__name__).exception(
-                    "Error in mailbox subscriber for %s", recipient
+                    "Error in mailbox subscriber for %s",
+                    recipient,
+                    extra={
+                        "message_id": message.id,
+                        "correlation_id": message.correlation_id,
+                    },
                 )
         return message.id
 
-    def receive(self, agent_id: str, *, max: int = 50) -> List[AgentMessage]:
-        """Drain up to ``max`` pending messages for an agent (oldest first)."""
+    def receive(self, agent_id: str, *, limit: int = 50) -> List[AgentMessage]:
+        """Drain up to ``limit`` pending messages for an agent (oldest first)."""
         with self._lock:
             inbox = self._inboxes.get(agent_id)
             if not inbox:
                 return []
-            count = min(max, len(inbox))
+            count = min(limit, len(inbox))
             return [inbox.popleft() for _ in range(count)]
 
     def subscribe(

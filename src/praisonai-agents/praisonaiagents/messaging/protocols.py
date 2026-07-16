@@ -103,12 +103,12 @@ class AgentMailboxProtocol(Protocol):
         """
         ...
 
-    def receive(self, agent_id: str, *, max: int = 50) -> list[AgentMessage]:
-        """Drain up to ``max`` pending messages for an agent (oldest first).
+    def receive(self, agent_id: str, *, limit: int = 50) -> list[AgentMessage]:
+        """Drain up to ``limit`` pending messages for an agent (oldest first).
 
         Args:
             agent_id: Address of the receiving agent.
-            max: Maximum number of messages to return.
+            limit: Maximum number of messages to return.
 
         Returns:
             List of delivered messages (removed from the inbox).

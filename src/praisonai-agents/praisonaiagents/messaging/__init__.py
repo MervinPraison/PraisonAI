@@ -25,8 +25,8 @@ Usage:
 """
 
 __all__ = [
-    "AgentMessage",
     "AgentMailboxProtocol",
+    "AgentMessage",
     "InProcessMailbox",
 ]
 
