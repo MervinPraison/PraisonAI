@@ -99,10 +99,11 @@ class CheckpointsHandler:
     
     async def rewind(self, steps: int = 1) -> bool:
         """
-        Rewind the workspace back ``steps`` checkpoints (turn-level undo).
+        Rewind the workspace back ``steps`` checkpoints.
 
-        ``steps=1`` undoes the most recent turn's file changes. Checkpoints form
-        an ordered sequence, so a "turn" is an index into it.
+        ``steps=1`` restores the checkpoint immediately before the current one,
+        undoing the most recent checkpointed change. Checkpoints form an ordered
+        sequence, so ``steps`` is an index into it.
 
         Args:
             steps: How many checkpoints to step back.
@@ -115,7 +116,7 @@ class CheckpointsHandler:
 
         if result.success:
             self._print_success(
-                f"Rewound {steps} turn(s) to checkpoint: {result.checkpoint.short_id}"
+                f"Rewound {steps} checkpoint(s) to: {result.checkpoint.short_id}"
             )
             return True
         else:

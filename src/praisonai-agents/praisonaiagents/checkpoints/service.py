@@ -355,10 +355,15 @@ class CheckpointService:
         """
         Rewind the workspace back ``steps`` checkpoints from the latest.
 
-        Checkpoints form an ordered sequence (newest first), so each
-        automatic/manual checkpoint marks the state after a turn. ``rewind(1)``
-        undoes the most recent turn's file changes by restoring the checkpoint
-        immediately before it; ``rewind(n)`` steps back ``n`` checkpoints.
+        Checkpoints form an ordered sequence (newest first). ``rewind(1)``
+        restores the checkpoint immediately before the current one (undoing the
+        most recent checkpointed change); ``rewind(n)`` steps back ``n``
+        checkpoints.
+
+        Note: a checkpoint is not guaranteed to correspond 1:1 with an agent
+        turn — manual saves and auto-checkpoints both create checkpoints — so
+        ``steps`` counts checkpoints, which is the closest turn-addressable
+        primitive available without persisting a turn↔checkpoint map.
 
         Args:
             steps: How many checkpoints to step back (must be >= 1).
@@ -372,14 +377,18 @@ class CheckpointService:
         if steps < 1:
             return CheckpointResult.fail("steps must be >= 1")
 
-        checkpoints = await self.list_checkpoints(limit=self.config.max_checkpoints)
+        # Query only as many checkpoints as we need to reach the target.
+        # Shadow-git retains every commit (pruning only trims the in-memory
+        # list), so we must not cap the lookup at ``max_checkpoints`` or valid
+        # older targets would become unreachable.
+        checkpoints = await self.list_checkpoints(limit=steps + 1)
         if steps >= len(checkpoints):
             return CheckpointResult.fail(
                 f"Cannot rewind {steps} step(s): only {len(checkpoints)} checkpoint(s) available"
             )
 
         # list_checkpoints is newest-first, so index ``steps`` is the checkpoint
-        # ``steps`` turns back from the latest.
+        # ``steps`` positions back from the latest.
         target = checkpoints[steps]
         return await self.restore(target.id)
 

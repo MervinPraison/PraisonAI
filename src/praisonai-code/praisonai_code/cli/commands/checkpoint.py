@@ -129,7 +129,7 @@ def restore(
 
 @app.command("rewind")
 def rewind(
-    steps: int = typer.Argument(1, help="How many turns/checkpoints to step back (default: 1 = undo last turn)"),
+    steps: int = typer.Argument(1, min=1, help="How many checkpoints to step back (default: 1 = undo last checkpoint)"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ):
     """Rewind the workspace back N turns (default 1 = undo the last turn's file changes)."""

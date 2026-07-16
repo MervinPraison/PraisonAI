@@ -398,6 +398,33 @@ class TestCheckpointService:
         assert "steps must be >= 1" in result.error
 
     @pytest.mark.asyncio
+    async def test_service_rewind_beyond_max_checkpoints(self, temp_workspace, temp_storage):
+        """Rewind can reach commits older than max_checkpoints.
+
+        Pruning only trims the in-memory list; shadow-git retains every commit,
+        so rewind must not cap its lookup at ``max_checkpoints``.
+        """
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage,
+            max_checkpoints=2,
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in range(1, 6):
+            with open(test_file, "w") as f:
+                f.write(f"turn {i}")
+            await service.save(f"Turn {i}")
+
+        # 5 saves > max_checkpoints=2, but the older commits still exist in git.
+        result = await service.rewind(4)
+
+        assert result.success
+        with open(test_file, "r") as f:
+            assert f.read() == "turn 1"
+
+    @pytest.mark.asyncio
     async def test_service_diff(self, temp_workspace, temp_storage):
         """Test getting diff between checkpoints."""
         service = CheckpointService(
