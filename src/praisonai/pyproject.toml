@@ -91,7 +91,7 @@ daytona = [
     # Install via: pip install git+https://github.com/daytonaio/daytona-python
 ]
 tenki = [
-    "tenki-sandbox>=0.3",
+    "tenki-sandbox>=0.3.6",
 ]
 realtime = [
     "aiui>=0.3.121,<0.4",
