@@ -206,7 +206,10 @@ class TestStartSession:
         from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
-        conn = ClientConnection(websocket=Mock())
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
+        # An available extension connection is required to accept the session
+        ext = ClientConnection(websocket=AsyncMock())
+        server._connections["ext"] = ext
         
         message = {
             "type": "start_session",
@@ -218,6 +221,7 @@ class TestStartSession:
         
         assert response["type"] == "status"
         assert response["status"] == "running"
+        assert response.get("start_automation_sent") is True
         assert "session_id" in response
         assert conn.session_id is not None
         
@@ -231,7 +235,9 @@ class TestStartSession:
         from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
-        conn = ClientConnection(websocket=Mock())
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
+        ext = ClientConnection(websocket=AsyncMock())
+        server._connections["ext"] = ext
         
         await server._handle_start_session(
             {"type": "start_session", "goal": "Test"},
@@ -245,12 +251,12 @@ class TestStartSession:
             server._sessions.close()
     
     @pytest.mark.asyncio
-    async def test_start_session_reports_no_extension(self):
-        """With only the CLI caller connected, start_automation is not delivered."""
+    async def test_handle_start_session_no_extension(self):
+        """Test start session with no extension connected returns error."""
         from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
-        conn = ClientConnection(websocket=Mock())
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
         # Register the CLI caller as the only connection.
         server._connections["cli"] = conn
         
@@ -259,8 +265,31 @@ class TestStartSession:
             conn
         )
         
-        assert response["status"] == "running"
-        assert response["start_automation_sent"] is False
+        assert response["type"] == "error"
+        assert response["code"] == "NO_EXTENSION"
+        
+        if server._sessions:
+            server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_handle_start_session_extension_busy(self):
+        """Test concurrent session is rejected when extension is busy."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
+        busy_ext = ClientConnection(
+            websocket=AsyncMock(), is_extension=True, session_id="existing"
+        )
+        server._connections["ext"] = busy_ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            conn
+        )
+        
+        assert response["type"] == "error"
+        assert response["code"] == "EXTENSION_IN_USE"
         
         if server._sessions:
             server._sessions.close()
@@ -272,7 +301,7 @@ class TestStartSession:
         from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
-        conn = ClientConnection(websocket=Mock())
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
         ext_ws = Mock()
         ext_ws.send_text = AsyncMock()
         ext = ClientConnection(websocket=ext_ws, is_extension=True)
@@ -297,7 +326,7 @@ class TestStartSession:
         from praisonai_browser.server import BrowserServer, ClientConnection
         
         server = BrowserServer()
-        conn = ClientConnection(websocket=Mock())
+        conn = ClientConnection(websocket=Mock(), is_cli=True)
         # A second CLI-like peer (not an extension) registered BEFORE the ext.
         peer_ws = Mock()
         peer_ws.send_text = AsyncMock()
