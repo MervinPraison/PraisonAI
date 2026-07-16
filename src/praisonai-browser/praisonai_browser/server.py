@@ -15,16 +15,28 @@ logger = logging.getLogger("praisonai.browser.server")
 
 
 def _port_in_use(host: str, port: int) -> bool:
-    """Return True if a TCP server is already listening on host:port."""
+    """Return True if a TCP server is already listening on host:port.
+
+    Resolves the address family via ``getaddrinfo`` so IPv6 hosts (e.g. ``::1``)
+    are probed correctly instead of assuming IPv4.
+    """
     import socket
 
     probe_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(1)
+    try:
+        infos = socket.getaddrinfo(probe_host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+
+    for family, socktype, proto, _canonname, sockaddr in infos:
         try:
-            return s.connect_ex((probe_host, port)) == 0
+            with socket.socket(family, socktype, proto) as s:
+                s.settimeout(1)
+                if s.connect_ex(sockaddr) == 0:
+                    return True
         except OSError:
-            return False
+            continue
+    return False
 
 
 @dataclass
@@ -566,11 +578,6 @@ class BrowserServer:
                 "uvicorn is required. Install it with: pip install uvicorn"
             )
         
-        if _port_in_use(self.host, self.port):
-            print(f"\nPraisonAI Browser Server already listening on {self.host}:{self.port}")
-            print(f"   Health: http://127.0.0.1:{self.port}/health\n")
-            return
-        
         app = self._get_app()
         self._running = True
         
@@ -584,11 +591,11 @@ class BrowserServer:
         signal.signal(signal.SIGTERM, handle_signal)
         
         logger.info(f"Starting PraisonAI Browser Server on {self.host}:{self.port}")
-        print(f"\nPraisonAI Browser Server")
+        print("\nPraisonAI Browser Server")
         print(f"   WebSocket: ws://{self.host}:{self.port}/ws")
         print(f"   Health:    http://{self.host}:{self.port}/health")
         print(f"   Model:     {self.model}")
-        print(f"\n   Press Ctrl+C to stop\n")
+        print("\n   Press Ctrl+C to stop\n")
         
         uvicorn.run(
             app,
