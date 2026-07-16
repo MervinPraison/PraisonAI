@@ -367,8 +367,25 @@ class MemoryMixin:
         
         self._current_run_id = None
 
-    def _persist_message(self, role: str, content: str):
-        """Persist a message to the DB or session store."""
+    def _persist_message(
+        self,
+        role: str,
+        content: str,
+        tool_calls=None,
+        tool_call_id: Optional[str] = None,
+    ):
+        """Persist a message to the DB or session store.
+
+        Args:
+            role: Message role ("user", "assistant", "system", "tool").
+            content: Message text.
+            tool_calls: Optional structured tool calls on an assistant turn
+                (Issue #3089). Persisted faithfully to the default JSON store
+                so a resumed tool-using session reconstructs the same message
+                list the model saw before.
+            tool_call_id: Optional id linking a ``role="tool"`` result turn to
+                the assistant tool call it answers (Issue #3089).
+        """
         # Try DB adapter first
         if self._db is not None:
             try:
@@ -386,7 +403,29 @@ class MemoryMixin:
                 if role == "user":
                     self._session_store.add_user_message(self._session_id, content)
                 elif role == "assistant":
-                    self._session_store.add_assistant_message(self._session_id, content)
+                    # Faithful transcript: carry any tool calls the assistant
+                    # requested so resume replays them (Issue #3089). Falls back
+                    # to a plain text turn for stores predating the tool fields.
+                    if tool_calls:
+                        self._session_store.add_message(
+                            self._session_id,
+                            "assistant",
+                            content,
+                            tool_calls=tool_calls,
+                        )
+                    else:
+                        self._session_store.add_assistant_message(
+                            self._session_id, content
+                        )
+                elif role == "tool":
+                    # Persist the tool-result turn linked to its call id so the
+                    # resumed message list interleaves results in order (#3089).
+                    self._session_store.add_message(
+                        self._session_id,
+                        "tool",
+                        content,
+                        tool_call_id=tool_call_id,
+                    )
                 # Keep auto_save index in sync when per-turn persist shares session_id
                 if self.auto_save and self.auto_save == self._session_id:
                     with self._history_lock:

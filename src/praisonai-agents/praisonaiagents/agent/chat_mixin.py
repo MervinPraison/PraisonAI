@@ -4021,7 +4021,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 } for tc in tool_calls_data if tc['id']
                             ]
                         self._append_to_chat_history(assistant_message)
-                        
+                        # Persist the assistant tool-call turn so resume replays
+                        # it (Issue #3089).
+                        self._persist_message(
+                            "assistant",
+                            response_text,
+                            tool_calls=assistant_message.get("tool_calls"),
+                        )
+
                         # Execute tool calls and add results to chat history.
                         # Media-bearing follow-up messages are deferred until all
                         # tool replies for this turn are appended, keeping the
@@ -4058,6 +4065,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             "tool_call_id": tool_call['id'],
                                             "content": str(tool_result)
                                         })
+                                    # Persist the tool-result turn (Issue #3089).
+                                    self._persist_message(
+                                        "tool",
+                                        str(tool_result),
+                                        tool_call_id=tool_call['id'],
+                                    )
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
@@ -4066,6 +4079,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         "tool_call_id": tool_call['id'],
                                         "content": f"Error: {str(tool_error)}"
                                     })
+                                    self._persist_message(
+                                        "tool",
+                                        f"Error: {str(tool_error)}",
+                                        tool_call_id=tool_call['id'],
+                                    )
 
                         # Flush deferred media follow-ups after all tool replies.
                         for _m in _deferred_media_followups:

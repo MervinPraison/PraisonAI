@@ -55,30 +55,71 @@ ARCHIVE_WARN_THRESHOLD = 10_000
 
 @dataclass
 class SessionMessage:
-    """A single message in a session."""
-    role: str  # "user", "assistant", "system"
+    """A single message in a session.
+
+    Beyond plain user/assistant text, a message may carry a structured
+    tool turn so a resumed session reconstructs the exact message list the
+    model saw before (Issue #3089):
+
+    - ``tool_calls``: on an assistant turn, the tool calls it requested
+      (list of ``{"id", "type", "function": {"name", "arguments"}}`` dicts).
+    - ``tool_call_id``: on a ``role="tool"`` result turn, the id of the
+      assistant tool call it answers.
+
+    Both are optional and additive — old text-only session files (four keys:
+    role/content/timestamp/metadata) still load unchanged.
+    """
+    role: str  # "user", "assistant", "system", "tool"
     content: str
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    # Optional structured tool turn (Issue #3089). Empty/None for text turns.
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
+        """Convert to dictionary.
+
+        Tool fields are only emitted when present, preserving the legacy
+        four-key JSON shape for plain text turns (backward compatible).
+        """
+        data: Dict[str, Any] = {
             "role": self.role,
             "content": self.content,
             "timestamp": self.timestamp,
             "metadata": self.metadata,
         }
-    
+        if self.tool_calls:
+            data["tool_calls"] = self.tool_calls
+        if self.tool_call_id is not None:
+            data["tool_call_id"] = self.tool_call_id
+        return data
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionMessage":
-        """Create from dictionary."""
+        """Create from dictionary (tolerant of missing tool fields)."""
         return cls(
             role=data.get("role", "user"),
             content=data.get("content", ""),
             timestamp=data.get("timestamp", time.time()),
             metadata=data.get("metadata", {}),
+            tool_calls=data.get("tool_calls"),
+            tool_call_id=data.get("tool_call_id"),
         )
+
+    def to_llm_message(self) -> Dict[str, Any]:
+        """Render as an LLM-compatible message, preserving tool turns.
+
+        Text turns collapse to the canonical ``{"role", "content"}`` shape;
+        turns carrying tool calls / a tool_call_id additionally surface those
+        keys so a resumed message list is identical in shape to the original.
+        """
+        msg: Dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            msg["tool_calls"] = self.tool_calls
+        if self.tool_call_id is not None:
+            msg["tool_call_id"] = self.tool_call_id
+        return msg
 
 @dataclass
 class CompactionCheckpoint:
@@ -213,7 +254,9 @@ class SessionData:
         messages = self.messages
         if max_messages and len(messages) > max_messages:
             messages = messages[-max_messages:]
-        return [{"role": m.role, "content": m.content} for m in messages]
+        # Preserve tool-call / tool-result turns so a resumed message list is
+        # identical in shape to the pre-resume one (Issue #3089).
+        return [m.to_llm_message() for m in messages]
 
     def trim_messages(self, max_messages: int) -> None:
         """Trim the transcript head to ``max_messages``, keeping the checkpoint
@@ -250,7 +293,8 @@ class SessionData:
         index = max(0, min(checkpoint.message_index, len(self.messages)))
         tail = self.messages[index:]
         history = [checkpoint.as_message()]
-        history.extend({"role": m.role, "content": m.content} for m in tail)
+        # Preserve tool-call / tool-result turns in the retained tail (#3089).
+        history.extend(m.to_llm_message() for m in tail)
         if max_messages and len(history) > max_messages:
             # Always preserve the summary at the head, trim the tail.
             head = history[:1]
@@ -671,15 +715,21 @@ class DefaultSessionStore:
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> bool:
         """
         Add a message to a session.
         
         Args:
             session_id: The session ID.
-            role: Message role ("user", "assistant", "system").
+            role: Message role ("user", "assistant", "system", "tool").
             content: Message content.
             metadata: Optional metadata.
+            tool_calls: Optional structured tool calls for an assistant turn
+                (Issue #3089), each ``{"id", "type", "function": {...}}``.
+            tool_call_id: Optional id linking a ``role="tool"`` result turn
+                back to the assistant tool call it answers (Issue #3089).
             
         Returns:
             True if saved successfully.
@@ -691,6 +741,8 @@ class DefaultSessionStore:
             content=content,
             timestamp=time.time(),
             metadata=metadata or {},
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
         )
         
         # Use file lock for atomic read-modify-write
@@ -818,9 +870,12 @@ class DefaultSessionStore:
                 session.messages.append(
                     SessionMessage(
                         role=msg.get("role", "user"),
-                        content=msg.get("content", ""),
+                        content=msg.get("content", "") or "",
                         timestamp=msg.get("timestamp", time.time()),
                         metadata=msg.get("metadata", {}),
+                        # Preserve tool turns on whole-transcript saves (#3089).
+                        tool_calls=msg.get("tool_calls"),
+                        tool_call_id=msg.get("tool_call_id"),
                     )
                 )
 
