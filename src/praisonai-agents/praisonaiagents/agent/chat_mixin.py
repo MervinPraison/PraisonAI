@@ -1132,6 +1132,7 @@ Your Goal: {self.goal}"""
 
     async def _apply_compaction_async(self, messages, compactor, policy):
         """Async version of _apply_compaction."""
+        import asyncio
         from ..compaction.strategy import CompactionStrategy as LegacyStrategy
         from ..hooks import HookEvent as _HookEvent
         import logging
@@ -1161,7 +1162,18 @@ Your Goal: {self.goal}"""
             f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
-        
+
+        # Issue #2741/#3062: persist the summary so async resume is cheap too,
+        # matching the sync proactive-compaction path above. No-op unless a
+        # session store + session_id are bound and a summary was produced.
+        # append_compaction_checkpoint() does a locked read/modify/write to
+        # disk, so offload it to a worker thread to avoid stalling the event
+        # loop (streaming, tool calls, other agents) during the file I/O.
+        try:
+            await asyncio.to_thread(self._persist_compaction_checkpoint, result)
+        except Exception as e:
+            logging.debug(f"Failed to persist compaction checkpoint (async): {e}")
+
         try:
             await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
         except Exception as e:
