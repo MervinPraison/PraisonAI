@@ -140,6 +140,50 @@ class TestCLIRunCommand:
         assert "engine" in result.output.lower() or "cdp" in result.output.lower()
 
 
+class TestBridgeUnreachableError:
+    """Test friendly bridge-not-running error handling."""
+
+    def test_detects_connection_refused(self):
+        """ConnectionRefusedError is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        assert _is_bridge_unreachable(ConnectionRefusedError()) is True
+
+    def test_detects_winerror_1225(self):
+        """Windows WinError 1225 is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        exc = OSError("refused")
+        exc.winerror = 1225
+        assert _is_bridge_unreachable(exc) is True
+
+    def test_detects_posix_errno(self):
+        """POSIX ECONNREFUSED (111/61) is recognised as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        for errno in (111, 61):
+            exc = OSError()
+            exc.errno = errno
+            assert _is_bridge_unreachable(exc) is True
+
+    def test_detects_wrapped_cause(self):
+        """Detection follows the exception __cause__ chain."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        outer = RuntimeError("wrapper")
+        outer.__cause__ = ConnectionRefusedError()
+        assert _is_bridge_unreachable(outer) is True
+
+    def test_ignores_unrelated_errors(self):
+        """Unrelated errors are not misclassified as bridge unreachable."""
+        from praisonai_browser.cli.commands.browser import _is_bridge_unreachable
+        assert _is_bridge_unreachable(ValueError("boom")) is False
+
+    def test_message_contains_actionable_hints(self):
+        """The message names the bridge URL and the start command."""
+        from praisonai_browser.cli.commands.browser import _bridge_unreachable_message
+        msg = _bridge_unreachable_message(8765)
+        assert "ws://localhost:8765/ws" in msg
+        assert "praisonai browser start" in msg
+        assert "/health" in msg
+
+
 # Smoke tests - minimal checks that things don't crash
 
 class TestSmokeImports:

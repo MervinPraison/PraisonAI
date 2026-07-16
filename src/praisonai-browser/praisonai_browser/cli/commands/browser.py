@@ -21,6 +21,36 @@ app = typer.Typer(
 console = Console()
 
 
+def _is_bridge_unreachable(exc: Exception) -> bool:
+    """Return True if the exception indicates the bridge server is not running.
+
+    Matches connection-refused errors across platforms:
+    Windows WinError 1225, Linux ECONNREFUSED (111), macOS (61).
+    """
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if getattr(exc, "winerror", None) == 1225:
+        return True
+    if getattr(exc, "errno", None) in (111, 61):
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        return _is_bridge_unreachable(cause)
+    return False
+
+
+def _bridge_unreachable_message(port: int = 8765) -> str:
+    """Actionable message shown when the bridge server is not running."""
+    return (
+        f"Cannot connect to PraisonAI Browser bridge at ws://localhost:{port}/ws\n\n"
+        "The bridge server is not running. In a separate terminal, start it with:\n\n"
+        f"  praisonai browser start --port {port}\n\n"
+        "Then verify it is up:\n"
+        f"  curl http://localhost:{port}/health\n\n"
+        "Note: this is the local bridge server, not your target site (--url)."
+    )
+
+
 @app.command("start")
 def start_server(
     port: int = typer.Option(8765, "--port", "-p", help="Port to listen on"),
@@ -505,6 +535,9 @@ def run_agent(
                     return {"status": "timeout", "goal": goal}
                     
             except Exception as e:
+                if _is_bridge_unreachable(e):
+                    console.print(f"[red]{_bridge_unreachable_message(port)}[/red]")
+                    return {"status": "error", "error": "bridge_unreachable"}
                 console.print(f"[red]Connection error:[/red] {e}")
                 return {"status": "error", "error": str(e)}
         
@@ -601,6 +634,9 @@ def run_agent(
                 return {"status": "timeout", "session_id": session_id}
                 
         except Exception as e:
+            if _is_bridge_unreachable(e):
+                console.print(f"[red]{_bridge_unreachable_message(port)}[/red]")
+                return {"status": "error", "error": "bridge_unreachable"}
             console.print(f"[red]Error:[/red] {e}")
             return {"status": "error", "error": str(e)}
         finally:
