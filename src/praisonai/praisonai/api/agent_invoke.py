@@ -168,6 +168,91 @@ def list_registered_agents() -> list:
     return list(_agent_registry.keys())
 
 
+def _supports_session_isolation(agent: Any) -> bool:
+    """Return True when ``agent`` can be safely cloned per session.
+
+    Only real ``praisonaiagents`` ``Agent`` instances expose the per-session
+    machinery (``_session_id`` binding, ``chat_history`` and a safe clone path).
+    Plain mocks / lightweight callables do not (a bare ``Mock`` auto-vivifies
+    every attribute), so we gate on the concrete class living in the
+    ``praisonaiagents`` package and leave everything else on the shared
+    instance to preserve backward compatibility.
+    """
+    module = type(agent).__module__ or ""
+    if not module.startswith("praisonaiagents"):
+        return False
+    if not hasattr(agent, "_session_id"):
+        return False
+    if not hasattr(agent, "chat_history"):
+        return False
+    return callable(getattr(agent, "clone_for_channel", None))
+
+
+def _clone_agent(agent: Any) -> Any:
+    """Create an independent copy of a real ``Agent``.
+
+    Prefers ``clone_for_channel`` (purpose-built for multi-channel isolation
+    with fresh locks), falling back to ``deepcopy``.
+    """
+    clone_for_channel = getattr(agent, "clone_for_channel", None)
+    if callable(clone_for_channel):
+        return clone_for_channel()
+    import copy as _copy
+
+    return _copy.deepcopy(agent)
+
+
+def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
+    """Resolve an isolated, session-scoped agent for a single request.
+
+    The registry holds a *template* agent, not a live conversation. Every
+    request gets its own clone so concurrent callers never share mutable
+    ``chat_history``:
+
+    - With a ``session_id``: the clone is bound to that session so its history
+      is loaded from (and persisted to) the shared, file-locked session store —
+      giving continuity across requests and isolation between sessions.
+    - Without a ``session_id``: the clone is ephemeral (no session binding), so
+      no global state is mutated.
+
+    Agents that don't support cloning/session binding (e.g. plain mocks) fall
+    back to the shared registry instance for backward compatibility.
+    """
+    template = get_agent(agent_id)
+    if template is None:
+        return None
+
+    if not _supports_session_isolation(template):
+        return template
+
+    try:
+        agent = _clone_agent(template)
+    except Exception as e:  # pragma: no cover - defensive fallback
+        logger.warning(
+            f"Failed to clone agent '{agent_id}' for session isolation: {e}; "
+            "falling back to shared instance"
+        )
+        return template
+
+    # Reset per-request conversation state so the clone starts clean and
+    # (re)loads the requested session's history lazily on first chat.
+    try:
+        agent.chat_history = []
+    except Exception:
+        pass
+    if hasattr(agent, "_session_store_initialized"):
+        agent._session_store_initialized = False
+    if session_id:
+        agent._session_id = session_id
+        if hasattr(agent, "_history_session_id"):
+            agent._history_session_id = session_id
+    else:
+        agent._session_id = None
+        if hasattr(agent, "_history_session_id"):
+            agent._history_session_id = None
+    return agent
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -218,8 +303,10 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         }
         ```
         """
-        # Get agent from registry
-        agent = get_agent(agent_id)
+        # Resolve a per-session isolated agent view so concurrent callers never
+        # share mutable chat_history. A provided session_id gives continuity via
+        # the shared session store; its absence yields an ephemeral conversation.
+        agent = resolve_session_agent(agent_id, request.session_id)
         if not agent:
             logger.error(f"Agent not found: {agent_id}")
             raise HTTPException(
@@ -228,7 +315,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             )
         
         try:
-            # Set session ID if provided
+            # Session ID echoed back to the caller
             session_id = request.session_id or "default"
             
             # Apply agent config overrides if provided
@@ -362,14 +449,16 @@ async def invoke_agent_standalone(
     This can be used in environments where FastAPI is not available
     or when integrating with other web frameworks.
     """
-    agent = get_agent(agent_id)
-    if not agent:
+    if get_agent(agent_id) is None:
         return {
             "error": f"Agent '{agent_id}' not found",
             "status": "error",
             "available_agents": list_registered_agents()
         }
-    
+
+    # Per-session isolated agent view (see resolve_session_agent).
+    agent = resolve_session_agent(agent_id, session_id)
+
     try:
         # Apply config if provided
         if agent_config:
