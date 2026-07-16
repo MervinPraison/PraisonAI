@@ -81,6 +81,7 @@ class Checkpoint:
     files_changed: int = 0
     insertions: int = 0
     deletions: int = 0
+    step: Optional[int] = None  # Per-step checkpoint index, if any
     
     @classmethod
     def from_git_commit(cls, commit_hash: str, message: str, timestamp: str) -> "Checkpoint":
@@ -101,7 +102,8 @@ class Checkpoint:
             "timestamp": self.timestamp.isoformat(),
             "files_changed": self.files_changed,
             "insertions": self.insertions,
-            "deletions": self.deletions
+            "deletions": self.deletions,
+            "step": self.step
         }
 
 

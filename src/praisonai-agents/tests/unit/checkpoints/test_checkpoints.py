@@ -397,6 +397,85 @@ class TestCheckpointService:
         assert not service.is_initialized
     
     @pytest.mark.asyncio
+    async def test_service_save_with_step_tag(self, temp_workspace, temp_storage):
+        """Test that a per-step checkpoint records its step index."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("step one")
+
+        result = await service.save("edit", step=1)
+
+        assert result.success
+        assert result.checkpoint.step == 1
+        assert result.checkpoint.message.startswith("[step-1]")
+
+    @pytest.mark.asyncio
+    async def test_service_restore_by_step(self, temp_workspace, temp_storage):
+        """Rewind to an earlier step returns the file to that step's state.
+
+        Mirrors the issue's agentic scenario: >=3 edits across separate steps,
+        then restore(step=1) restores the step-1 content.
+        """
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        for i in (1, 2, 3):
+            with open(test_file, "w") as f:
+                f.write(f"content-{i}")
+            result = await service.save(f"edit {i}", step=i)
+            assert result.success
+            assert result.checkpoint.step == i
+
+        # Rewind to step 1
+        result = await service.restore(step=1)
+        assert result.success
+
+        with open(test_file, "r") as f:
+            assert f.read() == "content-1"
+
+    @pytest.mark.asyncio
+    async def test_service_restore_unknown_step(self, temp_workspace, temp_storage):
+        """Restoring an unknown step fails gracefully."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        result = await service.restore(step=99)
+        assert not result.success
+        assert "step 99" in result.error
+
+    @pytest.mark.asyncio
+    async def test_service_get_checkpoint_by_step(self, temp_workspace, temp_storage):
+        """get_checkpoint_by_step returns the matching step checkpoint."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        test_file = os.path.join(temp_workspace, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("v")
+        await service.save("edit", step=2)
+
+        cp = await service.get_checkpoint_by_step(2)
+        assert cp is not None
+        assert cp.step == 2
+        assert await service.get_checkpoint_by_step(5) is None
+
+    @pytest.mark.asyncio
     async def test_service_delete_all(self, temp_workspace, temp_storage):
         """Test deleting all checkpoints."""
         service = CheckpointService(

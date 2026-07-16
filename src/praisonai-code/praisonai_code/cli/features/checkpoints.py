@@ -76,18 +76,20 @@ class CheckpointsHandler:
                 self._print_error(f"Failed to save checkpoint: {result.error}")
             return False
     
-    async def restore(self, checkpoint_id: str) -> bool:
+    async def restore(self, checkpoint_id: Optional[str] = None,
+                      step: Optional[int] = None) -> bool:
         """
         Restore to a checkpoint.
         
         Args:
             checkpoint_id: Checkpoint ID to restore
+            step: Per-step checkpoint index to restore (rewind-to-step)
             
         Returns:
             True if successful
         """
         service = await self._get_service()
-        result = await service.restore(checkpoint_id)
+        result = await service.restore(checkpoint_id, step=step)
         
         if result.success:
             self._print_success(f"Restored to checkpoint: {result.checkpoint.short_id}")
