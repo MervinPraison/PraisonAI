@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -40,6 +41,11 @@ logger = get_logger(__name__)
 
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
+
+# Guards lazy creation of each Workflow's per-instance _run_lock so two threads
+# entering run()/astart() concurrently on a fresh instance cannot each create
+# and acquire a *different* lock object (which would defeat the run guard).
+_RUN_LOCK_INIT_GUARD = threading.Lock()
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
@@ -654,11 +660,20 @@ class AgentFlow:
 
     @property
     def _execution_lock(self):
-        """Lazily-created re-entrancy lock for run()/astart() (zero overhead until used)."""
-        if self._run_lock is None:
-            import threading
-            self._run_lock = threading.Lock()
-        return self._run_lock
+        """Lazily-created re-entrancy lock for run()/astart() (zero overhead until used).
+
+        Creation is serialized through a module-level guard so two threads that
+        first reach run()/astart() concurrently observe the *same* lock object
+        (double-checked locking) rather than each minting and acquiring its own.
+        """
+        lock = self._run_lock
+        if lock is None:
+            with _RUN_LOCK_INIT_GUARD:
+                lock = self._run_lock
+                if lock is None:
+                    lock = threading.Lock()
+                    self._run_lock = lock
+        return lock
 
     def __post_init__(self):
         """Resolve consolidated params to internal values."""
