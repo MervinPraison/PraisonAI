@@ -42,11 +42,11 @@ def _is_bridge_unreachable(exc: Exception) -> bool:
 def _bridge_unreachable_message(port: int = 8765) -> str:
     """Actionable message shown when the bridge server is not running."""
     return (
-        f"Cannot connect to PraisonAI Browser bridge at ws://127.0.0.1:{port}/ws\n\n"
+        f"Cannot connect to PraisonAI Browser bridge at ws://localhost:{port}/ws\n\n"
         "The bridge server is not running. In a separate terminal, start it with:\n\n"
         f"  praisonai browser start --port {port}\n\n"
         "Then verify it is up:\n"
-        f"  curl http://127.0.0.1:{port}/health\n\n"
+        f"  curl http://localhost:{port}/health\n\n"
         "Note: this is the local bridge server, not your target site (--url)."
     )
 

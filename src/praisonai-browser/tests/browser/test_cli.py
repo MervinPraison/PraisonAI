@@ -179,7 +179,7 @@ class TestBridgeUnreachableError:
         """The message names the bridge URL and the start command."""
         from praisonai_browser.cli.commands.browser import _bridge_unreachable_message
         msg = _bridge_unreachable_message(8765)
-        assert "ws://127.0.0.1:8765/ws" in msg
+        assert "ws://localhost:8765/ws" in msg
         assert "praisonai browser start" in msg
         assert "/health" in msg
 
