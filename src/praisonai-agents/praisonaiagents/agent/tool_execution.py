@@ -987,10 +987,15 @@ class ToolExecutionMixin:
             if hasattr(self, '_ensure_loop_guard'):
                 loop_guard = self._ensure_loop_guard()
                 is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
-                loop_guard.record(function_name, arguments, is_success)
-                # Handle warning injection for WARN decisions
-                decision = loop_guard.check(function_name, arguments, is_pre_execution=False) 
-                if decision.action.value == "warn":
+                loop_guard.record(function_name, arguments, is_success, result=result)
+                # Surface the loop-guard decision back to the model on this same
+                # iteration. Previously only WARN was injected, so a post-exec
+                # BLOCK/HALT (e.g. the call that first reaches a threshold) was
+                # silently discarded and only took effect on the next
+                # pre-execution check. Injecting block/halt here ensures the stop
+                # signal reaches the model immediately without raising mid-turn.
+                decision = loop_guard.check(function_name, arguments, is_pre_execution=False)
+                if decision.action.value in ("warn", "block", "halt"):
                     if isinstance(result, str):
                         result = f"{result}\n\n[loop-guard] {decision.message}"
                     elif isinstance(result, dict):
