@@ -328,7 +328,7 @@ def new_function():
     return "new"
 >>>>>>> REPLACE"""
             
-            result = apply_diff(file_path, diff)
+            result = apply_diff(file_path, diff, workspace=temp_dir)
             
             assert result['success'] is True
             assert result['applied_count'] == 1

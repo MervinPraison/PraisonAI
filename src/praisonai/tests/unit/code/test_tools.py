@@ -279,7 +279,7 @@ class TestSearchReplace:
             
             result = search_replace(file_path, [
                 {'search': 'old', 'replace': 'new'}
-            ])
+            ], workspace=temp_dir)
             
             assert result['success'] is True
             assert result['total_replacements'] == 1
@@ -299,7 +299,7 @@ class TestSearchReplace:
             result = search_replace(file_path, [
                 {'search': 'foo', 'replace': 'FOO'},
                 {'search': 'bar', 'replace': 'BAR'},
-            ])
+            ], workspace=temp_dir)
             
             assert result['success'] is True
             assert result['operations_applied'] == 2
@@ -321,7 +321,7 @@ class TestSearchReplace:
             
             result = search_replace(file_path, [
                 {'search': r'def (\w+)\(\)', 'replace': r'def renamed_\1()', 'is_regex': True}
-            ])
+            ], workspace=temp_dir)
             
             assert result['success'] is True
             

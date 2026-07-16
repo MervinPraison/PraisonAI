@@ -71,9 +71,10 @@ def apply_diff(
         ... '''
         >>> result = apply_diff("src/main.py", diff)
     """
-    # Resolve path
-    if workspace and not os.path.isabs(path):
-        abs_path = os.path.abspath(os.path.join(workspace, path))
+    # Resolve path — default workspace is cwd so relative paths cannot escape
+    effective_workspace = workspace or os.getcwd()
+    if not os.path.isabs(path):
+        abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
     
@@ -87,15 +88,14 @@ def apply_diff(
             'applied_count': 0,
         }
 
-    # Security check
-    if workspace:
-        if not is_path_within_directory(abs_path, workspace):
-            return {
-                'success': False,
-                'error': f"Path '{path}' is outside the workspace",
-                'path': path,
-                'applied_count': 0,
-            }
+    # Security check — confinement always enforced against the workspace
+    if not is_path_within_directory(abs_path, effective_workspace):
+        return {
+            'success': False,
+            'error': f"Path '{path}' is outside the workspace",
+            'path': path,
+            'applied_count': 0,
+        }
     
     # Check if file exists
     if not file_exists(abs_path):
