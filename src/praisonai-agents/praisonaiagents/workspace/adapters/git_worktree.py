@@ -8,21 +8,30 @@ Degrades gracefully to the original directory when the workspace is not a git
 repository or git is unavailable.
 """
 
+import hashlib
 import re
 from pathlib import Path
 
 
 def _slugify(name: str) -> str:
-    """Return a git-ref-safe slug for ``name``."""
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name.strip()).strip("-.")
-    return slug or "run"
+    """Return a git-ref-safe, collision-resistant slug for ``name``.
+
+    A short deterministic hash of the original ``name`` is appended so distinct
+    inputs (e.g. ``"agent one"`` vs ``"agent-one"``) never normalise to the same
+    slug and accidentally share a worktree.
+    """
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", name.strip()).strip("-.") or "run"
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"{base}-{digest}"
 
 
 class GitWorktreeAdapter:
     """Per-run isolation via ``git worktree``.
 
     Each ``create(name)`` provisions a worktree at ``<worktrees_dir>/<slug>`` on
-    a fresh branch ``<branch_prefix>/<slug>``. ``reset`` runs ``git clean -ffdx``;
+    a fresh branch ``<branch_prefix>/<slug>`` where ``slug`` is a deterministic,
+    collision-resistant function of ``name`` — so ``path``/``reset``/``remove``
+    always resolve the exact same target. ``reset`` runs ``git clean -ffdx``;
     ``remove`` tears down the worktree and its branch.
 
     When the root is not a git repository (or git is missing), the adapter
@@ -80,40 +89,54 @@ class GitWorktreeAdapter:
             return str(self._root)
 
         target = Path(self.path(name))
+        # Idempotent: an existing worktree for this name is reused as-is.
         if target.exists():
             return str(target)
 
         self._worktrees_dir.mkdir(parents=True, exist_ok=True)
 
-        slug = _slugify(name)
-        base_branch = self._branch(name)
-        # Unique-name retries so concurrent runs never collide on a branch name.
-        for attempt in range(100):
-            branch = base_branch if attempt == 0 else f"{base_branch}-{attempt}"
-            candidate = target if attempt == 0 else self._worktrees_dir / f"{slug}-{attempt}"
-            if candidate.exists():
-                continue
-            result = self._git(
-                "worktree", "add", "-b", branch, str(candidate), "HEAD"
+        # Drop stale worktree registrations whose directories were deleted so a
+        # re-create of the same name doesn't fail on leftover bookkeeping.
+        self._git("worktree", "prune")
+
+        # ``-B`` resets/reuses a lingering branch of the same name, so the path
+        # and branch are a deterministic function of ``name`` — path()/reset()/
+        # remove() resolve the exact same target with no dynamic suffixes.
+        result = self._git("worktree", "add", "-B", self._branch(name), str(target), "HEAD")
+        if result.returncode != 0:
+            # Tolerate a concurrent creator that won the race for this path.
+            if target.exists():
+                return str(target)
+            # Fail fast: isolation was requested but could not be provisioned.
+            raise RuntimeError(
+                f"Failed to create isolated git worktree at {target}: "
+                f"{result.stderr.strip()}"
             )
-            if result.returncode == 0:
-                return str(candidate)
-        # Fall back to the original root if a worktree could not be created.
-        return str(self._root)
+        return str(target)
 
     def reset(self, name: str) -> None:
         if not self._available:
             return
         target = Path(self.path(name))
-        if target.exists():
-            self._git("clean", "-ffdx", cwd=target)
-            self._git("checkout", "--", ".", cwd=target)
+        if not target.exists():
+            return
+        clean = self._git("clean", "-ffdx", cwd=target)
+        checkout = self._git("checkout", "--", ".", cwd=target)
+        if clean.returncode != 0 or checkout.returncode != 0:
+            raise RuntimeError(
+                f"Failed to reset git worktree at {target}: "
+                f"{(clean.stderr or checkout.stderr).strip()}"
+            )
 
     def remove(self, name: str) -> None:
         if not self._available:
             return
         target = Path(self.path(name))
         if target.exists():
-            self._git("worktree", "remove", "--force", str(target))
+            result = self._git("worktree", "remove", "--force", str(target))
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to remove git worktree at {target}: {result.stderr.strip()}"
+                )
         # Best-effort branch cleanup; ignore failure if branch is checked out elsewhere.
         self._git("branch", "-D", self._branch(name))

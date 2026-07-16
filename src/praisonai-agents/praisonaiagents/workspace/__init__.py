@@ -207,12 +207,12 @@ def __getattr__(name):
 
 
 __all__ = [
+    "GitWorktreeAdapter",
+    "NoIsolationAdapter",
     "Workspace",
     "WorkspaceAccess",
-    "WorkspaceScope",
-    "validate_within_dir",
-    "has_traversal_component",
     "WorkspaceIsolationProtocol",
-    "NoIsolationAdapter",
-    "GitWorktreeAdapter",
+    "WorkspaceScope",
+    "has_traversal_component",
+    "validate_within_dir",
 ]

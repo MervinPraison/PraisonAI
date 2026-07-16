@@ -101,3 +101,51 @@ def test_reset_restores_clean_state(tmp_path):
     assert not (wt / "untracked.txt").exists()
 
     adapter.remove("run")
+
+
+@pytest.mark.skipif(not _git_available(), reason="git not available")
+def test_lifecycle_is_stateless_across_calls(tmp_path):
+    # path()/reset()/remove() must resolve the exact worktree that create() made.
+    _init_repo(tmp_path)
+    adapter = GitWorktreeAdapter(root=tmp_path)
+
+    created = Path(adapter.create("run"))
+    assert Path(adapter.path("run")) == created
+
+    (created / "untracked.txt").write_text("x\n")
+    adapter.reset("run")
+    assert not (created / "untracked.txt").exists()
+
+    adapter.remove("run")
+    assert not created.exists()
+
+
+@pytest.mark.skipif(not _git_available(), reason="git not available")
+def test_slug_collision_names_get_distinct_worktrees(tmp_path):
+    # Distinct names that normalise to the same base slug must not share a dir.
+    _init_repo(tmp_path)
+    adapter = GitWorktreeAdapter(root=tmp_path)
+
+    path_a = Path(adapter.create("agent one"))
+    path_b = Path(adapter.create("agent-one"))
+
+    assert path_a != path_b
+    assert path_a.exists() and path_b.exists()
+
+    adapter.remove("agent one")
+    adapter.remove("agent-one")
+
+
+@pytest.mark.skipif(not _git_available(), reason="git not available")
+def test_recreate_after_remove(tmp_path):
+    # Re-creating the same name after remove must succeed (stale bookkeeping pruned).
+    _init_repo(tmp_path)
+    adapter = GitWorktreeAdapter(root=tmp_path)
+
+    first = Path(adapter.create("run"))
+    adapter.remove("run")
+    second = Path(adapter.create("run"))
+
+    assert second.exists()
+    assert first == second
+    adapter.remove("run")
