@@ -1045,7 +1045,43 @@ class ToolResolver:
         elif tools_dir.is_dir():
             _merge_local(self.get_local_tool_classes_from_dir(tools_dir))
             logger.debug("tools folder exists in the root directory")
+
+        # Additively merge project-local .praisonai/tools/*.py @tool functions,
+        # reusing the existing gated discovery convention (walk-up + user-global
+        # + PRAISONAI_ALLOW_LOCAL_TOOLS opt-in). This composes with the cwd
+        # tools.py / tools/ paths above rather than replacing them, so a
+        # @tool-decorated function dropped into .praisonai/tools/ is available
+        # to YAML-defined agents by its tool name.
+        _merge_local(self._discover_praisonai_dir_tools())
         return tools_dict
+
+    def _discover_praisonai_dir_tools(self) -> Dict[str, Any]:
+        """Discover @tool functions from the ``.praisonai/tools/`` convention.
+
+        Keys each discovered callable by its tool name (``@tool`` name or the
+        function ``__name__``) so it can be resolved like any other tool. Errors
+        and the disabled opt-in degrade to an empty dict — this is additive and
+        never breaks the canonical YAML/Python resolution paths.
+        """
+        try:
+            from praisonai_code.cli.features.custom_definitions import (
+                discover_project_tools,
+            )
+        except Exception:
+            return {}
+
+        try:
+            callables = discover_project_tools()
+        except Exception as e:
+            logger.debug("Project tool discovery failed: %s", e, exc_info=True)
+            return {}
+
+        discovered: Dict[str, Any] = {}
+        for obj in callables:
+            name = getattr(obj, "name", None) or getattr(obj, "__name__", None)
+            if name:
+                discovered[name] = obj
+        return discovered
 
 
     def load_functions_from_module(
