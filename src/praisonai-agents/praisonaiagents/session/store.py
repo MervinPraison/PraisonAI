@@ -245,15 +245,33 @@ class SessionData:
             last_compaction=last_compaction,
         )
     
+    @staticmethod
+    def _trim_preserving_tool_exchanges(
+        messages: List["SessionMessage"], max_messages: int
+    ) -> List["SessionMessage"]:
+        """Keep the most recent ``max_messages`` without splitting a tool
+        exchange (Issue #3089).
+
+        A count-based tail can otherwise begin on an orphaned ``role="tool"``
+        result (a tool output whose originating assistant tool-call was trimmed
+        off), which providers reject as an invalid transcript. We nudge the
+        boundary forward past any leading tool results so history always starts
+        on a self-contained turn.
+        """
+        if not max_messages or len(messages) <= max_messages:
+            return messages
+        start = len(messages) - max_messages
+        while start < len(messages) and messages[start].role == "tool":
+            start += 1
+        return messages[start:]
+
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
         """
         Get chat history in LLM-compatible format.
         
         Returns list of {"role": "user/assistant", "content": "..."} dicts.
         """
-        messages = self.messages
-        if max_messages and len(messages) > max_messages:
-            messages = messages[-max_messages:]
+        messages = self._trim_preserving_tool_exchanges(self.messages, max_messages)
         # Preserve tool-call / tool-result turns so a resumed message list is
         # identical in shape to the pre-resume one (Issue #3089).
         return [m.to_llm_message() for m in messages]
@@ -299,6 +317,10 @@ class SessionData:
             # Always preserve the summary at the head, trim the tail.
             head = history[:1]
             body = history[1:][-(max_messages - 1):] if max_messages > 1 else []
+            # Don't let the trimmed tail begin on an orphaned tool result whose
+            # assistant tool-call was cut off (Issue #3089).
+            while body and body[0].get("role") == "tool":
+                body = body[1:]
             history = head + body
         return history
 

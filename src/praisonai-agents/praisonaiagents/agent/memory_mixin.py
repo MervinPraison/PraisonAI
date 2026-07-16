@@ -7,6 +7,7 @@ for maintainability.
 """
 
 import os
+import inspect
 import logging
 from typing import Optional
 
@@ -407,11 +408,8 @@ class MemoryMixin:
                     # requested so resume replays them (Issue #3089). Falls back
                     # to a plain text turn for stores predating the tool fields.
                     if tool_calls:
-                        self._session_store.add_message(
-                            self._session_id,
-                            "assistant",
-                            content,
-                            tool_calls=tool_calls,
+                        self._add_message_with_tool_fields(
+                            "assistant", content, tool_calls=tool_calls
                         )
                     else:
                         self._session_store.add_assistant_message(
@@ -420,11 +418,8 @@ class MemoryMixin:
                 elif role == "tool":
                     # Persist the tool-result turn linked to its call id so the
                     # resumed message list interleaves results in order (#3089).
-                    self._session_store.add_message(
-                        self._session_id,
-                        "tool",
-                        content,
-                        tool_call_id=tool_call_id,
+                    self._add_message_with_tool_fields(
+                        "tool", content, tool_call_id=tool_call_id
                     )
                 # Keep auto_save index in sync when per-turn persist shares session_id
                 if self.auto_save and self.auto_save == self._session_id:
@@ -435,6 +430,45 @@ class MemoryMixin:
                 self._persist_session_stats()
             except Exception as e:
                 logging.warning(f"Failed to persist message to session store: {e}")
+
+    def _add_message_with_tool_fields(self, role, content, **tool_fields):
+        """Add a message carrying tool fields, tolerating stores without them.
+
+        The default JSON store and the SQLite store accept ``tool_calls`` /
+        ``tool_call_id``, but custom stores implementing the older
+        ``SessionStoreProtocol`` (and the built-in ``HierarchicalSessionStore``)
+        only accept ``(session_id, role, content, metadata)``. Passing the new
+        keywords to those would raise ``TypeError`` and drop the turn entirely
+        (Issue #3089). We feature-detect once via the call signature and fall
+        back to a plain-text turn so no exchange is silently lost.
+        """
+        add_message = self._session_store.add_message
+        if self._store_supports_tool_fields(add_message):
+            add_message(self._session_id, role, content, **tool_fields)
+            return
+        # Legacy store: preserve the turn as plain text so resume still sees it.
+        add_message(self._session_id, role, content)
+
+    def _store_supports_tool_fields(self, add_message) -> bool:
+        """Return True if ``add_message`` accepts the tool keyword fields."""
+        cached = getattr(self, "_session_store_tool_fields", None)
+        if cached is not None:
+            return cached
+        supported = True
+        try:
+            params = inspect.signature(add_message).parameters
+            has_var_kw = any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+            supported = has_var_kw or (
+                "tool_calls" in params and "tool_call_id" in params
+            )
+        except (TypeError, ValueError):
+            # Builtins / C-callables without introspectable signatures: assume
+            # the conservative legacy shape.
+            supported = False
+        self._session_store_tool_fields = supported
+        return supported
 
     def _persist_session_stats(self):
         """Flush agent cost/token stats into session JSON metadata."""

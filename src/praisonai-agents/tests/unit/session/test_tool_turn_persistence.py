@@ -105,3 +105,70 @@ class TestPersistMessageForwardsToolTurns:
         assert [m["role"] for m in history] == ["user", "assistant", "tool"]
         assert history[1]["tool_calls"] == TOOL_CALLS
         assert history[2]["tool_call_id"] == "call_1"
+
+
+class _LegacyStore:
+    """A store matching the pre-#3089 SessionStoreProtocol shape: its
+    ``add_message`` does not accept tool_calls / tool_call_id kwargs."""
+
+    def __init__(self):
+        self.calls = []
+
+    def add_user_message(self, session_id, content):
+        self.calls.append(("user", content))
+
+    def add_assistant_message(self, session_id, content):
+        self.calls.append(("assistant", content))
+
+    def add_message(self, session_id, role, content, metadata=None):
+        self.calls.append((role, content))
+
+
+class TestLegacyStoreCompatibility:
+    """Issue #3089: stores predating the tool fields must not raise and must
+    not silently drop the turn — the turn is preserved as plain text."""
+
+    def test_persist_message_falls_back_for_legacy_store(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="t", instructions="t")
+        agent._db = None
+        agent._session_store = _LegacyStore()
+        agent._session_id = "s5"
+
+        agent._persist_message("assistant", "call", tool_calls=TOOL_CALLS)
+        agent._persist_message("tool", "result", tool_call_id="call_1")
+
+        assert agent._session_store.calls == [
+            ("assistant", "call"),
+            ("tool", "result"),
+        ]
+
+    def test_hierarchical_store_accepts_tool_fields(self):
+        import tempfile
+        from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = HierarchicalSessionStore(session_dir=tmpdir)
+            store.add_message("h1", "assistant", "", tool_calls=TOOL_CALLS)
+            store.add_message("h1", "tool", "ok", tool_call_id="call_1")
+
+            history = store.get_chat_history("h1")
+            assert history[0].get("tool_calls") == TOOL_CALLS
+            assert history[1].get("tool_call_id") == "call_1"
+
+
+class TestHistoryLimitPreservesToolExchanges:
+    """Issue #3089: a count-based tail must not begin on an orphaned tool
+    result whose assistant tool-call was trimmed off."""
+
+    def test_get_chat_history_skips_orphaned_tool_result(self, temp_store):
+        temp_store.add_user_message("s6", "go")
+        temp_store.add_message("s6", "assistant", "", tool_calls=TOOL_CALLS)
+        temp_store.add_message("s6", "tool", "result", tool_call_id="call_1")
+        temp_store.add_assistant_message("s6", "done")
+
+        # max_messages=2 would naively slice ["tool", "assistant"], orphaning
+        # the tool result. The boundary must skip forward past it.
+        history = temp_store.get_chat_history("s6", max_messages=2)
+        assert history[0]["role"] != "tool"
