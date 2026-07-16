@@ -283,7 +283,6 @@ _WRAPPER_RESIDENT_COMMANDS = frozenset({
     # C8.3 — feature-heavy commands
     "context",
     "recipe",
-    "mcp",
     "validate",
 })
 
@@ -301,6 +300,11 @@ _BROWSER_RESIDENT_COMMANDS = frozenset({
     "browser",
 })
 
+# C12: MCP server commands implemented in ``praisonai_mcp.cli.commands.*``.
+_MCP_RESIDENT_COMMANDS = frozenset({
+    "mcp",
+})
+
 # Backward-compatible alias (C7.1 name).
 _WRAPPER_COMMANDS = _WRAPPER_RESIDENT_COMMANDS
 
@@ -315,6 +319,7 @@ from praisonai_code._wrapper_bridge import wrapper_available
 from praisonai_code._bot_bridge import bot_package_available
 from praisonai_code._train_bridge import train_package_available
 from praisonai_code._browser_bridge import browser_package_available
+from praisonai_code._mcp_bridge import mcp_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -332,12 +337,14 @@ class LazyCommandGroup(TyperGroup):
         bot_ok = bot_package_available()
         train_ok = train_package_available()
         browser_ok = browser_package_available()
+        mcp_ok = mcp_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
             and (bot_ok or name not in _BOT_RESIDENT_COMMANDS)
             and (train_ok or name not in _TRAIN_RESIDENT_COMMANDS)
             and (browser_ok or name not in _BROWSER_RESIDENT_COMMANDS)
+            and (mcp_ok or name not in _MCP_RESIDENT_COMMANDS)
         )
         commands.update(_SPECIAL_COMMANDS.keys())
         
@@ -391,6 +398,10 @@ class LazyCommandGroup(TyperGroup):
                     if not browser_package_available():
                         return None
                     module = importlib.import_module(f"praisonai_browser.cli.commands.{name}")
+                elif name in _MCP_RESIDENT_COMMANDS:
+                    if not mcp_package_available():
+                        return None
+                    module = importlib.import_module(f"praisonai_mcp.cli.commands.{name}")
                 elif name in _WRAPPER_RESIDENT_COMMANDS:
                     if not wrapper_available():
                         return None

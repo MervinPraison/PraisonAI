@@ -12,6 +12,11 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _cap(name: str):
+    from praisonai_mcp._wrapper_bridge import wrapper_callable
+    return wrapper_callable("praisonai.capabilities", name)
+
+
 def register_capability_tools() -> None:
     """Register all capability-based MCP tools."""
     
@@ -23,7 +28,7 @@ def register_capability_tools() -> None:
         language: Optional[str] = None,
     ) -> str:
         """Transcribe audio file to text."""
-        from praisonai.capabilities import transcribe
+        transcribe = _cap("transcribe")
         result = transcribe(file=file_path, model=model, language=language)
         return result.text if hasattr(result, "text") else str(result)
     
@@ -34,7 +39,7 @@ def register_capability_tools() -> None:
         voice: str = "alloy",
     ) -> str:
         """Convert text to speech."""
-        from praisonai.capabilities import speech
+        speech = _cap("speech")
         result = speech(input=text, model=model, voice=voice)
         return f"Audio generated: {result}"
     
@@ -47,7 +52,7 @@ def register_capability_tools() -> None:
         n: int = 1,
     ) -> str:
         """Generate images from text prompt."""
-        from praisonai.capabilities import image_generate
+        image_generate = _cap("image_generate")
         result = image_generate(prompt=prompt, model=model, size=size, n=n)
         if hasattr(result, "data"):
             urls = [img.url for img in result.data if hasattr(img, "url")]
@@ -61,7 +66,7 @@ def register_capability_tools() -> None:
         model: str = "text-embedding-3-small",
     ) -> str:
         """Create text embeddings."""
-        from praisonai.capabilities import embed
+        embed = _cap("embed")
         result = embed(input=text, model=model)
         if hasattr(result, "data") and result.data:
             return f"Embedding created with {len(result.data[0].embedding)} dimensions"
@@ -71,7 +76,7 @@ def register_capability_tools() -> None:
     @register_tool("praisonai.moderate.check")
     def moderate_check(text: str) -> str:
         """Check content for policy violations."""
-        from praisonai.capabilities import moderate
+        moderate = _cap("moderate")
         result = moderate(input=text)
         if hasattr(result, "results") and result.results:
             flagged = result.results[0].flagged
@@ -86,7 +91,7 @@ def register_capability_tools() -> None:
         system_prompt: Optional[str] = None,
     ) -> str:
         """Generate chat completion."""
-        from praisonai.capabilities import chat_completion
+        chat_completion = _cap("chat_completion")
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -105,7 +110,7 @@ def register_capability_tools() -> None:
         top_n: int = 5,
     ) -> str:
         """Rerank documents by relevance to query."""
-        from praisonai.capabilities import rerank
+        rerank = _cap("rerank")
         result = rerank(query=query, documents=documents, model=model, top_n=top_n)
         return str(result)
     
@@ -116,7 +121,7 @@ def register_capability_tools() -> None:
         collection: str = "default",
     ) -> str:
         """Query RAG knowledge base."""
-        from praisonai.capabilities import rag_query
+        rag_query = _cap("rag_query")
         result = rag_query(query=query, collection=collection)
         return str(result)
     
@@ -124,7 +129,7 @@ def register_capability_tools() -> None:
     @register_tool("praisonai.search")
     def search_web(query: str) -> str:
         """Search the web."""
-        from praisonai.capabilities import search
+        search = _cap("search")
         result = search(query=query)
         return str(result)
     
@@ -135,7 +140,7 @@ def register_capability_tools() -> None:
         guardrail_name: str = "default",
     ) -> str:
         """Apply guardrail to text."""
-        from praisonai.capabilities import apply_guardrail
+        apply_guardrail = _cap("apply_guardrail")
         result = apply_guardrail(text=text, guardrail_name=guardrail_name)
         return str(result)
     

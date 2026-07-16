@@ -23,6 +23,11 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _cap(name: str):
+    from praisonai_mcp._wrapper_bridge import wrapper_callable
+    return wrapper_callable("praisonai.capabilities", name)
+
+
 def register_extended_capability_tools() -> None:
     """Register extended capability-based MCP tools."""
     
@@ -35,7 +40,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Generate video from text prompt."""
         try:
-            from praisonai.capabilities import video_generate
+            video_generate = _cap("video_generate")
             result = video_generate(prompt=prompt, model=model, duration=duration)
             return str(result)
         except ImportError:
@@ -51,7 +56,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Upload a file."""
         try:
-            from praisonai.capabilities import file_create
+            file_create = _cap("file_create")
             result = file_create(file=file_path, purpose=purpose)
             if hasattr(result, "id"):
                 return f"File created: {result.id}"
@@ -65,7 +70,7 @@ def register_extended_capability_tools() -> None:
     def files_list(purpose: Optional[str] = None) -> str:
         """List uploaded files."""
         try:
-            from praisonai.capabilities import file_list
+            file_list = _cap("file_list")
             result = file_list(purpose=purpose)
             if hasattr(result, "data"):
                 files = [{"id": f.id, "filename": f.filename} for f in result.data]
@@ -80,7 +85,7 @@ def register_extended_capability_tools() -> None:
     def files_retrieve(file_id: str) -> str:
         """Retrieve file metadata."""
         try:
-            from praisonai.capabilities import file_retrieve
+            file_retrieve = _cap("file_retrieve")
             result = file_retrieve(file_id=file_id)
             return str(result)
         except ImportError:
@@ -92,7 +97,7 @@ def register_extended_capability_tools() -> None:
     def files_delete(file_id: str) -> str:
         """Delete a file."""
         try:
-            from praisonai.capabilities import file_delete
+            file_delete = _cap("file_delete")
             file_delete(file_id=file_id)
             return f"File deleted: {file_id}"
         except ImportError:
@@ -104,7 +109,7 @@ def register_extended_capability_tools() -> None:
     def files_content(file_id: str) -> str:
         """Get file content."""
         try:
-            from praisonai.capabilities import file_content
+            file_content = _cap("file_content")
             result = file_content(file_id=file_id)
             return str(result)
         except ImportError:
@@ -121,7 +126,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Create a batch processing job."""
         try:
-            from praisonai.capabilities import batch_create
+            batch_create = _cap("batch_create")
             result = batch_create(
                 input_file_id=input_file_id,
                 endpoint=endpoint,
@@ -139,7 +144,7 @@ def register_extended_capability_tools() -> None:
     def batches_list() -> str:
         """List batch jobs."""
         try:
-            from praisonai.capabilities import batch_list
+            batch_list = _cap("batch_list")
             result = batch_list()
             return str(result)
         except ImportError:
@@ -151,7 +156,7 @@ def register_extended_capability_tools() -> None:
     def batches_retrieve(batch_id: str) -> str:
         """Retrieve batch job status."""
         try:
-            from praisonai.capabilities import batch_retrieve
+            batch_retrieve = _cap("batch_retrieve")
             result = batch_retrieve(batch_id=batch_id)
             return str(result)
         except ImportError:
@@ -163,7 +168,7 @@ def register_extended_capability_tools() -> None:
     def batches_cancel(batch_id: str) -> str:
         """Cancel a batch job."""
         try:
-            from praisonai.capabilities import batch_cancel
+            batch_cancel = _cap("batch_cancel")
             batch_cancel(batch_id=batch_id)
             return f"Batch cancelled: {batch_id}"
         except ImportError:
@@ -179,7 +184,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Create a vector store."""
         try:
-            from praisonai.capabilities import vector_store_create
+            vector_store_create = _cap("vector_store_create")
             result = vector_store_create(name=name, file_ids=file_ids or [])
             if hasattr(result, "id"):
                 return f"Vector store created: {result.id}"
@@ -197,7 +202,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Search a vector store."""
         try:
-            from praisonai.capabilities import vector_store_search
+            vector_store_search = _cap("vector_store_search")
             result = vector_store_search(
                 vector_store_id=vector_store_id,
                 query=query,
@@ -216,7 +221,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Add a file to a vector store."""
         try:
-            from praisonai.capabilities import vector_store_file_create
+            vector_store_file_create = _cap("vector_store_file_create")
             vector_store_file_create(
                 vector_store_id=vector_store_id,
                 file_id=file_id,
@@ -231,7 +236,7 @@ def register_extended_capability_tools() -> None:
     def vector_stores_file_list(vector_store_id: str) -> str:
         """List files in a vector store."""
         try:
-            from praisonai.capabilities import vector_store_file_list
+            vector_store_file_list = _cap("vector_store_file_list")
             result = vector_store_file_list(vector_store_id=vector_store_id)
             return str(result)
         except ImportError:
@@ -247,7 +252,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Extract text from image using OCR."""
         try:
-            from praisonai.capabilities import ocr
+            ocr = _cap("ocr")
             result = ocr(file=image_path, model=model)
             return str(result)
         except ImportError:
@@ -265,7 +270,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Create an OpenAI-style assistant."""
         try:
-            from praisonai.capabilities import assistant_create
+            assistant_create = _cap("assistant_create")
             result = assistant_create(
                 name=name,
                 instructions=instructions,
@@ -284,7 +289,7 @@ def register_extended_capability_tools() -> None:
     def assistants_list() -> str:
         """List assistants."""
         try:
-            from praisonai.capabilities import assistant_list
+            assistant_list = _cap("assistant_list")
             result = assistant_list()
             return str(result)
         except ImportError:
@@ -301,7 +306,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Create a fine-tuning job."""
         try:
-            from praisonai.capabilities import fine_tuning_create
+            fine_tuning_create = _cap("fine_tuning_create")
             result = fine_tuning_create(
                 training_file=training_file,
                 model=model,
@@ -319,7 +324,7 @@ def register_extended_capability_tools() -> None:
     def fine_tuning_list() -> str:
         """List fine-tuning jobs."""
         try:
-            from praisonai.capabilities import fine_tuning_list
+            fine_tuning_list = _cap("fine_tuning_list")
             result = fine_tuning_list()
             return str(result)
         except ImportError:
@@ -336,7 +341,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Send message to another agent via A2A protocol."""
         try:
-            from praisonai.capabilities import a2a_send
+            a2a_send = _cap("a2a_send")
             result = a2a_send(
                 agent_url=agent_url,
                 message=message,
@@ -356,7 +361,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Create a container for code execution."""
         try:
-            from praisonai.capabilities import container_create
+            container_create = _cap("container_create")
             result = container_create(name=name, image=image)
             if hasattr(result, "id"):
                 return f"Container created: {result.id}"
@@ -373,7 +378,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Read a file from a container."""
         try:
-            from praisonai.capabilities import container_file_read
+            container_file_read = _cap("container_file_read")
             result = container_file_read(
                 container_id=container_id,
                 file_path=file_path,
@@ -392,7 +397,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Write a file to a container."""
         try:
-            from praisonai.capabilities import container_file_write
+            container_file_write = _cap("container_file_write")
             container_file_write(
                 container_id=container_id,
                 file_path=file_path,
@@ -409,7 +414,7 @@ def register_extended_capability_tools() -> None:
     def skills_list() -> str:
         """List available skills."""
         try:
-            from praisonai.capabilities import skill_list
+            skill_list = _cap("skill_list")
             result = skill_list()
             return str(result)
         except ImportError:
@@ -421,7 +426,7 @@ def register_extended_capability_tools() -> None:
     def skills_load(skill_path: str) -> str:
         """Load a skill from path."""
         try:
-            from praisonai.capabilities import skill_load
+            skill_load = _cap("skill_load")
             result = skill_load(skill_path=skill_path)
             return str(result)
         except ImportError:
@@ -436,7 +441,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Connect to realtime API."""
         try:
-            from praisonai.capabilities import realtime_connect
+            realtime_connect = _cap("realtime_connect")
             result = realtime_connect(model=model)
             return str(result)
         except ImportError:
@@ -451,7 +456,7 @@ def register_extended_capability_tools() -> None:
     ) -> str:
         """Send message to realtime session."""
         try:
-            from praisonai.capabilities import realtime_send
+            realtime_send = _cap("realtime_send")
             result = realtime_send(session_id=session_id, message=message)
             return str(result)
         except ImportError:

@@ -253,7 +253,8 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             return self.EXIT_ERROR
         
         try:
-            from ..recipe.core import list_recipes
+            from praisonai_mcp._wrapper_bridge import wrapper_callable
+            list_recipes = wrapper_callable("praisonai.recipe.core", "list_recipes")
             
             tags = parsed.tags.split(",") if parsed.tags else None
             recipes = list_recipes(tags=tags, source=parsed.source)
@@ -278,7 +279,8 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
         except ImportError:
             # Fallback to template discovery
             try:
-                from ..templates.discovery import TemplateDiscovery
+                from praisonai_mcp._wrapper_bridge import wrapper_callable
+                TemplateDiscovery = wrapper_callable("praisonai.templates.discovery", "TemplateDiscovery")
                 
                 discovery = TemplateDiscovery()
                 templates = discovery.discover_all()

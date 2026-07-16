@@ -12,7 +12,7 @@ class TestToolChoiceType:
     
     def test_tool_choice_types(self):
         """Test tool choice type values per MCP 2025-11-25 spec."""
-        from praisonai.mcp_server.sampling import ToolChoiceType
+        from praisonai_mcp.mcp_server.sampling import ToolChoiceType
         
         assert ToolChoiceType.AUTO.value == "auto"
         assert ToolChoiceType.NONE.value == "none"
@@ -25,7 +25,7 @@ class TestToolDefinition:
     
     def test_tool_definition(self):
         """Test tool definition creation."""
-        from praisonai.mcp_server.sampling import ToolDefinition
+        from praisonai_mcp.mcp_server.sampling import ToolDefinition
         
         tool = ToolDefinition(
             name="search",
@@ -38,7 +38,7 @@ class TestToolDefinition:
     
     def test_tool_definition_to_dict(self):
         """Test tool definition serialization."""
-        from praisonai.mcp_server.sampling import ToolDefinition
+        from praisonai_mcp.mcp_server.sampling import ToolDefinition
         
         tool = ToolDefinition(
             name="search",
@@ -57,7 +57,7 @@ class TestToolChoice:
     
     def test_tool_choice_auto(self):
         """Test auto tool choice."""
-        from praisonai.mcp_server.sampling import ToolChoice, ToolChoiceType
+        from praisonai_mcp.mcp_server.sampling import ToolChoice, ToolChoiceType
         
         choice = ToolChoice.auto()
         result = choice.to_dict()
@@ -66,7 +66,7 @@ class TestToolChoice:
     
     def test_tool_choice_specific(self):
         """Test specific tool choice (TOOL mode)."""
-        from praisonai.mcp_server.sampling import ToolChoice, ToolChoiceType
+        from praisonai_mcp.mcp_server.sampling import ToolChoice, ToolChoiceType
         
         choice = ToolChoice.tool("search")
         result = choice.to_dict()
@@ -80,7 +80,7 @@ class TestSamplingMessage:
     
     def test_message_creation(self):
         """Test message creation."""
-        from praisonai.mcp_server.sampling import SamplingMessage
+        from praisonai_mcp.mcp_server.sampling import SamplingMessage
         
         msg = SamplingMessage(role="user", content="Hello")
         
@@ -89,7 +89,7 @@ class TestSamplingMessage:
     
     def test_message_to_dict(self):
         """Test message serialization."""
-        from praisonai.mcp_server.sampling import SamplingMessage
+        from praisonai_mcp.mcp_server.sampling import SamplingMessage
         
         msg = SamplingMessage(role="user", content="Hello")
         result = msg.to_dict()
@@ -104,7 +104,7 @@ class TestModelPreferences:
     
     def test_model_preferences(self):
         """Test model preferences creation."""
-        from praisonai.mcp_server.sampling import ModelPreferences
+        from praisonai_mcp.mcp_server.sampling import ModelPreferences
         
         prefs = ModelPreferences(
             hints=[{"name": "gpt-4"}],
@@ -116,7 +116,7 @@ class TestModelPreferences:
     
     def test_model_preferences_to_dict(self):
         """Test model preferences serialization."""
-        from praisonai.mcp_server.sampling import ModelPreferences
+        from praisonai_mcp.mcp_server.sampling import ModelPreferences
         
         prefs = ModelPreferences(
             cost_priority=0.3,
@@ -133,7 +133,7 @@ class TestSamplingRequest:
     
     def test_basic_request(self):
         """Test basic sampling request."""
-        from praisonai.mcp_server.sampling import SamplingRequest, SamplingMessage
+        from praisonai_mcp.mcp_server.sampling import SamplingRequest, SamplingMessage
         
         request = SamplingRequest(
             messages=[SamplingMessage(role="user", content="Hello")],
@@ -145,7 +145,7 @@ class TestSamplingRequest:
     
     def test_request_with_tools(self):
         """Test request with tools."""
-        from praisonai.mcp_server.sampling import (
+        from praisonai_mcp.mcp_server.sampling import (
             SamplingRequest, SamplingMessage, ToolDefinition, ToolChoice, ToolChoiceType
         )
         
@@ -160,7 +160,7 @@ class TestSamplingRequest:
     
     def test_request_to_dict(self):
         """Test request serialization."""
-        from praisonai.mcp_server.sampling import SamplingRequest, SamplingMessage
+        from praisonai_mcp.mcp_server.sampling import SamplingRequest, SamplingMessage
         
         request = SamplingRequest(
             messages=[SamplingMessage(role="user", content="Hello")],
@@ -182,7 +182,7 @@ class TestToolCall:
     
     def test_tool_call_from_dict(self):
         """Test tool call from dictionary."""
-        from praisonai.mcp_server.sampling import ToolCall
+        from praisonai_mcp.mcp_server.sampling import ToolCall
         
         data = {
             "id": "call-123",
@@ -202,7 +202,7 @@ class TestSamplingResponse:
     
     def test_basic_response(self):
         """Test basic sampling response."""
-        from praisonai.mcp_server.sampling import SamplingResponse
+        from praisonai_mcp.mcp_server.sampling import SamplingResponse
         
         response = SamplingResponse(
             role="assistant",
@@ -217,7 +217,7 @@ class TestSamplingResponse:
     
     def test_response_with_tool_calls(self):
         """Test response with tool calls."""
-        from praisonai.mcp_server.sampling import SamplingResponse, ToolCall
+        from praisonai_mcp.mcp_server.sampling import SamplingResponse, ToolCall
         
         response = SamplingResponse(
             role="assistant",
@@ -230,7 +230,7 @@ class TestSamplingResponse:
     
     def test_response_to_dict(self):
         """Test response serialization."""
-        from praisonai.mcp_server.sampling import SamplingResponse
+        from praisonai_mcp.mcp_server.sampling import SamplingResponse
         
         response = SamplingResponse(
             role="assistant",
@@ -246,7 +246,7 @@ class TestSamplingResponse:
     
     def test_response_from_dict(self):
         """Test response from dictionary."""
-        from praisonai.mcp_server.sampling import SamplingResponse
+        from praisonai_mcp.mcp_server.sampling import SamplingResponse
         
         data = {
             "role": "assistant",
@@ -267,7 +267,7 @@ class TestSamplingHandler:
     
     def test_handler_init(self):
         """Test handler initialization."""
-        from praisonai.mcp_server.sampling import SamplingHandler
+        from praisonai_mcp.mcp_server.sampling import SamplingHandler
         
         handler = SamplingHandler(default_model="gpt-4")
         
@@ -275,7 +275,7 @@ class TestSamplingHandler:
     
     def test_handler_with_callback(self):
         """Test handler with custom callback."""
-        from praisonai.mcp_server.sampling import (
+        from praisonai_mcp.mcp_server.sampling import (
             SamplingHandler, SamplingRequest, SamplingMessage, SamplingResponse
         )
         
@@ -297,7 +297,7 @@ class TestSamplingHandler:
     
     def test_set_callback(self):
         """Test setting callback."""
-        from praisonai.mcp_server.sampling import (
+        from praisonai_mcp.mcp_server.sampling import (
             SamplingHandler, SamplingResponse
         )
         
@@ -315,7 +315,7 @@ class TestSamplingHelpers:
     
     def test_create_sampling_request(self):
         """Test create_sampling_request helper."""
-        from praisonai.mcp_server.sampling import create_sampling_request
+        from praisonai_mcp.mcp_server.sampling import create_sampling_request
         
         request = create_sampling_request(
             prompt="Hello",
@@ -330,7 +330,7 @@ class TestSamplingHelpers:
     
     def test_create_sampling_request_with_tools(self):
         """Test create_sampling_request with tools."""
-        from praisonai.mcp_server.sampling import create_sampling_request, ToolChoiceType
+        from praisonai_mcp.mcp_server.sampling import create_sampling_request, ToolChoiceType
         
         request = create_sampling_request(
             prompt="Search for AI",
@@ -344,7 +344,7 @@ class TestSamplingHelpers:
     
     def test_create_sampling_request_specific_tool(self):
         """Test create_sampling_request with specific tool choice."""
-        from praisonai.mcp_server.sampling import create_sampling_request, ToolChoiceType
+        from praisonai_mcp.mcp_server.sampling import create_sampling_request, ToolChoiceType
         
         request = create_sampling_request(
             prompt="Search",
@@ -361,7 +361,7 @@ class TestGlobalSamplingHandler:
     
     def test_get_sampling_handler(self):
         """Test getting global handler."""
-        from praisonai.mcp_server.sampling import get_sampling_handler, SamplingHandler
+        from praisonai_mcp.mcp_server.sampling import get_sampling_handler, SamplingHandler
         
         handler = get_sampling_handler()
         
@@ -369,7 +369,7 @@ class TestGlobalSamplingHandler:
     
     def test_set_sampling_handler(self):
         """Test setting global handler."""
-        from praisonai.mcp_server.sampling import (
+        from praisonai_mcp.mcp_server.sampling import (
             get_sampling_handler, set_sampling_handler, SamplingHandler
         )
         

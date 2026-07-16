@@ -7,7 +7,7 @@ import pytest
 
 def test_resolve_cwd_yaml_rejects_traversal(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from praisonai.mcp_server.adapters import cli_tools
+    from praisonai_mcp.mcp_server.adapters import cli_tools
 
     (tmp_path / "workflow.yaml").write_text("framework: test\ntopic: t\n")
 

@@ -531,12 +531,15 @@ class MCPServer:
         if level.lower() not in level_map:
             raise ValueError(f"Unknown log level: {level!r}")
         # Scope the change to the MCP-server package logger tree
-        # (``praisonai.mcp_server`` — the parent of the loggers this module and
-        # its siblings actually emit through), never the process root. This
-        # honours the client's request for the server's own log output while
-        # leaving unrelated audit / injection-defense telemetry in the host
-        # process untouched.
-        logging.getLogger("praisonai.mcp_server").setLevel(level_map[level.lower()])
+        # (``praisonai_mcp.mcp_server`` — the parent of the loggers this module
+        # and its siblings actually emit through), never the process root. The
+        # namespace is derived from ``__name__`` so it tracks the package the
+        # server is actually running under (post-C12 extraction) rather than a
+        # hard-coded legacy string. This honours the client's request for the
+        # server's own log output while leaving unrelated audit /
+        # injection-defense telemetry in the host process untouched.
+        server_logger_root = __name__.rsplit(".", 1)[0]
+        logging.getLogger(server_logger_root).setLevel(level_map[level.lower()])
         return {}
     
     def _success_response(self, msg_id: Any, result: Any) -> Dict[str, Any]:

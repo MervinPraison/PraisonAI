@@ -5,7 +5,7 @@ Provides file-backed indexing of MCP tool schemas for efficient loading.
 Only tool names and hints are loaded statically; full schemas are loaded on demand.
 
 Usage:
-    from praisonai.mcp_server.tool_index import MCPToolIndex
+    from praisonai_mcp.mcp_server.tool_index import MCPToolIndex
     
     index = MCPToolIndex()
     

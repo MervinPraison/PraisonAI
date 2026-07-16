@@ -10,7 +10,7 @@ class TestElicitationMode:
     
     def test_elicitation_modes(self):
         """Test elicitation mode values."""
-        from praisonai.mcp_server.elicitation import ElicitationMode
+        from praisonai_mcp.mcp_server.elicitation import ElicitationMode
         
         assert ElicitationMode.FORM.value == "form"
         assert ElicitationMode.URL.value == "url"
@@ -21,7 +21,7 @@ class TestElicitationStatus:
     
     def test_elicitation_statuses(self):
         """Test elicitation status values (maps to ElicitationAction)."""
-        from praisonai.mcp_server.elicitation import ElicitationStatus
+        from praisonai_mcp.mcp_server.elicitation import ElicitationStatus
         
         # ElicitationStatus is deprecated and maps to ElicitationAction values
         assert ElicitationStatus.COMPLETED.value == "accept"
@@ -35,7 +35,7 @@ class TestElicitationSchema:
     
     def test_schema_creation(self):
         """Test schema creation."""
-        from praisonai.mcp_server.elicitation import ElicitationSchema
+        from praisonai_mcp.mcp_server.elicitation import ElicitationSchema
         
         schema = ElicitationSchema(
             properties={"name": {"type": "string"}},
@@ -50,7 +50,7 @@ class TestElicitationSchema:
     
     def test_schema_to_dict(self):
         """Test schema serialization."""
-        from praisonai.mcp_server.elicitation import ElicitationSchema
+        from praisonai_mcp.mcp_server.elicitation import ElicitationSchema
         
         schema = ElicitationSchema(
             properties={"name": {"type": "string"}},
@@ -69,7 +69,7 @@ class TestElicitationRequest:
     
     def test_form_request(self):
         """Test form mode request."""
-        from praisonai.mcp_server.elicitation import (
+        from praisonai_mcp.mcp_server.elicitation import (
             ElicitationRequest, ElicitationMode, ElicitationSchema
         )
         
@@ -87,7 +87,7 @@ class TestElicitationRequest:
     
     def test_url_request(self):
         """Test URL mode request."""
-        from praisonai.mcp_server.elicitation import ElicitationRequest, ElicitationMode
+        from praisonai_mcp.mcp_server.elicitation import ElicitationRequest, ElicitationMode
         
         request = ElicitationRequest(
             elicitation_id="elicit-456",
@@ -101,7 +101,7 @@ class TestElicitationRequest:
     
     def test_request_to_dict(self):
         """Test request serialization."""
-        from praisonai.mcp_server.elicitation import ElicitationRequest, ElicitationMode
+        from praisonai_mcp.mcp_server.elicitation import ElicitationRequest, ElicitationMode
         
         request = ElicitationRequest(
             elicitation_id="elicit-789",
@@ -123,7 +123,7 @@ class TestElicitationResult:
     
     def test_completed_result(self):
         """Test completed (accept) result."""
-        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationAction
+        from praisonai_mcp.mcp_server.elicitation import ElicitationResult, ElicitationAction
         
         result = ElicitationResult.accept({"name": "John"})
         
@@ -132,7 +132,7 @@ class TestElicitationResult:
     
     def test_error_result(self):
         """Test error (decline) result."""
-        from praisonai.mcp_server.elicitation import ElicitationResult, ElicitationAction
+        from praisonai_mcp.mcp_server.elicitation import ElicitationResult, ElicitationAction
         
         result = ElicitationResult.decline("Validation failed")
         
@@ -141,7 +141,7 @@ class TestElicitationResult:
     
     def test_result_to_dict(self):
         """Test result serialization."""
-        from praisonai.mcp_server.elicitation import ElicitationResult
+        from praisonai_mcp.mcp_server.elicitation import ElicitationResult
         
         result = ElicitationResult.accept({"confirmed": True})
         
@@ -156,7 +156,7 @@ class TestElicitationHandler:
     
     def test_handler_init(self):
         """Test handler initialization."""
-        from praisonai.mcp_server.elicitation import ElicitationHandler
+        from praisonai_mcp.mcp_server.elicitation import ElicitationHandler
         
         handler = ElicitationHandler(interactive=False, ci_mode=True)
         
@@ -165,7 +165,7 @@ class TestElicitationHandler:
     
     def test_handler_ci_mode_with_defaults(self):
         """Test CI mode with default values."""
-        from praisonai.mcp_server.elicitation import (
+        from praisonai_mcp.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
             ElicitationSchema, ElicitationAction
         )
@@ -191,7 +191,7 @@ class TestElicitationHandler:
     
     def test_handler_ci_mode_url_fails(self):
         """Test CI mode fails for URL elicitation."""
-        from praisonai.mcp_server.elicitation import (
+        from praisonai_mcp.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
             ElicitationAction
         )
@@ -212,7 +212,7 @@ class TestElicitationHandler:
     
     def test_handler_cancel(self):
         """Test cancelling pending request."""
-        from praisonai.mcp_server.elicitation import ElicitationHandler
+        from praisonai_mcp.mcp_server.elicitation import ElicitationHandler
         
         handler = ElicitationHandler()
         
@@ -226,7 +226,7 @@ class TestElicitationHandler:
     
     def test_custom_handler(self):
         """Test custom elicitation handler."""
-        from praisonai.mcp_server.elicitation import (
+        from praisonai_mcp.mcp_server.elicitation import (
             ElicitationHandler, ElicitationRequest, ElicitationMode,
             ElicitationResult
         )
@@ -254,7 +254,7 @@ class TestElicitationHelpers:
     
     def test_create_form_request(self):
         """Test create_form_request helper."""
-        from praisonai.mcp_server.elicitation import create_form_request, ElicitationMode
+        from praisonai_mcp.mcp_server.elicitation import create_form_request, ElicitationMode
         
         request = create_form_request(
             message="Enter details",
@@ -269,7 +269,7 @@ class TestElicitationHelpers:
     
     def test_create_url_request(self):
         """Test create_url_request helper."""
-        from praisonai.mcp_server.elicitation import create_url_request, ElicitationMode
+        from praisonai_mcp.mcp_server.elicitation import create_url_request, ElicitationMode
         
         request = create_url_request(
             message="Please authenticate",
@@ -287,7 +287,7 @@ class TestGlobalElicitationHandler:
     
     def test_get_elicitation_handler(self):
         """Test getting global handler."""
-        from praisonai.mcp_server.elicitation import get_elicitation_handler, ElicitationHandler
+        from praisonai_mcp.mcp_server.elicitation import get_elicitation_handler, ElicitationHandler
         
         handler = get_elicitation_handler()
         
@@ -295,7 +295,7 @@ class TestGlobalElicitationHandler:
     
     def test_set_elicitation_handler(self):
         """Test setting global handler."""
-        from praisonai.mcp_server.elicitation import (
+        from praisonai_mcp.mcp_server.elicitation import (
             get_elicitation_handler, set_elicitation_handler, ElicitationHandler
         )
         

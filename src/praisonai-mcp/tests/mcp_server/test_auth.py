@@ -10,7 +10,7 @@ class TestAPIKeyAuth:
     
     def test_generate_key(self):
         """Test API key generation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, api_key = auth.generate_key(name="test-key")
@@ -21,7 +21,7 @@ class TestAPIKeyAuth:
     
     def test_generate_key_with_scopes(self):
         """Test API key generation with scopes."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, api_key = auth.generate_key(
@@ -35,7 +35,7 @@ class TestAPIKeyAuth:
     
     def test_validate_key(self):
         """Test API key validation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, api_key = auth.generate_key()
@@ -47,7 +47,7 @@ class TestAPIKeyAuth:
     
     def test_validate_invalid_key(self):
         """Test invalid key validation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         
@@ -58,7 +58,7 @@ class TestAPIKeyAuth:
     
     def test_validate_header_bearer(self):
         """Test Bearer token validation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, _ = auth.generate_key()
@@ -69,7 +69,7 @@ class TestAPIKeyAuth:
     
     def test_validate_header_apikey(self):
         """Test ApiKey header validation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, _ = auth.generate_key()
@@ -80,7 +80,7 @@ class TestAPIKeyAuth:
     
     def test_revoke_key(self):
         """Test key revocation."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         raw_key, api_key = auth.generate_key()
@@ -93,7 +93,7 @@ class TestAPIKeyAuth:
     
     def test_list_keys(self):
         """Test listing keys."""
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         
         auth = APIKeyAuth(allow_env_key=False)
         auth.generate_key(name="key1")
@@ -109,7 +109,7 @@ class TestAPIKeyAuth:
         Note: We mock time.time to simulate expiration instead of using
         time.sleep which is patched by fast_sleep fixture.
         """
-        from praisonai.mcp_server.auth.api_key import APIKeyAuth
+        from praisonai_mcp.mcp_server.auth.api_key import APIKeyAuth
         import time
         
         # Track the current time for mocking
@@ -127,7 +127,7 @@ class TestAPIKeyAuth:
             return current_time[0] + 2  # 2 seconds later
         
         # Patch time.time in the api_key module
-        import praisonai.mcp_server.auth.api_key as api_key_module
+        import praisonai_mcp.mcp_server.auth.api_key as api_key_module
         monkeypatch.setattr(api_key_module.time, 'time', mock_time)
         
         # Key should be expired now
@@ -140,7 +140,7 @@ class TestScopeManager:
     
     def test_validate_scopes_success(self):
         """Test successful scope validation."""
-        from praisonai.mcp_server.auth.scopes import ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeManager
         
         manager = ScopeManager()
         
@@ -154,7 +154,7 @@ class TestScopeManager:
     
     def test_validate_scopes_failure(self):
         """Test failed scope validation."""
-        from praisonai.mcp_server.auth.scopes import ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeManager
         
         manager = ScopeManager()
         
@@ -169,7 +169,7 @@ class TestScopeManager:
     
     def test_expand_scopes(self):
         """Test scope expansion."""
-        from praisonai.mcp_server.auth.scopes import ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeManager
         
         manager = ScopeManager()
         
@@ -180,7 +180,7 @@ class TestScopeManager:
     
     def test_admin_scope_expansion(self):
         """Test admin scope expands to all scopes."""
-        from praisonai.mcp_server.auth.scopes import ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeManager
         
         manager = ScopeManager()
         
@@ -193,7 +193,7 @@ class TestScopeManager:
     
     def test_check_scope(self):
         """Test single scope check."""
-        from praisonai.mcp_server.auth.scopes import ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeManager
         
         manager = ScopeManager()
         
@@ -202,7 +202,7 @@ class TestScopeManager:
     
     def test_scope_challenge_to_www_authenticate(self):
         """Test WWW-Authenticate header generation."""
-        from praisonai.mcp_server.auth.scopes import ScopeChallenge
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeChallenge
         
         challenge = ScopeChallenge(
             required_scopes=["admin"],
@@ -223,7 +223,7 @@ class TestScopeRequirement:
     
     def test_all_scopes_required(self):
         """Test all scopes required."""
-        from praisonai.mcp_server.auth.scopes import ScopeRequirement, ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeRequirement, ScopeManager
         
         manager = ScopeManager()
         requirement = ScopeRequirement(scopes=["tools:read", "resources:read"])
@@ -234,7 +234,7 @@ class TestScopeRequirement:
     
     def test_any_scope_sufficient(self):
         """Test any scope is sufficient."""
-        from praisonai.mcp_server.auth.scopes import ScopeRequirement, ScopeManager
+        from praisonai_mcp.mcp_server.auth.scopes import ScopeRequirement, ScopeManager
         
         manager = ScopeManager()
         requirement = ScopeRequirement(
@@ -252,7 +252,7 @@ class TestOAuthConfig:
     
     def test_oauth_config_creation(self):
         """Test OAuth config creation."""
-        from praisonai.mcp_server.auth.oauth import OAuthConfig
+        from praisonai_mcp.mcp_server.auth.oauth import OAuthConfig
         
         config = OAuthConfig(
             authorization_endpoint="https://auth.example.com/authorize",
@@ -267,7 +267,7 @@ class TestOAuthConfig:
     
     def test_oauth_config_to_dict(self):
         """Test OAuth config serialization."""
-        from praisonai.mcp_server.auth.oauth import OAuthConfig
+        from praisonai_mcp.mcp_server.auth.oauth import OAuthConfig
         
         config = OAuthConfig(
             authorization_endpoint="https://auth.example.com/authorize",
@@ -287,7 +287,7 @@ class TestTokenResponse:
     
     def test_token_response(self):
         """Test token response creation."""
-        from praisonai.mcp_server.auth.oauth import TokenResponse
+        from praisonai_mcp.mcp_server.auth.oauth import TokenResponse
         
         token = TokenResponse(
             access_token="access123",
@@ -301,7 +301,7 @@ class TestTokenResponse:
     
     def test_token_not_expired(self):
         """Test token not expired."""
-        from praisonai.mcp_server.auth.oauth import TokenResponse
+        from praisonai_mcp.mcp_server.auth.oauth import TokenResponse
         
         token = TokenResponse(
             access_token="access123",
@@ -312,7 +312,7 @@ class TestTokenResponse:
     
     def test_token_expired(self):
         """Test token expired."""
-        from praisonai.mcp_server.auth.oauth import TokenResponse
+        from praisonai_mcp.mcp_server.auth.oauth import TokenResponse
         import time
         
         token = TokenResponse(
@@ -329,7 +329,7 @@ class TestOAuthManager:
     
     def test_create_authorization_url(self):
         """Test authorization URL creation."""
-        from praisonai.mcp_server.auth.oauth import OAuthConfig, OAuthManager
+        from praisonai_mcp.mcp_server.auth.oauth import OAuthConfig, OAuthManager
         
         config = OAuthConfig(
             authorization_endpoint="https://auth.example.com/authorize",
@@ -348,7 +348,7 @@ class TestOAuthManager:
     
     def test_create_authorization_url_with_pkce(self):
         """Test authorization URL with PKCE."""
-        from praisonai.mcp_server.auth.oauth import OAuthConfig, OAuthManager
+        from praisonai_mcp.mcp_server.auth.oauth import OAuthConfig, OAuthManager
         
         config = OAuthConfig(
             authorization_endpoint="https://auth.example.com/authorize",
@@ -366,7 +366,7 @@ class TestOAuthManager:
     
     def test_www_authenticate_challenge(self):
         """Test WWW-Authenticate challenge creation."""
-        from praisonai.mcp_server.auth.oauth import OAuthConfig, OAuthManager
+        from praisonai_mcp.mcp_server.auth.oauth import OAuthConfig, OAuthManager
         
         config = OAuthConfig(
             authorization_endpoint="https://auth.example.com/authorize",
@@ -391,7 +391,7 @@ class TestOIDCConfig:
     
     def test_oidc_config_creation(self):
         """Test OIDC config creation."""
-        from praisonai.mcp_server.auth.oidc import OIDCConfig
+        from praisonai_mcp.mcp_server.auth.oidc import OIDCConfig
         
         config = OIDCConfig(
             issuer="https://auth.example.com",
@@ -403,7 +403,7 @@ class TestOIDCConfig:
     
     def test_oidc_config_from_dict(self):
         """Test OIDC config from dictionary."""
-        from praisonai.mcp_server.auth.oidc import OIDCConfig
+        from praisonai_mcp.mcp_server.auth.oidc import OIDCConfig
         
         data = {
             "issuer": "https://auth.example.com",
@@ -423,7 +423,7 @@ class TestClientMetadata:
     
     def test_client_metadata_creation(self):
         """Test client metadata creation."""
-        from praisonai.mcp_server.auth.oidc import ClientMetadata
+        from praisonai_mcp.mcp_server.auth.oidc import ClientMetadata
         
         metadata = ClientMetadata(
             client_id="my-client",
@@ -436,7 +436,7 @@ class TestClientMetadata:
     
     def test_client_metadata_to_dict(self):
         """Test client metadata serialization."""
-        from praisonai.mcp_server.auth.oidc import ClientMetadata
+        from praisonai_mcp.mcp_server.auth.oidc import ClientMetadata
         
         metadata = ClientMetadata(
             client_id="my-client",

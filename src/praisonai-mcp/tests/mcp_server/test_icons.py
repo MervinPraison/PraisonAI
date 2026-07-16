@@ -10,7 +10,7 @@ class TestIconMetadata:
     
     def test_icon_from_url(self):
         """Test icon from URL."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         icon = IconMetadata.from_url("https://example.com/icon.svg")
         
@@ -19,7 +19,7 @@ class TestIconMetadata:
     
     def test_icon_from_data_uri(self):
         """Test icon from data URI."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         # Note: validate_icon_url regex only matches image/[a-z]+ not svg+xml
         data_uri = "data:image/png;base64,PHN2Zz4="
@@ -30,7 +30,7 @@ class TestIconMetadata:
     
     def test_icon_from_name(self):
         """Test icon with src as name reference."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         # Icon class uses src field, not icon_name
         icon = IconMetadata(src="icon://search")
@@ -39,7 +39,7 @@ class TestIconMetadata:
     
     def test_icon_to_dict_url(self):
         """Test icon serialization with URL."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         icon = IconMetadata(src="https://example.com/icon.png")
         result = icon.to_dict()
@@ -48,7 +48,7 @@ class TestIconMetadata:
     
     def test_icon_to_dict_name(self):
         """Test icon serialization with mime type."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         icon = IconMetadata(src="https://example.com/icon.svg", mime_type="image/svg+xml")
         result = icon.to_dict()
@@ -58,7 +58,7 @@ class TestIconMetadata:
     
     def test_icon_from_dict(self):
         """Test icon from dictionary."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         data = {"src": "https://example.com/icon.svg"}
         icon = IconMetadata.from_dict(data)
@@ -67,7 +67,7 @@ class TestIconMetadata:
     
     def test_invalid_icon(self):
         """Test invalid icon."""
-        from praisonai.mcp_server.icons import IconMetadata
+        from praisonai_mcp.mcp_server.icons import IconMetadata
         
         icon = IconMetadata(src="")
         
@@ -79,14 +79,14 @@ class TestValidateIconUrl:
     
     def test_valid_http_url(self):
         """Test valid HTTP URL."""
-        from praisonai.mcp_server.icons import validate_icon_url
+        from praisonai_mcp.mcp_server.icons import validate_icon_url
         
         assert validate_icon_url("https://example.com/icon.png") is True
         assert validate_icon_url("http://example.com/icon.svg") is True
     
     def test_valid_data_uri(self):
         """Test valid data URI."""
-        from praisonai.mcp_server.icons import validate_icon_url
+        from praisonai_mcp.mcp_server.icons import validate_icon_url
         
         assert validate_icon_url("data:image/png;base64,abc123") is True
         # Note: svg+xml doesn't match [a-z]+ regex pattern
@@ -94,7 +94,7 @@ class TestValidateIconUrl:
     
     def test_invalid_url(self):
         """Test invalid URLs."""
-        from praisonai.mcp_server.icons import validate_icon_url
+        from praisonai_mcp.mcp_server.icons import validate_icon_url
         
         assert validate_icon_url("") is False
         # Note: validate_icon_url may accept ftp if implementation allows
@@ -106,7 +106,7 @@ class TestValidateIconFormat:
     
     def test_format_from_extension(self):
         """Test format detection from extension."""
-        from praisonai.mcp_server.icons import validate_icon_format
+        from praisonai_mcp.mcp_server.icons import validate_icon_format
         
         assert validate_icon_format("https://example.com/icon.svg") == "svg"
         assert validate_icon_format("https://example.com/icon.png") == "png"
@@ -114,14 +114,14 @@ class TestValidateIconFormat:
     
     def test_format_from_data_uri(self):
         """Test format detection from data URI."""
-        from praisonai.mcp_server.icons import validate_icon_format
+        from praisonai_mcp.mcp_server.icons import validate_icon_format
         
         assert validate_icon_format("data:image/png;base64,abc") == "png"
         assert validate_icon_format("data:image/svg;base64,xyz") == "svg"
     
     def test_unknown_format(self):
         """Test unknown format."""
-        from praisonai.mcp_server.icons import validate_icon_format
+        from praisonai_mcp.mcp_server.icons import validate_icon_format
         
         assert validate_icon_format("https://example.com/icon") is None
         assert validate_icon_format("") is None
@@ -132,7 +132,7 @@ class TestRichMetadata:
     
     def test_rich_metadata_creation(self):
         """Test rich metadata creation."""
-        from praisonai.mcp_server.icons import RichMetadata, IconMetadata
+        from praisonai_mcp.mcp_server.icons import RichMetadata, IconMetadata
         
         icon = IconMetadata.from_url("https://example.com/tool.svg")
         metadata = RichMetadata(
@@ -149,7 +149,7 @@ class TestRichMetadata:
     
     def test_rich_metadata_to_dict(self):
         """Test rich metadata serialization."""
-        from praisonai.mcp_server.icons import RichMetadata, IconMetadata
+        from praisonai_mcp.mcp_server.icons import RichMetadata, IconMetadata
         
         metadata = RichMetadata(
             icon=IconMetadata.from_url("https://example.com/icon.svg"),
@@ -165,7 +165,7 @@ class TestRichMetadata:
     
     def test_rich_metadata_from_dict(self):
         """Test rich metadata from dictionary."""
-        from praisonai.mcp_server.icons import RichMetadata
+        from praisonai_mcp.mcp_server.icons import RichMetadata
         
         data = {
             "icon": {"url": "https://example.com/icon.svg"},
@@ -185,7 +185,7 @@ class TestSchemaHelpers:
     
     def test_add_icon_to_schema(self):
         """Test adding icon to schema."""
-        from praisonai.mcp_server.icons import add_icon_to_schema, IconMetadata
+        from praisonai_mcp.mcp_server.icons import add_icon_to_schema, IconMetadata
         
         schema = {"name": "test-tool"}
         icon = IconMetadata.from_url("https://example.com/wrench.svg")
@@ -197,7 +197,7 @@ class TestSchemaHelpers:
     
     def test_add_metadata_to_schema(self):
         """Test adding metadata to schema."""
-        from praisonai.mcp_server.icons import add_metadata_to_schema, RichMetadata
+        from praisonai_mcp.mcp_server.icons import add_metadata_to_schema, RichMetadata
         
         schema = {"name": "test-tool"}
         metadata = RichMetadata(author="Test", version="1.0.0")
@@ -213,7 +213,7 @@ class TestStandardIcons:
     
     def test_get_standard_icon(self):
         """Test getting standard icons."""
-        from praisonai.mcp_server.icons import get_standard_icon
+        from praisonai_mcp.mcp_server.icons import get_standard_icon
         
         assert get_standard_icon("run") == "play"
         assert get_standard_icon("search") == "search"
@@ -222,13 +222,13 @@ class TestStandardIcons:
     
     def test_get_standard_icon_partial_match(self):
         """Test partial match for standard icons."""
-        from praisonai.mcp_server.icons import get_standard_icon
+        from praisonai_mcp.mcp_server.icons import get_standard_icon
         
         assert get_standard_icon("run_task") == "play"
         assert get_standard_icon("search_web") == "search"
     
     def test_get_standard_icon_not_found(self):
         """Test icon not found."""
-        from praisonai.mcp_server.icons import get_standard_icon
+        from praisonai_mcp.mcp_server.icons import get_standard_icon
         
         assert get_standard_icon("unknown_operation") is None
