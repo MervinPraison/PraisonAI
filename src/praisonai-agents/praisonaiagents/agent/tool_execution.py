@@ -426,8 +426,50 @@ class ToolExecutionMixin:
             metadata={'agent_name': self.name}
         )
         
-        # Execute within injection context
-        return self._execute_tool_with_context(function_name, arguments, state, tool_call_id)
+        # Route through user-supplied tool middleware (Agent(hooks=[...])) when
+        # present. Zero overhead when no hooks: the fast path calls straight
+        # into _execute_tool_with_context.
+        manager = self._get_tool_middleware_manager()
+        if manager is None:
+            return self._execute_tool_with_context(function_name, arguments, state, tool_call_id)
+
+        from ..hooks import ToolRequest, ToolResponse, InvocationContext
+        request = ToolRequest(
+            tool_name=function_name,
+            arguments=arguments,
+            context=InvocationContext(
+                agent_id=self.name,
+                run_id=getattr(self, '_current_run_id', 'unknown'),
+                session_id=getattr(self, '_session_id', None) or 'default',
+                tool_name=function_name,
+            ),
+        )
+
+        def _final_handler(req: ToolRequest) -> ToolResponse:
+            result = self._execute_tool_with_context(
+                req.tool_name, req.arguments, state, tool_call_id
+            )
+            return ToolResponse(tool_name=req.tool_name, result=result)
+
+        response = manager.execute_tool_call(request, _final_handler)
+        return response.result if isinstance(response, ToolResponse) else response
+
+    def _get_tool_middleware_manager(self):
+        """Return a MiddlewareManager if user tool hooks are registered, else None.
+
+        Lazily constructs the manager from ``self._hooks`` (the list passed via
+        ``Agent(hooks=[...])``) on first use. Returns ``None`` when there are no
+        hooks or no tool-level hooks, preserving the zero-overhead fast path.
+        """
+        hooks = getattr(self, '_hooks', None)
+        if not hooks:
+            return None
+        manager = getattr(self, '_middleware_manager', None)
+        if manager is None:
+            from ..hooks import MiddlewareManager
+            manager = MiddlewareManager(hooks)
+            self._middleware_manager = manager
+        return manager if manager.has_tool_hooks else None
 
     def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
         """Execute tool within injection context, with optional output truncation.
