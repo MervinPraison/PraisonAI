@@ -80,10 +80,22 @@ class InMemoryAdapter:
         ]
         return results[:limit]
 
-    def delete_memory(self, memory_id: str, **kwargs) -> bool:
-        """Delete a memory by ID. Returns True if an entry was removed."""
+    def delete_memory(self, memory_id: str, tier: Optional[str] = None, **kwargs) -> bool:
+        """Delete a memory by ID. Returns True if an entry was removed.
+
+        ``tier`` ("short" or "long") optionally scopes the delete to a single
+        tier. IDs here are globally unique (shared monotonic counter), so tier
+        is only used to preserve the caller's scope, never for disambiguation.
+        """
         before = len(self._data)
-        self._data = [e for e in self._data if e.get("id") != str(memory_id)]
+        self._data = [
+            e
+            for e in self._data
+            if not (
+                e.get("id") == str(memory_id)
+                and (tier is None or e.get("type") == tier)
+            )
+        ]
         return len(self._data) < before
 
     def reset_short_term(self) -> None:

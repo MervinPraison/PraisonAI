@@ -1873,17 +1873,26 @@ class ToolExecutionMixin:
         if policy is not None and hasattr(policy, "check_tool"):
             try:
                 result = policy.check_tool(function_name, arguments)
-                if not getattr(result, "allowed", True):
-                    reason = getattr(result, "reason", "denied by policy")
-                    logging.warning(
-                        f"Tool '{function_name}' denied by policy: {reason}"
-                    )
-                    return {
-                        "error": f"Tool '{function_name}' denied by policy: {reason}",
-                        "policy_denied": True,
-                    }
-            except Exception as e:  # noqa: BLE001 — never break exec on policy bug
-                logging.debug(f"Policy check_tool raised; skipping: {e}")
+            except Exception as e:  # noqa: BLE001
+                # Fail closed: an operator opted into policy enforcement, so a
+                # broken/misconfigured PolicyEngine must deny rather than let a
+                # protected tool run without a decision.
+                logging.warning(
+                    f"Tool '{function_name}' denied: policy check_tool raised: {e}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied: policy check failed ({e})",
+                    "policy_denied": True,
+                }
+            if not getattr(result, "allowed", True):
+                reason = getattr(result, "reason", "denied by policy")
+                logging.warning(
+                    f"Tool '{function_name}' denied by policy: {reason}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied by policy: {reason}",
+                    "policy_denied": True,
+                }
 
         for guardrail in getattr(self, "_tool_call_guardrails", None) or []:
             validate = getattr(guardrail, "validate_tool_call", None)
@@ -1891,9 +1900,17 @@ class ToolExecutionMixin:
                 continue
             try:
                 is_valid, processed = validate(function_name, arguments)
-            except Exception as e:  # noqa: BLE001 — never break exec on guardrail bug
-                logging.debug(f"Guardrail validate_tool_call raised; skipping: {e}")
-                continue
+            except Exception as e:  # noqa: BLE001
+                # Fail closed: mirror the guardrail-chain default. A guardrail
+                # dependency/implementation error must block, not permit, the
+                # unchecked call.
+                logging.warning(
+                    f"Tool '{function_name}' denied: guardrail validate_tool_call raised: {e}"
+                )
+                return {
+                    "error": f"Tool '{function_name}' denied: guardrail check failed ({e})",
+                    "guardrail_denied": True,
+                }
             if not is_valid:
                 logging.warning(
                     f"Tool '{function_name}' rejected by tool-call guardrail"

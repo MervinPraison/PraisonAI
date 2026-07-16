@@ -1174,7 +1174,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if (getattr(self, "provider", None) in ("sqlite", "in_memory")
                 and getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "delete_memory")):
-            return self.memory_adapter.delete_memory(memory_id)
+            return self.memory_adapter.delete_memory(memory_id, tier="short")
 
         deleted = False
         
@@ -1224,7 +1224,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if (getattr(self, "provider", None) in ("sqlite", "in_memory")
                 and getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "delete_memory")):
-            return self.memory_adapter.delete_memory(memory_id)
+            return self.memory_adapter.delete_memory(memory_id, tier="long")
 
         deleted = False
         

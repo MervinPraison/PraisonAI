@@ -1254,6 +1254,7 @@ class AgentFlow:
             max_retries = getattr(step, 'max_retries', 3)
             retry_count = 0
             validation_feedback = None
+            guardrail_failed = False
             
             while retry_count <= max_retries:
                 step_error = None
@@ -1439,18 +1440,31 @@ class AgentFlow:
                         is_valid, feedback = guardrail(StepResult(output=output))
                         if not is_valid:
                             validation_feedback = str(feedback)
+                            guardrail_failed = True
                             retry_count += 1
                             if verbose:
                                 print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
                             continue  # Retry
+                        guardrail_failed = False
                     except Exception as e:
                         logger.error(f"Guardrail failed for {step.name}: {e}")
                 
                 # Success - break out of retry loop
                 break
             
+            # A step whose guardrail never validated after exhausting retries is
+            # a failure too, even though no exception was raised. Treat it like
+            # step_error so on_error flow control and the final status are honored
+            # instead of silently reporting the step "completed".
+            step_failed = bool(step_error) or guardrail_failed
+            failure_reason = (
+                str(step_error) if step_error
+                else (f"guardrail validation failed: {validation_feedback}"
+                      if guardrail_failed else None)
+            )
+
             # Update step status
-            if step_error:
+            if step_failed:
                 if hasattr(step, 'status'):
                     step.status = "failed"
                 self.step_statuses[step.name] = "failed"
@@ -1460,19 +1474,29 @@ class AgentFlow:
                 self.step_statuses[step.name] = "completed"
 
             # Honor the step's on_error flow-control setting. When a step
-            # exhausts its retries and on_error == "stop" (the Task default),
-            # abort the workflow and mark it failed instead of feeding the
-            # error string forward into the next step and falsely reporting
-            # overall success.
-            if step_error and getattr(step, 'on_error', 'stop') == 'stop':
+            # exhausts its retries (error or unresolved guardrail) and
+            # on_error == "stop" (the Task default), abort the workflow and mark
+            # it failed instead of feeding the error string forward into the next
+            # step and falsely reporting overall success.
+            if step_failed and getattr(step, 'on_error', 'stop') == 'stop':
                 self.status = "failed"
                 results.append({
                     "step": step.name,
                     "output": output,
                     "status": "failed",
                     "retries": retry_count,
-                    "error": str(step_error),
+                    "error": failure_reason,
                 })
+                # Still notify the step-complete callback so lifecycle observers
+                # see the (failed) terminal step before the workflow aborts.
+                if self.on_step_complete:
+                    try:
+                        self.on_step_complete(
+                            step.name,
+                            StepResult(output=output or "", stop_workflow=True),
+                        )
+                    except Exception as e:
+                        logger.error(f"on_step_complete callback failed: {e}")
                 if verbose:
                     print(f"🛑 Workflow stopped: step '{step.name}' failed (on_error='stop')")
                 break
