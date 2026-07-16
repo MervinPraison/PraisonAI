@@ -4028,6 +4028,12 @@ class WebSocketGateway:
             raw_channels = raw.get("channels")
             if not isinstance(raw_channels, dict):
                 raw_channels = {}
+            # Credential fields the schema resolves from a secret-reference form
+            # (Issue #3102). When the raw value is a ``{source, id}`` reference,
+            # the validator has already resolved it to a plaintext string; that
+            # resolved value must win so the adapter never receives the raw,
+            # unresolved dict (which would e.g. break WhatsApp verify_token).
+            _secret_fields = ("token", "app_token", "verify_token")
             merged: Dict[str, Any] = {}
             for name, channel in validated.channels.items():
                 validated_fields = channel.model_dump(exclude_none=True)
@@ -4036,6 +4042,13 @@ class WebSocketGateway:
                     merged[name] = {**validated_fields, **existing}
                     for key, val in validated_fields.items():
                         if existing.get(key) in (None, ""):
+                            merged[name][key] = val
+                        # A resolved secret string always wins over a raw
+                        # secret-reference dict so adapters get the value.
+                        elif (
+                            key in _secret_fields
+                            and isinstance(existing.get(key), dict)
+                        ):
                             merged[name][key] = val
                 else:
                     merged[name] = validated_fields

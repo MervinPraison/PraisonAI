@@ -16,6 +16,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 logger = logging.getLogger(__name__)
 
 
+def _register_redaction(value: str) -> None:
+    """Register a resolved secret value for log redaction (best-effort).
+
+    Delegates to the core redaction registry (Issue #3102) but never fails
+    config validation if core is unavailable.
+    """
+    try:
+        from praisonaiagents.secrets import register_secret_for_redaction
+
+        register_secret_for_redaction(value)
+    except Exception:  # pragma: no cover - redaction is best-effort
+        pass
+
+
 class AgentConfigSchema(BaseModel):
     """Schema for agent configuration in bot.yaml."""
     name: str = "assistant"
@@ -270,8 +284,12 @@ class ChannelConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     platform: Optional[str] = None
-    token: str = ""
-    app_token: Optional[str] = None  # For Slack Socket Mode
+    # Credential fields accept plaintext, a ``${ENV}`` reference, or the
+    # additive secret-reference form ``{source: file|env|exec, id: ...}``
+    # (Issue #3102). The reference form is resolved by the core secret
+    # resolver and the resolved value is registered for log redaction.
+    token: Union[str, Dict[str, Any]] = ""
+    app_token: Optional[Union[str, Dict[str, Any]]] = None  # For Slack Socket Mode
     mode: str = "poll"  # poll | ws | webhook | hybrid
     group_policy: str = "mention_only"  # Default to secure: respond_all, mention_only, command_only
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
@@ -305,7 +323,7 @@ class ChannelConfigSchema(BaseModel):
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp
-    verify_token: Optional[str] = None  # WhatsApp
+    verify_token: Optional[Union[str, Dict[str, Any]]] = None  # WhatsApp
     whatsapp_mode: Optional[str] = None  # WhatsApp-specific mode: "cloud" or "web"
     creds_dir: Optional[str] = None  # WhatsApp web mode credentials directory
     email_address: Optional[str] = None  # Email
@@ -324,20 +342,54 @@ class ChannelConfigSchema(BaseModel):
             )
         return v
     
-    @field_validator("token")
+    @field_validator("token", "app_token", "verify_token", mode="before")
     @classmethod
-    def resolve_env_var(cls, v: str) -> str:
-        """Resolve ${ENV_VAR} references in token."""
-        if v.startswith("${") and v.endswith("}"):
-            env_key = v[2:-1]
-            resolved = os.environ.get(env_key, "")
-            if not resolved:
-                raise ValueError(
-                    f"Environment variable '{env_key}' not set. "
-                    f"Set it with: export {env_key}=your_token"
-                )
-            return resolved
-        return v
+    def resolve_secret_ref(cls, v):
+        """Resolve credential inputs for every secret field (Issue #3102).
+
+        Backward compatible: plaintext and ``${ENV}`` continue to work. The
+        additive reference form ``{source: file|env|exec, id: ...}`` (or a
+        core ``SecretRef``) is resolved via the core secret resolver, and the
+        resolved value is registered for log redaction so it never leaks into
+        logs or tracebacks.
+        """
+        if v is None or v == "":
+            return v
+
+        # Plain ${ENV} kept inline to preserve the original error message and
+        # avoid importing core for the common case.
+        if isinstance(v, str):
+            if v.startswith("${") and v.endswith("}"):
+                env_key = v[2:-1]
+                resolved = os.environ.get(env_key, "")
+                if not resolved:
+                    raise ValueError(
+                        f"Environment variable '{env_key}' not set. "
+                        f"Set it with: export {env_key}=your_token"
+                    )
+                _register_redaction(resolved)
+                return resolved
+            _register_redaction(v)
+            return v
+
+        # Reference form (dict / SecretRef) → resolve via core.
+        try:
+            from praisonaiagents.secrets import resolve_secret, MISSING
+        except ImportError:  # pragma: no cover - core always present in-tree
+            raise ValueError(
+                "Secret-reference form requires praisonaiagents.secrets; "
+                "use a plaintext string or ${ENV} reference instead."
+            )
+        result = resolve_secret(v)
+        if result.status == MISSING or result.value is None:
+            raise ValueError(
+                f"Secret reference could not be resolved: {result.detail or 'missing'}"
+            )
+        if not result.available:
+            raise ValueError(
+                f"Secret reference unavailable: {result.detail or 'unavailable'}"
+            )
+        return result.value
     
     @field_validator("group_policy")
     @classmethod
