@@ -41,6 +41,8 @@ from praisonaiagents.gateway.protocols import (
     HelloError,
     GATEWAY_PROTOCOL_VERSION,
     MIN_CLIENT_PROTOCOL_VERSION,
+    ReloadStatus,
+    compute_config_revision,
 )
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
@@ -888,6 +890,17 @@ class WebSocketGateway:
         self._reload_lock: Optional[asyncio.Lock] = None
         # Background config-watch task handle (event-driven or polling).
         self._config_watch_task: Optional[asyncio.Task] = None
+
+        # Issue #3049: config hot-reload observability. Record the outcome of
+        # the last reload attempt and the revision of the config actually
+        # running, so ``health()`` can surface "did my edit take effect / is
+        # the watcher still alive?" instead of swallowing it into a log line.
+        # ``_reload_watcher_active`` flips to False only when the watcher
+        # genuinely gives up, so silent degradation is detectable.
+        self._reload_status: Optional["ReloadStatus"] = None
+        self._applied_config_revision: Optional[str] = None
+        self._config_path: Optional[str] = None
+        self._reload_watcher_active: bool = False
         
         # Session cleanup background task
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -3559,6 +3572,35 @@ class WebSocketGateway:
             "clients": len(self._clients),
             "channels": channel_status,
         }
+
+        # Issue #3049: surface config hot-reload observability so an operator
+        # can see the last reload outcome, whether the watcher is alive, and
+        # whether the config on disk actually took effect (drift detection) —
+        # without restarting or scraping logs. Only included when running from
+        # a config file, and computed defensively so health() never raises.
+        reload_status = self._reload_status
+        if reload_status is None and self._config_path is not None:
+            # Watcher armed but no reload attempted yet this run.
+            reload_status = ReloadStatus(
+                watcher="active" if self._reload_watcher_active else "disabled",
+            )
+        if reload_status is not None:
+            result["reload"] = reload_status.to_dict()
+        if self._applied_config_revision is not None:
+            result["applied_config_revision"] = self._applied_config_revision
+        if self._config_path is not None:
+            try:
+                on_disk = compute_config_revision(
+                    self.load_gateway_config(self._config_path)
+                )
+            except Exception:
+                on_disk = None
+            if on_disk is not None:
+                result["on_disk_config_revision"] = on_disk
+                if self._applied_config_revision is not None:
+                    result["config_drift"] = (
+                        on_disk != self._applied_config_revision
+                    )
         
         # Add push status if enabled (push infra lives in wrapper; guard defensively)
         if getattr(self, "_push_enabled", False):
@@ -5248,18 +5290,44 @@ class WebSocketGateway:
         async with self._reload_lock:
             await self._reload_config_locked(config_path)
 
+    def _record_reload_status(
+        self,
+        last_result: str,
+        *,
+        changed_paths: Tuple[str, ...] = (),
+        error: Optional[str] = None,
+    ) -> None:
+        """Record the outcome of a reload attempt for ``health()`` (Issue #3049).
+
+        Preserves the watcher-liveness flag so a bad edit is visibly *rejected*
+        rather than silently ineffective, and operators can see it without
+        scraping logs.
+        """
+        self._reload_status = ReloadStatus(
+            watcher="active" if self._reload_watcher_active else "disabled",
+            last_result=last_result,
+            last_at=time.time(),
+            changed_paths=changed_paths,
+            error=error,
+        )
+
     async def _reload_config_locked(self, config_path: str) -> None:
         """Perform the actual hot-reload. Callers must hold ``_reload_lock``."""
         logger.info(f"Hot-reloading gateway config from {config_path}...")
+        self._config_path = config_path
         try:
             new_cfg = self.load_gateway_config(config_path)
         except (FileNotFoundError, ValueError) as e:
             logger.error(f"Reload failed — config invalid: {e}")
+            # Issue #3049: record the failure so the operator sees the edit was
+            # rejected in health() instead of just a log line.
+            self._record_reload_status("failed", error=str(e))
             return
         
         # First time loading - do full setup
         if self._loaded_config is None:
             self._loaded_config = new_cfg
+            self._applied_config_revision = compute_config_revision(new_cfg)
             await self.stop_channels()
             
             # Create agents
@@ -5284,6 +5352,7 @@ class WebSocketGateway:
                 await self.start_channels(channels_cfg)
             
             logger.info("Initial config load complete")
+            self._record_reload_status("ok")
             return
         
         # Diff the configs to find what changed
@@ -5291,6 +5360,7 @@ class WebSocketGateway:
         
         if not changed_paths:
             logger.info("No changes detected in config")
+            self._record_reload_status("no_changes")
             return
         
         logger.info(f"Config changes detected: {changed_paths}")
@@ -5382,6 +5452,14 @@ class WebSocketGateway:
 
         # Update stored config
         self._loaded_config = new_cfg
+        # Issue #3049: the config the gateway is *actually running* now has a
+        # new revision; record it so health() can be compared against the
+        # on-disk revision for drift detection, and record the successful
+        # reload outcome with the paths that changed.
+        self._applied_config_revision = compute_config_revision(new_cfg)
+        self._record_reload_status(
+            "ok", changed_paths=tuple(sorted(changed_paths))
+        )
         logger.info("Hot-reload complete")
 
     async def _apply_auth_secret_rotation(self, new_cfg: Dict[str, Any]) -> int:
@@ -5469,15 +5547,28 @@ class WebSocketGateway:
             poll_interval: How often to check for changes when polling (seconds)
             debounce: Wait time after detecting change before reloading (seconds)
         """
-        if await self._watch_config_event_driven(config_path, debounce=debounce):
-            return
-        logger.info(
-            "Config watcher: event-driven watching unavailable, "
-            "falling back to %.1fs polling", poll_interval,
-        )
-        await self._watch_config_polling(
-            config_path, poll_interval=poll_interval, debounce=debounce
-        )
+        self._config_path = config_path
+        # Issue #3049: mark hot-reload liveness "active" for the health surface
+        # while a watcher (event-driven or polling) is running, and flip it to
+        # "disabled" only when the watcher genuinely gives up — so silent
+        # degradation is observable rather than assumed-working.
+        self._reload_watcher_active = True
+        try:
+            if await self._watch_config_event_driven(config_path, debounce=debounce):
+                return
+            logger.info(
+                "Config watcher: event-driven watching unavailable, "
+                "falling back to %.1fs polling", poll_interval,
+            )
+            await self._watch_config_polling(
+                config_path, poll_interval=poll_interval, debounce=debounce
+            )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            # The watcher has stopped (fell through, errored, or was cancelled);
+            # hot-reload is no longer active.
+            self._reload_watcher_active = False
 
     async def _config_settled(self, config_path: str, debounce: float = 1.0) -> bool:
         """Return ``True`` once the config file's mtime has stopped changing.
@@ -5721,6 +5812,11 @@ class WebSocketGateway:
         
         # Store initial config for diff-driven reload
         self._loaded_config = cfg
+        # Issue #3049: record the config source + the applied revision at
+        # startup so health() can report which revision is running and detect
+        # drift against the on-disk file even before any hot-reload occurs.
+        self._config_path = config_path
+        self._applied_config_revision = compute_config_revision(cfg)
 
         # Apply gateway section overrides
         gw_cfg = cfg.get("gateway", {})

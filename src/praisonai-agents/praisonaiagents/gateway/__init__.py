@@ -21,6 +21,9 @@ from .protocols import (
     EventType,
     OperatorScope,
     GatewayCloseCode,
+    # Config hot-reload observability (Issue #3049)
+    ReloadStatus,
+    compute_config_revision,
     # Push protocols and dataclasses
     PushChannelProtocol,
     PresenceProtocol,
@@ -205,6 +208,9 @@ __all__ = [
     "EventType",
     "OperatorScope",
     "GatewayCloseCode",
+    # Config hot-reload observability (Issue #3049)
+    "ReloadStatus",
+    "compute_config_revision",
     # Push protocols (always available)
     "PushChannelProtocol",
     "PresenceProtocol",

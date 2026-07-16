@@ -590,9 +590,55 @@ class GatewayHandler:
                 print(f"  Agents: {data.get('agents', 0)}")
                 print(f"  Sessions: {data.get('sessions', 0)}")
                 print(f"  Clients: {data.get('clients', 0)}")
+                self._print_reload_status(data)
         except Exception as e:
             print(f"Gateway not reachable at {url}")
             print(f"Error: {e}")
+
+    @staticmethod
+    def _print_reload_status(data: dict) -> None:
+        """Render config hot-reload observability from /health (Issue #3049).
+
+        Surfaces the last reload outcome, applied vs on-disk config revision
+        (drift), and watcher liveness so an operator can see whether the last
+        edit took effect without scraping logs.
+        """
+        import time as _time
+
+        reload_info = data.get("reload")
+        if reload_info:
+            last_result = reload_info.get("last_result", "never")
+            last_at = reload_info.get("last_at")
+            when = ""
+            if last_at:
+                try:
+                    when = " at " + _time.strftime(
+                        "%H:%M:%S", _time.localtime(last_at)
+                    )
+                except Exception:
+                    when = ""
+            line = f"  Reload: {str(last_result).upper()}{when}"
+            error = reload_info.get("error")
+            if error:
+                line += f"  {error}"
+            changed = reload_info.get("changed_paths")
+            if changed:
+                line += "  changed=" + ",".join(changed)
+            print(line)
+            print(f"  Watcher: {reload_info.get('watcher', 'unknown')}")
+
+        applied = data.get("applied_config_revision")
+        on_disk = data.get("on_disk_config_revision")
+        if applied or on_disk:
+            if applied and on_disk and applied != on_disk:
+                print(
+                    f"  Config: on-disk {on_disk}  !=  applied {applied}   "
+                    "(change not in effect)"
+                )
+            elif applied and on_disk:
+                print(f"  Config: {applied} (up to date)")
+            else:
+                print(f"  Config: applied {applied or on_disk}")
 
 
 def handle_gateway_command(args) -> int:

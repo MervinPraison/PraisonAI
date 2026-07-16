@@ -1076,8 +1076,106 @@ class GatewayProtocol(Protocol):
             - agents: Number of registered agents
             - sessions: Number of active sessions
             - clients: Number of connected clients
+            - reload: Optional :class:`ReloadStatus` dict (config hot-reload
+              outcome + watcher liveness), when the gateway runs from a config
+              file. See :class:`ReloadStatus`.
+            - applied_config_revision: Optional stable revision id (see
+              :func:`compute_config_revision`) of the config the gateway is
+              *actually running*, comparable against the on-disk revision to
+              detect drift.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Config hot-reload observability (Issue #3049)
+#
+# The gateway supports diff-driven hot-reload of ``gateway.yaml`` (config
+# watcher, SIGHUP, selective restart, drain), but the *outcome* of a reload is
+# invisible to operators: a failed reload is swallowed into a log line, the
+# watcher can silently degrade, and there is no applied-config revision to
+# compare against what is on disk. This is the small, canonical contract that
+# both the SDK's ``gateway.health()`` and the bot's ``/health`` populate so
+# reload outcome and config drift are first-class, observable signals rather
+# than log-scraping. Core owns only the *shape* (a frozen dataclass) and a
+# pure, deterministic revision hash; the wrapper server records the outcome and
+# computes the revision.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ReloadStatus:
+    """Observable outcome of the gateway's config hot-reload machinery.
+
+    Populated by the running gateway and surfaced in :meth:`GatewayProtocol.health`
+    so an operator can ask "did my last config edit take effect, and is
+    hot-reload still working?" without restarting or scraping logs.
+
+    Attributes:
+        watcher: ``"active"`` while the config watcher is running (event-driven
+            or polling), ``"disabled"`` once it has genuinely given up — so
+            silent degradation is detectable rather than assumed-working.
+        last_result: Outcome of the most recent reload attempt — ``"ok"``,
+            ``"failed"``, ``"no_changes"``, or ``"never"`` (no reload attempted
+            yet this run).
+        last_at: Unix timestamp of the last reload attempt, or ``None`` when
+            none has occurred.
+        changed_paths: The config paths that changed on the last successful
+            reload (empty otherwise).
+        error: On ``"failed"``, the human-readable reason the edit was
+            rejected; ``None`` otherwise.
+    """
+
+    watcher: Literal["active", "disabled"] = "disabled"
+    last_result: Literal["ok", "failed", "no_changes", "never"] = "never"
+    last_at: Optional[float] = None
+    changed_paths: Tuple[str, ...] = ()
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serializable dict for the health surface."""
+        return {
+            "watcher": self.watcher,
+            "last_result": self.last_result,
+            "last_at": self.last_at,
+            "changed_paths": list(self.changed_paths),
+            "error": self.error,
+        }
+
+
+def compute_config_revision(config: Optional[Dict[str, Any]]) -> str:
+    """Return a stable, short revision id for a gateway config mapping.
+
+    Deterministic hash over the *canonical* form of ``config`` (keys sorted,
+    whitespace-insensitive) so the same logical config always yields the same
+    revision regardless of key ordering or formatting. Comparing the revision
+    of the running config against the revision of what is on disk gives a
+    first-class config-drift signal ("did my change take effect / is a restart
+    still owed?").
+
+    Pure and dependency-free (stdlib ``json`` + ``hashlib``) so it lives in
+    core and is reused by both the SDK and the bot without divergence.
+
+    Args:
+        config: The parsed gateway config mapping (or ``None``/empty).
+
+    Returns:
+        A 12-character hex revision id; a stable sentinel for an empty config.
+    """
+    import hashlib
+    import json
+
+    if not config:
+        return "0" * 12
+    try:
+        canonical = json.dumps(
+            config, sort_keys=True, separators=(",", ":"), default=str
+        )
+    except (TypeError, ValueError):
+        # Fall back to a repr so an un-JSON-able config still hashes stably
+        # rather than raising into the reload/health path.
+        canonical = repr(config)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------
