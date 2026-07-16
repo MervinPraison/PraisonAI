@@ -560,6 +560,25 @@ class TestCompactionSummaryDurability:
             session = store.get_session("s1")
             assert session.last_compaction is None
 
+    def test_reused_compactor_does_not_leak_prior_summary(self):
+        """A stale ``_previous_summary`` must NOT surface on a later non-
+        summarizing pass (Issue #3062 review): otherwise a reused compactor
+        would persist an outdated checkpoint and drop intervening turns on
+        resume. Extraction only reflects the summary of the *current* pass.
+        """
+        compactor = ContextCompactor(max_tokens=10, preserve_recent=1)
+        compactor._previous_summary = "STALE summary from an earlier LLM pass"
+        compactor.strategy = CompactionStrategy.TRUNCATE
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "u1 with a good amount of content here"},
+            {"role": "assistant", "content": "a1 with a good amount of content too"},
+            {"role": "user", "content": "u2 with even more content to force compaction"},
+        ]
+        _, result = compactor.compact(messages)
+        assert "STALE" not in (result.summary or "")
+        assert result.summary == ""
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

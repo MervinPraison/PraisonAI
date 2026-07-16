@@ -421,14 +421,18 @@ class ContextCompactor:
         returns the summary the strategy just injected (LLM or naive), so
         callers/persisters (e.g. ``_persist_compaction_checkpoint``) can make
         it durable. Returns ``""`` for non-summarizing strategies.
+
+        Only summaries produced by the *current* pass are surfaced: we read the
+        message the strategy just injected into ``compacted``. We deliberately
+        do NOT fall back to the instance-level ``_previous_summary``, because a
+        reused compactor would then leak a stale LLM summary into a later
+        TRUNCATE/SLIDING/PRUNE pass and persist an outdated checkpoint that
+        drops intervening turns on resume (Issue #3062 review).
         """
         # Summarizing strategies tag their injected message with ``_compacted``.
         for msg in reversed(compacted):
             if msg.get("_compacted") and isinstance(msg.get("content"), str):
                 return msg["content"]
-        # LLM iterative path keeps the raw summary on the instance.
-        if isinstance(getattr(self, "_previous_summary", None), str):
-            return self._previous_summary
         # Naive ``_summarize`` injects an untagged system summary line.
         for msg in reversed(compacted):
             content = msg.get("content")
