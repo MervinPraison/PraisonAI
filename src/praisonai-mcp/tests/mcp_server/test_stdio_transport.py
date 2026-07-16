@@ -80,3 +80,24 @@ def test_stdio_transport_reports_parse_error(monkeypatch):
     out_buffer.seek(0)
     response = json.loads(out_buffer.read().decode("utf-8").strip())
     assert response["error"]["code"] == -32700
+
+
+def test_stdio_transport_reports_invalid_utf8(monkeypatch):
+    """Malformed UTF-8 yields a -32700 parse error instead of crashing."""
+    from praisonai_mcp.mcp_server.transports.stdio import StdioTransport
+
+    # 0xff is not a valid UTF-8 start byte.
+    monkeypatch.setattr("sys.stdin", _FakeStdin(b"\xff\xfe\n"))
+    out_buffer = io.BytesIO()
+
+    class _FakeStdout:
+        buffer = out_buffer
+
+    monkeypatch.setattr("sys.stdout", _FakeStdout())
+
+    transport = StdioTransport(_FakeServer())
+    asyncio.run(asyncio.wait_for(transport.run(), timeout=5))
+
+    out_buffer.seek(0)
+    response = json.loads(out_buffer.read().decode("utf-8").strip())
+    assert response["error"]["code"] == -32700

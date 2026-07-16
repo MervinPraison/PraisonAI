@@ -35,6 +35,10 @@ class StdioTransport:
     All logging goes to stderr to avoid corrupting the protocol stream.
     """
     
+    # Bound the stdin queue so a fast/malicious client cannot grow memory
+    # without limit; the reader blocks (applying backpressure) when full.
+    _MAX_QUEUE_SIZE = 1000
+
     def __init__(self, server: "MCPServer"):
         """
         Initialize STDIO transport.
@@ -44,6 +48,7 @@ class StdioTransport:
         """
         self.server = server
         self._running = False
+        self._line_queue: "Optional[queue.Queue[Optional[bytes]]]" = None
     
     async def run(self) -> None:
         """Run the STDIO transport loop."""
@@ -57,15 +62,25 @@ class StdioTransport:
         logger.info(f"MCP server '{self.server.name}' starting on STDIO transport")
         
         loop = asyncio.get_running_loop()
-        line_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
+        line_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(
+            maxsize=self._MAX_QUEUE_SIZE
+        )
+        self._line_queue = line_queue
 
         def _blocking_reader() -> None:
             """Read stdin in a dedicated thread; ``None`` signals EOF."""
             try:
                 for raw in sys.stdin.buffer:
+                    # Apply backpressure via a bounded put, but stay responsive
+                    # to stop() by retrying with a timeout.
+                    while self._running:
+                        try:
+                            line_queue.put(raw, timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
                     if not self._running:
                         break
-                    line_queue.put(raw)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(f"Error reading stdin: {exc}")
             finally:
@@ -83,14 +98,14 @@ class StdioTransport:
                     # EOF reached
                     break
 
-                line = raw.decode("utf-8").strip()
-                if not line:
-                    continue
-
-                # Parse JSON-RPC message
+                # Parse JSON-RPC message. Malformed UTF-8 is treated as a parse
+                # error (-32700) rather than terminating the transport.
                 try:
+                    line = raw.decode("utf-8").strip()
+                    if not line:
+                        continue
                     message = json.loads(line)
-                except json.JSONDecodeError as e:
+                except (UnicodeDecodeError, json.JSONDecodeError) as e:
                     logger.error(f"JSON parse error: {e}")
                     self._write_message(
                         {
@@ -118,6 +133,7 @@ class StdioTransport:
                     self._write_message(response)
         finally:
             self._running = False
+            self._line_queue = None
             logger.info("MCP server stopped")
     
     def _write_message(self, message: dict) -> None:
@@ -130,8 +146,19 @@ class StdioTransport:
             logger.error(f"Error writing message: {e}")
     
     def stop(self) -> None:
-        """Stop the transport."""
+        """Stop the transport.
+
+        Wakes the loop even when stdin stays open and idle by enqueueing the
+        EOF sentinel, so a blocked ``line_queue.get`` returns and ``run()``
+        can exit cleanly.
+        """
         self._running = False
+        line_queue = self._line_queue
+        if line_queue is not None:
+            try:
+                line_queue.put_nowait(None)
+            except queue.Full:  # pragma: no cover - defensive
+                pass
 
 
 def run_stdio_server(server: "MCPServer") -> None:
