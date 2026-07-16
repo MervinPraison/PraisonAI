@@ -1221,7 +1221,17 @@ Write the complete compiled report:"""
                 error_msg = f"Error during approval process: {str(e)}"
                 logging.error(error_msg)
                 return {"error": error_msg, "approval_error": True}
-            
+
+            # Policy/guardrail gate (protocol-driven). Mirrors the sync path in
+            # _execute_tool_impl so async callers cannot bypass a PolicyEngine
+            # deny or a tool-call guardrail. The check is pure/sync (no awaits).
+            check = getattr(self, "_check_tool_policy_and_guardrails", None)
+            if check is not None:
+                policy_result = check(function_name, arguments)
+                if isinstance(policy_result, dict):
+                    return policy_result  # Error dict
+                _, arguments = policy_result
+
             # Try to find the function in the override tools list first, then agent's tools list
             func = None
             tools_to_search = tools_override if tools_override is not None else self.tools
