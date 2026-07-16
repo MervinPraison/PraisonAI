@@ -143,3 +143,96 @@ class TestPromptOptimizer:
 
         assert PromptOptimizer is not None
         assert OptimizeResult is not None
+
+    def test_applied_swaps_goal_and_backstory(self):
+        """Effective prompt is driven by goal/backstory, so those must change."""
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        agent = self._make_agent("base")
+        agent.chat = MagicMock(return_value="out")
+        opt = PromptOptimizer(agent, [("p", "e")], metric=lambda o, e: 0.0)
+
+        seen = {}
+        with opt._applied("NEW PROMPT"):
+            seen["instructions"] = agent.instructions
+            seen["goal"] = agent.goal
+            seen["backstory"] = agent.backstory
+
+        assert seen == {
+            "instructions": "NEW PROMPT",
+            "goal": "NEW PROMPT",
+            "backstory": "NEW PROMPT",
+        }
+        # Restored on exit
+        assert agent.instructions == "base"
+        assert agent.goal == "base"
+        assert agent.backstory == "base"
+
+    def test_apply_permanently_updates_effective_fields(self):
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        agent = self._make_agent("base")
+        agent.chat = MagicMock(return_value="out")
+        scores = {"base": 3.0, "A": 9.0}
+
+        opt = PromptOptimizer(agent, [("p", "e")], metric=lambda o, e: 0.0)
+        opt._propose_variants = MagicMock(return_value=["A"])
+        opt._score_instructions = MagicMock(side_effect=lambda instr: scores[instr])
+
+        result = opt.optimize()
+
+        assert result.applied is True
+        assert agent.instructions == "A"
+        assert agent.goal == "A"
+        assert agent.backstory == "A"
+
+    def test_split_variants_keeps_multiline_blocks(self):
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        agent = self._make_agent("base")
+        opt = PromptOptimizer(agent, [("p", "e")], metric=lambda o, e: 0.0)
+
+        response = "Line one\nLine two\n===\nOther one\nOther two"
+        variants = opt._split_variants(response)
+
+        assert variants == ["Line one\nLine two", "Other one\nOther two"]
+
+    def test_split_variants_blank_line_fallback(self):
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        agent = self._make_agent("base")
+        opt = PromptOptimizer(agent, [("p", "e")], metric=lambda o, e: 0.0)
+
+        response = "First multi\nline block\n\nSecond block"
+        variants = opt._split_variants(response)
+
+        assert variants == ["First multi\nline block", "Second block"]
+
+    def test_non_finite_metric_score_floored(self):
+        from praisonaiagents.eval.prompt_optimizer import PromptOptimizer
+
+        agent = self._make_agent("base")
+        opt = PromptOptimizer(agent, [("p", "e")], metric=lambda o, e: float("nan"))
+
+        assert opt._score_one("out", "e") == 0.0
+
+
+class TestLoopNonFiniteScore:
+    def test_metric_nan_is_floored(self):
+        from praisonaiagents.eval.loop import EvaluationLoop
+
+        agent = MagicMock()
+        agent.chat.return_value = "o1"
+
+        loop = EvaluationLoop(
+            agent=agent,
+            criteria="",
+            threshold=8.0,
+            max_iterations=1,
+            mode="review",
+            metric=lambda o: float("inf"),
+        )
+        result = loop.run("prompt")
+
+        assert result.best_score == 0.0
+        assert result.success is False

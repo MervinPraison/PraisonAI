@@ -17,6 +17,7 @@ Example:
 """
 
 import time
+import math
 import logging
 from praisonaiagents._logging import get_logger
 from typing import TYPE_CHECKING, Optional, Callable, Any, List
@@ -125,15 +126,26 @@ class EvaluationLoop:
         and ``suggestions`` so the loop can treat both paths uniformly.
         """
         if self.metric is not None:
-            score = float(self.metric(output))
-            return _MetricScore(score=score)
+            return _MetricScore(score=self._sanitize_score(self.metric(output)))
         return self.judge.run(output=output, criteria=self.criteria)
+
+    @staticmethod
+    def _sanitize_score(value: Any) -> float:
+        """Coerce a metric result to a finite float (NaN/inf -> 0.0).
+
+        Non-finite scores never reach the threshold and make ``max()`` selection
+        order-dependent, so they are floored to the worst score.
+        """
+        score = float(value)
+        if not math.isfinite(score):
+            logger.warning("Metric returned non-finite value %r; treating as 0.0", score)
+            return 0.0
+        return score
 
     async def _score_async(self, output: str):
         """Async twin of :meth:`_score`."""
         if self.metric is not None:
-            score = float(self.metric(output))
-            return _MetricScore(score=score)
+            return _MetricScore(score=self._sanitize_score(self.metric(output)))
         if hasattr(self.judge, 'run_async'):
             return await self.judge.run_async(output=output, criteria=self.criteria)
         return self.judge.run(output=output, criteria=self.criteria)

@@ -23,9 +23,11 @@ Example:
     print(result.best_score, result.best_instructions)
 """
 
+import contextlib
+import math
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Generator, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from ..agent.agent import Agent
@@ -77,6 +79,8 @@ class PromptOptimizer:
         apply: Write the winning instructions back to the agent (default: True).
     """
 
+    _DELIMITER = "==="
+
     def __init__(
         self,
         agent: "Agent",
@@ -114,38 +118,79 @@ class PromptOptimizer:
     def _score_one(self, output: str, expected: Any) -> float:
         """Score a single output against its expected value."""
         if self.metric is not None:
-            return float(self.metric(output, expected))
-        result = self.scorer.run(output=output, expected=expected, criteria=self.criteria)
-        return float(result.score)
+            value = float(self.metric(output, expected))
+        else:
+            result = self.scorer.run(output=output, expected=expected, criteria=self.criteria)
+            value = float(result.score)
+        # Non-finite scores (NaN/inf) break ``max()`` and threshold logic; treat
+        # them as the worst possible score so they never win selection.
+        if not math.isfinite(value):
+            logger.warning("Scorer returned non-finite value %r; treating as 0.0", value)
+            return 0.0
+        return value
+
+    @contextlib.contextmanager
+    def _applied(self, instructions: str) -> Generator[None, None, None]:
+        """Temporarily make ``instructions`` the agent's *effective* prompt.
+
+        The agent's system prompt is derived from ``goal``/``backstory`` (seeded
+        from ``instructions`` at construction) and is cached; swapping only
+        ``instructions`` would leave chat behaviour unchanged. This swaps all
+        three fields, clears the system-prompt cache so the change takes effect,
+        and isolates chat history so eval turns never pollute the live agent.
+        Everything is restored on exit, even on error.
+        """
+        agent = self.agent
+        original = (
+            getattr(agent, "instructions", None),
+            getattr(agent, "goal", None),
+            getattr(agent, "backstory", None),
+        )
+        cache = getattr(agent, "_system_prompt_cache", None)
+        try:
+            agent.instructions = instructions
+            if hasattr(agent, "goal"):
+                agent.goal = instructions
+            if hasattr(agent, "backstory"):
+                agent.backstory = instructions
+            if cache is not None:
+                cache.clear()
+            ephemeral = getattr(agent, "ephemeral", None)
+            if callable(ephemeral):
+                with ephemeral():
+                    yield
+            else:
+                yield
+        finally:
+            agent.instructions, goal, backstory = original[0], original[1], original[2]
+            if goal is not None and hasattr(agent, "goal"):
+                agent.goal = goal
+            if backstory is not None and hasattr(agent, "backstory"):
+                agent.backstory = backstory
+            if cache is not None:
+                cache.clear()
 
     def _score_instructions(self, instructions: str) -> float:
         """Run the agent (with ``instructions``) over the eval set and aggregate.
 
-        Temporarily swaps ``agent.instructions``, runs each prompt, scores it,
-        and returns the mean score. Always restores the original instructions.
+        Temporarily makes ``instructions`` the agent's effective prompt, runs
+        each prompt, scores it, and returns the mean score. Always restores the
+        original agent state.
         """
-        original = self.agent.instructions
         scores: List[float] = []
-        try:
-            self.agent.instructions = instructions
+        with self._applied(instructions):
             for prompt, expected in self.evalset:
                 output = str(self.agent.chat(prompt))
                 scores.append(self._score_one(output, expected))
-        finally:
-            self.agent.instructions = original
         return sum(scores) / len(scores) if scores else 0.0
 
     def _lowest_scoring_examples(self, instructions: str, limit: int = 2) -> List[str]:
         """Return prompts where ``instructions`` scored worst (reflective signal)."""
-        original = self.agent.instructions
         scored: List[Tuple[float, str]] = []
-        try:
-            self.agent.instructions = instructions
+        with self._applied(instructions):
             for prompt, expected in self.evalset:
                 output = str(self.agent.chat(prompt))
                 scored.append((self._score_one(output, expected), prompt))
-        finally:
-            self.agent.instructions = original
         scored.sort(key=lambda x: x[0])
         return [p for _, p in scored[:limit]]
 
@@ -160,9 +205,10 @@ class PromptOptimizer:
             "You are optimising an AI agent's system instructions. "
             f"Rewrite the instructions below into {self.n_candidates} distinct, "
             "improved variants. Each variant must be a complete, standalone set of "
-            "instructions that stays faithful to the original intent while being "
-            "clearer and more effective. Return one variant per line, no numbering, "
-            "no commentary.\n\n"
+            "instructions (which may span multiple lines) that stays faithful to "
+            "the original intent while being clearer and more effective. Separate "
+            f"each variant with a line containing only {self._DELIMITER!r}. "
+            "No numbering, no commentary.\n\n"
             f"Current instructions:\n{base}{weak_block}"
         )
         from ..agent.agent import Agent
@@ -172,7 +218,7 @@ class PromptOptimizer:
             llm=self.model,
         )
         response = str(proposer.chat(proposal_prompt) or "")
-        variants = [line.strip(" -\t") for line in response.splitlines() if line.strip()]
+        variants = self._split_variants(response)
         seen = set()
         unique: List[str] = []
         for v in variants:
@@ -180,6 +226,40 @@ class PromptOptimizer:
                 seen.add(v)
                 unique.append(v)
         return unique[: self.n_candidates]
+
+    def _split_variants(self, response: str) -> List[str]:
+        """Parse the proposer response into complete (possibly multiline) variants.
+
+        Splits on the explicit delimiter when present, otherwise falls back to
+        blank-line-separated blocks, so a multiline prompt is kept intact rather
+        than treated as many single-line fragments.
+        """
+        text = response.strip()
+        if not text:
+            return []
+        if self._DELIMITER in text:
+            blocks = text.split(self._DELIMITER)
+        else:
+            import re
+            blocks = re.split(r"\n\s*\n", text)
+        return [b.strip().strip("-").strip() for b in blocks if b.strip()]
+
+    def _apply_permanently(self, instructions: str) -> None:
+        """Write winning instructions to the fields that drive the system prompt.
+
+        The chat system prompt is built from ``goal``/``backstory`` (both seeded
+        from ``instructions`` at construction) and cached; writing all three and
+        clearing the cache ensures the applied instructions actually take effect.
+        """
+        agent = self.agent
+        agent.instructions = instructions
+        if hasattr(agent, "goal"):
+            agent.goal = instructions
+        if hasattr(agent, "backstory"):
+            agent.backstory = instructions
+        cache = getattr(agent, "_system_prompt_cache", None)
+        if cache is not None:
+            cache.clear()
 
     def optimize(self) -> OptimizeResult:
         """Generate candidates, keep the best, and (optionally) apply it."""
@@ -196,7 +276,7 @@ class PromptOptimizer:
 
         applied = False
         if self.apply and best_instructions != base:
-            self.agent.instructions = best_instructions
+            self._apply_permanently(best_instructions)
             applied = True
 
         return OptimizeResult(

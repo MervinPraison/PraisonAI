@@ -694,8 +694,8 @@ class EvaluationLoopResult:
     total_duration_seconds: float = 0.0
     threshold: float = 8.0
     mode: str = "optimize"
-    best: Optional[IterationResult] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    best: Optional[IterationResult] = None
     
     @property
     def best_iteration(self) -> Optional[IterationResult]:
