@@ -275,6 +275,65 @@ def clear_sessions(
     manager.close()
 
 
+def _require_bridge(port: int = 8765) -> None:
+    """Pre-flight check: verify the bridge server is up with an extension connected.
+
+    Fails fast (a few seconds) with an actionable message instead of letting the
+    CLI hang for the full timeout on keepalive PING/PONG frames.
+    """
+    import json
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = json.loads(resp.read())
+    except (OSError, ValueError):
+        # OSError: bridge unreachable; ValueError/JSONDecodeError: malformed body.
+        console.print("[red]Cannot reach PraisonAI Browser bridge[/red]")
+        console.print(f"  Expected: ws://127.0.0.1:{port}/ws")
+        console.print("  Start server: praisonai browser start --port 8765 --host 127.0.0.1")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+
+    # Prefer the explicit extension count; fall back to total connections for
+    # older servers that don't report extension_connections. Guard against
+    # malformed (non-object / non-integer) responses.
+    if not isinstance(data, dict):
+        console.print("[red]Bridge returned an unexpected health response[/red]")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+
+    ext = data.get("extension_connections")
+    if ext is None:
+        ext = data.get("connections", 0)
+    if not isinstance(ext, int) or isinstance(ext, bool):
+        console.print("[red]Bridge returned an invalid connection count[/red]")
+        console.print(f"  Verify: curl {url}")
+        raise typer.Exit(2)
+    if ext < 1:
+        console.print("[yellow]Bridge is up but no extension is connected[/yellow]")
+        console.print("  1. Open Chrome with the PraisonAI extension and side panel")
+        console.print(f"  2. Verify: curl {url} → extension_connections >= 1")
+        console.print("  3. Use the side panel OR the CLI, not both at once")
+        console.print("  Tip: use --engine cdp for extension-free automation")
+        raise typer.Exit(2)
+
+
+def _exit_for_status(result: Optional[dict]) -> None:
+    """Map a run result status to a CLI exit code (shared by all engine modes).
+
+    Exit codes: 0=success, 2=infra failure, 3=timeout, 1=task failure.
+    """
+    status = (result or {}).get("status")
+    if status in ("error", "no_steps"):
+        raise typer.Exit(2)
+    if status == "timeout":
+        raise typer.Exit(3)
+    if status in ("failed", "stopped"):
+        raise typer.Exit(1)
+
+
 def _run_alternative_engine(
     engine: str,
     goal: str,
@@ -468,6 +527,10 @@ def run_agent(
         console.print(f"   [dim]Debug mode: ON[/dim]")
     console.print()
     
+    # Pre-flight: fail fast if the bridge is down or no extension is connected,
+    # instead of hanging on keepalive PING/PONG until --timeout.
+    _require_bridge(port=8765)
+    
     if debug:
         # Debug mode - connect directly to WebSocket and show all messages
         try:
@@ -561,9 +624,11 @@ def run_agent(
                 return {"status": "error", "error": str(e)}
         
         try:
-            asyncio.run(debug_run())
+            debug_result = asyncio.run(debug_run())
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted[/yellow]")
+            raise typer.Exit(0)
+        _exit_for_status(debug_result)
         return
     
     # Normal mode - poll session database for progress
@@ -587,11 +652,18 @@ def run_agent(
                 
                 # Wait for session_id
                 session_id = None
+                automation_sent = None
                 while True:
                     message = await asyncio.wait_for(ws.recv(), timeout=10)
                     data = json.loads(message)
+                    if data.get("type") == "error":
+                        console.print(f"[red]{data.get('error', 'Server error')}[/red]")
+                        if data.get("code") == "EXTENSION_IN_USE":
+                            console.print("  Stop the side panel agent and retry.")
+                        return {"status": "error", "error": data.get("error")}
                     if data.get("type") == "status" and data.get("session_id"):
                         session_id = data["session_id"]
+                        automation_sent = data.get("start_automation_sent")
                         console.print(f"[dim]Session: {session_id[:8]}[/dim]")
                         break
                 
@@ -599,55 +671,87 @@ def run_agent(
                     console.print("[red]Failed to start session[/red]")
                     return {"status": "error"}
                 
+                if verbose:
+                    if automation_sent:
+                        console.print("[dim]start_automation delivered to extension[/dim]")
+                    elif automation_sent is False:
+                        console.print("[yellow]Warning: start_automation not confirmed[/yellow]")
+                
+                # If the server confirmed no extension received the task, fail fast
+                # instead of polling an empty DB until timeout.
+                if automation_sent is False:
+                    console.print("[red]Extension automation did not start.[/red]")
+                    console.print("  Check: extension connected? side panel stopped? sessions=0?")
+                    return {"status": "error", "session_id": session_id,
+                            "error": "start_automation not delivered"}
+                
                 # Poll session database for progress
                 start_time = time.time()
                 displayed_steps = 0
                 last_url = ""
+                first_step_deadline = 30  # seconds to see the first step
                 
+                # Only apply the first-step watchdog when the server could NOT
+                # confirm delivery to an extension. When start_automation_sent is
+                # True, a slow first step (cold browser, slow navigation, slow
+                # initial model call) is legitimate, so we honour --timeout only.
+                apply_watchdog = automation_sent is not True
+
                 console.print()
                 while time.time() - start_time < timeout:
                     await asyncio.sleep(2)  # Poll every 2s
                     
                     session = session_manager.get_session(session_id)
-                    if not session:
-                        continue
+                    if session:
+                        # Show new steps FIRST so a step written near the deadline
+                        # is observed instead of being rejected unseen.
+                        for step in session["steps"][displayed_steps:]:
+                            step_num = step.get("step_number", displayed_steps)
+                            action = step.get("action", {})
+                            thought = step.get("thought", "")[:80] if step.get("thought") else ""
+                            
+                            console.print(f"\n[bold]Step {step_num}:[/bold]")
+                            
+                            if thought:
+                                console.print(f"  [dim]💭 {thought}...[/dim]")
+                            
+                            if action:
+                                action_type = action.get("action", "wait")
+                                console.print(f"  [yellow]▶ {action_type.upper()}[/yellow]", end="")
+                                if action.get("selector"):
+                                    console.print(f" → {action.get('selector')[:40]}", end="")
+                                if action.get("text"):
+                                    console.print(f" \"{action.get('text')}\"", end="")
+                                console.print()
+                            
+                            displayed_steps += 1
+                        
+                        # Show URL changes
+                        current_url = session.get("current_url", "")
+                        if current_url and current_url != last_url:
+                            console.print(f"  [dim]📍 {current_url[:60]}[/dim]")
+                            last_url = current_url
+                        
+                        # Check completion
+                        status = session.get("status")
+                        if status == "completed":
+                            console.print(f"\n[green]✅ Task completed![/green]")
+                            return {"status": "completed", "session_id": session_id}
+                        elif status in ("failed", "stopped"):
+                            console.print(f"\n[yellow]Session {status}[/yellow]")
+                            return {"status": status, "session_id": session_id}
                     
-                    # Show new steps
-                    for step in session["steps"][displayed_steps:]:
-                        step_num = step.get("step_number", displayed_steps)
-                        action = step.get("action", {})
-                        thought = step.get("thought", "")[:80] if step.get("thought") else ""
-                        
-                        console.print(f"\n[bold]Step {step_num}:[/bold]")
-                        
-                        if thought:
-                            console.print(f"  [dim]💭 {thought}...[/dim]")
-                        
-                        if action:
-                            action_type = action.get("action", "wait")
-                            console.print(f"  [yellow]▶ {action_type.upper()}[/yellow]", end="")
-                            if action.get("selector"):
-                                console.print(f" → {action.get('selector')[:40]}", end="")
-                            if action.get("text"):
-                                console.print(f" \"{action.get('text')}\"", end="")
-                            console.print()
-                        
-                        displayed_steps += 1
-                    
-                    # Show URL changes
-                    current_url = session.get("current_url", "")
-                    if current_url and current_url != last_url:
-                        console.print(f"  [dim]📍 {current_url[:60]}[/dim]")
-                        last_url = current_url
-                    
-                    # Check completion
-                    status = session.get("status")
-                    if status == "completed":
-                        console.print(f"\n[green]✅ Task completed![/green]")
-                        return {"status": "completed", "session_id": session_id}
-                    elif status in ("failed", "stopped"):
-                        console.print(f"\n[yellow]Session {status}[/yellow]")
-                        return {"status": status, "session_id": session_id}
+                    # Watchdog: only when delivery was NOT confirmed. If no step
+                    # is observed within the deadline the extension isn't running
+                    # the task — fail fast with guidance (treated as a timeout).
+                    if (
+                        apply_watchdog
+                        and displayed_steps == 0
+                        and (time.time() - start_time) > first_step_deadline
+                    ):
+                        console.print(f"\n[red]No automation steps in {first_step_deadline}s[/red]")
+                        console.print("  Check: extension connected? side panel stopped? sessions=0?")
+                        return {"status": "no_steps", "session_id": session_id}
                 
                 console.print(f"\n[yellow]⏱️ Timeout after {timeout}s[/yellow]")
                 return {"status": "timeout", "session_id": session_id}
@@ -663,11 +767,12 @@ def run_agent(
     
     try:
         result = asyncio.run(run_with_progress())
-        if result.get("session_id"):
-            console.print(f"   Session: {result['session_id']}")
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
         raise typer.Exit(0)
+    if result.get("session_id"):
+        console.print(f"   Session: {result['session_id']}")
+    _exit_for_status(result)
 
 
 @app.command("tabs")

@@ -243,6 +243,109 @@ class TestStartSession:
         # Cleanup
         if server._sessions:
             server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_start_session_reports_no_extension(self):
+        """With only the CLI caller connected, start_automation is not delivered."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock())
+        # Register the CLI caller as the only connection.
+        server._connections["cli"] = conn
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            conn
+        )
+        
+        assert response["status"] == "running"
+        assert response["start_automation_sent"] is False
+        
+        if server._sessions:
+            server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_start_session_reports_extension_delivery(self):
+        """When an extension is available, start_automation_sent is True."""
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock())
+        ext_ws = Mock()
+        ext_ws.send_text = AsyncMock()
+        ext = ClientConnection(websocket=ext_ws, is_extension=True)
+        server._connections["cli"] = conn
+        server._connections["ext"] = ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            conn
+        )
+        
+        assert response["start_automation_sent"] is True
+        ext_ws.send_text.assert_awaited()
+        
+        if server._sessions:
+            server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_start_session_skips_non_extension_peer(self):
+        """A non-extension peer must not receive start_automation."""
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        conn = ClientConnection(websocket=Mock())
+        # A second CLI-like peer (not an extension) registered BEFORE the ext.
+        peer_ws = Mock()
+        peer_ws.send_text = AsyncMock()
+        peer_ws.send_json = AsyncMock()
+        peer = ClientConnection(websocket=peer_ws, is_extension=False)
+        ext_ws = Mock()
+        ext_ws.send_text = AsyncMock()
+        ext = ClientConnection(websocket=ext_ws, is_extension=True)
+        server._connections["cli"] = conn
+        server._connections["peer"] = peer
+        server._connections["ext"] = ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            conn
+        )
+        
+        assert response["start_automation_sent"] is True
+        ext_ws.send_text.assert_awaited()
+        peer_ws.send_text.assert_not_awaited()
+        peer_ws.send_json.assert_not_awaited()
+        
+        if server._sessions:
+            server._sessions.close()
+
+
+class TestHealthEndpoint:
+    """Tests for the /health endpoint fields."""
+    
+    @pytest.mark.asyncio
+    async def test_health_reports_extension_connections(self):
+        """/health distinguishes extension connections from CLI connections."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        server._connections["cli"] = ClientConnection(websocket=Mock(), is_extension=False)
+        server._connections["ext"] = ClientConnection(websocket=Mock(), is_extension=True)
+        
+        app = server._get_app()
+        # Locate the registered /health route handler and call it directly to
+        # avoid a hard test dependency on an HTTP client (httpx).
+        health = next(
+            r.endpoint for r in app.routes if getattr(r, "path", None) == "/health"
+        )
+        data = await health()
+        
+        assert data["connections"] == 2
+        assert data["extension_connections"] == 1
 
 
 class TestIntegration:

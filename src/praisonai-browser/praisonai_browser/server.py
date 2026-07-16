@@ -155,7 +155,7 @@ class BrowserServer:
         @app.get("/health")
         async def health():
             extension_connections = sum(
-                1 for c in self._connections.values() if c.is_extension
+                1 for c in self._connections.values() if getattr(c, "is_extension", False)
             )
             return {
                 "status": "ok",
@@ -396,8 +396,13 @@ class BrowserServer:
             logger.info(f"[DEBUG] Client {client_id[:8]}: is_self={is_self}, same_id={is_same_id}, websocket={has_websocket}, session={has_session}, conn_id={id(client_conn)}")
 
             # Only send to extensions (not CLI) that don't have an active session
-            print(f"[SERVER] Checking client {client_id[:8]}: conn!=self={client_conn != conn}, ws={client_conn.websocket is not None}, no_session={not client_conn.session_id}", flush=True)
-            if client_conn != conn and client_conn.websocket and not client_conn.session_id:
+            print(f"[SERVER] Checking client {client_id[:8]}: conn!=self={client_conn != conn}, ws={client_conn.websocket is not None}, no_session={not client_conn.session_id}, is_extension={getattr(client_conn, 'is_extension', False)}", flush=True)
+            if (
+                client_conn != conn
+                and client_conn.websocket
+                and not client_conn.session_id
+                and getattr(client_conn, "is_extension", False)
+            ):
                 try:
                     print(f"[SERVER] SENDING start_automation to {client_id[:8]}", flush=True)
                     logger.info(f"[SERVER][START] _handle_start_session:server.py → Sending start_automation to extension {client_id[:8]}")
@@ -430,7 +435,11 @@ class BrowserServer:
             
             # Retry
             for client_id, client_conn in self._connections.items():
-                if client_conn != conn and client_conn.websocket:
+                if (
+                    client_conn != conn
+                    and client_conn.websocket
+                    and getattr(client_conn, "is_extension", False)
+                ):
                     try:
                         await client_conn.websocket.send_json(start_msg)
                         client_conn.session_id = session_id
@@ -440,11 +449,18 @@ class BrowserServer:
                     except Exception as e:
                         logger.error(f"Retry failed for {client_id}: {e}")
         
+        if not sent_to_extension:
+            logger.warning(
+                "[SERVER][START] start_automation was NOT delivered to any extension "
+                "(no extension connected or all busy)"
+            )
+
         return {
             "type": "status",
             "status": "running",
             "session_id": session_id,
             "message": f"Session started with goal: {goal}",
+            "start_automation_sent": sent_to_extension,
         }
     
     async def _handle_observation(
