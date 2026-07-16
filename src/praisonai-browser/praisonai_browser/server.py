@@ -14,6 +14,19 @@ from dataclasses import dataclass
 logger = logging.getLogger("praisonai.browser.server")
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """Return True if a TCP server is already listening on host:port."""
+    import socket
+
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            return s.connect_ex((probe_host, port)) == 0
+        except OSError:
+            return False
+
+
 @dataclass
 class ClientConnection:
     """Represents a connected WebSocket client."""
@@ -553,6 +566,11 @@ class BrowserServer:
                 "uvicorn is required. Install it with: pip install uvicorn"
             )
         
+        if _port_in_use(self.host, self.port):
+            print(f"\nPraisonAI Browser Server already listening on {self.host}:{self.port}")
+            print(f"   Health: http://127.0.0.1:{self.port}/health\n")
+            return
+        
         app = self._get_app()
         self._running = True
         
@@ -566,7 +584,7 @@ class BrowserServer:
         signal.signal(signal.SIGTERM, handle_signal)
         
         logger.info(f"Starting PraisonAI Browser Server on {self.host}:{self.port}")
-        print(f"\n🌐 PraisonAI Browser Server")
+        print(f"\nPraisonAI Browser Server")
         print(f"   WebSocket: ws://{self.host}:{self.port}/ws")
         print(f"   Health:    http://{self.host}:{self.port}/health")
         print(f"   Model:     {self.model}")

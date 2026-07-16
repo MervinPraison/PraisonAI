@@ -56,6 +56,15 @@ def start_server(
         server.start()
     except KeyboardInterrupt:
         console.print("\n[yellow]Server stopped[/yellow]")
+    except OSError as e:
+        if getattr(e, "winerror", None) == 10048 or e.errno in (98, 48):
+            health_url = f"http://127.0.0.1:{port}/health"
+            console.print(f"[yellow]Bridge server already running on port {port}[/yellow]")
+            console.print(f"  Health: {health_url}")
+            console.print("  Leave that terminal open; use a second terminal for commands.")
+            raise typer.Exit(0)
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -246,7 +255,7 @@ def _run_alternative_engine(
     from pathlib import Path
     from datetime import datetime
     
-    console.print(f"[bold blue]🚀 Starting browser agent ({engine} mode)[/bold blue]")
+    console.print(f"[bold blue]Starting browser agent ({engine} mode)[/bold blue]")
     console.print(f"   Goal: {goal}")
     console.print(f"   URL: {url}")
     console.print(f"   Model: {model}")
@@ -411,7 +420,7 @@ def run_agent(
         )
         return
     
-    console.print(f"[bold blue]🚀 Starting browser agent[/bold blue]")
+    console.print(f"[bold blue]Starting browser agent[/bold blue]")
     console.print(f"   Goal: {goal}")
     console.print(f"   URL: {url}")
     console.print(f"   Model: {model}")
