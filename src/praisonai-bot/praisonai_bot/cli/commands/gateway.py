@@ -222,9 +222,18 @@ def _secret_availability(value) -> str:
     Returns ``available`` | ``configured-but-unavailable`` | ``missing`` for a
     reference/`${ENV}`/plaintext input so operators can validate secret wiring
     before start.
+
+    An ``exec``-sourced reference is reported as ``configured`` WITHOUT running
+    its command: the command has side effects (a one-shot / rate-limited /
+    rotating secret-manager call) and the probe resolves the same reference
+    moments later, so executing it here would run it twice. env/file/plaintext
+    resolution is side-effect-free and fully checked.
     """
     try:
         from praisonaiagents.secrets import resolve_secret, AVAILABLE, MISSING
+
+        if isinstance(value, dict) and value.get("source") == "exec":
+            return "configured"
 
         result = resolve_secret(value, redact=False)
         if result.available:
@@ -371,11 +380,12 @@ async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
     return dict(results)
 
 
-def _render_secret_availability(channels: dict, json_output: bool = False) -> None:
-    """Print per-channel credential availability without revealing values (#3102).
+def _compute_secret_availability(channels: dict) -> dict:
+    """Per-channel credential availability without revealing values (#3102).
 
     Reports the ``token`` (and Slack ``app_token`` / WhatsApp ``verify_token``
-    when present) as ``available`` | ``configured-but-unavailable`` | ``missing``.
+    when present) as ``available`` | ``configured-but-unavailable`` |
+    ``configured`` | ``missing``. Returns ``{channel: {field: status}}``.
     """
     _fields = ("token", "app_token", "verify_token")
     report: dict = {}
@@ -388,22 +398,27 @@ def _render_secret_availability(channels: dict, json_output: bool = False) -> No
         }
         if fields:
             report[name] = fields
+    return report
 
+
+def _print_secret_availability(report: dict) -> None:
+    """Print the availability report as a table (values never shown)."""
     if not report:
         return
-
-    if json_output:
-        import json
-
-        print(json.dumps({"secrets": report}, indent=2))
-        return
-
     print("Credential availability (values never shown):")
     for name, fields in report.items():
         for f, status in fields.items():
             mark = "✓" if status == "available" else "✗"
             print(f"{name:<12} {f:<13} {mark}  {status}")
     print()
+
+
+def _probe_results_to_dict(results: dict) -> dict:
+    """JSON-serializable per-channel probe payload."""
+    return {
+        name: r.to_dict() if hasattr(r, "to_dict") else vars(r)
+        for name, r in results.items()
+    }
 
 
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:
@@ -413,15 +428,7 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
     if json_output:
         import json
 
-        print(
-            json.dumps(
-                {
-                    name: r.to_dict() if hasattr(r, "to_dict") else vars(r)
-                    for name, r in results.items()
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps(_probe_results_to_dict(results), indent=2))
         return all_ok
 
     for name, r in results.items():
@@ -467,13 +474,28 @@ def gateway_doctor(
         print("No channels configured.")
         raise typer.Exit(0)
 
-    # Report credential source availability first, WITHOUT printing any value
-    # (Issue #3102): operators can validate file/env/exec secret wiring even
-    # when the network probe cannot run.
-    _render_secret_availability(channels, json_output=json_output)
+    # Credential source availability, computed WITHOUT printing any value
+    # (Issue #3102): operators can validate file/env secret wiring even when
+    # the network probe cannot run.
+    availability = _compute_secret_availability(channels)
 
     results = asyncio.run(_probe_channels(channels))
-    all_ok = _render_probe_results(results, json_output=json_output)
+    all_ok = all(getattr(r, "ok", False) for r in results.values())
+
+    if json_output:
+        # Emit a SINGLE JSON document so consumers using json.load(s) can parse
+        # the whole output (previously the availability and probe blocks were
+        # printed as two separate top-level documents — invalid JSON).
+        import json
+
+        payload = {"probes": _probe_results_to_dict(results)}
+        if availability:
+            payload["secrets"] = availability
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_secret_availability(availability)
+        _render_probe_results(results, json_output=False)
+
     if not all_ok:
         raise typer.Exit(1)
 
