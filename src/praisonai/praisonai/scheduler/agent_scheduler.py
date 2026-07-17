@@ -347,7 +347,13 @@ class AgentScheduler(_BaseAgentScheduler):
             if self._delivery is None:
                 from praisonai.scheduler._delivery import SchedulerDelivery
                 job_id = self.config.get("agent_id", "") if self.config else ""
-                self._delivery = SchedulerDelivery(self.deliver, job_id=job_id)
+                # Pass the persisted origin (if any) so a ``deliver="origin"``
+                # target resolves to the concrete channel the job was created
+                # in — without the full gateway.
+                origin = SchedulerDelivery.origin_from_config(self.config)
+                self._delivery = SchedulerDelivery(
+                    self.deliver, job_id=job_id, origin=origin
+                )
             self._delivery.deliver(str(result))
         except Exception as e:
             logger.error(f"Scheduler delivery error: {e}")

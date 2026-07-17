@@ -94,6 +94,35 @@ class SchedulerDelivery:
             self._parse_target(self._deliver)
         )
 
+    @staticmethod
+    def origin_from_config(config: Optional[Dict[str, Any]]) -> Any:
+        """Extract a persisted origin :class:`DeliveryTarget` from job config.
+
+        A scheduled job persists where it was created on ``ScheduleJob.origin``.
+        When that job is materialised into a scheduler the origin is carried in
+        the ``config`` dict — either as a live :class:`DeliveryTarget` or as its
+        serialised ``dict`` form (from ``to_dict`` / persisted state). Normalise
+        both so ``deliver="origin"`` can resolve to the concrete channel on the
+        lightweight path. Returns ``None`` when no usable origin is present.
+        """
+        if not config:
+            return None
+        origin = config.get("origin")
+        if origin is None:
+            return None
+        if getattr(origin, "channel", None) is not None:
+            return origin
+        if isinstance(origin, dict):
+            try:
+                from praisonaiagents.scheduler import DeliveryTarget
+            except Exception:  # pragma: no cover - core always present
+                return None
+            try:
+                return DeliveryTarget.from_dict(origin)
+            except Exception:
+                return None
+        return None
+
     def _resolve_origin_target(self, target: Any) -> Any:
         """Rewrite a symbolic ``origin`` target to the persisted concrete one.
 
