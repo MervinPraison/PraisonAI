@@ -1092,18 +1092,24 @@ class MCP:
                 pass
         
         # Shutdown HTTP stream client if present
+        # (HTTPStreamMCPClient exposes close(), not shutdown())
         if hasattr(self, 'http_stream_client') and self.http_stream_client is not None:
             try:
                 if hasattr(self.http_stream_client, 'shutdown'):
                     self.http_stream_client.shutdown()
+                elif hasattr(self.http_stream_client, 'close'):
+                    self.http_stream_client.close()
             except Exception:
                 pass
         
         # Shutdown WebSocket client if present
+        # (WebSocketMCPClient exposes close(), not shutdown())
         if hasattr(self, 'websocket_client') and self.websocket_client is not None:
             try:
                 if hasattr(self.websocket_client, 'shutdown'):
                     self.websocket_client.shutdown()
+                elif hasattr(self.websocket_client, 'close'):
+                    self.websocket_client.close()
             except Exception:
                 pass
     

@@ -357,8 +357,12 @@ def _build_execution_context(agents_instance, task_id):
             "Set task.agent or provide task.agent_config before execution."
         )
     
-    # Set current agent for token tracking
-    llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
+    # Set current agent for token tracking.
+    # Prefer the real LLM instance (executor_agent.llm is always a model-name
+    # string, so it never exposes set_current_agent/last_token_metrics).
+    llm = getattr(executor_agent, 'llm_instance', None)
+    if llm is None:
+        llm = getattr(executor_agent, 'llm', None)
     if llm and hasattr(llm, 'set_current_agent'):
         llm.set_current_agent(executor_agent.display_name)
 
