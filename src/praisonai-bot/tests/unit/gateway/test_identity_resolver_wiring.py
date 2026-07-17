@@ -138,5 +138,67 @@ def test_build_creates_resolver_when_enabled(tmp_path):
     assert resolver.resolve("discord", "456") == "user:alice"
 
 
+# ── _reconcile_identity_resolver (hot-reload of the identity: block) ─
+
+
+def test_reconcile_enables_resolver_on_reload(tmp_path):
+    """Enabling ``identity:`` on reload installs a resolver (was a no-op)."""
+    store = tmp_path / "identity.json"
+    gateway = _gateway_with_agent()
+    assert gateway._identity_resolver is None
+    gateway._reconcile_identity_resolver({"enabled": True, "store": str(store)})
+    assert gateway._identity_resolver is not None
+    assert callable(getattr(gateway._identity_resolver, "resolve", None))
+
+
+def test_reconcile_disables_resolver_on_reload(tmp_path):
+    """Disabling ``identity:`` on reload clears the stale resolver."""
+    store = tmp_path / "identity.json"
+    gateway = _gateway_with_agent()
+    gateway._reconcile_identity_resolver({"enabled": True, "store": str(store)})
+    assert gateway._identity_resolver is not None
+    gateway._reconcile_identity_resolver({"enabled": False})
+    assert gateway._identity_resolver is None
+
+
+def test_reconcile_preserves_resolver_when_block_unchanged(tmp_path):
+    """An unchanged block keeps the same live resolver (link cache survives)."""
+    store = tmp_path / "identity.json"
+    cfg = {"enabled": True, "store": str(store)}
+    gateway = _gateway_with_agent()
+    gateway._reconcile_identity_resolver(cfg)
+    first = gateway._identity_resolver
+    first.link("telegram", "123", "user:alice")
+    gateway._reconcile_identity_resolver(dict(cfg))
+    assert gateway._identity_resolver is first
+    assert gateway._identity_resolver.resolve("telegram", "123") == "user:alice"
+
+
+def test_reconcile_repoints_resolver_when_store_changes(tmp_path):
+    """Re-pointing the store rebuilds the resolver."""
+    gateway = _gateway_with_agent()
+    gateway._reconcile_identity_resolver(
+        {"enabled": True, "store": str(tmp_path / "a.json")}
+    )
+    first = gateway._identity_resolver
+    gateway._reconcile_identity_resolver(
+        {"enabled": True, "store": str(tmp_path / "b.json")}
+    )
+    assert gateway._identity_resolver is not first
+
+
+def test_reconcile_never_clobbers_explicit_resolver(tmp_path):
+    """A constructor/CLI resolver always wins over the YAML block on reload."""
+    resolver = _StubResolver()
+    gateway = WebSocketGateway(
+        host="127.0.0.1", port=8903, identity_resolver=resolver
+    )
+    assert gateway._identity_resolver_explicit is True
+    gateway._reconcile_identity_resolver({"enabled": True, "store": str(tmp_path)})
+    assert gateway._identity_resolver is resolver
+    gateway._reconcile_identity_resolver({"enabled": False})
+    assert gateway._identity_resolver is resolver
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

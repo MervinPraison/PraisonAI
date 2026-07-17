@@ -223,6 +223,9 @@ class GatewayHandler:
                             path=os.path.expanduser(identity_store)
                         )
                     )
+                    # Mark explicit so the YAML ``identity:`` block (and its
+                    # hot-reload reconciliation) never clobbers the CLI store.
+                    self._gateway._identity_resolver_explicit = True
                     logger.info(
                         "Gateway cross-platform identity resolution enabled "
                         "(store=%s)", identity_store,
