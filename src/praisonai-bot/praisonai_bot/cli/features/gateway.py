@@ -119,6 +119,7 @@ class GatewayHandler:
         reliability: Optional[str] = None,
         openai_api: Optional[bool] = None,
         mcp: Optional[bool] = None,
+        identity_store: Optional[str] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -152,6 +153,10 @@ class GatewayHandler:
                 + inbound admission in one switch. Overrides
                 ``gateway.reliability``; explicit ``--drain-timeout`` /
                 ``--max-concurrent-runs`` still win.
+            identity_store: Optional path to the cross-platform identity
+                link-map JSON (#3020). Enables one continuous session + memory
+                per paired/linked user across channels. Overrides the
+                ``identity:`` block in the YAML; ``None`` falls back to it.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -207,6 +212,29 @@ class GatewayHandler:
                 self._gateway._openai_api_override = openai_api
             if mcp is not None:
                 self._gateway._mcp_override = mcp
+            # CLI --identity-store enables cross-platform continuity, overriding
+            # the gateway.yaml ``identity:`` block (#3020). A constructor-set
+            # resolver on the gateway always wins over both.
+            if identity_store is not None:
+                try:
+                    from praisonai_bot.bots import StoreBackedIdentityResolver
+                    self._gateway._identity_resolver = (
+                        StoreBackedIdentityResolver.from_env(
+                            path=os.path.expanduser(identity_store)
+                        )
+                    )
+                    # Mark explicit so the YAML ``identity:`` block (and its
+                    # hot-reload reconciliation) never clobbers the CLI store.
+                    self._gateway._identity_resolver_explicit = True
+                    logger.info(
+                        "Gateway cross-platform identity resolution enabled "
+                        "(store=%s)", identity_store,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not enable identity resolver from "
+                        "--identity-store %s: %s", identity_store, e,
+                    )
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
@@ -687,6 +715,13 @@ def handle_gateway_command(args) -> int:
             help="Named reliability posture composing drain + admission in one "
                  "switch (#2531)",
         )
+        start_parser.add_argument(
+            "--identity-store", dest="identity_store", default=None,
+            help="Enable cross-platform conversation continuity: path to the "
+                 "identity link-map JSON (default ~/.praisonai/identity.json). "
+                 "Paired/linked users share one session + memory across "
+                 "channels (#3020)",
+        )
         
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -755,6 +790,7 @@ def handle_gateway_command(args) -> int:
             queue_depth=getattr(args, "queue_depth", None),
             overflow_policy=getattr(args, "overflow_policy", None),
             reliability=getattr(args, "reliability", None),
+            identity_store=getattr(args, "identity_store", None),
         )
     elif subcommand == "status":
         handler.status(
