@@ -927,6 +927,7 @@ class WebSocketGateway:
         self._on_quiesce: Optional[Callable[[], Any]] = None
         self._lifecycle_task: Optional[asyncio.Task] = None
         self._drain_marker_task: Optional[asyncio.Task] = None
+        self._lifecycle_drain_timeout: Optional[float] = None
 
     @property
     def is_running(self) -> bool:
@@ -2106,16 +2107,28 @@ class WebSocketGateway:
         policy = self._idle_policy
         if policy is None:
             return
+        # Issue #3021: the gateway keeps its listening socket open when dormant
+        # and self-wakes on the next inbound client frame (``_handle_client_message``
+        # calls ``wake()``), so a resume path always exists — an external
+        # ``wake_url`` is only needed to also resume a suspended compute host.
+        # Treat the process as inherently wake-registered so CLI-only
+        # ``--scale-to-zero`` (no wake_url) still arms and quiesces.
         wake_url = getattr(policy, "wake_url", None)
+        wake_registered = wake_url is not None or self._on_quiesce is None
         if hasattr(policy, "should_arm"):
             if not policy.should_arm(
                 transports_quiescable=True,
-                wake_registered=wake_url is not None,
+                wake_registered=wake_registered,
             ):
                 logger.info(
                     "Gateway idle policy not armed (no wake path); staying always-on"
                 )
                 return
+        # Issue #3021: start the idle clock from when serving begins, not from
+        # object construction. An embedding process may build the gateway well
+        # before it starts; without this reset the first poll could quiesce a
+        # freshly-serving gateway instead of waiting a full idle interval.
+        self._last_inbound_ts = time.time()
         logger.info("Gateway idle-dormancy armed (scale-to-zero)")
         try:
             while self._is_running:
@@ -2194,6 +2207,59 @@ class WebSocketGateway:
                     self._draining = False
         except asyncio.CancelledError:
             raise
+
+    def _reconcile_lifecycle(self, cfg: Dict[str, Any]) -> None:
+        """Rebuild lifecycle policies + loops from a reloaded config.
+
+        Called on hot-reload so toggling scale-to-zero, changing the idle
+        window, or repointing the drain marker takes effect without a full
+        process restart. Rebuilds the pure policies via ``_configure_lifecycle``
+        then cancels and (re)launches only the loops whose enablement changed,
+        so an unchanged ``lifecycle`` block leaves the running tasks untouched.
+        No-op when no event loop is running (e.g. unit-time reconfigure).
+        """
+        gw_cfg = cfg.get("gateway", {}) if isinstance(cfg, dict) else {}
+        lifecycle_cfg = cfg.get("lifecycle", gw_cfg.get("lifecycle"))
+        lifecycle_cfg = self._merge_lifecycle_overrides(
+            lifecycle_cfg, self._lifecycle_drain_timeout
+        )
+
+        # Reset the policies before rebuilding so a removed block disables the
+        # corresponding feature rather than leaving stale state.
+        prev_idle = self._idle_policy is not None
+        prev_drain = self._drain_marker_policy is not None
+        self._idle_policy = None
+        self._drain_marker_policy = None
+        self._drain_marker_path = None
+        self._configure_lifecycle(lifecycle_cfg)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        now_idle = self._idle_policy is not None
+        now_drain = self._drain_marker_policy is not None
+
+        if now_idle != prev_idle:
+            if self._lifecycle_task is not None:
+                self._lifecycle_task.cancel()
+                self._lifecycle_task = None
+            if now_idle:
+                self._is_dormant = False
+                self._lifecycle_task = loop.create_task(
+                    self._run_idle_loop(), name="gateway-idle"
+                )
+
+        if now_drain != prev_drain:
+            if self._drain_marker_task is not None:
+                self._drain_marker_task.cancel()
+                self._drain_marker_task = None
+            if now_drain:
+                self._drain_marker_task = loop.create_task(
+                    self._run_drain_marker_watch(self._lifecycle_drain_timeout),
+                    name="gateway-drain-marker",
+                )
 
     async def _drain_active_sessions(self, reason: str = "shutdown", timeout: float = 10.0) -> None:
         """Drain active sessions by waiting for in-flight executions to complete.
@@ -2315,7 +2381,16 @@ class WebSocketGateway:
         the return value are unaffected.
         """
         msg_type = data.get("type", "message")
-        
+
+        # Issue #3021: record inbound activity for idle tracking and wake the
+        # gateway if it had quiesced. Cheap timestamp write + idempotent wake;
+        # both are no-ops when scale-to-zero is unconfigured. Doing this at the
+        # single client-frame entry point ensures a live handshake can never be
+        # quiesced mid-flight (closes the wake-tracking gap).
+        self.notify_inbound()
+        if self._is_dormant:
+            await self.wake()
+
         # Handle versioned handshake
         if msg_type == "hello":
             agent_id = data.get("agent_id")
@@ -5069,8 +5144,35 @@ class WebSocketGateway:
                 self._inject_routing_handler(name, bot)
                 await bot.start()
         
-        # Use supervisor for resilient channel management
-        await self._channel_supervisor.run(name, bot, start_bot)
+        # Issue #3021: crash-loop breaker. When a restart-loop guard is
+        # configured, record each supervised boot that ends by crashing and,
+        # once the guard trips (>= max_restarts within window_seconds), stop
+        # auto-resurrecting this channel instead of hammering a tight restart
+        # loop. No-op when the guard is unconfigured, so existing unlimited-retry
+        # behaviour is unchanged by default.
+        guard = self._restart_loop_guard
+        if guard is None:
+            await self._channel_supervisor.run(name, bot, start_bot)
+            return
+        while self._is_running:
+            try:
+                await self._channel_supervisor.run(name, bot, start_bot)
+                guard.reset()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if guard.record(now=time.monotonic()):
+                    logger.error(
+                        "Channel '%s' crash-loop breaker tripped "
+                        "(>= %d restarts in %ss); halting auto-resume: %s",
+                        name, guard.max_restarts, guard.window_seconds, e,
+                    )
+                    return
+                logger.warning(
+                    "Channel '%s' supervisor exited with error; retrying: %s",
+                    name, e,
+                )
 
     @staticmethod
     def _is_telegram_bot(bot: Any) -> bool:
@@ -5880,6 +5982,12 @@ class WebSocketGateway:
         # rotated hook secrets take effect without a full process restart.
         self._apply_hooks_from_config(new_cfg)
 
+        # Issue #3021: reconcile opt-in lifecycle policies on reload so enabling
+        # / disabling scale-to-zero or changing the drain-marker path takes
+        # effect without a full process restart. No-op when the ``lifecycle``
+        # block is absent and unchanged.
+        self._reconcile_lifecycle(new_cfg)
+
         # Issue #2661: pick up a rotated shared gateway secret and force-close
         # every live session that authenticated under the previous secret, so a
         # leaked/revoked credential stops working within one reload cycle
@@ -6434,6 +6542,9 @@ class WebSocketGateway:
         # CLI overrides (stamped on the instance) win over / synthesise the YAML.
         lifecycle_cfg = self._merge_lifecycle_overrides(lifecycle_cfg, drain_timeout_cfg)
         self._configure_lifecycle(lifecycle_cfg)
+        # Remember the drain-timeout so a later reload can rebuild the drain
+        # watcher task with the same bound (Issue #3021 lifecycle reconcile).
+        self._lifecycle_drain_timeout = drain_timeout_cfg
 
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})
