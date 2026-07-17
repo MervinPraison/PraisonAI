@@ -89,6 +89,11 @@ def get_praisonai_mcp_dir() -> Path:
     return get_project_root() / "src/praisonai-mcp"
 
 
+def get_praisonai_sandbox_dir() -> Path:
+    """Get the praisonai-sandbox package directory."""
+    return get_project_root() / "src/praisonai-sandbox"
+
+
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
     """Run a command and print it."""
     if not silent:
@@ -211,6 +216,8 @@ def bump_version(
     browser_pin_only: bool = False,
     mcp_version: Optional[str] = None,
     mcp_pin_only: bool = False,
+    sandbox_version: Optional[str] = None,
+    sandbox_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
@@ -220,7 +227,7 @@ def bump_version(
     train_dir = get_praisonai_train_dir()
     browser_dir = get_praisonai_browser_dir()
     mcp_dir = get_praisonai_mcp_dir()
-    
+    sandbox_dir = get_praisonai_sandbox_dir()
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
     # 1. Update version.py (single source of truth)
@@ -405,6 +412,32 @@ def bump_version(
             root,
         )
 
+    if sandbox_version:
+        if sandbox_pin_only:
+            print(f"\n📦 Pinning praisonai-sandbox dependency to >={sandbox_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-sandbox to {sandbox_version}:")
+            update_file(
+                sandbox_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{sandbox_version}"')],
+                root,
+            )
+            update_file(
+                sandbox_dir / "praisonai_sandbox/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{sandbox_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-sandbox(?:>=[0-9.]+)?"',
+                    f'"praisonai-sandbox>={sandbox_version}"',
+                )
+            ],
+            root,
+        )
+
     print("\n✨ Version bump complete!")
 
 
@@ -418,11 +451,12 @@ def validate_dependencies(
     train_version: Optional[str] = None,
     browser_version: Optional[str] = None,
     mcp_version: Optional[str] = None,
+    sandbox_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version or bot_version or train_version or browser_version or mcp_version:
+    if agents_version or code_version or bot_version or train_version or browser_version or mcp_version or sandbox_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
@@ -436,6 +470,8 @@ def validate_dependencies(
             lock_cmd.extend(["--upgrade-package", f"praisonai-browser=={browser_version}"])
         if mcp_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-mcp=={mcp_version}"])
+        if sandbox_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-sandbox=={sandbox_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -531,6 +567,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai-mcp/pyproject.toml",
         "src/praisonai-mcp/praisonai_mcp/_version.py",
         "src/praisonai-mcp/uv.lock",
+        "src/praisonai-sandbox/pyproject.toml",
+        "src/praisonai-sandbox/praisonai_sandbox/_version.py",
+        "src/praisonai-sandbox/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -699,9 +738,19 @@ Examples:
         help="Wait for the specified praisonai-mcp version to be available on PyPI"
     )
     parser.add_argument(
+        "--sandbox-pin",
+        help="Pin praisonai-sandbox>= in wrapper pyproject only (after CI sandbox publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-sandbox",
+        action="store_true",
+        help="Wait for the specified praisonai-sandbox version to be available on PyPI"
+    )
+    parser.add_argument(
         "--wait-all",
         action="store_true",
-        help="Wait for agents, code, bot, train, browser, and mcp versions on PyPI (needs --agents and pins)",
+        help="Wait for agents, code, bot, train, browser, mcp, and sandbox versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -755,6 +804,7 @@ Examples:
     train_version = args.train or args.train_pin
     browser_version = args.browser_pin
     mcp_version = args.mcp_pin
+    sandbox_version = args.sandbox_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
@@ -779,6 +829,11 @@ Examples:
         print(f"❌ Invalid mcp version format: {mcp_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.1)")
         sys.exit(1)
+
+    if sandbox_version and not re.match(r'^\d+\.\d+\.\d+$', sandbox_version):
+        print(f"❌ Invalid sandbox version format: {sandbox_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.1)")
+        sys.exit(1)
     
     # Pre-flight checks
     print("\n🔍 Pre-flight checks...")
@@ -801,6 +856,7 @@ Examples:
     wait_train = args.wait_train or args.wait_all
     wait_browser = args.wait_browser or args.wait_all
     wait_mcp = args.wait_mcp or args.wait_all
+    wait_sandbox = args.wait_sandbox or args.wait_all
 
     if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
@@ -832,6 +888,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-mcp", mcp_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-mcp was published successfully")
             sys.exit(1)
+
+    if wait_sandbox and sandbox_version:
+        if not wait_for_pypi_version("praisonai-sandbox", sandbox_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-sandbox was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -847,6 +908,8 @@ Examples:
         browser_pin_only=bool(args.browser_pin),
         mcp_version=mcp_version,
         mcp_pin_only=bool(args.mcp_pin),
+        sandbox_version=sandbox_version,
+        sandbox_pin_only=bool(args.sandbox_pin),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -861,6 +924,7 @@ Examples:
         train_version=train_version,
         browser_version=browser_version,
         mcp_version=mcp_version,
+        sandbox_version=sandbox_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

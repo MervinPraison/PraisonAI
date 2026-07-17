@@ -13,10 +13,10 @@ import asyncio
 import os
 import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 try:
-    from praisonai.sandbox.subprocess import SubprocessSandbox
+    from praisonai_sandbox.subprocess import SubprocessSandbox
     from praisonaiagents.sandbox import SandboxConfig, ResourceLimits, SandboxStatus
     from praisonaiagents.sandbox.config import SecurityPolicy
 except ImportError as e:
@@ -59,7 +59,7 @@ class TestEnvironmentIsolation:
         """When allow_network=True, proxy vars should be passed through."""
         policy = SecurityPolicy(
             allow_network=True,
-            allow_filesystem_write=False,
+            allow_file_write=False,
             max_output_size=1024 * 1024
         )
         
@@ -86,7 +86,7 @@ class TestEnvironmentIsolation:
         """When allow_network=False, proxy vars should be blocked."""
         policy = SecurityPolicy(
             allow_network=False,
-            allow_filesystem_write=False,
+            allow_file_write=False,
             max_output_size=1024 * 1024
         )
         
@@ -162,26 +162,31 @@ class TestResourceLimits:
         )
         
         # Mock the resource module to verify correct calls
-        with patch('praisonai.sandbox.subprocess.resource') as mock_resource:
-            mock_resource.RLIMIT_AS = 9
-            mock_resource.RLIMIT_NPROC = 7  
-            mock_resource.RLIMIT_NOFILE = 8
-            
-            sandbox._apply_rlimits(limits)
-            
-            # Verify setrlimit was called with correct memory limit (128MB in bytes)
+        with patch("resource.setrlimit") as mock_setrlimit:
+            with patch("resource.RLIMIT_AS", 9, create=True):
+                with patch("resource.RLIMIT_NPROC", 7, create=True):
+                    with patch("resource.RLIMIT_NOFILE", 8, create=True):
+                        sandbox._apply_rlimits(limits)
+
             expected_memory = 128 * 1024 * 1024
-            mock_resource.setrlimit.assert_any_call(9, (expected_memory, expected_memory))
-            mock_resource.setrlimit.assert_any_call(7, (10, 10))  # max_processes
-            mock_resource.setrlimit.assert_any_call(8, (50, 50))  # max_open_files
+            mock_setrlimit.assert_any_call(9, (expected_memory, expected_memory))
+            mock_setrlimit.assert_any_call(7, (10, 10))
+            mock_setrlimit.assert_any_call(8, (50, 50))
 
     def test_apply_rlimits_handles_missing_resource_module(self):
         """Should handle gracefully when resource module is not available."""
         sandbox = SubprocessSandbox()
         limits = ResourceLimits(memory_mb=128, timeout_seconds=30)
-        
-        with patch('praisonai.sandbox.subprocess.resource', side_effect=ImportError):
-            with patch('praisonai.sandbox.subprocess.logger') as mock_logger:
+
+        real_import = __import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "resource":
+                raise ImportError("no resource")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with patch("praisonai_sandbox.subprocess.logger") as mock_logger:
                 sandbox._apply_rlimits(limits)
                 mock_logger.warning.assert_called_once()
 
@@ -191,7 +196,7 @@ class TestResourceLimits:
         limits = ResourceLimits(memory_mb=128, timeout_seconds=30)
         
         with patch('os.name', 'nt'):  # Windows
-            with patch('praisonai.sandbox.subprocess.logger') as mock_logger:
+            with patch('praisonai_sandbox.subprocess.logger') as mock_logger:
                 sandbox._apply_rlimits(limits)
                 mock_logger.warning.assert_called_with(
                     "Resource limits not supported on Windows - sandbox isolation is weaker"
@@ -207,7 +212,7 @@ class TestOutputSizeLimit:
         # Create a policy with small output limit for testing
         policy = SecurityPolicy(
             allow_network=False,
-            allow_filesystem_write=True,
+            allow_file_write=True,
             max_output_size=100  # Very small for testing
         )
         
@@ -234,7 +239,7 @@ class TestOutputSizeLimit:
         """Small output should not be truncated."""
         policy = SecurityPolicy(
             allow_network=False,
-            allow_filesystem_write=True,
+            allow_file_write=True,
             max_output_size=1000
         )
         
@@ -307,8 +312,9 @@ class TestCrossPlatformCompatibility:
             with patch('asyncio.create_subprocess_exec') as mock_create:
                 mock_proc = MagicMock()
                 mock_proc.pid = 1234
-                mock_proc.communicate.side_effect = asyncio.TimeoutError()
-                mock_proc.wait.return_value = None
+                mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+                mock_proc.wait = AsyncMock(return_value=None)
+                mock_proc.kill = MagicMock()
                 mock_create.return_value = mock_proc
                 
                 await sandbox.start()
@@ -329,8 +335,8 @@ class TestCrossPlatformCompatibility:
                     with patch('signal.SIGKILL', 9):
                         mock_proc = MagicMock()
                         mock_proc.pid = 1234
-                        mock_proc.communicate.side_effect = asyncio.TimeoutError()
-                        mock_proc.wait.return_value = None
+                        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+                        mock_proc.wait = AsyncMock(return_value=None)
                         mock_create.return_value = mock_proc
                         
                         await sandbox.start()

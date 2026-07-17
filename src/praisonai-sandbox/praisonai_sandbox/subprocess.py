@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import tempfile
 import time
 import uuid
@@ -32,7 +33,7 @@ class SubprocessSandbox:
     Less secure than Docker but works without Docker installation.
     
     Example:
-        from praisonai.sandbox import SubprocessSandbox
+        from praisonai_sandbox import SubprocessSandbox
         
         sandbox = SubprocessSandbox()
         result = await sandbox.execute("print('Hello, World!')")
@@ -67,8 +68,17 @@ class SubprocessSandbox:
                 if var in os.environ:
                     env[var] = os.environ[var]
 
-        # Always pass a minimal PATH (so /usr/bin/python resolves) — never the host's.
-        env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+        # Always pass a minimal PATH (so python resolves) — never the host's.
+        env.setdefault(
+            "PATH",
+            os.pathsep.join(
+                p for p in (
+                    os.path.dirname(sys.executable) if sys.executable else "",
+                    "/usr/local/bin", "/usr/bin", "/bin",
+                )
+                if p
+            ),
+        )
         # HOME uses temp_dir which is set during start() - /tmp is defensive fallback  # noqa: S108
         env.setdefault("HOME", self._temp_dir or "/tmp")
         return env
@@ -186,12 +196,13 @@ class SubprocessSandbox:
         with open(code_file, "w") as f:
             f.write(code)
         
+        python_exe = sys.executable or "python"
         if language == "python":
-            cmd = ["python", code_file]
+            cmd = [python_exe, code_file]
         elif language == "bash":
             cmd = ["bash", code_file]
         else:
-            cmd = ["python", code_file]
+            cmd = [python_exe, code_file]
         
         # Build environment based on security policy instead of copying host environment
         process_env = self._build_child_env(self.config.security_policy, env)

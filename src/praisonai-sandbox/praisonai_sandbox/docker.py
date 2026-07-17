@@ -32,7 +32,7 @@ class DockerSandbox:
     and security policies.
     
     Example:
-        from praisonai.sandbox import DockerSandbox
+        from praisonai_sandbox import DockerSandbox
         
         sandbox = DockerSandbox(image="python:3.11-slim")
         result = await sandbox.execute("print('Hello, World!')")

@@ -27,7 +27,7 @@ class DaytonaSandbox:
     pre-configured tooling and dependencies.
     
     Example:
-        from praisonai.sandbox import DaytonaSandbox
+        from praisonai_sandbox import DaytonaSandbox
         
         sandbox = DaytonaSandbox(
             workspace_template="python-dev",

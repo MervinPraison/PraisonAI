@@ -28,7 +28,7 @@ class ModalSandbox:
     and resource management.
     
     Example:
-        from praisonai.sandbox import ModalSandbox
+        from praisonai_sandbox import ModalSandbox
         
         sandbox = ModalSandbox(gpu="A100")
         result = await sandbox.execute("import torch; print(torch.cuda.is_available())")

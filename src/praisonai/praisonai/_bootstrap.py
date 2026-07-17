@@ -91,3 +91,19 @@ def ensure_praisonai_mcp() -> None:
         root = str(mcp_src)
         if root not in sys.path:
             sys.path.insert(0, root)
+
+
+def ensure_praisonai_sandbox() -> None:
+    """Ensure ``praisonai_sandbox`` can be imported in monorepo dev layouts."""
+    try:
+        import praisonai_sandbox  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    wrapper_src = Path(__file__).resolve().parents[1]  # .../src/praisonai
+    sandbox_src = wrapper_src.parent / "praisonai-sandbox"
+    if (sandbox_src / "praisonai_sandbox").is_dir():
+        root = str(sandbox_src)
+        if root not in sys.path:
+            sys.path.insert(0, root)

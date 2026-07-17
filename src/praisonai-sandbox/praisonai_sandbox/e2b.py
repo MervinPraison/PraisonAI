@@ -30,7 +30,7 @@ class E2BSandbox:
     
     Example:
         import os
-        from praisonai.sandbox import E2BSandbox
+        from praisonai_sandbox import E2BSandbox
         
         os.environ["E2B_API_KEY"] = "your-api-key"
         sandbox = E2BSandbox()
@@ -56,7 +56,8 @@ class E2BSandbox:
     def is_available(self) -> bool:
         """Check if E2B is available."""
         try:
-            import e2b_code_interpreter
+            import importlib
+            importlib.import_module("e2b_code_interpreter")
             api_key = os.getenv("E2B_API_KEY")
             return api_key is not None and api_key.strip() != ""
         except ImportError:
@@ -295,7 +296,8 @@ class E2BSandbox:
             await self.start()
         
         if isinstance(command, list):
-            command = " ".join(command)
+            import shlex
+            command = shlex.join(command)
         
         return await self._execute_bash_command(command, limits or self.config.resource_limits, env, working_dir)
     

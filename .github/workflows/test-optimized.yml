@@ -85,6 +85,7 @@ jobs:
           tests/unit/test_c9_1_boundaries.py \
           tests/unit/test_c11_browser_backward_compat.py \
           tests/unit/test_c12_mcp_backward_compat.py \
+          tests/unit/test_c13_sandbox_backward_compat.py \
           -q --tb=line --timeout=30 --maxfail=5
         python -m pytest tests/unit/cli/ \
           ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
@@ -251,10 +252,27 @@ jobs:
         bash "$GITHUB_WORKSPACE/scripts/check_c12_mcp_imports.sh"
         python -m pytest src/praisonai-mcp/tests/mcp_server -q -m "not network"
 
+    - name: Standalone praisonai-sandbox smoke (C13)
+      run: |
+        set -euo pipefail
+        python -m venv /tmp/praisonai-sandbox-standalone
+        /tmp/praisonai-sandbox-standalone/bin/pip install -q -e src/praisonai-agents -e src/praisonai-sandbox
+        /tmp/praisonai-sandbox-standalone/bin/python -c "
+        from praisonai_sandbox._version import __version__ as pkg_version
+        import praisonai_sandbox
+        assert praisonai_sandbox.__version__ == pkg_version
+        for heavy in ('docker', 'modal', 'e2b'):
+            assert heavy not in __import__('sys').modules
+        print('sandbox standalone ok', praisonai_sandbox.__version__)
+        "
+        /tmp/praisonai-sandbox-standalone/bin/praisonai-sandbox --help
+        bash "$GITHUB_WORKSPACE/scripts/check_c13_sandbox_imports.sh"
+        python -m pytest src/praisonai-sandbox/tests -q -m "not network"
+
     - name: Audit hybrid module imports (C8 full stack)
       run: |
         set -euo pipefail
-        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai-mcp -e src/praisonai
+        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai-mcp -e src/praisonai-sandbox -e src/praisonai
         python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary
@@ -320,7 +338,6 @@ jobs:
           --ignore=tests/e2e \
           --ignore=tests/live \
           --ignore=tests/unit/jobs \
-          --ignore=tests/unit/sandbox \
           --ignore=tests/unit/test_langflow_components.py \
           --cov=praisonai \
           --cov-report=xml \

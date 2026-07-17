@@ -106,23 +106,13 @@ crawl = [
     "playwright>=1.47.0",
 ]
 
-# Sandbox dependencies
-sandbox = [
-    "e2b-code-interpreter>=1.0.0",
-]
-
 # Declarative agent UI (Google A2UI SDK — lazy loaded)
 a2ui = [
     "a2ui-agent-sdk>=0.2.1",
     "a2a-sdk>=0.3.0,<1.0.0",
 ]
 
-# Docker sandbox dependencies
-sandbox-docker = [
-    "docker>=7.0.0",
-]
-
-# Combined features
+# Declarative agent UI (Google A2UI SDK — lazy loaded)
 all = [
     "praisonaiagents[memory]",
     "praisonaiagents[knowledge]",
@@ -133,7 +123,6 @@ all = [
     "praisonaiagents[telemetry]",
     "praisonaiagents[mongodb]",
     "praisonaiagents[auth]",
-    "praisonaiagents[sandbox]",
     "praisonaiagents[search]",
     "praisonaiagents[crawl]",
     "praisonaiagents[autonomy]",

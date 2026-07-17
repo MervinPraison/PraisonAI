@@ -49,7 +49,7 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
-            from praisonai.sandbox._registry import SandboxRegistry
+            from praisonai_sandbox._registry import SandboxRegistry
             
             registry = SandboxRegistry.default()
             try:
@@ -59,7 +59,8 @@ class SandboxHandler:
                 print(
                     f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
                     f"Available: {registry.list_names()}\n"
-                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"To install the optional backend:  pip install praisonai-sandbox[{sandbox_type}] "
+                    f"or pip install \"praisonai[sandbox]\"\n"
                     f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
                 )
                 sys.exit(2)
@@ -113,7 +114,7 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
-            from praisonai.sandbox._registry import SandboxRegistry
+            from praisonai_sandbox._registry import SandboxRegistry
             
             registry = SandboxRegistry.default()
             try:
@@ -123,7 +124,8 @@ class SandboxHandler:
                 print(
                     f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
                     f"Available: {registry.list_names()}\n"
-                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"To install the optional backend:  pip install praisonai-sandbox[{sandbox_type}] "
+                    f"or pip install \"praisonai[sandbox]\"\n"
                     f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
                 )
                 sys.exit(2)
@@ -181,7 +183,7 @@ class SandboxHandler:
         print("Subprocess sandbox: Available")
         
         try:
-            from praisonai.sandbox import DockerSandbox
+            from praisonai_sandbox import DockerSandbox
             sandbox = DockerSandbox()
             if sandbox.is_available:
                 print("Docker sandbox: Available")
