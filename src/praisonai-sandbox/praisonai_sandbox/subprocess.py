@@ -72,7 +72,10 @@ class SubprocessSandbox:
         env.setdefault(
             "PATH",
             os.pathsep.join(
-                p for p in (os.path.dirname(sys.executable), "/usr/local/bin", "/usr/bin", "/bin")
+                p for p in (
+                    os.path.dirname(sys.executable) if sys.executable else "",
+                    "/usr/local/bin", "/usr/bin", "/bin",
+                )
                 if p
             ),
         )
@@ -193,12 +196,13 @@ class SubprocessSandbox:
         with open(code_file, "w") as f:
             f.write(code)
         
+        python_exe = sys.executable or "python"
         if language == "python":
-            cmd = [sys.executable, code_file]
+            cmd = [python_exe, code_file]
         elif language == "bash":
             cmd = ["bash", code_file]
         else:
-            cmd = [sys.executable, code_file]
+            cmd = [python_exe, code_file]
         
         # Build environment based on security policy instead of copying host environment
         process_env = self._build_child_env(self.config.security_policy, env)

@@ -259,8 +259,8 @@ class SandlockSandbox:
             os.path.join(self._temp_dir, path.lstrip("/"))
         )
         sandbox_root = os.path.realpath(self._temp_dir)
-        # Ensure the resolved path is strictly inside the sandbox root (not equal to it)
-        if not candidate.startswith(sandbox_root + os.sep):
+        # Allow the sandbox root itself (e.g. list_files("/")) or any path inside it.
+        if candidate != sandbox_root and not candidate.startswith(sandbox_root + os.sep):
             logger.warning("Path traversal attempt blocked: %s", path)
             return None
         return candidate
