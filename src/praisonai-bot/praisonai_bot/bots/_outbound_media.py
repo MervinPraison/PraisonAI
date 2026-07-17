@@ -326,6 +326,27 @@ def _accepts_caption(func: Any) -> bool:
     )
 
 
+def _accepts_kwarg(func: Any, name: str) -> bool:
+    """Return True if ``func`` accepts keyword ``name`` (or **kwargs).
+
+    Used to thread a resolved ``thread_id`` into an upload primitive only when
+    it can carry it, so an adapter/primitive without the parameter is left
+    completely unaffected (no ``TypeError``) — mirroring the text path's
+    ``_accepts_thread_id`` guard so threaded text and media route alike.
+    """
+    if not name:
+        return False
+    try:
+        import inspect
+
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 def _telegram_chat_id(channel_id: str) -> Any:
     """Coerce numeric Telegram IDs to int; pass ``@channelusername`` strings.
 
@@ -342,6 +363,7 @@ async def deliver_media_to_adapter(
     path: str,
     *,
     caption: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> bool:
     """Upload a validated local ``path`` through a live platform ``adapter``.
 
@@ -353,6 +375,13 @@ async def deliver_media_to_adapter(
     * Slack's ``_client.files_upload_v2``;
     * Discord's ``_client.get_channel(...).send(file=...)``.
 
+    When ``thread_id`` is given (a Slack ``thread_ts``, Telegram forum topic, or
+    Discord thread) it is threaded into each primitive via that transport's
+    native keyword so a threaded target delivers the attachment into the thread
+    rather than the parent chat — matching the text path. It is passed only when
+    the primitive accepts it, so adapters/primitives lacking thread support are
+    completely unaffected.
+
     Returns ``True`` when an upload primitive accepted the file, ``False`` when
     the adapter exposes no way to attach files (caller reports text-only
     delivery rather than misleading the model).
@@ -363,48 +392,70 @@ async def deliver_media_to_adapter(
     #    upload). The hook is called exactly once.
     send_media = getattr(adapter, "send_media", None)
     if callable(send_media):
+        kwargs: dict = {}
         if _accepts_caption(send_media):
-            await send_media(channel_id, path, caption=caption)
-        else:
-            await send_media(channel_id, path)
+            kwargs["caption"] = caption
+        if thread_id is not None and _accepts_kwarg(send_media, "thread_id"):
+            kwargs["thread_id"] = thread_id
+        await send_media(channel_id, path, **kwargs)
         return True
 
     platform = (getattr(adapter, "platform", "") or "").lower()
     filename = os.path.basename(path)
 
-    # 2) Telegram (python-telegram-bot).
+    # 2) Telegram (python-telegram-bot). A forum-topic thread is addressed via
+    #    ``message_thread_id`` and only forwarded when the primitive accepts it.
     application = getattr(adapter, "_application", None)
     if application is not None and getattr(application, "bot", None) is not None:
         bot = application.bot
         chat_id = _telegram_chat_id(channel_id)
         with open(path, "rb") as fh:
             if _is_image(path) and hasattr(bot, "send_photo"):
-                await bot.send_photo(
-                    chat_id=chat_id, photo=fh, caption=caption or None
-                )
+                tg_kwargs = {"chat_id": chat_id, "photo": fh, "caption": caption or None}
+                if thread_id is not None and _accepts_kwarg(
+                    bot.send_photo, "message_thread_id"
+                ):
+                    tg_kwargs["message_thread_id"] = _telegram_chat_id(thread_id)
+                await bot.send_photo(**tg_kwargs)
             else:
-                await bot.send_document(
-                    chat_id=chat_id, document=fh, caption=caption or None
-                )
+                tg_kwargs = {
+                    "chat_id": chat_id,
+                    "document": fh,
+                    "caption": caption or None,
+                }
+                if thread_id is not None and _accepts_kwarg(
+                    bot.send_document, "message_thread_id"
+                ):
+                    tg_kwargs["message_thread_id"] = _telegram_chat_id(thread_id)
+                await bot.send_document(**tg_kwargs)
         return True
 
-    # 3) Slack (slack_sdk AsyncWebClient).
+    # 3) Slack (slack_sdk AsyncWebClient). A thread is addressed via ``thread_ts``.
     client = getattr(adapter, "_client", None)
     if client is not None and hasattr(client, "files_upload_v2"):
-        await client.files_upload_v2(
-            channel=channel_id,
-            file=path,
-            title=filename,
-            initial_comment=caption or None,
-        )
+        slack_kwargs = {
+            "channel": channel_id,
+            "file": path,
+            "title": filename,
+            "initial_comment": caption or None,
+        }
+        if thread_id is not None and _accepts_kwarg(
+            client.files_upload_v2, "thread_ts"
+        ):
+            slack_kwargs["thread_ts"] = thread_id
+        await client.files_upload_v2(**slack_kwargs)
         return True
 
-    # 4) Discord (discord.py).
+    # 4) Discord (discord.py). A thread channel is itself addressable by id, so
+    #    prefer the thread id as the send target when one is named.
     if client is not None and hasattr(client, "get_channel"):
         try:
             import discord  # type: ignore
 
-            channel = client.get_channel(int(channel_id))
+            target_id = thread_id or channel_id
+            channel = client.get_channel(int(target_id))
+            if channel is None and thread_id is not None:
+                channel = client.get_channel(int(channel_id))
             if channel is not None:
                 await channel.send(
                     content=caption or None, file=discord.File(path)

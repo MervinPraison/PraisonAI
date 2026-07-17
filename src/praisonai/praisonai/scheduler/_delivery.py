@@ -259,12 +259,16 @@ class SchedulerDelivery:
         channel = self._target.channel or ""
         channel_id = self._target.channel_id or ""
         thread_id = self._target.thread_id or ""
-        # Prefer an explicit "platform:channel_id" target; fall back to the
-        # bare platform token so the router resolves its home channel. The
-        # router resolves to ``(platform, channel_id)`` and sends to the chat —
-        # it does not (yet) route to a thread, so a ``thread_id`` narrows the
-        # idempotency key (below) but is not part of the route.
-        route = f"{channel}:{channel_id}" if channel_id else channel
+        # Prefer an explicit "platform:channel_id[:thread_id]" target; fall back
+        # to the bare platform token so the router resolves its home channel.
+        # The router now preserves the thread segment end-to-end, so a thread
+        # target is delivered into that thread rather than the parent chat.
+        if channel_id and thread_id:
+            route = f"{channel}:{channel_id}:{thread_id}"
+        elif channel_id:
+            route = f"{channel}:{channel_id}"
+        else:
+            route = channel
         # Fold the thread into the dedup key so two threads in the same chat do
         # not collapse to one idempotency entry (which would drop the second
         # thread's message as a duplicate).

@@ -143,6 +143,76 @@ def test_deliver_via_adapter_send_media_hook(tmp_path):
     assert calls == [("42", str(f), "hi")]
 
 
+def test_deliver_threads_media_hook_into_thread(tmp_path):
+    # A resolved thread_id is forwarded to a thread-aware adapter hook so a
+    # threaded target delivers the attachment into the thread (parity with text).
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    calls = []
+
+    class Adapter:
+        platform = "telegram"
+
+        async def send_media(self, channel_id, path, caption=None, thread_id=None):
+            calls.append((channel_id, path, caption, thread_id))
+
+    ok = asyncio.run(
+        deliver_media_to_adapter(
+            Adapter(), "42", str(f), caption="hi", thread_id="789"
+        )
+    )
+    assert ok is True
+    assert calls == [("42", str(f), "hi", "789")]
+
+
+def test_deliver_thread_ignored_for_hook_without_thread_param(tmp_path):
+    # An adapter hook lacking ``thread_id`` is unaffected by a threaded target:
+    # it is called without the kwarg (no TypeError, no behaviour change).
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    calls = []
+
+    class Adapter:
+        platform = "telegram"
+
+        async def send_media(self, channel_id, path, caption=None):
+            calls.append((channel_id, path, caption))
+
+    ok = asyncio.run(
+        deliver_media_to_adapter(
+            Adapter(), "42", str(f), caption="hi", thread_id="789"
+        )
+    )
+    assert ok is True
+    assert calls == [("42", str(f), "hi")]
+
+
+def test_deliver_telegram_media_uses_message_thread_id(tmp_path):
+    # Telegram forum-topic thread is addressed via ``message_thread_id``.
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    photo_calls = []
+
+    class _Bot:
+        async def send_photo(self, chat_id, photo, caption=None, message_thread_id=None):
+            photo_calls.append((chat_id, caption, message_thread_id))
+
+    class _App:
+        bot = _Bot()
+
+    class Adapter:
+        platform = "telegram"
+        _application = _App()
+
+    ok = asyncio.run(
+        deliver_media_to_adapter(
+            Adapter(), "-100123", str(f), caption="cap", thread_id="789"
+        )
+    )
+    assert ok is True
+    assert photo_calls == [(-100123, "cap", 789)]
+
+
 def test_deliver_returns_false_when_no_primitive(tmp_path):
     f = tmp_path / "a.bin"
     f.write_bytes(b"x")

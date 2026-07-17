@@ -178,3 +178,79 @@ def test_scheduled_delivery_missing_target_is_skipped():
     asyncio.run(gw._deliver_scheduled_result(delivery, "nope"))
 
     assert bot.sends == []
+
+
+# ─── DeliveryRouter thread routing (issue #3141) ─────────────────────
+
+
+class _NoThreadBot:
+    """Adapter whose ``send_message`` has no ``thread_id`` parameter."""
+
+    def __init__(self):
+        self.sends = []
+
+    async def send_message(self, channel_id, text):
+        self.sends.append((channel_id, text))
+        return {"ok": True}
+
+
+class _RouterBotOS:
+    def __init__(self, bot):
+        self._bot = bot
+
+    def get_bot(self, platform):
+        return self._bot
+
+    def list_bots(self):
+        return ["telegram"]
+
+
+def _make_router(bot):
+    from praisonai_bot.bots.delivery import DeliveryRouter
+
+    return DeliveryRouter(_RouterBotOS(bot))
+
+
+def test_resolve_parses_thread_segment():
+    """``platform:channel:thread`` resolves to a 3-tuple keeping the thread."""
+    router = _make_router(_RecordingBot())
+    assert router.resolve("telegram:-100123:789") == ("telegram", "-100123", "789")
+
+
+def test_resolve_without_thread_returns_none_thread():
+    """``platform:channel`` resolves with ``thread_id`` of ``None``."""
+    router = _make_router(_RecordingBot())
+    assert router.resolve("telegram:-100123") == ("telegram", "-100123", None)
+
+
+def test_deliver_routes_into_thread():
+    """A threaded target passes ``thread_id`` through to ``send_message``."""
+    bot = _RecordingBot()
+    router = _make_router(bot)
+
+    ok = asyncio.run(router.deliver("telegram:-100123:789", "hi thread"))
+
+    assert ok is True
+    assert bot.sends == [("-100123", "hi thread", "789")]
+
+
+def test_deliver_without_thread_omits_thread_id():
+    """A non-threaded target still sends with ``thread_id=None``."""
+    bot = _RecordingBot()
+    router = _make_router(bot)
+
+    ok = asyncio.run(router.deliver("telegram:-100123", "no thread"))
+
+    assert ok is True
+    assert bot.sends == [("-100123", "no thread", None)]
+
+
+def test_deliver_thread_ignored_for_adapter_without_thread_support():
+    """A thread target does not break an adapter lacking ``thread_id``."""
+    bot = _NoThreadBot()
+    router = _make_router(bot)
+
+    ok = asyncio.run(router.deliver("telegram:-100123:789", "legacy adapter"))
+
+    assert ok is True
+    assert bot.sends == [("-100123", "legacy adapter")]
