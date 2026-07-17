@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Optional, Protocol, TYPE_CHECKING
 
@@ -60,6 +60,7 @@ class StreamingMode(Enum):
     OFF = "off"           # Current behavior (single final message, chunked)
     DRAFT = "draft"       # Send placeholder, edit in place with growing content
     PROGRESS = "progress" # Show compact status, then replace with final answer
+    AUTO = "auto"         # Stream (DRAFT) where the channel can edit, else OFF
 
 
 @dataclass
@@ -200,13 +201,27 @@ class DraftStreamer:
         if self._edit_rate_limit > 0:
             self._current_min_interval = max(self._current_min_interval, self._edit_rate_limit)
         
-        # Override config if channel doesn't support editing
-        if not self._can_edit and self._config.mode != StreamingMode.OFF:
+        # Resolve AUTO to a concrete mode: stream where the channel can edit,
+        # otherwise fall back to OFF. This makes "stream where supported" an
+        # explicit, opt-in choice instead of every platform silently sitting on
+        # OFF.
+        if self._config.mode == StreamingMode.AUTO:
+            resolved = StreamingMode.DRAFT if self._can_edit else StreamingMode.OFF
             logger.info(
-                "Channel %s doesn't support live editing, disabling streaming",
-                channel_id
+                "Channel %s streaming mode 'auto' resolved to '%s' (can_edit=%s)",
+                channel_id, resolved.value, self._can_edit,
             )
-            self._config = StreamingConfig(mode=StreamingMode.OFF)
+            self._config = replace(self._config, mode=resolved)
+
+        # Override config if channel doesn't support editing. Logged (not
+        # silent) so operators can see why a channel isn't streaming.
+        if not self._can_edit and self._config.mode != StreamingMode.OFF:
+            logger.warning(
+                "Channel %s doesn't support live editing; degrading streaming "
+                "mode '%s' to 'off'",
+                channel_id, self._config.mode.value,
+            )
+            self._config = replace(self._config, mode=StreamingMode.OFF)
         
         logger.debug(
             "DraftStreamer initialized for channel %s, mode=%s, can_edit=%s, min_interval=%s",

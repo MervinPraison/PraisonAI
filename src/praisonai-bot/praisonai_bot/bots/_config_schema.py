@@ -167,7 +167,7 @@ class SessionConfigSchema(BaseModel):
 
 class StreamingConfigSchema(BaseModel):
     """Schema for streaming reply configuration."""
-    mode: str = "off"  # off | draft | progress
+    mode: str = "off"  # off | draft | progress | auto
     min_interval: float = 1.5  # Minimum seconds between edits
     min_delta: int = 120  # Minimum character delta before edit
     placeholder_text: str = "🤔 Thinking..."
@@ -186,7 +186,7 @@ class StreamingConfigSchema(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_streaming_mode(cls, v: str) -> str:
-        allowed = {"off", "draft", "progress"}
+        allowed = {"off", "draft", "progress", "auto"}
         if v not in allowed:
             raise ValueError(
                 f"Invalid streaming mode '{v}'. Must be one of: {', '.join(sorted(allowed))}"
