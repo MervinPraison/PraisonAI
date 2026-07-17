@@ -207,7 +207,11 @@ class DraftStreamer:
         # OFF.
         if self._config.mode == StreamingMode.AUTO:
             resolved = StreamingMode.DRAFT if self._can_edit else StreamingMode.OFF
-            logger.info(
+            # Degrading 'auto' to 'off' is logged at WARNING (like the explicit
+            # degrade path below) so operators filtering info logs can still see
+            # why a channel isn't streaming; resolving to draft stays at info.
+            logger.log(
+                logging.INFO if self._can_edit else logging.WARNING,
                 "Channel %s streaming mode 'auto' resolved to '%s' (can_edit=%s)",
                 channel_id, resolved.value, self._can_edit,
             )

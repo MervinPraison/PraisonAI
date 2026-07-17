@@ -101,6 +101,23 @@ def test_auto_mode_resolves_to_off_when_channel_cannot_edit():
     assert streamer._config.mode == StreamingMode.OFF
 
 
+def test_auto_mode_degradation_to_off_logs_at_warning(caplog):
+    # Operators filtering info logs must still see why a channel isn't streaming
+    # when 'auto' degrades to 'off' on a non-editable channel.
+    adapter = _make_adapter(capabilities={"live_edit": False})
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING):
+        streamer = DraftStreamer(
+            adapter, "chan", StreamingConfig(mode=StreamingMode.AUTO), platform="slack"
+        )
+    assert streamer._config.mode == StreamingMode.OFF
+    assert any(
+        r.levelno == _logging.WARNING and "auto" in r.getMessage()
+        for r in caplog.records
+    )
+
+
 def test_auto_mode_preserves_other_config_fields_when_resolving():
     adapter = _make_adapter(capabilities={"live_edit": True})
     cfg = StreamingConfig(
