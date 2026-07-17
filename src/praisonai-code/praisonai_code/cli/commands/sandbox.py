@@ -14,7 +14,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_SandboxType = Literal["subprocess", "docker"]
+_SandboxType = Literal["subprocess", "docker", "daytona"]
 
 
 def _sandbox_handler():
@@ -29,7 +29,7 @@ def sandbox_run(
     code: Optional[str] = typer.Option(None, "--code", "-c", help="Code to execute"),
     file: Optional[str] = typer.Option(None, "--file", "-f", help="File to execute"),
     sandbox_type: _SandboxType = typer.Option(
-        "subprocess", "--type", "-t", help="Sandbox backend (subprocess or docker)"
+        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
     ),
     image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
     timeout: int = typer.Option(60, "--timeout", help="Timeout in seconds"),
@@ -47,7 +47,7 @@ def sandbox_run(
 @app.command("shell")
 def sandbox_shell(
     sandbox_type: _SandboxType = typer.Option(
-        "subprocess", "--type", "-t", help="Sandbox backend (subprocess or docker)"
+        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
     ),
     image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
 ):

@@ -255,7 +255,7 @@ def add_sandbox_parser(subparsers) -> None:
     )
     run_parser.add_argument(
         "--type", "-t",
-        choices=["subprocess", "docker"],
+        choices=["subprocess", "docker", "daytona"],
         default="subprocess",
         help="Sandbox type (default: subprocess)",
     )
@@ -277,7 +277,7 @@ def add_sandbox_parser(subparsers) -> None:
     )
     shell_parser.add_argument(
         "--type", "-t",
-        choices=["subprocess", "docker"],
+        choices=["subprocess", "docker", "daytona"],
         default="subprocess",
         help="Sandbox type (default: subprocess)",
     )

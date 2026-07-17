@@ -108,9 +108,10 @@ class DaytonaSandbox:
         from daytona_sdk import CreateSandboxFromImageParams, Resources
 
         client = self._get_client()
+        memory_gib = max(1, round(self.memory_mb / 1024))
         params = CreateSandboxFromImageParams(
             image=self.image,
-            resources=Resources(cpu=self.cpu, memory=self.memory_mb),
+            resources=Resources(cpu=self.cpu, memory=memory_gib),
         )
         return client.create(params, timeout=max(self.timeout, 60))
 
@@ -245,19 +246,28 @@ class DaytonaSandbox:
                     error=f"Could not read {file_path}: {exc}",
                 )
             language = "bash" if file_path.endswith((".sh", ".bash")) else "python"
+            if args:
+                interpreter = "bash" if language == "bash" else "python"
+                remote_path = f"/tmp/{uuid.uuid4().hex}_{os.path.basename(file_path)}"
+                if not await self.write_file(remote_path, code):
+                    return SandboxResult(
+                        execution_id=str(uuid.uuid4()),
+                        status=SandboxStatus.FAILED,
+                        error=f"Could not upload {file_path} to sandbox",
+                    )
+                parts = [interpreter, remote_path] + list(args)
+                return await self.run_command(parts, limits=limits, env=env)
             return await self.execute(code, language=language, limits=limits, env=env)
 
-        parts = [file_path] + (args or [])
-        return await self.run_command(
-            " ".join(shlex.quote(p) for p in parts), limits=limits, env=env
-        )
+        parts = [file_path] + list(args or [])
+        return await self.run_command(parts, limits=limits, env=env)
 
     async def write_file(self, path: str, content: Union[str, bytes]) -> bool:
         if not self._is_running:
             await self.start()
         try:
             payload = content if isinstance(content, bytes) else content.encode("utf-8")
-            await asyncio.to_thread(self._sandbox.fs.upload_file, path, payload)
+            await asyncio.to_thread(self._sandbox.fs.upload_file, payload, path)
             return True
         except Exception as exc:
             logger.error("Daytona write_file failed: %s", exc)
