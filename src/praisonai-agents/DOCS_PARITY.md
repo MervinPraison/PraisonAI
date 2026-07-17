@@ -18,22 +18,22 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 44 | 13662 |
+| ✅ Agent | 21 | 45 | 13991 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2262 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 9 | 2591 |
+| ✅ Auto Generation | 5 | 10 | 2868 |
 | ✅ Autonomy | 3 | 7 | 2705 |
 | ✅ Bots | 7 | 28 | 10942 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 116 | 31618 |
+| ✅ CLI | 5 | 116 | 31865 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3923 |
-| ✅ Conditions | 1 | 3 | 1175 |
+| ✅ Code Execution | 2 | 13 | 3907 |
+| ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 7 | 2763 |
-| ✅ Context Management | 16 | 34 | 13124 |
+| ✅ Context Management | 16 | 34 | 13176 |
 | ✅ Database | 1 | 40 | 6124 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -44,16 +44,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 48 | 16593 |
+| ✅ Gateway | 7 | 49 | 17067 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 3850 |
+| ✅ Hooks | 2 | 9 | 3924 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4767 |
-| ✅ Loops | 4 | 4 | 1075 |
-| ✅ MCP | 1 | 56 | 12475 |
-| ✅ Memory | 6 | 17 | 6475 |
+| ✅ Loops | 4 | 4 | 1202 |
+| ✅ MCP | 1 | 57 | 12645 |
+| ✅ Memory | 6 | 17 | 6481 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2771 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -70,19 +70,19 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2559 |
-| ✅ Security | 1 | 3 | 2887 |
-| ✅ Sessions | 4 | 13 | 4971 |
+| ✅ Security | 1 | 3 | 2899 |
+| ✅ Sessions | 4 | 13 | 5023 |
 | ✅ Skills | 6 | 13 | 4893 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 131 | 36741 |
+| ✅ Tools | 12 | 131 | 36879 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 8 | 2055 |
-| ✅ Workflows | 5 | 16 | 6435 |
+| ✅ Workflows | 5 | 16 | 6522 |
 
 ## Documentation Without Features
 
