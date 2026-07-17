@@ -1707,17 +1707,7 @@ Now provide your final answer using this result. Summarize the information natur
         
         # Capture tool calls from streaming chunks if provider supports it
         if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-            for tc in delta.tool_calls:
-                if tc.index >= len(tool_calls):
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""}
-                    })
-                if tc.function.name:
-                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                if tc.function.arguments:
-                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+            self._process_tool_calls_from_stream(delta, tool_calls)
         
         return response_text, tool_calls
 
