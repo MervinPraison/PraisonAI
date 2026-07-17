@@ -3158,7 +3158,29 @@ class WebSocketGateway:
             )
             return None
         try:
-            self._dead_targets = DeadTargetRegistry()
+            # Issue #3139: back the dead-target registry with the canonical
+            # SQLite ``dead_targets`` table (shared ``DeliveryControlStore``)
+            # instead of the node-local ``dead_targets.json`` sidecar, so the
+            # single source of truth is the same crash-safe, cross-worker store
+            # the outbox/DLQ/rate-limiter already use. Falls back to the JSON
+            # default only if the SQLite store cannot be constructed.
+            dead_store = None
+            try:
+                from pathlib import Path
+                from praisonai_bot.bots._delivery_control_store import (
+                    DeliveryControlStore,
+                )
+
+                dead_store = DeliveryControlStore(
+                    Path.home() / ".praisonai" / "state" / "delivery_control.sqlite"
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(
+                    "DeliveryControlStore unavailable, using JSON dead-target "
+                    "sidecar: %s",
+                    e,
+                )
+            self._dead_targets = DeadTargetRegistry(store=dead_store)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug("DeadTargetRegistry unavailable: %s", e)
             self._dead_targets = None
