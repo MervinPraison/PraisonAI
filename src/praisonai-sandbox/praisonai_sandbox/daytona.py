@@ -14,7 +14,12 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
-from praisonaiagents.sandbox import SandboxResult, SandboxStatus, ResourceLimits
+from praisonaiagents.sandbox import (
+    SandboxConfig,
+    SandboxResult,
+    SandboxStatus,
+    ResourceLimits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,23 +31,37 @@ class DaytonaSandbox:
 
     def __init__(
         self,
-        image: str = "python:3.12-slim",
+        config: Optional[SandboxConfig] = None,
+        image: Optional[str] = None,
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
         target: Optional[str] = None,
-        timeout: int = 300,
-        cpu: int = 1,
-        memory_mb: int = 512,
+        timeout: Optional[int] = None,
+        cpu: Optional[int] = None,
+        memory_mb: Optional[int] = None,
     ):
-        self.image = image
+        self.config = config or SandboxConfig(sandbox_type="daytona")
+        limits = self.config.resource_limits
+
+        if image is not None:
+            self.image = image
+        elif config is not None and config.image:
+            self.image = config.image
+        else:
+            self.image = "python:3.12-slim"
         self._api_key = api_key or os.environ.get("DAYTONA_API_KEY", "")
         self._api_url = api_url or os.environ.get(
             "DAYTONA_API_URL", "https://app.daytona.io/api"
         )
         self._target = target or os.environ.get("DAYTONA_TARGET", "us")
-        self.timeout = timeout
-        self.cpu = cpu
-        self.memory_mb = memory_mb
+        if timeout is not None:
+            self.timeout = timeout
+        elif config is not None:
+            self.timeout = limits.timeout_seconds
+        else:
+            self.timeout = 300
+        self.cpu = cpu if cpu is not None else max(1, limits.cpu_percent // 100)
+        self.memory_mb = memory_mb if memory_mb is not None else limits.memory_mb
         self._sandbox = None
         self._client = None
         self._is_running = False
@@ -168,22 +187,19 @@ class DaytonaSandbox:
         started_at: float,
     ) -> SandboxResult:
         try:
+            cmd_parts: List[str] = []
+            if working_dir:
+                cmd_parts.append(f"cd {shlex.quote(working_dir)}")
             if env:
                 for key, value in env.items():
-                    await asyncio.to_thread(
-                        self._sandbox.process.exec,
-                        f"export {shlex.quote(key)}={shlex.quote(value)}",
-                        timeout=10,
+                    cmd_parts.append(
+                        f"export {shlex.quote(key)}={shlex.quote(value)}"
                     )
-            if working_dir:
-                await asyncio.to_thread(
-                    self._sandbox.process.exec,
-                    f"cd {shlex.quote(working_dir)}",
-                    timeout=10,
-                )
+            cmd_parts.append(command)
+            full_command = " && ".join(cmd_parts)
             response = await asyncio.to_thread(
                 self._sandbox.process.exec,
-                command,
+                full_command,
                 timeout=limits.timeout_seconds,
             )
             stdout = getattr(response, "result", "") or ""
@@ -218,8 +234,23 @@ class DaytonaSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
+        if os.path.isfile(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as handle:
+                    code = handle.read()
+            except OSError as exc:
+                return SandboxResult(
+                    execution_id=str(uuid.uuid4()),
+                    status=SandboxStatus.FAILED,
+                    error=f"Could not read {file_path}: {exc}",
+                )
+            language = "bash" if file_path.endswith((".sh", ".bash")) else "python"
+            return await self.execute(code, language=language, limits=limits, env=env)
+
         parts = [file_path] + (args or [])
-        return await self.run_command(" ".join(shlex.quote(p) for p in parts), limits=limits, env=env)
+        return await self.run_command(
+            " ".join(shlex.quote(p) for p in parts), limits=limits, env=env
+        )
 
     async def write_file(self, path: str, content: Union[str, bytes]) -> bool:
         if not self._is_running:
