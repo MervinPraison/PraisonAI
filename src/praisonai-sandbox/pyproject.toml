@@ -31,9 +31,11 @@ ssh = [
 modal = [
     "modal>=0.64.0",
 ]
-daytona = []
+daytona = [
+    "daytona-sdk>=0.1.0",
+]
 all = [
-    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal]",
+    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal,daytona]",
 ]
 
 [project.urls]

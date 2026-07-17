@@ -183,6 +183,9 @@ jobs:
         if [ "$WORKDIR" = "src/praisonai-sandbox" ]; then
           bash "$GITHUB_WORKSPACE/scripts/check_c13_sandbox_imports.sh"
         fi
+        if [ "$WORKDIR" = "src/praisonai-mcp" ]; then
+          bash "$GITHUB_WORKSPACE/scripts/check_c12_mcp_imports.sh"
+        fi
         cd "$WORKDIR"
         if [ -n "${{ matrix.pythonpath || '' }}" ]; then
           export PYTHONPATH="${{ matrix.pythonpath }}:${PYTHONPATH:-}"
