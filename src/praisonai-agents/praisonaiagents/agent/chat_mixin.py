@@ -106,7 +106,10 @@ class ChatMixin:
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
-                return cached_prompt
+                # Path-scoped glob rules are per-turn (they depend on the files
+                # touched so far) so they are appended after the cache, never
+                # baked into the cached base prompt.
+                return self._append_glob_rules_context(cached_prompt)
         else:
             cache_key = None  # Don't cache when memory is enabled
             
@@ -279,7 +282,87 @@ Your Goal: {self.goal}"""
             pass  # Trust module not available, skip security instructions
         
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
-        return system_prompt
+        # Append per-turn path-scoped (glob) rules last so they are never cached.
+        return self._append_glob_rules_context(system_prompt)
+
+    def _append_glob_rules_context(self, system_prompt):
+        """Append path-scoped (activation: glob) rules for files touched this run.
+
+        Path-scoped rules activate dynamically: as the agent reads or edits
+        files during a run, any glob rule whose pattern matches a touched path
+        is injected once, deduplicated against the always/manual rules already
+        present in the base prompt. This is per-turn context, so it is added
+        after the (cached) base prompt and never baked into the cache.
+
+        The whole path is gated on ``has_glob_rules()`` so workspaces without
+        any glob rules incur zero cost.
+        """
+        if not system_prompt:
+            return system_prompt
+        if not (getattr(self, "_rules_enabled", True) and self.rules_manager):
+            return system_prompt
+        manager = self.rules_manager
+        if not getattr(manager, "has_glob_rules", None) or not manager.has_glob_rules():
+            return system_prompt
+
+        file_paths = self._collect_touched_file_paths()
+        if not file_paths:
+            return system_prompt
+
+        # Deduplicate against rules already emitted in the base prompt.
+        already = {r.name for r in manager.get_active_rules()}
+        matched = manager.get_glob_rules_for_paths(list(file_paths), exclude_names=already)
+        if not matched:
+            return system_prompt
+
+        sections = []
+        for rule in matched:
+            text = (rule.content or "").strip()
+            if not text:
+                continue
+            header = f"## {rule.name}: {rule.description}" if rule.description else f"## {rule.name}"
+            sections.append(f"{header}\n{text}")
+        if not sections:
+            return system_prompt
+
+        return (
+            system_prompt
+            + "\n\n## Path-Scoped Rules (apply to the files being worked on)\n"
+            + "\n\n".join(sections)
+        )
+
+    def _collect_touched_file_paths(self):
+        """Extract candidate file paths referenced in the current conversation.
+
+        Scans user prompts and tool results in chat history for path-like
+        tokens (containing a supported extension). This gives dynamic, per-turn
+        glob activation without threading a path argument through every tool
+        call site: as the agent reads/edits files, matching glob rules appear.
+        """
+        history = getattr(self, "chat_history", None)
+        if not history:
+            return set()
+
+        pattern = getattr(self, "_glob_path_pattern", None)
+        if pattern is None:
+            import re as _re
+            # Match bare or quoted path tokens ending in a file extension, e.g.
+            # foo.py, src/main.py, "tests/test_x.py".
+            pattern = _re.compile(r"[\w./\\-]+\.[A-Za-z0-9]{1,8}")
+            self._glob_path_pattern = pattern
+
+        paths = set()
+        for msg in history:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str) or not content:
+                continue
+            for match in pattern.findall(content):
+                normalized = match.strip("'\"").replace("\\", "/")
+                if "." in normalized:
+                    paths.add(normalized)
+        return paths
 
     def _build_response_format(self, schema_model):
         """Build response_format dict for native structured output.

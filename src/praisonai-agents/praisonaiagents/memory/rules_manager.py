@@ -67,9 +67,17 @@ class Rule:
         if self.activation == "manual":
             return False  # Only activated via @mention
         if self.activation == "glob" and self.globs:
+            basename = os.path.basename(file_path)
             for pattern in self.globs:
                 if fnmatch.fnmatch(file_path, pattern):
                     return True
+                # A recursive pattern like "**/*.py" should also match a bare
+                # filename ("foo.py"); match the basename against the pattern
+                # tail so path-less references still activate the rule.
+                if "**/" in pattern:
+                    tail = pattern.split("**/", 1)[1]
+                    if fnmatch.fnmatch(basename, tail):
+                        return True
                 # Also try with ** expansion
                 if "**" in pattern:
                     # Convert ** to regex for recursive matching
@@ -666,6 +674,44 @@ class RulesManager:
         
         return "\n".join(parts)
     
+    def get_glob_rules_for_paths(
+        self,
+        file_paths: List[str],
+        exclude_names: Optional[set] = None
+    ) -> List[Rule]:
+        """
+        Get glob-activated rules matching any of the given file paths.
+
+        Only rules with ``activation == "glob"`` are considered; ``always``
+        rules are handled up front by the system-prompt builder. Results are
+        deduplicated by rule name and any name in ``exclude_names`` is skipped
+        so already-injected rules are not emitted twice.
+
+        Args:
+            file_paths: Paths the agent has read/edited this run.
+            exclude_names: Rule names already injected (deduplication).
+
+        Returns:
+            Matching glob rules sorted by priority (highest first).
+        """
+        exclude = exclude_names or set()
+        seen: set = set()
+        matched: List[Rule] = []
+        for rule in self._rules.values():
+            if rule.activation != "glob":
+                continue
+            if rule.name in exclude or rule.name in seen:
+                continue
+            if any(rule.matches_file(fp) for fp in file_paths):
+                matched.append(rule)
+                seen.add(rule.name)
+        matched.sort(key=lambda r: r.priority, reverse=True)
+        return matched
+
+    def has_glob_rules(self) -> bool:
+        """Return True if any glob-activated rule is loaded (cheap gate)."""
+        return any(r.activation == "glob" for r in self._rules.values())
+
     def create_rule(
         self,
         name: str,
