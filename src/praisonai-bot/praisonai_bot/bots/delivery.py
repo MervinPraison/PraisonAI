@@ -792,16 +792,19 @@ class DeliveryRouter:
     ) -> bool:
         """Upload a local file ``path`` to a resolved ``target``.
 
-        Resolves the symbolic target to a concrete (platform, channel_id) and
-        dispatches the upload through the live adapter's native file primitive
-        (see :func:`praisonai.bots._outbound_media.deliver_media_to_adapter`).
-        The path is expected to have already passed the outbound-path guard.
+        Resolves the symbolic target to a concrete (platform, channel_id,
+        thread_id) and dispatches the upload through the live adapter's native
+        file primitive (see
+        :func:`praisonai.bots._outbound_media.deliver_media_to_adapter`). When
+        the target names a thread the attachment is delivered into that thread,
+        matching the text path. The path is expected to have already passed the
+        outbound-path guard.
 
         Returns:
             True if the adapter attached the file, False otherwise.
         """
         try:
-            platform, channel_id, _thread_id = self.resolve(target, origin)
+            platform, channel_id, thread_id = self.resolve(target, origin)
             bot = self._botos.get_bot(platform)
             if not bot:
                 logger.warning(
@@ -825,7 +828,11 @@ class DeliveryRouter:
             media_target = getattr(bot, "adapter", None) or bot
 
             ok = await deliver_media_to_adapter(
-                media_target, channel_id, safe_path, caption=caption
+                media_target,
+                channel_id,
+                safe_path,
+                caption=caption,
+                thread_id=thread_id,
             )
             if ok:
                 logger.info(
