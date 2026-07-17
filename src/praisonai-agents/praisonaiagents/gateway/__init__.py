@@ -86,6 +86,7 @@ from .protocols import (
     GATEWAY_FATAL_CONFIG_EXIT_CODE,
     FatalConfigError,
     classify_exit_reason,
+    RestartLoopGuard,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -272,6 +273,7 @@ __all__ = [
     "GATEWAY_FATAL_CONFIG_EXIT_CODE",
     "FatalConfigError",
     "classify_exit_reason",
+    "RestartLoopGuard",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",

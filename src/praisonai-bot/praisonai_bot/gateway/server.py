@@ -909,7 +909,26 @@ class WebSocketGateway:
         # run succeeds, so without this set two simultaneous requests would both
         # pass the seen-check across the ``await`` and run the agent twice.
         self._hook_inflight: set = set()
-    
+
+        # Issue #3021: opt-in gateway lifecycle — idle/scale-to-zero, epoch-aware
+        # external drain marker, and a crash-loop restart guard. These reuse the
+        # pure core policies (``ScaleToZeroPolicy``/``DrainMarkerPolicy``/
+        # ``RestartLoopGuard``) so the primary gateway runtime gets the same
+        # guarantees ``BotOS`` already has. All default to off/None so an
+        # always-on gateway pays zero cost and behaviour stays backward-compatible.
+        self._idle_policy: Optional[Any] = None
+        self._drain_marker_policy: Optional[Any] = None
+        self._drain_marker_path: Optional[str] = None
+        self._restart_loop_guard: Optional[Any] = None
+        self._instantiation_epoch: Optional[str] = None
+        self._last_handled_drain_epoch: Optional[str] = None
+        self._is_dormant: bool = False
+        self._last_inbound_ts: float = time.time()
+        self._on_quiesce: Optional[Callable[[], Any]] = None
+        self._lifecycle_task: Optional[asyncio.Task] = None
+        self._drain_marker_task: Optional[asyncio.Task] = None
+        self._lifecycle_drain_timeout: Optional[float] = None
+
     @property
     def is_running(self) -> bool:
         return self._is_running
@@ -1906,7 +1925,342 @@ class WebSocketGateway:
                 self._pid_lock = None
             # Re-raise the original exception
             raise
-    
+
+    # ── Gateway lifecycle: idle/scale-to-zero + drain marker (Issue #3021) ──
+
+    def _configure_lifecycle(self, lifecycle_cfg: Optional[Dict[str, Any]]) -> None:
+        """Build opt-in lifecycle policies from a ``lifecycle:`` config block.
+
+        Reuses the pure core policies rather than duplicating machinery:
+        ``ScaleToZeroPolicy`` (idle-quiesce), ``DrainMarkerPolicy`` +
+        ``current_epoch`` (epoch-aware external drain), and
+        ``RestartLoopGuard`` (crash-loop breaker). Every sub-feature is off
+        unless explicitly enabled, so always-on gateways are unchanged.
+
+        Config shape (``gateway.yaml``)::
+
+            lifecycle:
+              scale_to_zero: { enabled: true, idle_minutes: 10, wake_url: "…" }
+              drain:         { marker_path: "/data/gateway.drain" }
+              restart_loop_guard: { max_restarts: 3, window_seconds: 60 }
+        """
+        if not isinstance(lifecycle_cfg, dict):
+            return
+
+        def _as_bool(v: Any, default: bool = False) -> bool:
+            if isinstance(v, str):
+                return v.strip().lower() in ("1", "true", "yes", "on")
+            return bool(v) if v is not None else default
+
+        # Scale-to-zero / idle dormancy.
+        stz = lifecycle_cfg.get("scale_to_zero")
+        if isinstance(stz, dict) and _as_bool(stz.get("enabled")):
+            try:
+                from praisonaiagents.gateway import ScaleToZeroPolicy
+
+                idle_minutes = float(stz.get("idle_minutes", 10.0))
+                self._idle_policy = ScaleToZeroPolicy(
+                    idle_timeout_minutes=idle_minutes,
+                    wake_url=stz.get("wake_url"),
+                    enabled=True,
+                )
+                logger.info(
+                    "Gateway scale-to-zero enabled (idle_minutes=%s)",
+                    idle_minutes,
+                )
+            except (ImportError, ValueError) as e:
+                logger.warning("Invalid scale_to_zero config; disabling: %s", e)
+                self._idle_policy = None
+
+        # Epoch-aware external drain marker.
+        drain = lifecycle_cfg.get("drain")
+        if isinstance(drain, dict) and drain.get("marker_path"):
+            try:
+                from praisonaiagents.gateway import (
+                    DrainMarkerPolicy,
+                    current_epoch,
+                )
+
+                self._drain_marker_policy = DrainMarkerPolicy()
+                self._drain_marker_path = str(drain["marker_path"])
+                self._instantiation_epoch = current_epoch()
+                logger.info(
+                    "Gateway drain-marker watch enabled (path=%s)",
+                    self._drain_marker_path,
+                )
+            except ImportError as e:
+                logger.warning("Drain-marker watch unavailable: %s", e)
+                self._drain_marker_policy = None
+
+        # Crash-loop restart guard.
+        rlg = lifecycle_cfg.get("restart_loop_guard")
+        if isinstance(rlg, dict) and _as_bool(rlg.get("enabled"), True):
+            try:
+                from praisonaiagents.gateway import RestartLoopGuard
+
+                self._restart_loop_guard = RestartLoopGuard(
+                    max_restarts=int(rlg.get("max_restarts", 3)),
+                    window_seconds=float(rlg.get("window_seconds", 60.0)),
+                )
+            except (ImportError, ValueError) as e:
+                logger.warning("Invalid restart_loop_guard config; disabling: %s", e)
+                self._restart_loop_guard = None
+
+    def _merge_lifecycle_overrides(
+        self,
+        lifecycle_cfg: Optional[Dict[str, Any]],
+        drain_timeout_cfg: Optional[float],
+    ) -> Optional[Dict[str, Any]]:
+        """Fold CLI lifecycle overrides into the YAML ``lifecycle`` block.
+
+        CLI flags stamped on the instance by the ``praisonai gateway`` command
+        (``--scale-to-zero``, ``--idle-minutes``, ``--drain-marker``) win over
+        the YAML so operators can toggle scale-to-zero without editing the
+        file. Returns the (possibly newly created) merged block, or the
+        original when there are no overrides.
+        """
+        stz_on = getattr(self, "_scale_to_zero_override", None)
+        idle_min = getattr(self, "_idle_minutes_override", None)
+        marker = getattr(self, "_drain_marker_override", None)
+        if stz_on is None and idle_min is None and marker is None:
+            return lifecycle_cfg
+
+        merged: Dict[str, Any] = dict(lifecycle_cfg) if isinstance(lifecycle_cfg, dict) else {}
+        if stz_on or idle_min is not None:
+            stz = dict(merged.get("scale_to_zero") or {})
+            if stz_on is not None:
+                stz["enabled"] = bool(stz_on)
+            if idle_min is not None:
+                stz["idle_minutes"] = idle_min
+            merged["scale_to_zero"] = stz
+        if marker is not None:
+            drain = dict(merged.get("drain") or {})
+            drain["marker_path"] = marker
+            merged["drain"] = drain
+        return merged
+
+    def notify_inbound(self) -> None:
+        """Record inbound activity for idle tracking (cheap timestamp write).
+
+        Safe to call always. When no idle policy is configured this is a
+        no-op-cheap write; the idle loop also passively probes live session
+        state, so live traffic is reflected even without explicit calls.
+        """
+        self._last_inbound_ts = time.time()
+
+    def _probe_idle_facts(self) -> Tuple[int, float, bool]:
+        """Read live liveness facts from gateway sessions for the idle policy.
+
+        Returns ``(running_turns, last_inbound_ts, has_background_work)`` from
+        the session state every code path already maintains (``_is_executing``,
+        ``_last_activity``, pending inbox), merged with any explicitly recorded
+        ``notify_inbound`` timestamp so both sources are honoured.
+        """
+        running = 0
+        last_ts = self._last_inbound_ts
+        has_pending = False
+        for session in self._sessions.values():
+            if getattr(session, "_is_executing", False):
+                running += 1
+            inbox = getattr(session, "_inbox", None)
+            if inbox is not None and not inbox.empty():
+                has_pending = True
+            la = getattr(session, "_last_activity", None)
+            if isinstance(la, (int, float)) and la > last_ts:
+                last_ts = la
+        return running, last_ts, has_pending
+
+    async def wake(self) -> None:
+        """Resume the gateway from dormancy. Idempotent (no-op when awake)."""
+        if not self._is_dormant:
+            return
+        logger.info("Gateway waking from dormancy")
+        self._is_dormant = False
+        self.notify_inbound()
+
+    async def _quiesce(self, reason: str) -> None:
+        """Mark the gateway dormant and drive an optional host-suspend hook.
+
+        The gateway keeps its listening socket (so an inbound request wakes it
+        via ``notify_inbound``); the ``on_quiesce`` driver — when supplied —
+        owns any deeper compute-host suspend (Fly/Modal/Daytona).
+        """
+        if self._is_dormant:
+            return
+        logger.info("Gateway quiescing (scale-to-zero): %s", reason)
+        self._is_dormant = True
+        if self._on_quiesce is not None:
+            try:
+                result = self._on_quiesce()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning("Gateway on_quiesce driver error: %s", e)
+
+    async def _run_idle_loop(self) -> None:
+        """Evaluate the idle policy and quiesce when the gateway is fully idle.
+
+        Only scheduled when an ``idle_policy`` is configured. The decision is
+        the pure core predicate; this loop supplies live facts and owns the
+        side effects, mirroring ``BotOS._run_idle_loop``.
+        """
+        policy = self._idle_policy
+        if policy is None:
+            return
+        # Issue #3021: the gateway keeps its listening socket open when dormant
+        # and self-wakes on the next inbound client frame (``_handle_client_message``
+        # calls ``wake()``), so a resume path always exists — an external
+        # ``wake_url`` is only needed to also resume a suspended compute host.
+        # Treat the process as inherently wake-registered so CLI-only
+        # ``--scale-to-zero`` (no wake_url) still arms and quiesces.
+        wake_url = getattr(policy, "wake_url", None)
+        wake_registered = wake_url is not None or self._on_quiesce is None
+        if hasattr(policy, "should_arm"):
+            if not policy.should_arm(
+                transports_quiescable=True,
+                wake_registered=wake_registered,
+            ):
+                logger.info(
+                    "Gateway idle policy not armed (no wake path); staying always-on"
+                )
+                return
+        # Issue #3021: start the idle clock from when serving begins, not from
+        # object construction. An embedding process may build the gateway well
+        # before it starts; without this reset the first poll could quiesce a
+        # freshly-serving gateway instead of waiting a full idle interval.
+        self._last_inbound_ts = time.time()
+        logger.info("Gateway idle-dormancy armed (scale-to-zero)")
+        try:
+            while self._is_running:
+                await asyncio.sleep(30)
+                if self._is_dormant:
+                    continue
+                try:
+                    running, last_ts, has_bg = self._probe_idle_facts()
+                    decision = policy.is_idle(
+                        running_turns=running,
+                        last_inbound_ts=last_ts,
+                        has_background_work=has_bg,
+                        now=time.time(),
+                    )
+                except Exception as e:
+                    logger.debug("Gateway idle evaluation error: %s", e)
+                    continue
+                if getattr(decision, "idle", False):
+                    await self._quiesce(getattr(decision, "reason", ""))
+        except asyncio.CancelledError:
+            raise
+
+    def _read_drain_marker(self) -> Optional[Dict[str, Any]]:
+        """Read + parse the external drain marker file, or ``None`` if absent."""
+        path = self._drain_marker_path
+        if not path:
+            return None
+        try:
+            import json
+
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    async def _run_drain_marker_watch(self, drain_timeout: Optional[float]) -> None:
+        """Poll for an epoch-matching external drain marker and act on it.
+
+        A marker written by ``praisonai gateway drain`` triggers a bounded
+        graceful drain. ``DrainMarkerPolicy`` ignores markers whose epoch does
+        not match this instantiation, so a stale marker left on a durable
+        volume by a machine restart never wedges a fresh process in "draining".
+        """
+        policy = self._drain_marker_policy
+        if policy is None:
+            return
+        try:
+            while self._is_running:
+                await asyncio.sleep(5)
+                if self._draining:
+                    continue
+                marker = self._read_drain_marker()
+                try:
+                    should = policy.drain_requested(
+                        marker,
+                        self._instantiation_epoch or "",
+                        time.monotonic(),
+                        last_handled_epoch=self._last_handled_drain_epoch,
+                    )
+                except Exception as e:
+                    logger.debug("Gateway drain-marker evaluation error: %s", e)
+                    continue
+                if not should:
+                    continue
+                if isinstance(marker, dict):
+                    self._last_handled_drain_epoch = marker.get("epoch")
+                logger.info("Gateway honouring external drain marker")
+                self._draining = True
+                try:
+                    await self._drain_active_sessions(
+                        reason="drain-marker",
+                        timeout=float(drain_timeout) if drain_timeout else 10.0,
+                    )
+                finally:
+                    self._draining = False
+        except asyncio.CancelledError:
+            raise
+
+    def _reconcile_lifecycle(self, cfg: Dict[str, Any]) -> None:
+        """Rebuild lifecycle policies + loops from a reloaded config.
+
+        Called on hot-reload so toggling scale-to-zero, changing the idle
+        window, or repointing the drain marker takes effect without a full
+        process restart. Rebuilds the pure policies via ``_configure_lifecycle``
+        then cancels and (re)launches only the loops whose enablement changed,
+        so an unchanged ``lifecycle`` block leaves the running tasks untouched.
+        No-op when no event loop is running (e.g. unit-time reconfigure).
+        """
+        gw_cfg = cfg.get("gateway", {}) if isinstance(cfg, dict) else {}
+        lifecycle_cfg = cfg.get("lifecycle", gw_cfg.get("lifecycle"))
+        lifecycle_cfg = self._merge_lifecycle_overrides(
+            lifecycle_cfg, self._lifecycle_drain_timeout
+        )
+
+        # Reset the policies before rebuilding so a removed block disables the
+        # corresponding feature rather than leaving stale state.
+        prev_idle = self._idle_policy is not None
+        prev_drain = self._drain_marker_policy is not None
+        self._idle_policy = None
+        self._drain_marker_policy = None
+        self._drain_marker_path = None
+        self._configure_lifecycle(lifecycle_cfg)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        now_idle = self._idle_policy is not None
+        now_drain = self._drain_marker_policy is not None
+
+        if now_idle != prev_idle:
+            if self._lifecycle_task is not None:
+                self._lifecycle_task.cancel()
+                self._lifecycle_task = None
+            if now_idle:
+                self._is_dormant = False
+                self._lifecycle_task = loop.create_task(
+                    self._run_idle_loop(), name="gateway-idle"
+                )
+
+        if now_drain != prev_drain:
+            if self._drain_marker_task is not None:
+                self._drain_marker_task.cancel()
+                self._drain_marker_task = None
+            if now_drain:
+                self._drain_marker_task = loop.create_task(
+                    self._run_drain_marker_watch(self._lifecycle_drain_timeout),
+                    name="gateway-drain-marker",
+                )
+
     async def _drain_active_sessions(self, reason: str = "shutdown", timeout: float = 10.0) -> None:
         """Drain active sessions by waiting for in-flight executions to complete.
         
@@ -2027,7 +2381,16 @@ class WebSocketGateway:
         the return value are unaffected.
         """
         msg_type = data.get("type", "message")
-        
+
+        # Issue #3021: record inbound activity for idle tracking and wake the
+        # gateway if it had quiesced. Cheap timestamp write + idempotent wake;
+        # both are no-ops when scale-to-zero is unconfigured. Doing this at the
+        # single client-frame entry point ensures a live handshake can never be
+        # quiesced mid-flight (closes the wake-tracking gap).
+        self.notify_inbound()
+        if self._is_dormant:
+            await self.wake()
+
         # Handle versioned handshake
         if msg_type == "hello":
             agent_id = data.get("agent_id")
@@ -3571,6 +3934,17 @@ class WebSocketGateway:
             "channels": channel_status,
         }
 
+        # Issue #3021: surface opt-in lifecycle state so an operator can see
+        # whether scale-to-zero is armed / the gateway is dormant / an external
+        # drain watcher is active — without scraping logs. Only included when a
+        # lifecycle feature is configured, so always-on gateways are unchanged.
+        if self._idle_policy is not None or self._drain_marker_policy is not None:
+            result["lifecycle"] = {
+                "scale_to_zero": self._idle_policy is not None,
+                "dormant": self._is_dormant,
+                "drain_marker_watch": self._drain_marker_policy is not None,
+            }
+
         # Issue #3049: surface config hot-reload observability so an operator
         # can see the last reload outcome, whether the watcher is alive, and
         # whether the config on disk actually took effect (drift detection) —
@@ -4770,8 +5144,35 @@ class WebSocketGateway:
                 self._inject_routing_handler(name, bot)
                 await bot.start()
         
-        # Use supervisor for resilient channel management
-        await self._channel_supervisor.run(name, bot, start_bot)
+        # Issue #3021: crash-loop breaker. When a restart-loop guard is
+        # configured, record each supervised boot that ends by crashing and,
+        # once the guard trips (>= max_restarts within window_seconds), stop
+        # auto-resurrecting this channel instead of hammering a tight restart
+        # loop. No-op when the guard is unconfigured, so existing unlimited-retry
+        # behaviour is unchanged by default.
+        guard = self._restart_loop_guard
+        if guard is None:
+            await self._channel_supervisor.run(name, bot, start_bot)
+            return
+        while self._is_running:
+            try:
+                await self._channel_supervisor.run(name, bot, start_bot)
+                guard.reset()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if guard.record(now=time.monotonic()):
+                    logger.error(
+                        "Channel '%s' crash-loop breaker tripped "
+                        "(>= %d restarts in %ss); halting auto-resume: %s",
+                        name, guard.max_restarts, guard.window_seconds, e,
+                    )
+                    return
+                logger.warning(
+                    "Channel '%s' supervisor exited with error; retrying: %s",
+                    name, e,
+                )
 
     @staticmethod
     def _is_telegram_bot(bot: Any) -> bool:
@@ -5581,6 +5982,12 @@ class WebSocketGateway:
         # rotated hook secrets take effect without a full process restart.
         self._apply_hooks_from_config(new_cfg)
 
+        # Issue #3021: reconcile opt-in lifecycle policies on reload so enabling
+        # / disabling scale-to-zero or changing the drain-marker path takes
+        # effect without a full process restart. No-op when the ``lifecycle``
+        # block is absent and unchanged.
+        self._reconcile_lifecycle(new_cfg)
+
         # Issue #2661: pick up a rotated shared gateway secret and force-close
         # every live session that authenticated under the previous secret, so a
         # leaked/revoked credential stops working within one reload cycle
@@ -6128,6 +6535,17 @@ class WebSocketGateway:
         # top level (``hooks:``) or nested under ``gateway:`` for grouping.
         self._apply_hooks_from_config(cfg)
 
+        # Issue #3021: opt-in gateway lifecycle (idle/scale-to-zero, epoch-aware
+        # external drain marker, crash-loop guard). Accept the block at the top
+        # level (``lifecycle:``) or nested under ``gateway:``. No-op when unset.
+        lifecycle_cfg = cfg.get("lifecycle", gw_cfg.get("lifecycle"))
+        # CLI overrides (stamped on the instance) win over / synthesise the YAML.
+        lifecycle_cfg = self._merge_lifecycle_overrides(lifecycle_cfg, drain_timeout_cfg)
+        self._configure_lifecycle(lifecycle_cfg)
+        # Remember the drain-timeout so a later reload can rebuild the drain
+        # watcher task with the same bound (Issue #3021 lifecycle reconcile).
+        self._lifecycle_drain_timeout = drain_timeout_cfg
+
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})
 
@@ -6143,6 +6561,20 @@ class WebSocketGateway:
             )
             # Launch scheduler tick to poll for due jobs
             self._start_scheduler_tick()
+            # Issue #3021: launch opt-in lifecycle loops. Both are no-op when
+            # their policy is unconfigured; they poll on ``_is_running`` (set by
+            # ``start()`` below) after an initial sleep, so starting them here is
+            # safe. Idle-quiesce arms scale-to-zero; the drain watcher honours a
+            # current-epoch external drain marker.
+            if self._idle_policy is not None:
+                self._lifecycle_task = asyncio.create_task(
+                    self._run_idle_loop(), name="gateway-idle"
+                )
+            if self._drain_marker_policy is not None:
+                self._drain_marker_task = asyncio.create_task(
+                    self._run_drain_marker_watch(drain_timeout_cfg),
+                    name="gateway-drain-marker",
+                )
             await self.start()
 
         # Issue #2436: crash/shutdown forensics. Capture a fast, non-blocking
@@ -6287,6 +6719,11 @@ class WebSocketGateway:
                 self._scheduler_task.cancel()
             if self._cleanup_task:
                 self._cleanup_task.cancel()
+            # Issue #3021: stop lifecycle loops on shutdown.
+            if self._lifecycle_task:
+                self._lifecycle_task.cancel()
+            if self._drain_marker_task:
+                self._drain_marker_task.cancel()
             # Issue #2375: drain in-flight agent turns (channel bots) and
             # websocket sessions before final teardown when a drain timeout
             # is configured. The configured timeout bounds the *total*

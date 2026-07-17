@@ -3493,6 +3493,77 @@ def classify_exit_reason(exc: "BaseException | None") -> int:
     return GATEWAY_RESTART_EXIT_CODE
 
 
+class RestartLoopGuard:
+    """Pure rolling-window predicate that trips on a rapid restart loop.
+
+    A companion to :func:`classify_exit_reason` for the crash-loop breaker
+    referenced in Issue #3021. Where ``classify_exit_reason`` maps a *single*
+    exit to a supervisor exit code, this tracks the *rate* of restart-worthy
+    boots so a process that keeps crashing-on-resume can stop auto-resuming the
+    offending work rather than wedging in a tight restart loop.
+
+    It is intentionally side-effect free (records timestamps only, no I/O, no
+    heavy deps) so both gateway runtimes (``BotOS`` and ``WebSocketGateway``)
+    can reuse the same *decision* and prove it in isolation. The caller feeds a
+    monotonic timestamp each time a restart-interrupted boot is observed and
+    asks whether the breaker has tripped.
+
+    A trip means: at least ``max_restarts`` restarts occurred within the last
+    ``window_seconds``. When tripped, the caller should stop auto-resuming the
+    offending session (while still serving real inbound) instead of restarting
+    it again immediately.
+
+    Example::
+
+        guard = RestartLoopGuard(max_restarts=3, window_seconds=60)
+        if guard.record(now=time.monotonic()):
+            # too many restarts too fast — stop auto-resuming this session
+            ...
+    """
+
+    def __init__(self, max_restarts: int = 3, window_seconds: float = 60.0):
+        if max_restarts < 1:
+            raise ValueError(f"max_restarts must be >= 1, got {max_restarts!r}")
+        if window_seconds <= 0:
+            raise ValueError(
+                f"window_seconds must be > 0, got {window_seconds!r}"
+            )
+        self.max_restarts = int(max_restarts)
+        self.window_seconds = float(window_seconds)
+        self._events: "List[float]" = []
+
+    def record(self, now: float) -> bool:
+        """Record a restart at ``now`` and return whether the breaker tripped.
+
+        Args:
+            now: A monotonic timestamp for this restart event.
+
+        Returns:
+            ``True`` when at least ``max_restarts`` restarts have occurred
+            within the trailing ``window_seconds`` (breaker tripped);
+            ``False`` otherwise.
+        """
+        cutoff = now - self.window_seconds
+        # Drop events that have aged out of the trailing window.
+        self._events = [t for t in self._events if t >= cutoff]
+        self._events.append(now)
+        return len(self._events) >= self.max_restarts
+
+    def tripped(self, now: float) -> bool:
+        """Return whether the breaker is currently tripped without recording.
+
+        Prunes aged-out events first so a burst that has since gone quiet is
+        no longer considered a live loop.
+        """
+        cutoff = now - self.window_seconds
+        self._events = [t for t in self._events if t >= cutoff]
+        return len(self._events) >= self.max_restarts
+
+    def reset(self) -> None:
+        """Clear the recorded restart history (e.g. after a clean run)."""
+        self._events = []
+
+
 # ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
