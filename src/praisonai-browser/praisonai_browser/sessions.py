@@ -228,7 +228,7 @@ class SessionManager:
         if status is not None:
             updates.append("status = ?")
             params.append(status)
-            if status in ("completed", "failed", "stopped"):
+            if status in ("completed", "failed", "stopped", "cancelled"):
                 updates.append("ended_at = ?")
                 params.append(time.time())
         

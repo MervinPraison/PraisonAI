@@ -46,6 +46,7 @@ class ClientConnection:
     session_id: Optional[str] = None
     connected_at: float = 0.0
     is_extension: bool = False
+    is_cli: bool = False  # True for CLI clients (no Origin header from localhost)
 
 
 class BrowserServer:
@@ -154,14 +155,19 @@ class BrowserServer:
         
         @app.get("/health")
         async def health():
-            extension_connections = sum(
-                1 for c in self._connections.values() if getattr(c, "is_extension", False)
+            extension_conns = [
+                c for c in self._connections.values() if getattr(c, "is_extension", False)
+            ]
+            busy_conn = next(
+                (c for c in extension_conns if c.session_id), None
             )
             return {
                 "status": "ok",
                 "connections": len(self._connections),
-                "extension_connections": extension_connections,
+                "extension_connections": len(extension_conns),
                 "sessions": len(self._agents),
+                "extension_busy": busy_conn is not None,
+                "active_session_id": busy_conn.session_id if busy_conn else None,
             }
         
         @app.websocket("/ws")
@@ -194,6 +200,9 @@ class BrowserServer:
                 ]
         
         origin = websocket.headers.get("origin")
+        # CLI clients connect from localhost without an Origin header; extensions
+        # always send a chrome-extension:// Origin. Track this to distinguish them.
+        is_cli = False
         
         # Security: Reject connections without Origin header (unless from localhost CLI)
         if not origin:
@@ -203,6 +212,7 @@ class BrowserServer:
                 logger.warning(f"[SECURITY] Rejecting WebSocket without Origin from {client_host}")
                 await websocket.close(code=1008)
                 return
+            is_cli = True
             logger.debug(f"[SECURITY] Allowing missing Origin from localhost {client_host}")
         else:
             import urllib.parse
@@ -231,6 +241,7 @@ class BrowserServer:
             websocket=websocket,
             connected_at=time.time(),
             is_extension=is_extension,
+            is_cli=is_cli,
         )
         self._connections[conn_id] = conn
         
@@ -276,8 +287,17 @@ class BrowserServer:
             # Cleanup
             if conn_id in self._connections:
                 del self._connections[conn_id]
-            if conn.session_id and conn.session_id in self._agents:
-                del self._agents[conn.session_id]
+            disconnected_session = conn.session_id
+            if disconnected_session:
+                if disconnected_session in self._agents:
+                    del self._agents[disconnected_session]
+                if self._sessions:
+                    self._sessions.update_session(disconnected_session, status="cancelled")
+                # Release the session lock held by any other connection (e.g. the
+                # extension) so a stale session_id does not deadlock future runs.
+                for other in self._connections.values():
+                    if other.session_id == disconnected_session:
+                        other.session_id = None
     
     async def _process_message(
         self,
@@ -297,6 +317,9 @@ class BrowserServer:
             return await self._handle_observation(message, conn)
         
         elif msg_type == "stop_session":
+            return await self._handle_stop_session(message, conn)
+        
+        elif msg_type == "cancel_session":
             return await self._handle_stop_session(message, conn)
         
         elif msg_type == "ping":
@@ -336,6 +359,35 @@ class BrowserServer:
                 "code": "MISSING_GOAL",
             }
         
+        # Concurrency guard: the bridge drives a single Chrome extension. Reject a
+        # second start_session (e.g. CLI while the side panel is running) instead of
+        # silently reporting "running" and hanging with zero steps executed.
+        #
+        # The caller itself may be the extension (side panel sends start_session on
+        # its own websocket), so include the caller when it is not a CLI client;
+        # otherwise a legitimate side-panel run is wrongly rejected as NO_EXTENSION.
+        extension_conns = [
+            c
+            for c in self._connections.values()
+            if not c.is_cli and (c is not conn or not conn.is_cli)
+        ]
+        if not extension_conns:
+            logger.warning("[SERVER][START] No Chrome extension connected")
+            return {
+                "type": "error",
+                "error": "No Chrome extension connected. Load the extension and open "
+                         "the side panel first.",
+                "code": "NO_EXTENSION",
+            }
+        if any(c.session_id for c in extension_conns):
+            logger.warning("[SERVER][START] Extension already running a session")
+            return {
+                "type": "error",
+                "error": "Extension already running a session. Stop the side panel "
+                         "agent or wait for it to complete before starting another.",
+                "code": "EXTENSION_IN_USE",
+            }
+        
         # Initialize session manager
         if self._sessions is None:
             self._sessions = SessionManager()
@@ -344,7 +396,11 @@ class BrowserServer:
         logger.debug(f"[SERVER][CALL] SessionManager.create_session:server.py goal='{goal[:30]}...'")
         session = self._sessions.create_session(goal)
         session_id = session["session_id"]
-        conn.session_id = session_id
+        # Tag the CLI caller so action broadcasts reach it. The extension caller
+        # (side panel) is claimed by the delivery loop below to keep the "idle
+        # extension" check meaningful and avoid skipping the sole connection.
+        if conn.is_cli:
+            conn.session_id = session_id
         
         # Create agent for this session
         logger.debug(f"[SERVER][CALL] BrowserAgent.__init__:server.py model={model}, max_steps={max_steps}")
@@ -366,101 +422,72 @@ class BrowserServer:
         }
         sent_to_extension = False
         
-        logger.debug(f"[SERVER][SCAN] _handle_start_session:server.py checking {len(self._connections)} connections for available extension")
-        
-        # *** FIX: Aggressively clear ALL stale session_ids before looking ***
-        # This handles crashed CLI runs that leave stale state
-        for client_id, client_conn in self._connections.items():
-            # Clear session_id on all connections that aren't the current CLI caller
-            # This ensures fresh state for each new CLI run
-            if client_conn != conn and client_conn.session_id:
-                logger.info(f"Clearing stale session_id on client {client_id[:8]}")
+        logger.debug(f"[SERVER][SCAN] _handle_start_session:server.py checking {len(extension_conns)} extension connection(s)")
+
+        import json as json_mod
+
+        # Deliver to ONE idle extension connection only (never a CLI client) to
+        # avoid duplicate debugger attachment. Extension availability was already
+        # validated above via extension_conns, which excludes CLI clients and
+        # correctly includes the caller when it is the side panel itself.
+        for client_conn in extension_conns:
+            if client_conn.websocket is None or client_conn.session_id:
+                continue
+            # Claim the connection before awaiting the send so a concurrent
+            # start_session cannot pass the busy guard and target the same
+            # extension while this send is in flight.
+            client_conn.session_id = session_id
+            try:
+                logger.info("[SERVER][START] Sending start_automation to extension")
+                await client_conn.websocket.send_text(json_mod.dumps(start_msg))
+                logger.info(f"[SERVER][START] start_automation sent, session={session_id[:8]}")
+                sent_to_extension = True
+                break  # Only send to ONE extension
+            except Exception as e:
+                # Release the claim so the connection can be retried / reused.
                 client_conn.session_id = None
-        
-        # First, log all connections for debugging
-        logger.info(f"Looking for available extension. Connections: {len(self._connections)}")
-        for client_id, client_conn in self._connections.items():
-            has_session = "has session" if client_conn.session_id else "no session"
-            is_caller = "caller" if client_conn == conn else "not caller"
-            logger.debug(f"  Client {client_id[:8]}: {has_session}, {is_caller}")
+                logger.error(f"[SERVER][START] Failed to send start_automation: {e}")
 
-
-        # Try to find an available extension
-        logger.info(f"[DEBUG] Scanning {len(self._connections)} connections for available extension")
-        logger.info(f"[DEBUG] Current conn id: {id(conn)}")
-        for client_id, client_conn in self._connections.items():
-            is_self = client_conn == conn
-            is_same_id = id(client_conn) == id(conn)
-            has_websocket = client_conn.websocket is not None
-            has_session = client_conn.session_id is not None
-            logger.info(f"[DEBUG] Client {client_id[:8]}: is_self={is_self}, same_id={is_same_id}, websocket={has_websocket}, session={has_session}, conn_id={id(client_conn)}")
-
-            # Only send to extensions (not CLI) that don't have an active session
-            print(f"[SERVER] Checking client {client_id[:8]}: conn!=self={client_conn != conn}, ws={client_conn.websocket is not None}, no_session={not client_conn.session_id}, is_extension={getattr(client_conn, 'is_extension', False)}", flush=True)
-            if (
-                client_conn != conn
-                and client_conn.websocket
-                and not client_conn.session_id
-                and getattr(client_conn, "is_extension", False)
-            ):
-                try:
-                    print(f"[SERVER] SENDING start_automation to {client_id[:8]}", flush=True)
-                    logger.info(f"[SERVER][START] _handle_start_session:server.py → Sending start_automation to extension {client_id[:8]}")
-                    # Use send_text with JSON to ensure compatibility
-                    import json as json_mod
-                    await client_conn.websocket.send_text(json_mod.dumps(start_msg))
-                    print(f"[SERVER] SENT start_automation successfully", flush=True)
-                    # Set the extension's session_id so we can broadcast actions to CLI
-                    client_conn.session_id = session_id
-                    logger.info(f"[SERVER][START] start_automation sent successfully to {client_id[:8]}, session={session_id[:8]}")
-                    sent_to_extension = True
-                    break  # Only send to ONE extension
-                except Exception as e:
-                    logger.error(f"[SERVER][START] Failed to send start_automation to {client_id[:8]}: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-        
-        # *** FIX: If no extension found, it might have stale session_id - clear and retry ***
+        # If the initial send failed (e.g. transient websocket error), wait briefly
+        # for the extension to settle and retry once against the same pool.
         if not sent_to_extension:
-            logger.warning("[SERVER][START] No available extension found. Clearing stale session_ids and retrying...")
-
-            for client_id, client_conn in self._connections.items():
-                if client_conn != conn and client_conn.session_id:
-                    logger.info(f"Clearing stale session_id on client {client_id[:8]}")
-                    client_conn.session_id = None
-            
-            # Wait for extension to complete CDP cleanup
-            import asyncio
+            logger.warning("[SERVER][START] No extension accepted the task. Retrying once...")
             await asyncio.sleep(1.0)
-            
-            # Retry
-            for client_id, client_conn in self._connections.items():
-                if (
-                    client_conn != conn
-                    and client_conn.websocket
-                    and getattr(client_conn, "is_extension", False)
-                ):
-                    try:
-                        await client_conn.websocket.send_json(start_msg)
-                        client_conn.session_id = session_id
-                        logger.info(f"Retry: Sent start_automation to extension {client_id[:8]}")
-                        sent_to_extension = True
-                        break
-                    except Exception as e:
-                        logger.error(f"Retry failed for {client_id}: {e}")
-        
-        if not sent_to_extension:
-            logger.warning(
-                "[SERVER][START] start_automation was NOT delivered to any extension "
-                "(no extension connected or all busy)"
-            )
+            for client_conn in extension_conns:
+                if client_conn.websocket is None or client_conn.session_id:
+                    continue
+                client_conn.session_id = session_id
+                try:
+                    await client_conn.websocket.send_text(json_mod.dumps(start_msg))
+                    logger.info("[SERVER][START] Retry: start_automation delivered")
+                    sent_to_extension = True
+                    break
+                except Exception as e:
+                    client_conn.session_id = None
+                    logger.error(f"[SERVER][START] Retry failed: {e}")
 
+        # Do not report "running" unless the task was actually delivered to the
+        # extension. Otherwise the CLI prints a session id and hangs forever while
+        # the extension never receives start_automation (stale-lock deadlock).
+        if not sent_to_extension:
+            logger.error("[SERVER][START] Could not deliver start_automation to any extension")
+            self._agents.pop(session_id, None)
+            conn.session_id = None
+            if self._sessions:
+                self._sessions.update_session(session_id, status="failed")
+            return {
+                "type": "error",
+                "error": "Could not deliver task to the Chrome extension. Refresh the "
+                         "extension or restart the bridge server, then retry.",
+                "code": "START_AUTOMATION_FAILED",
+            }
+        
         return {
             "type": "status",
             "status": "running",
             "session_id": session_id,
             "message": f"Session started with goal: {goal}",
-            "start_automation_sent": sent_to_extension,
+            "start_automation_sent": True,
         }
     
     async def _handle_observation(
