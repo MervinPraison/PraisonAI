@@ -39,7 +39,7 @@ class SandlockSandbox:
     - ~5ms overhead, no Docker, no root required
     
     Example:
-        from praisonai.sandbox import SandlockSandbox
+        from praisonai_sandbox import SandlockSandbox
         from praisonaiagents.sandbox import ResourceLimits
         
         sandbox = SandlockSandbox()

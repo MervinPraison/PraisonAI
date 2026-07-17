@@ -1582,9 +1582,9 @@ class PraisonAI:
                 sys.exit(exit_code if exit_code is not None else 1)
             
             elif args.command == 'sandbox':
-                # Sandbox command - secure code execution environment
-                from ..features.sandbox_cli import handle_sandbox_command
-                exit_code = handle_sandbox_command(unknown_args)
+                from praisonai_code._wrapper_bridge import import_wrapper_module
+                mod = import_wrapper_module("praisonai.cli.features.sandbox_cli")
+                exit_code = mod.handle_sandbox_command(unknown_args)
                 sys.exit(exit_code)
             
             elif args.command == 'wizard':

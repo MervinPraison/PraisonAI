@@ -1,0 +1,65 @@
+[project]
+name = "praisonai-sandbox"
+version = "0.0.1"
+description = "Isolated agent code execution for PraisonAI — Docker, E2B, Modal, Sandlock, SSH backends extracted from the praisonai wrapper."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.126",
+    "rich>=13.7",
+    "typer>=0.12.0",
+    "click>=8.4.2",
+]
+
+[project.optional-dependencies]
+docker = [
+    "docker>=7.0.0",
+]
+e2b = [
+    "e2b-code-interpreter>=1.0.0",
+]
+sandlock = [
+    "sandlock>=0.1.0",
+]
+ssh = [
+    "asyncssh>=2.14.0",
+]
+modal = [
+    "modal>=0.64.0",
+]
+daytona = []
+all = [
+    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal]",
+]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[project.scripts]
+praisonai-sandbox = "praisonai_sandbox.__main__:main"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_sandbox*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "network: marks tests requiring network access",
+    "integration: marks integration tests",
+]

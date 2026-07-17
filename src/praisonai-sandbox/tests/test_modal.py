@@ -5,7 +5,7 @@ Unit tests for Modal Sandbox implementation.
 import pytest
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
-from praisonai.sandbox.modal import ModalSandbox
+from praisonai_sandbox.modal import ModalSandbox
 from praisonaiagents.sandbox import SandboxStatus, ResourceLimits
 
 
@@ -28,8 +28,16 @@ class TestModalSandbox:
     
     def test_is_available_without_modal(self):
         """Test availability check when modal is not available."""
-        sandbox = ModalSandbox()
-        assert not sandbox.is_available
+        real_import = __import__
+
+        def _import(name, *args, **kwargs):
+            if name == "modal" or name.startswith("modal."):
+                raise ImportError("modal not installed")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_import):
+            sandbox = ModalSandbox()
+            assert not sandbox.is_available
     
     def test_is_available_with_modal(self):
         """Test availability check when modal is available."""
@@ -198,7 +206,7 @@ class TestModalSandbox:
         """Test write file shows warning for stateless functions."""
         sandbox = ModalSandbox()
         
-        with patch('praisonai.sandbox.modal.logger.warning') as mock_warning:
+        with patch('praisonai_sandbox.modal.logger.warning') as mock_warning:
             result = await sandbox.write_file("/tmp/test.py", "print('Hello')")
             
             assert result
@@ -209,7 +217,7 @@ class TestModalSandbox:
         """Test read file shows warning for stateless functions."""
         sandbox = ModalSandbox()
         
-        with patch('praisonai.sandbox.modal.logger.warning') as mock_warning:
+        with patch('praisonai_sandbox.modal.logger.warning') as mock_warning:
             result = await sandbox.read_file("/tmp/test.py")
             
             assert result is None
@@ -220,7 +228,7 @@ class TestModalSandbox:
         """Test list files shows warning for stateless functions."""
         sandbox = ModalSandbox()
         
-        with patch('praisonai.sandbox.modal.logger.warning') as mock_warning:
+        with patch('praisonai_sandbox.modal.logger.warning') as mock_warning:
             result = await sandbox.list_files("/")
             
             assert result == []
@@ -247,7 +255,7 @@ class TestModalSandbox:
         """Test cleanup operation."""
         sandbox = ModalSandbox()
         
-        with patch('praisonai.sandbox.modal.logger.info') as mock_info:
+        with patch('praisonai_sandbox.modal.logger.info') as mock_info:
             await sandbox.cleanup()
             mock_info.assert_called_once()
     
@@ -256,7 +264,7 @@ class TestModalSandbox:
         """Test reset operation."""
         sandbox = ModalSandbox()
         
-        with patch('praisonai.sandbox.modal.logger.info') as mock_info:
+        with patch('praisonai_sandbox.modal.logger.info') as mock_info:
             await sandbox.reset()
             mock_info.assert_called_once()
     

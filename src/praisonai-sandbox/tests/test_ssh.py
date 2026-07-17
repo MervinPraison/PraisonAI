@@ -5,7 +5,7 @@ Unit tests for SSH Sandbox implementation.
 import pytest
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
-from praisonai.sandbox.ssh import SSHSandbox
+from praisonai_sandbox.ssh import SSHSandbox
 from praisonaiagents.sandbox import SandboxStatus, ResourceLimits
 
 

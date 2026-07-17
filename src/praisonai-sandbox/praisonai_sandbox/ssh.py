@@ -31,7 +31,7 @@ class SSHSandbox:
     and security policies.
     
     Example:
-        from praisonai.sandbox import SSHSandbox
+        from praisonai_sandbox import SSHSandbox
         
         sandbox = SSHSandbox(
             host="gpu-server.example.com",

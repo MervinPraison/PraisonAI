@@ -8,11 +8,11 @@ wrapper when agents changes).
 
 Publish order when selected:
   praisonaiagents → praisonai-code → praisonai-bot → praisonai-train
-  → praisonai-browser → praisonai-mcp → praisonai (wrapper)
+  → praisonai-browser → praisonai-mcp → praisonai-sandbox → praisonai (wrapper)
 
 Usage (from repo root or src/praisonai):
   python scripts/publish_all.py                  # changed packages only (default)
-  python scripts/publish_all.py --all            # bump + publish all seven
+  python scripts/publish_all.py --all            # bump + publish all eight
   python scripts/publish_all.py --dry-run        # preview versions only
   python scripts/publish_all.py --since v4.6.149 # diff since tag/ref
   python scripts/publish_all.py --skip-wrapper   # publish changed deps only
@@ -66,17 +66,17 @@ def _apply_changed_only(
     """Auto-skip unchanged tier packages; always refresh wrapper when deps ship."""
     if overrides.get("agents"):
         changed.add("agents")
-    for key in ("code", "bot", "train", "browser", "mcp"):
+    for key in ("code", "bot", "train", "browser", "mcp", "sandbox"):
         if overrides.get(key):
             changed.add(key)
     if overrides.get("wrapper"):
         changed.add("wrapper")
 
-    for key in ("agents", "code", "bot", "train", "browser", "mcp"):
+    for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"):
         if key not in changed:
             skip[key] = True
 
-    dep_publish = any(not skip[k] for k in ("agents", "code", "bot", "train", "browser", "mcp"))
+    dep_publish = any(not skip[k] for k in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"))
     if dep_publish and not skip_wrapper_flag:
         skip["wrapper"] = False
     elif "wrapper" not in changed:
@@ -106,6 +106,7 @@ def _print_plan(
         ("train", lib.PYPI_NAMES["train"]),
         ("browser", lib.PYPI_NAMES["browser"]),
         ("mcp", lib.PYPI_NAMES["mcp"]),
+        ("sandbox", lib.PYPI_NAMES["sandbox"]),
         ("wrapper", lib.PYPI_NAMES["wrapper"]),
     ]
     for key, pypi_name in order:
@@ -138,6 +139,8 @@ def _wrapper_bump_kwargs(
         "browser_pin_only": skip["browser"],
         "mcp_version": planned["mcp"] if not skip["mcp"] else current["mcp"],
         "mcp_pin_only": skip["mcp"],
+        "sandbox_version": planned["sandbox"] if not skip["sandbox"] else current["sandbox"],
+        "sandbox_pin_only": skip["sandbox"],
     }
 
 
@@ -149,6 +152,7 @@ def _validate_kwargs(planned: dict[str, str], skip: dict[str, bool]) -> dict:
         "train_version": None if skip["train"] else planned["train"],
         "browser_version": None if skip["browser"] else planned["browser"],
         "mcp_version": None if skip["mcp"] else planned["mcp"],
+        "sandbox_version": None if skip["sandbox"] else planned["sandbox"],
     }
 
 
@@ -165,7 +169,7 @@ def main() -> None:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Publish all seven packages (default: only changed packages since --since)",
+        help="Publish all eight packages (default: only changed packages since --since)",
     )
     parser.add_argument(
         "--since",
@@ -183,6 +187,7 @@ def main() -> None:
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--skip-browser", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
+    parser.add_argument("--skip-sandbox", action="store_true")
     parser.add_argument("--skip-wrapper", action="store_true")
     parser.add_argument("--agents-version", default=None)
     parser.add_argument("--code-version", default=None)
@@ -190,6 +195,7 @@ def main() -> None:
     parser.add_argument("--train-version", default=None)
     parser.add_argument("--browser-version", default=None)
     parser.add_argument("--mcp-version", default=None)
+    parser.add_argument("--sandbox-version", default=None)
     parser.add_argument("--wrapper-version", default=None)
     args = parser.parse_args()
 
@@ -206,6 +212,7 @@ def main() -> None:
         "train": args.skip_train,
         "browser": args.skip_browser,
         "mcp": args.skip_mcp,
+        "sandbox": args.skip_sandbox,
         "wrapper": args.skip_wrapper,
     }
     overrides = {
@@ -215,6 +222,7 @@ def main() -> None:
         "train": args.train_version,
         "browser": args.browser_version,
         "mcp": args.mcp_version,
+        "sandbox": args.sandbox_version,
         "wrapper": args.wrapper_version,
     }
 
@@ -378,7 +386,30 @@ def main() -> None:
                     root,
                 )
 
-    # --- 7. praisonai wrapper ---
+    # --- 7. praisonai-sandbox ---
+    if not skip["sandbox"]:
+        pkg = lib.PYPI_NAMES["sandbox"]
+        ver = planned["sandbox"]
+        if lib.pypi_has_version(pkg, ver):
+            print(f"⏭️  {pkg}=={ver} already on PyPI")
+        else:
+            print(f"\n📦 Publishing {pkg} {ver}")
+            wait_published("agents")
+            lib.bump_sandbox_files(ver)
+            lib.publish_package(lib.sandbox_dir())
+            _wait(pkg, ver, args.max_wait)
+            if not args.no_git:
+                lib.git_commit_files(
+                    f"Bump praisonai-sandbox to {ver}",
+                    [
+                        "src/praisonai-sandbox/pyproject.toml",
+                        "src/praisonai-sandbox/uv.lock",
+                        "src/praisonai-sandbox/praisonai_sandbox/_version.py",
+                    ],
+                    root,
+                )
+
+    # --- 8. praisonai wrapper ---
     if not skip["wrapper"]:
         pkg = lib.PYPI_NAMES["wrapper"]
         ver = planned["wrapper"]
@@ -386,7 +417,7 @@ def main() -> None:
             print(f"⏭️  {pkg}=={ver} already on PyPI")
         else:
             print(f"\n📦 Publishing {pkg} (wrapper) {ver}")
-            for key in ("agents", "code", "bot", "train", "browser", "mcp"):
+            for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"):
                 wait_published(key)
 
             bump.bump_version(ver, **_wrapper_bump_kwargs(planned, current, skip))

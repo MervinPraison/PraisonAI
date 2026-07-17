@@ -22,9 +22,9 @@ def _make_sandbox(mock_sandlock):
     if not isinstance(mock_sandlock.min_landlock_abi.return_value, int):
         mock_sandlock.min_landlock_abi.return_value = 6
     # Remove any cached version so the import block inside __init__ re-runs.
-    sys.modules.pop("praisonai.sandbox.sandlock", None)
+    sys.modules.pop("praisonai_sandbox.sandlock", None)
     with patch.dict("sys.modules", {"sandlock": mock_sandlock}):
-        from praisonai.sandbox.sandlock import SandlockSandbox
+        from praisonai_sandbox.sandlock import SandlockSandbox
         sandbox = SandlockSandbox()
     # Keep the mock wired up after the context manager exits.
     sandbox._sandlock = mock_sandlock
@@ -36,14 +36,14 @@ class TestSandlockSandbox:
 
     def test_import_without_sandlock(self):
         """Test that SandlockSandbox raises ImportError without sandlock."""
-        sys.modules.pop("praisonai.sandbox.sandlock", None)
+        sys.modules.pop("praisonai_sandbox.sandlock", None)
         # Ensure sandlock is absent from sys.modules so the import inside
         # __init__ actually raises ImportError.
         with patch.dict("sys.modules", {"sandlock": None}):
             # Re-import the module fresh so it picks up the patched sys.modules.
-            if "praisonai.sandbox.sandlock" in sys.modules:
-                del sys.modules["praisonai.sandbox.sandlock"]
-            from praisonai.sandbox.sandlock import SandlockSandbox
+            if "praisonai_sandbox.sandlock" in sys.modules:
+                del sys.modules["praisonai_sandbox.sandlock"]
+            from praisonai_sandbox.sandlock import SandlockSandbox
 
             with pytest.raises(ImportError, match="sandlock package required"):
                 SandlockSandbox()
@@ -298,7 +298,7 @@ class TestSandlockSandbox:
                 pytest.skip("Landlock ABI below sandlock's minimum on this system")
 
             # Test with real sandlock package
-            from praisonai.sandbox.sandlock import SandlockSandbox
+            from praisonai_sandbox.sandlock import SandlockSandbox
 
             sandbox = SandlockSandbox()
             assert sandbox.is_available

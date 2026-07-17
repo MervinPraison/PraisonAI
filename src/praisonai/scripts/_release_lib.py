@@ -20,10 +20,11 @@ PYPI_NAMES = {
     "train": "praisonai-train",
     "browser": "praisonai-browser",
     "mcp": "praisonai-mcp",
+    "sandbox": "praisonai-sandbox",
     "wrapper": "praisonai",
 }
 
-PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "wrapper")
+PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "wrapper")
 
 # Path prefixes used to detect which packages changed in git (longest match wins).
 PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
@@ -33,6 +34,7 @@ PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "train": ("src/praisonai-train/",),
     "browser": ("src/praisonai-browser/",),
     "mcp": ("src/praisonai-mcp/",),
+    "sandbox": ("src/praisonai-sandbox/",),
     "wrapper": ("src/praisonai/", "docker/"),
 }
 
@@ -63,6 +65,10 @@ def browser_dir() -> Path:
 
 def mcp_dir() -> Path:
     return project_root() / "src/praisonai-mcp"
+
+
+def sandbox_dir() -> Path:
+    return project_root() / "src/praisonai-sandbox"
 
 
 def wrapper_dir() -> Path:
@@ -126,6 +132,7 @@ def read_current_versions() -> dict[str, str]:
         "train": read_pyproject_version(train_dir() / "pyproject.toml"),
         "browser": read_pyproject_version(browser_dir() / "pyproject.toml"),
         "mcp": read_pyproject_version(mcp_dir() / "pyproject.toml"),
+        "sandbox": read_pyproject_version(sandbox_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -255,6 +262,16 @@ def bump_mcp_files(new_version: str) -> None:
     current = read_pyproject_version(path)
     write_pyproject_version(path, current, new_version)
     version_py = mcp_dir() / "praisonai_mcp/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_sandbox_files(new_version: str) -> None:
+    path = sandbox_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = sandbox_dir() / "praisonai_sandbox/_version.py"
     version_py.write_text(
         re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
     )

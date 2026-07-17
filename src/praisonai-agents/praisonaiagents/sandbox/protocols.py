@@ -202,8 +202,9 @@ class SandboxProtocol(Protocol):
     Implementations can use Docker, subprocess isolation, or other
     containerization technologies.
     
-    Example usage (implementation in praisonai wrapper):
-        from praisonai.sandbox import DockerSandbox
+    Example usage (implementation in praisonai-sandbox):
+
+        from praisonai_sandbox import DockerSandbox
         
         sandbox = DockerSandbox(image="python:3.11-slim")
         result = await sandbox.execute("print('Hello, World!')")

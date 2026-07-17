@@ -18,6 +18,7 @@ dependencies = [
     "praisonai-train>=0.0.6",
     "praisonai-browser>=0.0.3",
     "praisonai-mcp>=0.0.3",
+    "praisonai-sandbox>=0.0.1",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -78,13 +79,13 @@ code = [
     "playwright>=1.47.0"
 ]
 sandbox = [
-    "sandlock>=0.1.0",
+    "praisonai-sandbox[all]",
 ]
 ssh = [
-    "asyncssh>=2.14.0",
+    "praisonai-sandbox[ssh]",
 ]
 modal = [
-    "modal>=0.64.0",
+    "praisonai-sandbox[modal]",
 ]
 daytona = [
     # Note: daytona package not yet available on PyPI
@@ -287,6 +288,7 @@ praisonai-bot = { path = "../praisonai-bot", editable = true }
 praisonai-train = { path = "../praisonai-train", editable = true }
 praisonai-browser = { path = "../praisonai-browser", editable = true }
 praisonai-mcp = { path = "../praisonai-mcp", editable = true }
+praisonai-sandbox = { path = "../praisonai-sandbox", editable = true }
 
 [tool.uv]
 # Exclude from lock resolution — these cause cross-extra conflicts that

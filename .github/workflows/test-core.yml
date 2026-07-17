@@ -107,6 +107,13 @@ jobs:
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
+          - shard: sandbox
+            workdir: src/praisonai-sandbox
+            paths: >-
+              tests/
+            extra_ignore: ""
+            pythonpath: >-
+              ${{ github.workspace }}/src/praisonai-agents
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
@@ -173,6 +180,9 @@ jobs:
       run: |
         set -euo pipefail
         WORKDIR="${{ matrix.workdir || 'src/praisonai' }}"
+        if [ "$WORKDIR" = "src/praisonai-sandbox" ]; then
+          bash "$GITHUB_WORKSPACE/scripts/check_c13_sandbox_imports.sh"
+        fi
         cd "$WORKDIR"
         if [ -n "${{ matrix.pythonpath || '' }}" ]; then
           export PYTHONPATH="${{ matrix.pythonpath }}:${PYTHONPATH:-}"

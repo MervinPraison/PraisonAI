@@ -30,7 +30,7 @@ class E2BSandbox:
     
     Example:
         import os
-        from praisonai.sandbox import E2BSandbox
+        from praisonai_sandbox import E2BSandbox
         
         os.environ["E2B_API_KEY"] = "your-api-key"
         sandbox = E2BSandbox()
