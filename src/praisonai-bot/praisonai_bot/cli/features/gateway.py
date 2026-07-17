@@ -120,6 +120,9 @@ class GatewayHandler:
         openai_api: Optional[bool] = None,
         mcp: Optional[bool] = None,
         identity_store: Optional[str] = None,
+        scale_to_zero: Optional[bool] = None,
+        idle_minutes: Optional[float] = None,
+        drain_marker: Optional[str] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -235,6 +238,13 @@ class GatewayHandler:
                         "Could not enable identity resolver from "
                         "--identity-store %s: %s", identity_store, e,
                     )
+            # CLI lifecycle flags override gateway.lifecycle.* in YAML (#3021)
+            if scale_to_zero is not None:
+                self._gateway._scale_to_zero_override = scale_to_zero
+            if idle_minutes is not None:
+                self._gateway._idle_minutes_override = idle_minutes
+            if drain_marker is not None:
+                self._gateway._drain_marker_override = drain_marker
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
@@ -722,7 +732,19 @@ def handle_gateway_command(args) -> int:
                  "Paired/linked users share one session + memory across "
                  "channels (#3020)",
         )
-        
+        start_parser.add_argument(
+            "--scale-to-zero", dest="scale_to_zero", action="store_true", default=None,
+            help="Quiesce the gateway when idle for --idle-minutes (scale-to-zero; #3021)",
+        )
+        start_parser.add_argument(
+            "--idle-minutes", dest="idle_minutes", type=float, default=None,
+            help="Minutes of no inbound / in-flight work before quiescing (#3021)",
+        )
+        start_parser.add_argument(
+            "--drain-marker", dest="drain_marker", default=None,
+            help="Path to watch for an epoch-aware external drain marker file (#3021)",
+        )
+
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
         status_parser.add_argument("--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)")
@@ -791,6 +813,9 @@ def handle_gateway_command(args) -> int:
             overflow_policy=getattr(args, "overflow_policy", None),
             reliability=getattr(args, "reliability", None),
             identity_store=getattr(args, "identity_store", None),
+            scale_to_zero=getattr(args, "scale_to_zero", None),
+            idle_minutes=getattr(args, "idle_minutes", None),
+            drain_marker=getattr(args, "drain_marker", None),
         )
     elif subcommand == "status":
         handler.status(
