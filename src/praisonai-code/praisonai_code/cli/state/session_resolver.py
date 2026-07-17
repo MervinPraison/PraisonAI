@@ -109,10 +109,14 @@ def resolve_session(
     """
     store = _store_for(session_id, project_path)
     if store is not None:
+        # The id lives in a canonical store; that store owns this identity.
+        # If reading it fails we surface not-found *for this record* rather than
+        # silently falling through to a different same-id session in another
+        # store or the legacy store (Issue #3133 — one id, one session).
         try:
             data = store.get_session(session_id)
         except Exception:
-            data = None
+            return ResolvedSession(session_id=session_id, found=False)
         if data is not None:
             metadata = dict(getattr(data, "metadata", {}) or {})
             try:
@@ -130,6 +134,7 @@ def resolve_session(
                 updated_at=getattr(data, "updated_at", None),
                 found=True,
             )
+        return ResolvedSession(session_id=session_id, found=False)
 
     # Deprecation-window fallback: legacy SessionManager dir-per-session store.
     legacy = _legacy_get(session_id)
@@ -142,22 +147,27 @@ def resolve_session(
 def delete_session(session_id: str, project_path: Optional[str] = None) -> bool:
     """Delete a session from the store that actually holds it (Issue #3133).
 
-    Deletes from every canonical store carrying the id (so a shadow record in
-    both project and global stores is fully removed), then the legacy store as
-    a fallback. Returns True if anything was deleted.
+    Deletes from the *first* canonical store carrying the id — the same store
+    :func:`resolve_session` selects — so a project-scoped delete never removes
+    an unrelated same-id session living only in the global store. The delete is
+    only counted when the store confirms removal (its ``delete_session`` returns
+    ``True``), so an I/O failure is not reported as success. The legacy store is
+    always swept too, so a shadow legacy record can't resurface a session the
+    CLI just reported as deleted. Returns True if anything was actually removed.
     """
     deleted = False
-    for store in _canonical_stores(project_path):
+    store = _store_for(session_id, project_path)
+    if store is not None:
         try:
-            if store.session_exists(session_id):
-                store.delete_session(session_id)
-                deleted = True
+            deleted = bool(store.delete_session(session_id))
         except Exception:
-            continue
+            deleted = False
 
-    if not deleted:
-        deleted = _legacy_delete(session_id)
-    return deleted
+    # Always sweep the legacy store: a canonical delete alone would leave a
+    # duplicate legacy record that reappears via the fallback on the next
+    # resolve (Issue #3133 zombie sessions).
+    legacy_deleted = _legacy_delete(session_id)
+    return deleted or legacy_deleted
 
 
 def export_session(

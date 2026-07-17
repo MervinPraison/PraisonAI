@@ -188,3 +188,78 @@ def test_legacy_session_manager_fallback(project, monkeypatch):
 
     assert delete_session("legacy-1") is True
     assert resolve_session("legacy-1").found is False
+
+
+def test_delete_reports_store_failure(project, monkeypatch):
+    """A store I/O failure on delete is not reported as success (Issue #3133)."""
+    from praisonai_code.cli.state import session_resolver
+    from praisonai_code.cli.state.session_resolver import delete_session
+
+    class _FailingStore:
+        def delete_session(self, session_id):
+            return False
+
+    # The owning store confirms *no* removal (its delete_session returns False)
+    # and there is no legacy record, so nothing was actually deleted.
+    monkeypatch.setattr(session_resolver, "_store_for", lambda *a, **k: _FailingStore())
+    monkeypatch.setattr(session_resolver, "_legacy_delete", lambda sid: False)
+
+    assert delete_session("sess-fail") is False
+
+
+def test_delete_sweeps_legacy_duplicate(project, monkeypatch):
+    """A duplicate legacy record is swept even when a canonical record exists.
+
+    Prevents a session the CLI reported as deleted from reappearing via the
+    legacy fallback on the next resolve (Issue #3133 zombie sessions).
+    """
+    from praisonai_code.cli.state import sessions as sessions_mod
+    from praisonai_code.cli.state.identifiers import RunContext
+    from praisonai_code.cli.state.session_resolver import (
+        delete_session,
+        resolve_session,
+    )
+
+    # Same id lives in both the canonical project store and the legacy store.
+    _create_project_session("dup-id")
+
+    legacy_dir = project / "legacy_sessions"
+    manager = sessions_mod.SessionManager(sessions_dir=legacy_dir)
+    monkeypatch.setattr(sessions_mod, "_session_manager", manager)
+    ctx = RunContext(run_id="dup-id", trace_id="t", workspace=str(project))
+    manager.create(ctx, name="LegacyDup")
+
+    assert delete_session("dup-id") is True
+    # Neither the canonical nor the legacy record survives.
+    assert resolve_session("dup-id").found is False
+
+
+def test_read_failure_does_not_leak_other_session(project, monkeypatch):
+    """A read failure on the owning store reports not-found, not another record.
+
+    ``show``/``export`` must not silently return a different same-id session
+    from another store when the resolved store cannot read its record.
+    """
+    from praisonai_code.cli.state import session_resolver
+    from praisonai_code.cli.state.session_resolver import resolve_session
+
+    class _FailingReadStore:
+        def get_session(self, session_id):
+            raise IOError("simulated read failure")
+
+    # The owning store is located but cannot read the record. resolve must
+    # report not-found for this record, not fall through to legacy.
+    monkeypatch.setattr(
+        session_resolver, "_store_for", lambda *a, **k: _FailingReadStore()
+    )
+    called = {"legacy": False}
+
+    def _spy_legacy(sid):
+        called["legacy"] = True
+        return None
+
+    monkeypatch.setattr(session_resolver, "_legacy_get", _spy_legacy)
+
+    assert resolve_session("sess-read").found is False
+    # It must not have leaked through to the legacy fallback.
+    assert called["legacy"] is False
