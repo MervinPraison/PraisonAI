@@ -337,11 +337,15 @@ def session_delete(
 ):
     """Delete a session."""
     output = get_output_controller()
-    manager = get_session_manager()
-    
-    session = manager.get(session_id)
-    
-    if not session:
+
+    # Resolve against the same stores used by list/resume/--continue so any
+    # id a user can list or resume is also deletable (Issue #3133).
+    from ..state.session_resolver import delete_session as _delete_session
+    from ..state.session_resolver import resolve_session
+
+    session = resolve_session(session_id)
+
+    if not session.found:
         output.print_error(f"Session not found: {session_id}")
         raise typer.Exit(1)
     
@@ -351,7 +355,7 @@ def session_delete(
             output.print_info("Cancelled")
             raise typer.Exit(0)
     
-    deleted = manager.delete(session_id)
+    deleted = _delete_session(session_id)
     
     if output.is_json_mode:
         output.print_json({"deleted": deleted, "session_id": session_id})
@@ -381,10 +385,12 @@ def session_export(
 ):
     """Export a session."""
     output = get_output_controller()
-    manager = get_session_manager()
-    
-    content = manager.export(session_id, format=format)
-    
+
+    # Export the same session id list/resume expose (Issue #3133).
+    from ..state.session_resolver import export_session
+
+    content = export_session(session_id, format=format)
+
     if content is None:
         output.print_error(f"Session not found: {session_id}")
         raise typer.Exit(1)
@@ -403,11 +409,14 @@ def session_show(
 ):
     """Show session details."""
     output = get_output_controller()
-    manager = get_session_manager()
-    
-    session = manager.get(session_id)
-    
-    if not session:
+
+    # Resolve against the same stores used by list/resume/--continue so any
+    # id a user can list or resume is also showable (Issue #3133).
+    from ..state.session_resolver import resolve_session
+
+    session = resolve_session(session_id)
+
+    if not session.found:
         output.print_error(f"Session not found: {session_id}")
         raise typer.Exit(1)
     
@@ -417,14 +426,11 @@ def session_show(
     
     output.print_panel(
         f"Session ID: {session.session_id}\n"
-        f"Name: {session.name or '-'}\n"
-        f"Run ID: {session.run_id}\n"
-        f"Trace ID: {session.trace_id}\n"
-        f"Created: {session.created_at.isoformat()}\n"
-        f"Updated: {session.updated_at.isoformat()}\n"
-        f"Status: {session.status}\n"
-        f"Events: {session.event_count}\n"
-        f"Workspace: {session.workspace or '-'}",
+        f"Agent: {session.agent_name or '-'}\n"
+        f"Model: {session.model or '-'}\n"
+        f"Created: {session.created_at or '-'}\n"
+        f"Updated: {session.updated_at or '-'}\n"
+        f"Messages: {session.message_count}",
         title="Session Details"
     )
 
