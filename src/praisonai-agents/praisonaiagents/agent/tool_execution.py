@@ -1859,8 +1859,10 @@ class ToolExecutionMixin:
 
         try:
             
-            # Get or create circuit breaker for this tool
-            breaker_name = f"tool_{function_name}"
+            # Get or create circuit breaker for this tool.
+            # Scope the key to this Agent instance so one agent's failing tool
+            # cannot trip the breaker for another agent's same-named tool.
+            breaker_name = f"tool_{id(self)}_{function_name}"
             config = CircuitBreakerConfig(
                 failure_threshold=5,        # Open after 5 failures
                 recovery_timeout=60.0,      # Wait 60s before trying half-open

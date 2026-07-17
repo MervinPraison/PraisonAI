@@ -5507,7 +5507,9 @@ Answer:"""
         elif isinstance(self.guardrail, str):
             # Create LLM-based guardrail
             from ..guardrails import LLMGuardrail
-            llm = getattr(self, 'llm', None) or getattr(self, 'llm_instance', None)
+            # Prefer the configured LLM instance (with api_key/base_url/client
+            # overrides) over the bare model-name string in self.llm.
+            llm = getattr(self, 'llm_instance', None) or getattr(self, 'llm', None)
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
@@ -6141,13 +6143,16 @@ Answer:"""
         except Exception as e:
             logger.warning(f"LLM client cleanup failed: {e}")
 
-        # MCP cleanup  
+        # MCP cleanup — shut down MCP clients passed via tools=[MCP(...)]
+        # (mirrors remove_mcp_server()'s best-effort shutdown)
         try:
-            if hasattr(self, '_mcp_clients') and self._mcp_clients:
-                for client_name, client in self._mcp_clients.items():
-                    if hasattr(client, 'close'):
-                        client.close()
-                self._mcp_clients.clear()
+            if isinstance(self.tools, list):
+                for t in self.tools:
+                    if hasattr(t, 'shutdown'):
+                        try:
+                            t.shutdown()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
         except Exception as e:
             logger.warning(f"MCP cleanup failed: {e}")
 
@@ -6194,14 +6199,20 @@ Answer:"""
                 elif hasattr(self.memory, 'close_connections'):
                     self.memory.close_connections()
             
-            # Close MCP sessions asynchronously if supported
-            if hasattr(self, '_mcp_clients') and self._mcp_clients:
-                for client in self._mcp_clients.values():
-                    if hasattr(client, 'aclose'):
-                        await client.aclose()
-                    elif hasattr(client, 'close'):
-                        client.close()
-                self._mcp_clients.clear()
+            # Close MCP clients passed via tools=[MCP(...)]
+            # (mirrors remove_mcp_server()'s best-effort shutdown)
+            if isinstance(self.tools, list):
+                for t in self.tools:
+                    if hasattr(t, 'aclose'):
+                        try:
+                            await t.aclose()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
+                    elif hasattr(t, 'shutdown'):
+                        try:
+                            t.shutdown()
+                        except Exception as e:
+                            logger.warning(f"MCP tool cleanup failed: {e}")
 
             # Runtime-attached MCP servers cleanup (each guarded individually)
             self._shutdown_runtime_mcp_servers()
