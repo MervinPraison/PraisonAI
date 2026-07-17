@@ -92,6 +92,10 @@ except ImportError:
                     f"Plugin {name!r} is registered but its dependencies "
                     f"are not installed: {exc}"
                 ) from exc
+            except Exception as exc:  # noqa: BLE001 -- external plugin boundary
+                raise ValueError(
+                    f"Plugin {name!r} failed to load: {exc}"
+                ) from exc
             with self._lock:
                 if self._loaders.get(key) is loader:
                     self._items[key] = cls
@@ -144,6 +148,6 @@ except ImportError:
             except ValueError:
                 raise AttributeError(
                     f"module {module_name!r} has no attribute {name!r}"
-                )
+                ) from None
 
         return __getattr__

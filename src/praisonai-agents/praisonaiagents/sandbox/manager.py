@@ -108,7 +108,10 @@ class SandboxManager:
                 available = False
                 try:
                     cls = registry.resolve(name)
-                    available = bool(cls().is_available)
+                    is_available = getattr(cls(), "is_available", False)
+                    available = bool(
+                        is_available() if callable(is_available) else is_available
+                    )
                 except Exception:
                     available = False
                 types[name] = {
@@ -117,7 +120,11 @@ class SandboxManager:
                     "requires": [] if available else [sandbox_install_hint(name)],
                 }
         except ImportError:
-            pass
+            types.setdefault("subprocess", {
+                "available": False,
+                "description": "Local subprocess (limited isolation)",
+                "requires": [sandbox_install_hint("subprocess")],
+            })
 
         types.setdefault("subprocess", {
             "available": True,
