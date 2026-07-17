@@ -703,6 +703,7 @@ class WebSocketGateway:
         session_store: Optional[SessionStoreProtocol] = None,
         openai_api: Optional[bool] = None,
         mcp: Optional[bool] = None,
+        identity_resolver: Optional[Any] = None,
     ):
         """Initialize the gateway.
         
@@ -717,8 +718,20 @@ class WebSocketGateway:
                 ``config.api.openai`` when set.
             mcp: Serve an MCP JSON-RPC endpoint (``/mcp``) exposing this
                 gateway's agents as tools. Overrides ``config.api.mcp`` when set.
+            identity_resolver: Optional cross-platform identity resolver
+                (Issue #3020). When supplied it is stamped onto every channel
+                bot's session manager so a paired/linked user keeps one
+                continuous session + memory across channels. A constructor
+                value wins over the declarative ``identity:`` block in
+                ``gateway.yaml``. ``None`` preserves today's per-platform keys.
         """
         self.config = config or GatewayConfig(host=host, port=port)
+
+        # Issue #3020: shared cross-platform identity resolver. Mirrors BotOS —
+        # stamped onto each channel bot's session manager in ``start_channels``
+        # / ``_start_single_channel`` so continuity works in the flagship
+        # gateway process, not only the in-process BotOS orchestrator.
+        self._identity_resolver = identity_resolver
 
         # Explicit constructor toggles win over any config-provided defaults so
         # ``WebSocketGateway(openai_api=True, mcp=True)`` works without a config.
@@ -4431,6 +4444,10 @@ class WebSocketGateway:
                 # channel bot so inbound runs are admitted through the global
                 # concurrency ceiling / fair queue. No-op when not configured.
                 self._stamp_admission_gate(bot)
+                # Issue #3020: stamp the shared cross-platform identity resolver
+                # so this channel keys sessions by canonical identity (unified
+                # user) instead of a per-platform key. No-op when unconfigured.
+                self._stamp_identity_resolver(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -4519,6 +4536,78 @@ class WebSocketGateway:
             sess._admission_gate = gate
         elif hasattr(bot, "_admission_gate"):
             bot._admission_gate = gate
+
+    @staticmethod
+    def _build_identity_resolver(identity_cfg: Any) -> Optional[Any]:
+        """Build a cross-platform identity resolver from the ``identity:`` block.
+
+        Issue #3020: turns the declarative ``gateway.yaml`` block into a live
+        ``StoreBackedIdentityResolver`` so a paired/linked user shares one
+        session + memory across channels out of the box::
+
+            identity:
+              enabled: true
+              store: ~/.praisonai/identity.json   # optional link-map path
+
+        Returns ``None`` (per-platform keys, today's behaviour) when the block
+        is missing, not a mapping, or ``enabled`` is falsy. Any failure to
+        build the resolver degrades gracefully to ``None`` rather than aborting
+        gateway startup.
+        """
+        if not identity_cfg or not isinstance(identity_cfg, dict):
+            return None
+        enabled = identity_cfg.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+        if not enabled:
+            return None
+        store = identity_cfg.get("store") or identity_cfg.get("path")
+        store = os.path.expanduser(str(store)) if store else None
+        try:
+            from ..bots import StoreBackedIdentityResolver
+
+            resolver = StoreBackedIdentityResolver.from_env(path=store)
+            logger.info(
+                "Gateway cross-platform identity resolution enabled "
+                "(store=%s)",
+                store or "default",
+            )
+            return resolver
+        except Exception as e:  # pragma: no cover - optional/degraded path
+            logger.warning(
+                "Gateway identity resolver unavailable, falling back to "
+                "per-platform sessions: %s",
+                e,
+            )
+            return None
+
+    def _stamp_identity_resolver(self, bot: Any) -> None:
+        """Share the gateway's identity resolver with a channel bot (Issue #3020).
+
+        Mirrors ``_stamp_admission_gate`` and the post-construction splice that
+        ``Bot``/``BotOS`` already perform: the concrete adapters (TelegramBot,
+        DiscordBot, …) build their own ``BotSessionManager`` during ``__init__``
+        and expose it as ``_session`` / ``_session_mgr``. Stamping the resolver
+        there makes ``BotSessionManager._storage_key`` key by the resolved
+        canonical identity, so a paired/linked user shares one session + memory
+        across every channel served by this gateway process.
+
+        No-op when no resolver is configured, preserving today's per-platform
+        session keys. Called from both ``start_channels`` and
+        ``_start_single_channel`` (hot-reload) so a restarted channel keeps
+        continuity too.
+        """
+        resolver = getattr(self, "_identity_resolver", None)
+        if resolver is None:
+            return
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_identity_resolver"):
+            sess._identity_resolver = resolver
+        elif hasattr(bot, "_identity_resolver"):
+            bot._identity_resolver = resolver
 
     def _create_bot(
         self,
@@ -5229,6 +5318,9 @@ class WebSocketGateway:
             # Issue #2454: stamp the shared admission gate so a channel restarted
             # during hot-reload still enforces the global concurrency ceiling.
             self._stamp_admission_gate(bot)
+            # Issue #3020: stamp the identity resolver on the hot-reloaded
+            # channel too, so a restarted channel keeps cross-platform continuity.
+            self._stamp_identity_resolver(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
@@ -5799,6 +5891,15 @@ class WebSocketGateway:
         # drift against the on-disk file even before any hot-reload occurs.
         self._config_path = config_path
         self._applied_config_revision = compute_config_revision(cfg)
+
+        # Issue #3020: build the cross-platform identity resolver from the
+        # declarative top-level ``identity:`` block so a paired/linked user
+        # keeps one continuous session + memory across channels. A resolver
+        # passed to the constructor always wins over the YAML block.
+        if self._identity_resolver is None:
+            self._identity_resolver = self._build_identity_resolver(
+                cfg.get("identity")
+            )
 
         # Apply gateway section overrides
         gw_cfg = cfg.get("gateway", {})
