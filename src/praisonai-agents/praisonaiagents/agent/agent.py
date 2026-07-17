@@ -4702,6 +4702,27 @@ Summary:"""
                 logger.warning(f"Runtime MCP server '{name}' cleanup failed: {e}")
         servers.clear()
 
+    def _cleanup_circuit_breakers(self) -> None:
+        """Remove this agent's instance-scoped tool circuit breakers.
+
+        Breakers are keyed on ``id(self)`` in a process-global registry. Since
+        CPython may reuse an object id after this agent is collected, leaving the
+        entries behind could let a future agent inherit a stale OPEN breaker.
+        Removing them on close keeps the registry bounded and correct.
+        """
+        try:
+            from ..tools.circuit_breaker import _get_global_registry
+        except Exception:
+            return
+        try:
+            registry = _get_global_registry()
+            prefix = f"tool_{id(self)}_"
+            for name in registry.list_services():
+                if name.startswith(prefix):
+                    registry.remove(name)
+        except Exception as e:
+            logger.warning(f"Circuit breaker cleanup failed: {e}")
+
     def _model_supports_web_search(self) -> bool:
         """
         Check if the agent's model supports native web search via LiteLLM.
@@ -6159,6 +6180,10 @@ Answer:"""
         # Runtime-attached MCP servers cleanup (each guarded individually)
         self._shutdown_runtime_mcp_servers()
 
+        # Circuit breaker cleanup — remove this agent's instance-scoped breakers
+        # so a reused id(self) can't inherit a stale OPEN breaker.
+        self._cleanup_circuit_breakers()
+
         # Server registry cleanup
         try:
             self._cleanup_server_registrations()
@@ -6216,6 +6241,9 @@ Answer:"""
 
             # Runtime-attached MCP servers cleanup (each guarded individually)
             self._shutdown_runtime_mcp_servers()
+
+            # Circuit breaker cleanup — remove this agent's instance-scoped breakers
+            self._cleanup_circuit_breakers()
 
             # Clean up server registrations and tasks
             self._cleanup_server_registrations()
