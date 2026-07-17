@@ -1230,7 +1230,7 @@ provides-extras = ["docker", "e2b", "sandlock", "ssh", "modal", "daytona", "all"
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.153"
+version = "1.6.154"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },

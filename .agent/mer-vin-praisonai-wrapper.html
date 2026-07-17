@@ -1,0 +1,460 @@
+<!-- wp:paragraph -->
+<p>praisonai is Tier 3 — the integration wrapper that wires <code>praisonaiagents</code> + five Tier-2 packages (<code>praisonai-code</code>, <code>praisonai-bot</code>, <code>praisonai-train</code>, <code>praisonai-browser</code>, <code>praisonai-mcp</code>) into one install, with dashboard, framework adapters, jobs API, serve orchestration, and backward-compat shims. v4.6.150.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:merpress/mermaidjs {"align":"full"} -->
+<div class="wp-block-merpress-mermaidjs diagram-source-mermaid alignfull"><pre class="mermaid">%%{init: {"theme": "base", "themeVariables": {"background": "transparent", "lineColor": "#000000"}}}%%
+flowchart TB
+  subgraph T1 [Tier 1 praisonaiagents]
+    A[Agent tools memory MCP client]
+  end
+  subgraph T2 [Tier 2 packages]
+    C[praisonai-code run chat code]
+    B[praisonai-bot gateway channels]
+    TR[praisonai-train fine-tune agents]
+    BR[praisonai-browser CDP Playwright]
+    MCP[praisonai-mcp server host]
+  end
+  subgraph T3 [Tier 3 praisonai wrapper]
+    W[dashboard jobs frameworks serve shims]
+  end
+  A --> C
+  A --> B
+  A --> TR
+  A --> BR
+  A --> MCP
+  W --> C
+  W --> B
+  W --> TR
+  W --> BR
+  W --> MCP
+  W --> A
+  classDef agent fill:#8B0000,color:#fff
+  classDef tool fill:#189AB4,color:#fff
+  class A agent
+  class W agent
+  class C tool
+  class B tool
+  class TR tool
+  class BR tool
+  class MCP tool
+</pre></div>
+<!-- /wp:merpress/mermaidjs -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Seven-package stack</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai-browser + praisonai-mcp → praisonai (wrapper)</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Each Tier-2 package is installable standalone with its own console script. The wrapper pins all of them and preserves every old import path via shims. Use the wrapper when you need several surfaces together — HTTP serve, dashboard, framework YAML, jobs/recipe — without managing tier pins yourself.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Product catalog (C0–C12 shipped)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Package</th><th>Epic</th><th>Choose this when…</th><th>Standalone install</th></tr></thead><tbody><tr><td><code>praisonaiagents</code></td><td>Tier 1</td><td>Building or embedding agents in code — Agent, tools, memory, hooks</td><td><code>pip install praisonaiagents</code></td></tr><tr><td><code>praisonai-code</code></td><td>C0–C8</td><td>Terminal agentic CLI — run, chat, code, warm daemon</td><td><code>pip install praisonai-code</code></td></tr><tr><td><code>praisonai-bot</code></td><td>C9</td><td>Messaging bots + WebSocket gateway</td><td><code>pip install "praisonai-bot[gateway,bot]"</code></td></tr><tr><td><code>praisonai-train</code></td><td>C10</td><td>Agent training loops + GPU LLM fine-tuning</td><td><code>pip install praisonai-train</code> or <code>[llm]</code></td></tr><tr><td><code>praisonai-browser</code></td><td>C11</td><td>Chrome extension bridge, CDP, Playwright agents</td><td><code>pip install "praisonai-browser[all]"</code></td></tr><tr><td><code>praisonai-mcp</code></td><td>C12</td><td>MCP server for Cursor, Claude Desktop, Windsurf</td><td><code>pip install "praisonai-mcp[all]"</code></td></tr><tr><td><code>praisonai</code></td><td>Tier 3</td><td>Full product / umbrella — serve, dashboard, frameworks, jobs</td><td><code>pip install praisonai</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Three-layer products (do not conflate)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Product</th><th>Layer 1 (agents)</th><th>Layer 2 (dedicated pkg)</th><th>Layer 3 (wrapper)</th></tr></thead><tbody><tr><td>Browser</td><td><code>tools/protocols/browser.py</code></td><td><code>praisonai-browser</code></td><td>shims + optional full stack</td></tr><tr><td>MCP</td><td><code>praisonaiagents/mcp</code> client + light server</td><td><code>praisonai-mcp</code> heavy host</td><td>capability bodies via <code>_wrapper_bridge</code></td></tr><tr><td>Bots</td><td>bots/gateway protocols</td><td><code>praisonai-bot</code></td><td>shims only</td></tr><tr><td>Train</td><td>Agent + hooks in agents</td><td><code>praisonai-train</code></td><td>shims + <code>setup-conda-env</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Install matrix</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>1. Base install (full seven-package stack)</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install praisonai
+export OPENAI_API_KEY=sk-...
+
+praisonai doctor
+praisonai version show</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>2. Targeted extras</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install "praisonai[claw]"      # dashboard + bots + gateway
+pip install "praisonai[all]"       # onboarding + messaging + search stack
+pip install "praisonai[train]"     # LLM fine-tuning (Unsloth stack)
+pip install "praisonai[mcp]"       # full MCP server host
+pip install "praisonai[browser]"   # extension bridge + CDP + Playwright
+pip install "praisonai[crewai]"    # multi-framework YAML</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Package</th><th>Min version (wrapper pin)</th><th>Console script</th></tr></thead><tbody><tr><td><code>praisonaiagents</code></td><td>≥ 1.6.153</td><td>—</td></tr><tr><td><code>praisonai-code</code></td><td>≥ 0.0.49</td><td><code>praisonai-code</code></td></tr><tr><td><code>praisonai-bot</code></td><td>≥ 0.0.34</td><td><code>praisonai-bot</code></td></tr><tr><td><code>praisonai-train</code></td><td>≥ 0.0.5</td><td><code>praisonai-train</code></td></tr><tr><td><code>praisonai-browser</code></td><td>≥ 0.0.2</td><td><code>praisonai-browser</code></td></tr><tr><td><code>praisonai-mcp</code></td><td>≥ 0.0.2</td><td><code>praisonai-mcp</code></td></tr><tr><td><code>praisonai</code></td><td>4.6.150</td><td><code>praisonai</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 1 — What wrapper adds (not in Tier-2 alone)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Feature</th><th>Command / path</th><th>Owner</th><th>Extracted?</th></tr></thead><tbody><tr><td>Unified CLI router</td><td><code>praisonai …</code></td><td>code Typer + 6 resident registries</td><td>—</td></tr><tr><td>HTTP serve orchestration</td><td><code>praisonai serve agents|recipe|a2a|…</code></td><td>wrapper <code>cli/features/serve.py</code></td><td>Deferred (C15 epic)</td></tr><tr><td>Dashboard launcher</td><td><code>praisonai dashboard</code></td><td>wrapper</td><td>Stay wrapper</td></tr><tr><td>Framework adapters</td><td><code>praisonai --framework crewai</code></td><td>wrapper <code>framework_adapters/</code></td><td>Stay wrapper (impls in external PraisonAI-Frameworks)</td></tr><tr><td>Jobs API</td><td><code>praisonai.jobs</code> · port 8005</td><td>wrapper</td><td>Deferred (with serve/recipe)</td></tr><tr><td>Recipe NL → YAML</td><td><code>praisonai recipe …</code></td><td>wrapper</td><td>Deferred</td></tr><tr><td>Scheduler CLI</td><td><code>praisonai schedule …</code></td><td>wrapper</td><td>Stay wrapper (3-layer split with bot)</td></tr><tr><td>Sandbox execution</td><td><code>praisonai sandbox …</code></td><td>wrapper <code>sandbox/</code></td><td>C13 candidate</td></tr><tr><td>Cloud deploy</td><td><code>praisonai deploy …</code></td><td>wrapper <code>deploy/</code></td><td>C13 candidate</td></tr><tr><td>Langfuse / Langflow / n8n</td><td><code>langfuse</code>, <code>flow</code>, <code>n8n</code></td><td>wrapper</td><td>Stay wrapper</td></tr><tr><td>Backward-compat shims</td><td><code>praisonai.bots</code> → <code>praisonai_bot</code></td><td>wrapper <code>cli/_shim.py</code></td><td>Permanent</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p>Tier-2 packages own their domains; the wrapper owns integration surfaces that span multiple tiers.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 2 — Terminal hot path (via code tier)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install praisonai
+export OPENAI_API_KEY=sk-...
+
+praisonai run "Summarise the latest AI agent trends"
+praisonai chat
+praisonai code
+praisonai daemon start --background
+praisonai run "Hello"   # auto-forwards to warm runtime</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># Python SDK (Tier 1 — same everywhere)
+from praisonaiagents import Agent
+agent = Agent(instructions="You are a helpful AI assistant")
+agent.start("Write a movie script about a robot on Mars")</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Deep dive: <a href="https://mer.vin/2026/07/praisonai-code-praisonai-code-terminal-cli-in-depth/">praisonai-code in-depth</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 3 — Train (via praisonai-train tier)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># LLM fine-tuning (Unsloth) — lazy ML deps
+praisonai train llm dataset.json
+praisonai train llm --model llama-3.1 dataset.json
+
+# Agent training — LLM-as-judge
+praisonai train agents --input "What is Python?" --iterations 3
+
+# Human feedback loop
+praisonai train agents --input "Explain quantum computing" --human
+
+# Session management
+praisonai train list
+praisonai train apply train-abc123 --run "And Germany?"
+
+# Standalone script (no wrapper prefix)
+praisonai-train agents --input "Hello" --iterations 2</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Deep dive: <a href="https://mer.vin/2026/07/praisonai-train-praisonai-train-fine-tuning-agent-training-in-depth/">praisonai-train in-depth</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 4 — Bots &amp; gateway (via bot tier)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install "praisonai[bot]"
+export OPENAI_API_KEY=sk-...
+export TELEGRAM_BOT_TOKEN=...
+
+praisonai onboard
+praisonai bot start --platform telegram
+praisonai gateway start --config ~/.praisonai/bot.yaml
+praisonai gateway install --config ~/.praisonai/bot.yaml
+praisonai pairing approve telegram ABC12345</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Deep dive: <a href="https://mer.vin/2026/07/praisonai-bot-praisonai-bot-gateway-channels-in-depth/">praisonai-bot in-depth</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 5 — MCP server host (via mcp tier)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Command</th><th>Layer</th><th>Package</th></tr></thead><tbody><tr><td><code>praisonai serve mcp</code></td><td>Light server</td><td><code>praisonai-code</code> + agents</td></tr><tr><td><code>praisonai mcp serve</code></td><td>Heavy host</td><td><code>praisonai-mcp</code></td></tr><tr><td><code>praisonai-mcp serve</code></td><td>Heavy host (direct)</td><td><code>praisonai-mcp</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># Heavy MCP host — full tool/resource/prompt registry
+praisonai mcp serve --transport stdio
+praisonai mcp serve --transport http-stream --port 8080 --api-key secret
+
+# Recipe → scoped MCP server
+praisonai mcp serve-recipe support-reply --transport stdio
+
+# Client config management (needs praisonai-code co-installed)
+praisonai mcp list
+praisonai mcp add filesystem --command npx --args "-y @modelcontextprotocol/server-filesystem ."
+
+# Generate Cursor / Claude Desktop config
+praisonai mcp config-generate --client cursor --transport stdio</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Deep dive: <a href="https://mer.vin/2026/07/praisonai-mcp-praisonai-mcp-server-host-client-config-in-depth/">praisonai-mcp in-depth</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 6 — Browser automation (via browser tier)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install "praisonai[browser]"
+
+# Extension bridge server + LLM browser agent
+praisonai browser start
+praisonai browser run "Find the latest Python release notes"
+
+# Diagnostics
+praisonai browser doctor
+
+# Lightweight tool shim (code tier — no praisonai-browser required)
+praisonai browser-tool snapshot https://example.com
+
+# Standalone script
+praisonai-browser start
+praisonai-browser run "Click the login button"</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Three layers: agents protocols → <code>praisonai browser-tool</code> (praisonai-tools) → <code>praisonai browser</code> (extension bridge, CDP, Playwright).</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Deep dive: <a href="https://mer.vin/2026/07/praisonai-browser-praisonai-browser-browser-automation-in-depth/">praisonai-browser in-depth</a></p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 7 — Dashboard stack</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install "praisonai[claw,flow,ui]"
+
+# Individual services
+praisonai claw              # :8082 — ops dashboard
+praisonai flow              # :7861 — Langflow
+praisonai ui                # :8081 — clean chat
+
+# Unified launcher (wrapper-only)
+praisonai dashboard         # :3000
+praisonai dashboard --port 9000 --no-auto-start</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Port</th><th>Service</th></tr></thead><tbody><tr><td>3000</td><td>Dashboard hub</td></tr><tr><td>7860/7861</td><td>Langflow</td></tr><tr><td>8081</td><td>UI chat</td></tr><tr><td>8082</td><td>Claw</td></tr><tr><td>8765</td><td>Gateway WebSocket</td></tr><tr><td>8005</td><td>Jobs API</td></tr><tr><td>8080</td><td>MCP HTTP stream (optional)</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 8 — Multi-framework YAML</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>pip install "praisonai[crewai]"
+export OPENAI_API_KEY=sk-...
+
+praisonai --framework crewai --auto "Create a movie script"
+praisonai run --file agents.yaml --framework crewai
+
+pip install "praisonai[autogen]"
+praisonai --framework autogen agents.yaml</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Protocols live in <code>praisonaiagents/frameworks/</code>; adapter implementations in wrapper <code>framework_adapters/</code>. Entry-point group: <code>praisonai.framework_adapters</code>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 9 — Scheduler (24/7 agents)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>praisonai schedule add --agent my_agent.yaml --expr "hourly"
+praisonai schedule list
+praisonai schedule start</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># Python
+from praisonai.scheduler import AgentScheduler
+from praisonaiagents import Agent
+
+agent = Agent(name="NewsChecker", instructions="Check latest AI news")
+scheduler = AgentScheduler(agent=agent, task="Summarise top 3 AI stories")
+scheduler.start("hourly", run_immediately=True)</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Three scheduler layers: job store (<code>praisonaiagents.scheduler</code>) → CLI (<code>praisonai schedule</code>, wrapper) → gateway tick delivery (<code>praisonai_bot.scheduler.executor</code>).</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 10 — Jobs API &amp; wrapper-only surfaces</h2>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph -->
+<p>Jobs, recipe, serve, sandbox, and deploy remain wrapper-owned today (deferred or C13 candidates).</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># Jobs API (wrapper — port 8005)
+python -m uvicorn praisonai.jobs.server:create_app --port 8005 --factory
+praisonai run submit "Analyse AI trends"
+praisonai run submit "Analyse news" --recipe news-analyzer --wait
+export PRAISONAI_JOBS_API_KEY=your-secret
+
+# HTTP serve (wrapper orchestration — Typer shell in code tier)
+praisonai serve agents --port 8080
+praisonai serve recipe support-reply
+
+# Sandbox / deploy (wrapper today — C13 extraction candidates)
+praisonai sandbox run "print hello" --backend docker
+praisonai deploy agents.yaml --provider aws</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 11 — Lazy CLI routing (six resident registries)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Registry</th><th>Count</th><th>Examples</th><th>Loaded from</th><th>Gate</th></tr></thead><tbody><tr><td>Code-resident</td><td>~40</td><td>run, chat, code, daemon, serve, config</td><td><code>praisonai_code.cli.commands.*</code></td><td>always</td></tr><tr><td>Bot-resident</td><td>8</td><td>bot, gateway, onboard, kanban, claw</td><td><code>praisonai_bot.cli.commands.*</code></td><td><code>bot_package_available()</code></td></tr><tr><td>Train-resident</td><td>1</td><td>train</td><td><code>praisonai_train.cli.commands.*</code></td><td><code>train_package_available()</code></td></tr><tr><td>Browser-resident</td><td>1</td><td>browser</td><td><code>praisonai_browser.cli.commands.*</code></td><td><code>browser_package_available()</code></td></tr><tr><td>MCP-resident</td><td>1</td><td>mcp</td><td><code>praisonai_mcp.cli.commands.*</code></td><td><code>mcp_package_available()</code></td></tr><tr><td>Wrapper-resident</td><td>22</td><td>dashboard, schedule, flow, langfuse, recipe</td><td><code>praisonai.cli.commands.*</code></td><td><code>wrapper_available()</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>praisonai --help    # 70+ commands, lazy-loaded
+praisonai doctor
+praisonai train --help
+praisonai mcp --help
+praisonai browser --help
+praisonai dashboard --help</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>Standalone <code>praisonai-code</code> hides bot/train/browser/mcp/wrapper commands from <code>--help</code> when those packages are absent.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 12 — Shim map (backward compat)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Old import / path</th><th>Canonical target</th></tr></thead><tbody><tr><td><code>praisonai.cli.main</code></td><td><code>praisonai_code.cli.main</code></td></tr><tr><td><code>praisonai.runtime.*</code></td><td><code>praisonai_code.runtime.*</code></td></tr><tr><td><code>praisonai.bots.*</code></td><td><code>praisonai_bot.bots.*</code></td></tr><tr><td><code>praisonai.gateway.*</code></td><td><code>praisonai_bot.gateway.*</code></td></tr><tr><td><code>praisonai.train.*</code></td><td><code>praisonai_train.train.*</code></td></tr><tr><td><code>praisonai.browser.*</code></td><td><code>praisonai_browser.*</code></td></tr><tr><td><code>praisonai.mcp_server.*</code></td><td><code>praisonai_mcp.mcp_server.*</code></td></tr><tr><td><code>praisonai.scheduler.executor</code></td><td><code>praisonai_bot.scheduler.executor</code></td></tr><tr><td><code>setup-conda-env</code></td><td><code>praisonai_train.setup.setup_conda_env</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code># These must keep working
+from praisonai.cli.main import PraisonAI
+from praisonai.bots import Bot
+from praisonai.gateway import WebSocketGateway
+from praisonai.train.agents import AgentTrainer
+from praisonai.mcp_server import MCPServer
+python -m praisonai run "hello"
+python -m praisonai.runtime</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Section 13 — Bridges (no PyPI cycles)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Bridge</th><th>Direction</th><th>Use</th></tr></thead><tbody><tr><td><code>_wrapper_bridge</code></td><td>code → wrapper</td><td>serve handlers, frameworks, jobs</td></tr><tr><td><code>_bot_bridge</code></td><td>code → bot</td><td>bot/gateway CLI routing</td></tr><tr><td><code>_train_bridge</code></td><td>code → train</td><td>train CLI routing</td></tr><tr><td><code>_browser_bridge</code></td><td>code → browser</td><td>browser CLI routing</td></tr><tr><td><code>_mcp_bridge</code></td><td>code → mcp</td><td>mcp CLI routing</td></tr><tr><td><code>_code_bridge</code></td><td>tier-2 → code</td><td>config kernel, legacy dispatch</td></tr><tr><td><code>_wrapper_bridge</code></td><td>tier-2 → wrapper</td><td>capabilities, recipe, jobs/UI</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">When to use wrapper vs a Tier-2 package alone</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Your goal</th><th>Install</th></tr></thead><tbody><tr><td>Only terminal agents</td><td><code>praisonai-code</code> (+ optional <code>praisonaiagents</code>)</td></tr><tr><td>Only bots on Telegram/Slack</td><td><code>praisonai-bot</code></td></tr><tr><td>Only train / fine-tune</td><td><code>praisonai-train</code></td></tr><tr><td>Only automate browser</td><td><code>praisonai-browser</code></td></tr><tr><td>Only MCP server for IDE</td><td><code>praisonai-mcp</code></td></tr><tr><td>Several of the above + serve / dashboard / framework YAML</td><td><code>pip install praisonai</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">What stays in wrapper (not extracted)</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Surface</th><th>Why it stays</th></tr></thead><tbody><tr><td><code>dashboard</code> / <code>flow</code> / <code>ui</code></td><td>Langflow extra + launcher glue — not a standalone PyPI product</td></tr><tr><td><code>claw</code></td><td>Default app lives in <code>praisonai-bot</code>; wrapper is a thin shim</td></tr><tr><td><code>framework_adapters/</code></td><td>Thin registry; heavy impls in external PraisonAI-Frameworks</td></tr><tr><td><code>schedule</code> CLI</td><td>Three-layer split: agents store + wrapper CLI + bot executor</td></tr><tr><td><code>serve</code> / <code>recipe</code> / <code>jobs</code></td><td>~14k LOC deferred epic — high coupling (C15)</td></tr><tr><td><code>sandbox</code> / <code>deploy</code></td><td>Still in wrapper today; C13 extraction candidates</td></tr><tr><td><code>standardise</code> / suite runner</td><td>Maintainer/docs tooling — internal only</td></tr><tr><td><code>persist</code> / enterprise adapters</td><td><strong>Rejected</strong> — agents already ship File/SQLite defaults; no crisp standalone story</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Roadmap — C13+ candidates</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Package</th><th>Status</th><th>Choose when…</th><th>Standalone install (planned)</th></tr></thead><tbody><tr><td><code>praisonai-sandbox</code></td><td><strong>C13 preferred</strong> (execution goal)</td><td>Isolated agent code execution — Docker/E2B/Modal/Daytona/Sandlock</td><td><code>pip install praisonai-sandbox[docker]</code></td></tr><tr><td><code>praisonai-deploy</code></td><td><strong>C13 alt</strong> (deploy goal)</td><td>Ship <code>agents.yaml</code> to Docker/AWS/GCP/Azure</td><td><code>pip install praisonai-deploy</code></td></tr><tr><td><code>praisonai-replay</code></td><td>Conditional C14+</td><td>Deterministic replay from run ledger / traces</td><td>After product sign-off</td></tr><tr><td><code>praisonai-serve</code></td><td>Deferred C15</td><td>HTTP API hosting without full umbrella (~14k LOC)</td><td>With recipe/jobs decision</td></tr><tr><td><code>praisonai-recipe</code></td><td>Deferred</td><td>NL → agent YAML without jobs UI</td><td>Tied to jobs + serve</td></tr><tr><td><code>praisonai-jobs</code></td><td>Deferred</td><td>Async long-running agent jobs API</td><td>Extract with serve or stay wrapper</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p>C13 decision rule: <strong>sandbox</strong> = where code runs; <strong>deploy</strong> = where the agent service lives. Ship one first after product sign-off.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Standalone extraction litmus test</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Criterion</th><th>Pass (browser/MCP)</th><th>Fail (example)</th></tr></thead><tbody><tr><td>Named user goal without full <code>praisonai</code></td><td><code>pip install praisonai-browser</code> → automate Chrome</td><td><code>pip install praisonai-persist</code> → ???</td></tr><tr><td>Coherent product boundary</td><td>One Typer group / one console script</td><td>Whole <code>cli/features/</code> orchestration layer</td></tr><tr><td>PyPI deps: <code>praisonaiagents</code> only</td><td>Tier-2 + lazy <code>_wrapper_bridge</code></td><td>Hard <code>import praisonai</code> at module level</td></tr><tr><td>Worth a separate install</td><td>User who never wants dashboard/serve/bots</td><td>Internal docs tooling</td></tr><tr><td>Extraction shape</td><td>C10 single PR (~3–11k LOC)</td><td>Mega-epic without product sign-off</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">When to use which tier</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Scenario</th><th>Install</th></tr></thead><tbody><tr><td>Pure Python agents, minimal deps</td><td><code>pip install praisonaiagents</code></td></tr><tr><td>Terminal coding agent, CI, headless</td><td><code>pip install praisonai-code</code></td></tr><tr><td>Telegram/Discord gateway only</td><td><code>pip install "praisonai-bot[gateway,bot]"</code></td></tr><tr><td>Agent training (no GPU)</td><td><code>pip install praisonai-train</code></td></tr><tr><td>LLM fine-tuning (GPU)</td><td><code>pip install "praisonai-train[llm]"</code></td></tr><tr><td>MCP server for Cursor/Claude</td><td><code>pip install "praisonai-mcp[all]"</code></td></tr><tr><td>Browser automation (extension/CDP)</td><td><code>pip install "praisonai-browser[all]"</code></td></tr><tr><td>CrewAI/AutoGen YAML</td><td><code>pip install "praisonai[crewai]"</code></td></tr><tr><td>Full ops + channels + dashboard</td><td><code>pip install "praisonai[claw]"</code></td></tr><tr><td>Everything in one install</td><td><code>pip install praisonai</code></td></tr><tr><td>Library author / embedding</td><td><code>praisonaiagents</code> only</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Seven-package publish order</h2>
+<!-- /wp:heading -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>praisonaiagents
+  → praisonai-code + praisonai-bot + praisonai-train + praisonai-browser + praisonai-mcp
+  → praisonai (wrapper pins all tier-2 deps last)</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:paragraph -->
+<p>CI: <code>.github/workflows/pypi-release.yml</code> · selective publish: <code>publish_all.py --changed-only</code> (default). Playbook per package: manifest → TDD compat tests → git mv → shims → <code>_X_RESIDENT_COMMANDS</code> → CI shard → PyPI.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading -->
+<h2 class="wp-block-heading">Summary</h2>
+<!-- /wp:heading -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th>Item</th><th>Value</th></tr></thead><tbody><tr><td>Tier</td><td>3 (integration wrapper)</td></tr><tr><td>PyPI</td><td><code>praisonai</code> v4.6.150</td></tr><tr><td>Shipped tier-2 deps</td><td>code, bot, train, browser, mcp (C0–C12)</td></tr><tr><td>Resident registries</td><td>6 (code + bot + train + browser + mcp + wrapper)</td></tr><tr><td>Wrapper-only (~140k LOC)</td><td>serve, recipe, jobs, dashboard, sandbox, deploy, frameworks</td></tr><tr><td>Next extraction</td><td>C13: sandbox or deploy (product sign-off)</td></tr><tr><td>One-liner still works</td><td><code>pip install praisonai</code></td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:paragraph -->
+<p>Architecture overview: Seven-package C7–C12 extraction · Post-C12 roadmap (C13+)</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:paragraph -->
+<p>Series: <a href="https://mer.vin/2026/07/praisonai-code-praisonai-code-terminal-cli-in-depth/">praisonai-code</a> · <a href="https://mer.vin/2026/07/praisonai-bot-praisonai-bot-gateway-channels-in-depth/">praisonai-bot</a> · <a href="https://mer.vin/2026/07/praisonai-train-praisonai-train-fine-tuning-agent-training-in-depth/">praisonai-train</a> · <a href="https://mer.vin/2026/07/praisonai-browser-praisonai-browser-browser-automation-in-depth/">praisonai-browser</a> · <a href="https://mer.vin/2026/07/praisonai-mcp-praisonai-mcp-server-host-client-config-in-depth/">praisonai-mcp</a> · praisonai wrapper</p>
+<!-- /wp:paragraph -->
