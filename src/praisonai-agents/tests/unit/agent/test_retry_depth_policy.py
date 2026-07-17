@@ -9,9 +9,21 @@ from praisonaiagents import Agent
 from praisonaiagents.agent.retry_utils import RetryBackoffConfig
 
 
-def test_default_retry_depth_when_no_config():
-    """Without a retry config the loop falls back to the historical default (2)."""
+def test_default_retry_enabled_for_native_path():
+    """A default Agent retries transient errors, matching the LiteLLM path.
+
+    Previously the native path had ``_retry_config is None`` (no retry). The
+    default now applies ``RetryBackoffConfig()`` (max_retries=3) so both LLM
+    paths share the same default resilience.
+    """
     agent = Agent(name="test", instructions="Be helpful")
+    assert isinstance(agent._retry_config, RetryBackoffConfig)
+    assert agent._max_retry_depth() == RetryBackoffConfig().max_retries
+
+
+def test_retry_false_disables_retries():
+    """retry=False opts out entirely (no retry config)."""
+    agent = Agent(name="test", instructions="Be helpful", retry=False)
     assert agent._retry_config is None
     assert agent._max_retry_depth() == 2
 

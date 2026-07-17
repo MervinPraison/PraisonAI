@@ -2085,15 +2085,18 @@ Your Goal: {self.goal}
         # Store tool retry policy for tool execution with exponential backoff
         self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
         
-        # Retry configuration with jittered exponential backoff
+        # Retry configuration with jittered exponential backoff.
+        # Default (retry is None) applies RetryBackoffConfig() so the native
+        # OpenAI-client path retries transient errors by default, matching the
+        # LiteLLM path (max_retries=3). Only retry=False disables retries.
         if isinstance(retry, RetryBackoffConfig):
             self._retry_config = retry
         elif isinstance(retry, dict):
             self._retry_config = RetryBackoffConfig(**retry)
-        elif retry is True:
-            self._retry_config = RetryBackoffConfig()  # Use defaults
+        elif retry is False:
+            self._retry_config = None  # Explicitly disabled
         else:
-            self._retry_config = None  # No retry configuration
+            self._retry_config = RetryBackoffConfig()  # Use defaults (retry is True or None)
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
