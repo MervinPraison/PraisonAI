@@ -96,51 +96,6 @@ class _ChannelBotOS:
         return None
 
 
-class _ThreadBindingBot:
-    """Wrap a channel bot so the router's ``send_message`` carries a thread id.
-
-    Issue #2624: :meth:`DeliveryRouter.deliver` calls ``bot.send_message(
-    channel_id, text)`` with no ``thread_id``, but scheduled deliveries may be
-    threaded. This transparent proxy binds the delivery's ``thread_id`` onto
-    ``send_message`` (only when the underlying bot accepts it) while delegating
-    every other attribute — including ``adapter`` / ``_rate_limiter`` used for
-    limiter reuse — to the wrapped bot.
-    """
-
-    def __init__(self, bot: Any, thread_id: Any) -> None:
-        self._bot = bot
-        self._thread_id = thread_id
-        # Whether the wrapped bot accepts ``thread_id`` is stable for the life
-        # of this object, so introspect once here instead of on every send
-        # (the router calls ``send_message`` on the hot scheduled path).
-        self._accepts_thread_id = self._compute_accepts_thread_id(bot)
-
-    @staticmethod
-    def _compute_accepts_thread_id(bot: Any) -> bool:
-        try:
-            import inspect as _inspect
-
-            params = _inspect.signature(bot.send_message).parameters
-            return "thread_id" in params or any(
-                p.kind == _inspect.Parameter.VAR_KEYWORD
-                for p in params.values()
-            )
-        except (TypeError, ValueError):
-            return False
-
-    async def send_message(self, channel_id: str, text: str, **kwargs: Any) -> Any:
-        if (
-            self._thread_id is not None
-            and self._accepts_thread_id
-            and "thread_id" not in kwargs
-        ):
-            kwargs["thread_id"] = self._thread_id
-        return await self._bot.send_message(channel_id, text, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._bot, name)
-
-
 def _delivery_text_digest(text: str) -> str:
     """Short, stable digest of a delivery body for idempotency keys.
 
@@ -3721,44 +3676,17 @@ class WebSocketGateway:
                 f"sched:{channel}:{channel_id}:{session_id or ''}:"
                 f"{_delivery_text_digest(text)}"
             )
+            # The router now preserves the thread segment end-to-end, so a
+            # threaded delivery routes through the SHARED router directly (its
+            # bounded LRU owns dedup, its token bucket throttles, its dead-target
+            # registry suppresses/self-heals) — no thread-binding workaround.
             if thread_id is None:
-                delivered = await router.deliver(
-                    f"{channel}:{channel_id}", text, idempotency_key=idem,
-                )
+                route = f"{channel}:{channel_id}"
             else:
-                # Threaded delivery still needs the SHARED router's dedup so a
-                # re-fired threaded job does not double-post. We check/record the
-                # idempotency key on the shared router directly (its bounded LRU
-                # is the single source of truth) and route the actual send
-                # through a one-off thread-binding router that shares the same
-                # dead-target registry — so suppression/self-heal stays
-                # consistent while the shared LRU still owns dedup.
-                resolved = self._resolve_channel_bot(channel)
-                if resolved is None:
-                    logger.warning(
-                        "No channel bot '%s' found for scheduled delivery", channel,
-                    )
-                    return
-                if router.is_duplicate_key(idem):
-                    logger.info(
-                        "Suppressing duplicate threaded scheduled result to %s:%s",
-                        channel, channel_id,
-                    )
-                    return
-                thread_botos = _ChannelBotOS(
-                    {channel: _ThreadBindingBot(resolved, thread_id)}
-                )
-                send_router = router.__class__(
-                    thread_botos, dead_targets=self._dead_targets,
-                )
-                delivered = await send_router.deliver(
-                    f"{channel}:{channel_id}", text,
-                )
-                # Record on the shared router only after a confirmed success so
-                # a failed threaded send stays retryable, mirroring the router's
-                # own guard.
-                if delivered:
-                    router.remember_key(idem)
+                route = f"{channel}:{channel_id}:{thread_id}"
+            delivered = await router.deliver(
+                route, text, idempotency_key=idem,
+            )
             if delivered:
                 logger.info(
                     "Delivered scheduled result to %s:%s", channel, channel_id,

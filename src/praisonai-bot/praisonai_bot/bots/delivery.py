@@ -24,6 +24,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _accepts_thread_id(bot: Any) -> bool:
+    """Whether ``bot.send_message`` accepts a ``thread_id`` argument.
+
+    Adapters that support threads (Telegram/Slack/Discord) expose a
+    ``thread_id`` parameter or ``**kwargs``; lightweight adapters that do not
+    are left untouched so passing a thread cannot raise ``TypeError`` for them
+    — a target naming a thread is simply delivered to the parent chat.
+    """
+    send = getattr(bot, "send_message", None)
+    if send is None:
+        return False
+    try:
+        import inspect
+
+        params = inspect.signature(send).parameters
+    except (TypeError, ValueError):
+        return False
+    return "thread_id" in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 @dataclass
 class ChannelRef:
     """Lightweight descriptor of a reachable channel enumerated by an adapter.
@@ -531,17 +553,22 @@ class DeliveryRouter:
                 adapters[platform] = bot
         self.directory.refresh_from_adapters(adapters)
     
-    def resolve(self, target: str, origin: Optional[SessionSource] = None) -> Tuple[str, str]:
+    def resolve(
+        self, target: str, origin: Optional[SessionSource] = None
+    ) -> Tuple[str, str, Optional[str]]:
         """
-        Resolve a target string to (platform, channel_id).
-        
+        Resolve a target string to (platform, channel_id, thread_id).
+
         Args:
-            target: Target specification (origin|platform|platform:channel|alias)
+            target: Target specification
+                (origin|platform|platform:channel|platform:channel:thread|alias)
             origin: Optional source of the original request
-            
+
         Returns:
-            Tuple of (platform, channel_id)
-            
+            Tuple of (platform, channel_id, thread_id). ``thread_id`` is ``None``
+            when the target names no thread; adapters that do not support threads
+            ignore it, so delivery is unchanged for them.
+
         Raises:
             ValueError: If target cannot be resolved
         """
@@ -549,11 +576,16 @@ class DeliveryRouter:
         if target == "origin":
             if not origin:
                 raise ValueError("Cannot resolve 'origin' without source context")
-            return (origin.platform, origin.channel_id)
+            return (origin.platform, origin.channel_id, getattr(origin, "thread_id", None))
         
-        # Handle "platform:channel_id" format
+        # Handle "platform:channel_id[:thread_id]" format. A third segment names
+        # a thread (Slack thread_ts, Telegram forum topic, Discord thread) and is
+        # preserved end-to-end so proactive/scheduled sends land in the thread
+        # rather than the parent channel.
         if ":" in target:
-            platform, channel_id = [p.strip() for p in target.split(":", 1)]
+            parts = [p.strip() for p in target.split(":")]
+            platform, channel_id = parts[0], parts[1] if len(parts) > 1 else ""
+            thread_id = parts[2] if len(parts) > 2 and parts[2] else None
             if not platform or not channel_id:
                 raise ValueError(
                     "Invalid target format. Expected '<platform>:<channel_id>'"
@@ -564,20 +596,21 @@ class DeliveryRouter:
             if not self._botos.get_bot(platform_key):
                 raise ValueError(f"Platform '{platform}' not configured")
             
-            return (platform_key, channel_id)
+            return (platform_key, channel_id, thread_id)
         
         # Check if it's a platform name (use home channel) - check this BEFORE aliases
         platform_key = target.lower()
         if self._botos.get_bot(platform_key):
             home_channel = self.directory.get_home_channel(platform_key)
             if home_channel:
-                return (platform_key, home_channel)
+                return (platform_key, home_channel, None)
             raise ValueError(f"Platform '{target}' has no home channel configured")
         
         # Check if it's an alias
         alias_result = self.directory.resolve_alias(target)
         if alias_result:
-            return alias_result
+            platform_key, channel_id = alias_result
+            return (platform_key, channel_id, None)
         
         # If nothing matches, it might be an undefined alias
         raise ValueError(f"Cannot resolve target '{target}': not a platform, alias, or platform:channel format")
@@ -606,7 +639,7 @@ class DeliveryRouter:
             True if delivered successfully, False otherwise
         """
         try:
-            platform, channel_id = self.resolve(target, origin)
+            platform, channel_id, thread_id = self.resolve(target, origin)
             bot = self._botos.get_bot(platform)
             
             if not bot:
@@ -669,7 +702,15 @@ class DeliveryRouter:
                     )
 
             try:
-                result = await bot.send_message(channel_id, text)
+                # Thread the resolved thread_id through so a target that names a
+                # thread (Slack thread_ts, Telegram forum topic, Discord thread)
+                # is delivered into that thread. Passed only when present and
+                # only if the adapter accepts it, so adapters without a
+                # ``thread_id`` parameter are completely unaffected.
+                if thread_id is not None and _accepts_thread_id(bot):
+                    result = await bot.send_message(channel_id, text, thread_id=thread_id)
+                else:
+                    result = await bot.send_message(channel_id, text)
                 # An adapter that explicitly returns ``False`` is signalling a
                 # failed send without raising. Treat that as a failure so we do
                 # not cache the idempotency key or clear a dead target for a
@@ -760,7 +801,7 @@ class DeliveryRouter:
             True if the adapter attached the file, False otherwise.
         """
         try:
-            platform, channel_id = self.resolve(target, origin)
+            platform, channel_id, _thread_id = self.resolve(target, origin)
             bot = self._botos.get_bot(platform)
             if not bot:
                 logger.warning(
