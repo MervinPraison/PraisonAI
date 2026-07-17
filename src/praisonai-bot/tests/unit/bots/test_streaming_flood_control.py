@@ -37,9 +37,9 @@ class PermanentError(Exception):
         super().__init__("Bad Request: message text is invalid")
 
 
-def _make_adapter(edit_side_effect=None):
+def _make_adapter(edit_side_effect=None, capabilities=None):
     adapter = AsyncMock()
-    adapter.capabilities = {}
+    adapter.capabilities = {} if capabilities is None else capabilities
     adapter.send_message = AsyncMock(return_value={"message_id": "m1"})
     adapter.edit_message = AsyncMock(side_effect=edit_side_effect)
     return adapter
@@ -83,6 +83,64 @@ def test_config_from_dict_defaults_and_overrides():
     assert cfg2.flood_backoff_factor == 3.0
     assert cfg2.max_interval == 10.0
     assert cfg2.strip_reasoning_tags is False
+
+
+def test_auto_mode_resolves_to_draft_when_channel_can_edit():
+    adapter = _make_adapter(capabilities={"live_edit": True})
+    streamer = DraftStreamer(
+        adapter, "chan", StreamingConfig(mode=StreamingMode.AUTO), platform="telegram"
+    )
+    assert streamer._config.mode == StreamingMode.DRAFT
+
+
+def test_auto_mode_resolves_to_off_when_channel_cannot_edit():
+    adapter = _make_adapter(capabilities={"live_edit": False})
+    streamer = DraftStreamer(
+        adapter, "chan", StreamingConfig(mode=StreamingMode.AUTO), platform="slack"
+    )
+    assert streamer._config.mode == StreamingMode.OFF
+
+
+def test_auto_mode_degradation_to_off_logs_at_warning(caplog):
+    # Operators filtering info logs must still see why a channel isn't streaming
+    # when 'auto' degrades to 'off' on a non-editable channel.
+    adapter = _make_adapter(capabilities={"live_edit": False})
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING):
+        streamer = DraftStreamer(
+            adapter, "chan", StreamingConfig(mode=StreamingMode.AUTO), platform="slack"
+        )
+    assert streamer._config.mode == StreamingMode.OFF
+    assert any(
+        r.levelno == _logging.WARNING and "auto" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_auto_mode_preserves_other_config_fields_when_resolving():
+    adapter = _make_adapter(capabilities={"live_edit": True})
+    cfg = StreamingConfig(
+        mode=StreamingMode.AUTO, min_interval=2.5, strip_reasoning_tags=False
+    )
+    streamer = DraftStreamer(adapter, "chan", cfg, platform="telegram")
+    assert streamer._config.mode == StreamingMode.DRAFT
+    assert streamer._config.min_interval == pytest.approx(2.5)
+    assert streamer._config.strip_reasoning_tags is False
+
+
+def test_draft_mode_degrades_to_off_when_channel_cannot_edit():
+    adapter = _make_adapter(capabilities={"live_edit": False})
+    cfg = StreamingConfig(mode=StreamingMode.DRAFT, min_interval=2.5)
+    streamer = DraftStreamer(adapter, "chan", cfg, platform="slack")
+    assert streamer._config.mode == StreamingMode.OFF
+    # Other user-set fields survive the degradation (previously reset to defaults).
+    assert streamer._config.min_interval == pytest.approx(2.5)
+
+
+def test_config_from_dict_accepts_auto_mode():
+    cfg = StreamingConfig.from_dict({"mode": "auto"})
+    assert cfg.mode == StreamingMode.AUTO
 
 
 @pytest.mark.asyncio
