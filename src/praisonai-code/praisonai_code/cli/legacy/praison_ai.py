@@ -1582,10 +1582,15 @@ class PraisonAI:
                 sys.exit(exit_code if exit_code is not None else 1)
             
             elif args.command == 'sandbox':
-                from praisonai_code._wrapper_bridge import import_wrapper_module
-                mod = import_wrapper_module("praisonai.cli.features.sandbox_cli")
-                exit_code = mod.handle_sandbox_command(unknown_args)
-                sys.exit(exit_code)
+                from ..app import app as typer_app, register_commands
+                register_commands()
+                import sys as _sys
+                _sys.argv = ['praisonai', 'sandbox'] + unknown_args
+                try:
+                    typer_app()
+                except SystemExit as e:
+                    sys.exit(e.code if e.code else 0)
+                sys.exit(0)
             
             elif args.command == 'wizard':
                 # Wizard command - interactive project setup

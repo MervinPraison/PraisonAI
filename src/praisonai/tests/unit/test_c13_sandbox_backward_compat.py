@@ -56,6 +56,18 @@ class TestSandboxModuleIdentity:
 
         assert OldCls is NewCls
 
+    @pytest.mark.parametrize(
+        "name",
+        ["SubprocessSandbox", "E2BSandbox", "ModalSandbox", "DaytonaSandbox"],
+    )
+    def test_lazy_class_exports(self, name: str):
+        from praisonai_sandbox import __getattr__ as lazy_get
+
+        cls = lazy_get(name)
+        from praisonai.sandbox import __getattr__ as shim_get
+
+        assert shim_get(name) is cls
+
     def test_no_nested_shadow_package(self):
         nested = WRAPPER_PKG / "praisonai" / "praisonai_sandbox"
         assert not nested.exists()
@@ -75,3 +87,37 @@ class TestSandboxBridge:
         assert "praisonai_sandbox.docker" not in sys.modules
         assert "praisonai_sandbox.modal" not in sys.modules
         assert "praisonai_sandbox.e2b" not in sys.modules
+
+    def test_resolve_subprocess_class(self):
+        from praisonaiagents.sandbox._sandbox_bridge import resolve_sandbox_class
+        from praisonai_sandbox import SubprocessSandbox
+
+        assert resolve_sandbox_class("subprocess") is SubprocessSandbox
+
+    def test_get_sandbox_registry(self):
+        from praisonaiagents.sandbox._sandbox_bridge import get_sandbox_registry
+
+        registry = get_sandbox_registry().default()
+        assert "subprocess" in registry.list_names()
+
+    def test_sandbox_install_hint(self):
+        from praisonaiagents.sandbox._sandbox_bridge import sandbox_install_hint
+
+        assert "docker" in sandbox_install_hint("docker").lower()
+
+
+class TestSandboxCliRouting:
+    def test_sandbox_typer_command_resolves(self):
+        import click
+        from praisonai_code.cli.app import app  # noqa: F401
+        from typer.main import get_command as typer_get_command
+
+        root = typer_get_command(app)
+        ctx = click.Context(root)
+        assert root.get_command(ctx, "sandbox") is not None
+
+    def test_sandbox_run_and_backends_commands(self):
+        from praisonai_code.cli.commands import sandbox as sandbox_mod
+
+        assert hasattr(sandbox_mod, "sandbox_run")
+        assert hasattr(sandbox_mod, "sandbox_backends")

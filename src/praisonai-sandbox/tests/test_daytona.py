@@ -1,83 +1,109 @@
-"""
-Unit tests for Daytona Sandbox implementation.
+"""Unit tests for Daytona Sandbox (daytona-sdk backend)."""
 
-The Daytona backend is a deliberate fail-loud stub until a real Daytona client
-ships: ``is_available`` is ``False`` and lifecycle/execution raise (or surface)
-``NotImplementedError``. These tests lock in that contract plus the
-dependency-free initialization and status behaviour.
-"""
+from __future__ import annotations
+
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
 from praisonai_sandbox.daytona import DaytonaSandbox
+from praisonaiagents.sandbox import SandboxStatus
+
+
+def _daytona_sdk_module():
+    mod = MagicMock()
+    mod.Daytona = Mock()
+    mod.DaytonaConfig = Mock()
+    mod.CreateSandboxFromImageParams = Mock()
+    mod.Resources = Mock()
+    return mod
 
 
 class TestDaytonaSandbox:
-    """Test Daytona sandbox stub contract."""
-
-    def test_init(self):
-        """Test Daytona sandbox initialization with explicit args."""
-        sandbox = DaytonaSandbox(
-            workspace_template="python-dev",
-            provider="aws",
-            api_key="test-key",
-        )
-
-        assert sandbox.workspace_template == "python-dev"
-        assert sandbox.provider == "aws"
-        assert sandbox.api_key == "test-key"
+    def test_init_defaults(self):
+        sandbox = DaytonaSandbox()
+        assert sandbox.image == "python:3.12-slim"
         assert sandbox.sandbox_type == "daytona"
         assert not sandbox._is_running
 
-    def test_init_with_defaults(self):
-        """Test initialization with default values."""
+    def test_is_available_without_key(self):
+        with patch.dict(os.environ, {}, clear=True):
+            sandbox = DaytonaSandbox()
+            assert sandbox.is_available is False
+
+    @patch.dict(os.environ, {"DAYTONA_API_KEY": "test-key"})
+    def test_is_available_with_key_and_sdk(self):
         sandbox = DaytonaSandbox()
+        with patch.dict(sys.modules, {"daytona_sdk": _daytona_sdk_module()}):
+            assert sandbox.is_available is True
 
-        assert sandbox.workspace_template == "python"
-        assert sandbox.provider == "local"
-        assert sandbox.api_key is None
-        assert sandbox.server_url == "http://localhost:3000"
-        assert sandbox.timeout == 300
-        assert sandbox.workspace_name.startswith("praisonai-")
-
-    def test_init_with_custom_workspace_name(self):
-        """Test initialization with a custom workspace name."""
-        custom_name = "my-workspace"
-        sandbox = DaytonaSandbox(workspace_name=custom_name)
-        assert sandbox.workspace_name == custom_name
-
-    def test_is_available_is_false(self):
-        """Daytona backend advertises itself as unavailable until implemented."""
+    @patch.dict(os.environ, {"DAYTONA_API_KEY": "test-key"})
+    def test_is_available_without_sdk(self):
         sandbox = DaytonaSandbox()
-        assert sandbox.is_available is False
+        with patch.dict(sys.modules, {"daytona_sdk": None}):
+            with patch(
+                "builtins.__import__",
+                side_effect=lambda name, *a, **k: (_ for _ in ()).throw(ImportError())
+                if name == "daytona_sdk"
+                else __import__(name, *a, **k),
+            ):
+                assert sandbox.is_available is False
 
     @pytest.mark.asyncio
-    async def test_start_raises_not_implemented(self):
-        """start() fails loud with NotImplementedError."""
+    @patch.dict(os.environ, {"DAYTONA_API_KEY": "test-key"})
+    async def test_start_success(self):
+        sandbox = DaytonaSandbox(api_key="test-key")
+        mock_sandbox = Mock()
+        mock_client = Mock()
+        mock_client.create.return_value = mock_sandbox
+
+        with patch.dict(sys.modules, {"daytona_sdk": _daytona_sdk_module()}):
+            with patch.object(sandbox, "_get_client", return_value=mock_client):
+                await sandbox.start()
+
+        assert sandbox._is_running
+        assert sandbox._sandbox is mock_sandbox
+        mock_client.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_start_not_available(self):
         sandbox = DaytonaSandbox()
-        with pytest.raises(NotImplementedError, match="not yet implemented"):
+        with pytest.raises(RuntimeError, match="Daytona not available"):
             await sandbox.start()
 
     @pytest.mark.asyncio
-    async def test_execute_fails_loud(self):
-        """execute() fails loud because start() is not implemented."""
-        sandbox = DaytonaSandbox()
-        with pytest.raises(NotImplementedError, match="not yet implemented"):
-            await sandbox.execute("print('Hello')", "python")
+    @patch.dict(os.environ, {"DAYTONA_API_KEY": "test-key"})
+    async def test_execute_python(self):
+        sandbox = DaytonaSandbox(api_key="test-key")
+        sandbox._is_running = True
+        mock_response = Mock(result="daytona-ok", exit_code=0)
+        mock_sandbox = Mock()
+        mock_sandbox.process.exec.return_value = mock_response
+        sandbox._sandbox = mock_sandbox
+
+        result = await sandbox.execute("print('daytona-ok')", language="python")
+
+        assert result.status == SandboxStatus.COMPLETED
+        assert "daytona-ok" in (result.stdout or "")
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DAYTONA_API_KEY": "test-key"})
+    async def test_stop_deletes_sandbox(self):
+        sandbox = DaytonaSandbox(api_key="test-key")
+        mock_sandbox = Mock()
+        sandbox._sandbox = mock_sandbox
+        sandbox._is_running = True
+
+        await sandbox.stop()
+
+        mock_sandbox.delete.assert_called_once()
+        assert not sandbox._is_running
 
     def test_get_status(self):
-        """Test getting sandbox status without touching the workspace."""
-        sandbox = DaytonaSandbox(
-            workspace_template="python-dev",
-            provider="aws",
-            api_key="test-key",
-        )
-
+        sandbox = DaytonaSandbox(api_key="secret")
         status = sandbox.get_status()
-
         assert status["type"] == "daytona"
-        assert status["workspace"] == sandbox.workspace_name
-        assert status["template"] == "python-dev"
-        assert status["provider"] == "aws"
-        assert not status["running"]
-        assert status["workspace_info"] is None
+        assert status["api_key_set"] is True
+        assert status["running"] is False

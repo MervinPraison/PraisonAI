@@ -1,6 +1,6 @@
 # praisonai-sandbox Boundary Manifest (C13)
 
-> **Status:** C13 extraction. PyPI package `praisonai-sandbox` (0.0.1+). Wrapper shims preserve `praisonai.sandbox.*` imports.
+> **Status:** implemented. PyPI package `praisonai-sandbox` (0.0.1+). Wrapper shims preserve `praisonai.sandbox.*` imports.
 
 ## Eight-package stack
 
@@ -26,8 +26,9 @@ praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai
 | `praisonai_sandbox/sandlock.py` | Landlock/seccomp |
 | `praisonai_sandbox/ssh.py` | Remote SSH |
 | `praisonai_sandbox/modal.py` | Modal serverless |
-| `praisonai_sandbox/daytona.py` | Stub backend |
+| `praisonai_sandbox/daytona.py` | Daytona cloud (`daytona-sdk`) |
 | `praisonai_sandbox/_registry.py` | `SandboxRegistry` + entry-point group `praisonai.sandbox` |
+| `praisonai_sandbox/_plugin_registry.py` | Lazy `PluginRegistry` bridge to `praisonai_code` |
 | `praisonai_sandbox/_compat.py` | Path safety helper |
 | `praisonai_sandbox/_shell.py` | argv builder |
 | `praisonai_sandbox/_code_bridge.py` | Lazy `PluginRegistry` from `praisonai_code` |
@@ -56,14 +57,14 @@ Console script: `praisonai-sandbox = praisonai_sandbox.__main__:main`
 
 | Path | Notes |
 |------|-------|
-| `praisonai_code/cli/commands/sandbox.py` | Container mgmt Typer (`status/explain/list/recreate`) |
+| `praisonai_code/cli/commands/sandbox.py` | Typer: `run`/`shell`/`backends` (code-exec) + `status`/`explain`/`list`/`recreate` (containers) |
 | `praisonai_code/cli/features/sandbox_executor.py` | `--sandbox` flag executor |
 
 ## Stays in `praisonai` wrapper
 
 | Path | Notes |
 |------|-------|
-| `praisonai/cli/features/sandbox_cli.py` | Legacy code-exec handler (`run/shell/status`) |
+| `praisonai/cli/features/sandbox_cli.py` | `SandboxHandler` for code-exec (delegated from Typer `run`/`shell`/`backends`) |
 | `praisonai/SANDLOCK_README.md` | Sandlock user guide |
 
 ## Install matrix
@@ -74,7 +75,7 @@ Console script: `praisonai-sandbox = praisonai_sandbox.__main__:main`
 | `pip install praisonai-sandbox` | ✅ | host docker | `[sandlock]` | `[e2b]` | entry points |
 | `pip install "praisonai[sandbox]"` | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-Backend extras on `praisonai-sandbox`: `[docker]`, `[e2b]`, `[sandlock]`, `[ssh]`, `[modal]`, `[all]`.
+Backend extras on `praisonai-sandbox`: `[docker]`, `[e2b]`, `[sandlock]`, `[ssh]`, `[modal]`, `[daytona]`, `[all]`.
 
 ## Publish order
 

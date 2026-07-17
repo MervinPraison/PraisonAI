@@ -5,14 +5,60 @@ Provides sandbox management commands inspired by moltbot's sandbox CLI.
 Supports listing, explaining, and recreating sandbox containers.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 import typer
 
 app = typer.Typer(
-    help="Sandbox container management",
+    help="Sandbox: code execution (run/shell/backends) and container management",
     no_args_is_help=True,
 )
+
+_SandboxType = Literal["subprocess", "docker", "daytona"]
+
+
+def _sandbox_handler():
+    """Lazy wrapper bridge to code-exec handler (manifest: stays in praisonai wrapper)."""
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+
+    return import_wrapper_module("praisonai.cli.features.sandbox_cli").SandboxHandler()
+
+
+@app.command("run")
+def sandbox_run(
+    code: Optional[str] = typer.Option(None, "--code", "-c", help="Code to execute"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="File to execute"),
+    sandbox_type: _SandboxType = typer.Option(
+        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
+    ),
+    image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
+    timeout: int = typer.Option(60, "--timeout", help="Timeout in seconds"),
+):
+    """Run code in an isolated sandbox backend."""
+    _sandbox_handler().run(
+        code=code,
+        file=file,
+        sandbox_type=sandbox_type,
+        image=image,
+        timeout=timeout,
+    )
+
+
+@app.command("shell")
+def sandbox_shell(
+    sandbox_type: _SandboxType = typer.Option(
+        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
+    ),
+    image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
+):
+    """Start an interactive sandbox REPL."""
+    _sandbox_handler().shell(sandbox_type=sandbox_type, image=image)
+
+
+@app.command("backends")
+def sandbox_backends():
+    """Show availability of sandbox execution backends."""
+    _sandbox_handler().status()
 
 
 @app.command("status")
@@ -346,17 +392,22 @@ def sandbox_callback(ctx: typer.Context):
     """Show sandbox help if no subcommand provided."""
     if ctx.invoked_subcommand is None:
         help_text = """
-[bold cyan]PraisonAI Sandbox - Container Management[/bold cyan]
+[bold cyan]PraisonAI Sandbox[/bold cyan]
 
-Manage sandbox containers with: praisonai sandbox <command>
+Code execution and container management: praisonai sandbox <command>
 
 [bold]Commands:[/bold]
-  [green]status[/green]      Show sandbox status
+  [green]run[/green]        Run code in a sandbox backend
+  [green]shell[/green]      Interactive sandbox REPL
+  [green]backends[/green]    Show backend availability
+  [green]status[/green]      Show container status
   [green]explain[/green]     Explain effective sandbox policy
   [green]list[/green]        List sandbox containers
   [green]recreate[/green]    Recreate containers
 
 [bold]Examples:[/bold]
+  praisonai sandbox run --code "print('hello')"
+  praisonai sandbox backends
   praisonai sandbox status
   praisonai sandbox explain --agent work
   praisonai sandbox list --browser

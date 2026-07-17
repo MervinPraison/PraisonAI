@@ -15,6 +15,16 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _ensure_backends():
+    """Bootstrap praisonai-sandbox before registry imports (fail loud if missing)."""
+    try:
+        from praisonai._bootstrap import ensure_praisonai_sandbox
+
+        ensure_praisonai_sandbox()
+    except ImportError:
+        pass
+
+
 class SandboxHandler:
     """Handler for sandbox CLI commands."""
     
@@ -38,6 +48,8 @@ class SandboxHandler:
         if not code and not file:
             print("Error: Provide code via --code or --file")
             return
+        
+        _ensure_backends()
         
         if file:
             if not os.path.exists(file):
@@ -111,6 +123,7 @@ class SandboxHandler:
             sandbox_type: Type of sandbox (subprocess, docker)
             image: Docker image to use
         """
+        _ensure_backends()
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
@@ -176,21 +189,18 @@ class SandboxHandler:
         asyncio.run(run_shell())
     
     def status(self) -> None:
-        """Check sandbox availability."""
-        print("Sandbox Status:")
+        """Check sandbox backend availability."""
+        print("Sandbox backends:")
         print()
-        
-        print("Subprocess sandbox: Available")
-        
         try:
-            from praisonai_sandbox import DockerSandbox
-            sandbox = DockerSandbox()
-            if sandbox.is_available:
-                print("Docker sandbox: Available")
-            else:
-                print("Docker sandbox: Not available (Docker not running)")
-        except ImportError:
-            print("Docker sandbox: Not available (dependencies not installed)")
+            from praisonaiagents.sandbox import SandboxManager, SandboxConfig
+
+            manager = SandboxManager(SandboxConfig.subprocess())
+            for name, info in sorted(manager.get_available_types().items()):
+                flag = "Available" if info.get("available") else "Unavailable"
+                print(f"  {name}: {flag}")
+        except ImportError as exc:
+            print(f"  Error: {exc}")
 
 
 def handle_sandbox_command(args) -> None:
@@ -245,7 +255,7 @@ def add_sandbox_parser(subparsers) -> None:
     )
     run_parser.add_argument(
         "--type", "-t",
-        choices=["subprocess", "docker"],
+        choices=["subprocess", "docker", "daytona"],
         default="subprocess",
         help="Sandbox type (default: subprocess)",
     )
@@ -267,7 +277,7 @@ def add_sandbox_parser(subparsers) -> None:
     )
     shell_parser.add_argument(
         "--type", "-t",
-        choices=["subprocess", "docker"],
+        choices=["subprocess", "docker", "daytona"],
         default="subprocess",
         help="Sandbox type (default: subprocess)",
     )

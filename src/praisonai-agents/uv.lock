@@ -974,68 +974,12 @@ wheels = [
 ]
 
 [[package]]
-name = "docker"
-version = "7.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "requests" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/91/9b/4a2ea29aeba62471211598dac5d96825bb49348fa07e906ea930394a83ce/docker-7.1.0.tar.gz", hash = "sha256:ad8c70e6e3f8926cb8a92619b832b4ea5299e2831c14284663184e200546fa6c", size = 117834, upload-time = "2024-05-23T11:13:57.216Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/26/57c6fb270950d476074c087527a558ccb6f4436657314bfb6cdf484114c4/docker-7.1.0-py3-none-any.whl", hash = "sha256:c96b93b7f0a746f9e77d325bcfb87422a3d8bd4f03136ae8a85b37f1898d5fc0", size = 147774, upload-time = "2024-05-23T11:13:55.01Z" },
-]
-
-[[package]]
-name = "dockerfile-parse"
-version = "2.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/df/929ee0b5d2c8bd8d713c45e71b94ab57c7e11e322130724d54f469b2cd48/dockerfile-parse-2.0.1.tar.gz", hash = "sha256:3184ccdc513221983e503ac00e1aa504a2aa8f84e5de673c46b0b6eee99ec7bc", size = 24556, upload-time = "2023-07-18T13:36:07.897Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7a/6c/79cd5bc1b880d8c1a9a5550aa8dacd57353fa3bb2457227e1fb47383eb49/dockerfile_parse-2.0.1-py2.py3-none-any.whl", hash = "sha256:bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6", size = 14845, upload-time = "2023-07-18T13:36:06.052Z" },
-]
-
-[[package]]
 name = "durationpy"
 version = "0.9"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/31/e9/f49c4e7fccb77fa5c43c2480e09a857a78b41e7331a75e128ed5df45c56b/durationpy-0.9.tar.gz", hash = "sha256:fd3feb0a69a0057d582ef643c355c40d2fa1c942191f914d12203b1a01ac722a", size = 3186, upload-time = "2024-10-02T17:59:00.873Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/a3/ac312faeceffd2d8f86bc6dcb5c401188ba5a01bc88e69bed97578a0dfcd/durationpy-0.9-py3-none-any.whl", hash = "sha256:e65359a7af5cedad07fb77a2dd3f390f8eb0b74cb845589fa6c057086834dd38", size = 3461, upload-time = "2024-10-02T17:58:59.349Z" },
-]
-
-[[package]]
-name = "e2b"
-version = "2.2.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "attrs" },
-    { name = "dockerfile-parse" },
-    { name = "httpcore" },
-    { name = "httpx" },
-    { name = "packaging" },
-    { name = "protobuf" },
-    { name = "python-dateutil" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fe/1b/d11119f70ada7d8f0d3a79e6cd60c9180f614ddcd99afa436d89b81739bc/e2b-2.2.3.tar.gz", hash = "sha256:6e28655b1dc3753005e48e7268c02b29314d4b7907cf8617ba777a7096b471d9", size = 89414, upload-time = "2025-10-09T08:44:36.897Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/d1/ab9dec3e4abc9f932a9ef4a9a57900332a3c6df31db454d2d8ef0b6d1944/e2b-2.2.3-py3-none-any.whl", hash = "sha256:c6949b7c17ab66a5c56c187b473a7f5d5f367e22cf2bd8e3c5e376117003dc56", size = 165490, upload-time = "2025-10-09T08:44:35.196Z" },
-]
-
-[[package]]
-name = "e2b-code-interpreter"
-version = "2.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "attrs" },
-    { name = "e2b" },
-    { name = "httpx" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/db/d0/116900ce07bef1cf2068a0c6da6df4eebcb78b22c037ccb3360613ac1d47/e2b_code_interpreter-2.1.1.tar.gz", hash = "sha256:a51af42d30cbeca158168cee11e362254467b508a0ab578760248f0e97779dd8", size = 10114, upload-time = "2025-10-08T00:18:19.086Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/c0/774e3e37ba818e27496d2a483a2d679a56b6427562f6e94af862eefc9a9f/e2b_code_interpreter-2.1.1-py3-none-any.whl", hash = "sha256:f7d561ae0bc6f0ae755d09afaa636d3ba935af1b11e6e31d5dbd5988da5a4101", size = 12983, upload-time = "2025-10-08T00:18:17.424Z" },
 ]
 
 [[package]]
@@ -1064,7 +1008,7 @@ name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749, upload-time = "2025-05-10T17:42:51.123Z" }
 wheels = [
@@ -3162,7 +3106,6 @@ all = [
     { name = "chromadb" },
     { name = "crawl4ai" },
     { name = "ddgs" },
-    { name = "e2b-code-interpreter" },
     { name = "fastapi" },
     { name = "litellm" },
     { name = "markitdown", extra = ["all"] },
@@ -3233,12 +3176,6 @@ os = [
     { name = "pyjwt" },
     { name = "uvicorn" },
 ]
-sandbox = [
-    { name = "e2b-code-interpreter" },
-]
-sandbox-docker = [
-    { name = "docker" },
-]
 search = [
     { name = "ddgs" },
 ]
@@ -3259,8 +3196,6 @@ requires-dist = [
     { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.4.0" },
     { name = "dakera", marker = "extra == 'dakera'", specifier = ">=0.12.8" },
     { name = "ddgs", marker = "extra == 'search'", specifier = ">=9.0.0" },
-    { name = "docker", marker = "extra == 'sandbox-docker'", specifier = ">=7.0.0" },
-    { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=1.0.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
@@ -3288,7 +3223,6 @@ requires-dist = [
     { name = "praisonaiagents", extras = ["memory"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["os"], marker = "extra == 'all'" },
-    { name = "praisonaiagents", extras = ["sandbox"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["search"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["telemetry"], marker = "extra == 'all'" },
     { name = "pydantic", specifier = ">=2.10.0" },
@@ -3305,7 +3239,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "sandbox", "a2ui", "sandbox-docker", "all"]
+provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "primp"
@@ -4398,7 +4332,7 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0f/37/6964b830433e654ec7485e45a00fc9a27cf868d622838f6b6d9c5ec0d532/scipy-1.15.3.tar.gz", hash = "sha256:eae3cf522bc7df64b42cad3925c876e1b0b6c35c1337c93e12c0f366f55b0eaf", size = 59419214, upload-time = "2025-05-08T16:13:05.955Z" }
 wheels = [
@@ -4461,7 +4395,7 @@ resolution-markers = [
     "python_full_version == '3.11.*'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version >= '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -4725,8 +4659,8 @@ name = "standard-aifc"
 version = "3.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "audioop-lts" },
-    { name = "standard-chunk" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+    { name = "standard-chunk", marker = "python_full_version >= '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/53/6050dc3dde1671eb3db592c13b55a8005e5040131f7509cef0215212cb84/standard_aifc-3.13.0.tar.gz", hash = "sha256:64e249c7cb4b3daf2fdba4e95721f811bde8bdfc43ad9f936589b7bb2fae2e43", size = 15240, upload-time = "2024-10-30T16:01:31.772Z" }
 wheels = [
