@@ -705,30 +705,40 @@ class AgentsGenerator:
         framework_name = self.framework or config.get('framework', 'praisonai')
         adapter = self._select_framework(framework_name, config)
         
-        # Validate framework availability
+        # Validate framework availability through the injected registry so a
+        # scoped/per-tenant adapter registered on this generator's registry is
+        # not rejected just because it is absent from the process default.
         from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
+        assert_framework_available(adapter.name, registry=self._adapter_registry)
         
         # Validate cli_backend compatibility
         self._validate_cli_backend_compatibility(config, adapter.name, adapter=adapter)
-        
-        # Initialize observability hooks
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-        
-        # Run adapter setup hooks
-        adapter.setup(framework_tag=adapter.name)
-        
+
         # Update framework reference if resolution changed it
         self.framework = adapter.name
         self.framework_adapter = adapter
-        
+
+        # NB: adapter setup is intentionally NOT run here. The caller opens the
+        # observability_session (which owns init/finalize for every adapter) and
+        # then invokes _run_adapter_setup INSIDE that session, so setup events —
+        # and any setup/import failure — are recorded and finalized instead of
+        # slipping outside observability. See generate_crew_and_kickoff /
+        # agenerate_crew_and_kickoff.
         return {
             'adapter': adapter,
             'config': config,
             'topic': topic,
             'tools_dict': tools_dict,
         }
+
+    def _run_adapter_setup(self, adapter):
+        """Run an adapter's setup hooks.
+
+        Kept as a tiny seam so both the sync and async run paths execute setup
+        *inside* the observability_session, keeping init/setup/run/finalize
+        bracketed together for every adapter.
+        """
+        adapter.setup(framework_tag=adapter.name)
     
     def _build_tools_dict(self, config):
         """Shared tool resolution logic for sync and async paths."""
@@ -997,15 +1007,22 @@ class AgentsGenerator:
         prep = self._prepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return prep['adapter'].run(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        from .observability.hooks import observability_session
+        with observability_session(prep['adapter'].name):
+            # Run setup INSIDE the session so setup events and any setup/import
+            # failure are recorded and finalized, not dropped outside observability.
+            self._run_adapter_setup(prep['adapter'])
+            return prep['adapter'].run(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
     async def _aload_config(self):
         """Async-safe config loading (blocking file I/O off the event loop)."""
@@ -1013,7 +1030,8 @@ class AgentsGenerator:
         return await asyncio.to_thread(self._load_config)
 
     async def _aprepare_for_run(self, config):
-        """Async-safe run preparation (heavy imports + adapter.setup() off the loop)."""
+        """Async-safe run preparation (heavy imports off the loop). Adapter setup
+        runs later, inside the observability_session (see agenerate_crew_and_kickoff)."""
         import asyncio
         return await asyncio.to_thread(self._prepare_for_run, config)
 
@@ -1032,15 +1050,24 @@ class AgentsGenerator:
         prep = await self._aprepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return await prep['adapter'].arun(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        import asyncio
+        from .observability.hooks import observability_session
+        with observability_session(prep['adapter'].name):
+            # Run setup INSIDE the session (off the event loop, as it may block)
+            # so setup events and any setup/import failure are recorded and
+            # finalized, not dropped outside observability.
+            await asyncio.to_thread(self._run_adapter_setup, prep['adapter'])
+            return await prep['adapter'].arun(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
 
     def _build_yaml_workflow(self, config):

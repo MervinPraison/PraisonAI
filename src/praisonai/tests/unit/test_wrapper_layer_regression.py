@@ -317,7 +317,13 @@ class TestObservabilityFinalization:
 
 
 class TestFrameworkAdapterExceptionPaths:
-    """Test that framework adapters call finalize_observability on exception paths."""
+    """Observability lifecycle ownership.
+
+    The generator (AgentsGenerator) owns init+finalize via the
+    ``observability_session`` context manager, so finalize is paired with init
+    for every adapter — including AutoGen, which previously never finalized and
+    leaked a run on each invocation. Adapters must not finalize themselves.
+    """
     
     @patch('praisonai.observability.hooks.finalize_observability')
     @pytest.mark.skip(reason="AutoGenV4Adapter delegates execution; inspect source test outdated")
@@ -366,38 +372,64 @@ class TestFrameworkAdapterExceptionPaths:
             # Skip if AG2 dependencies not available
             pytest.skip("AG2 dependencies not available")
     
-    def test_crewai_adapter_finalization_calls(self):
-        """Test CrewAIAdapter calls finalize_observability with correct status."""
-        try:
-            from praisonai.framework_adapters.crewai_adapter import CrewAIAdapter
-            
-            # Verify the class exists and has run method
-            assert hasattr(CrewAIAdapter, 'run')
-            
-            # Check that the implementation calls finalize_observability
-            import inspect
-            source = inspect.getsource(CrewAIAdapter.run)
-            
-            # Verify finalize_observability call exists with status parameter
-            assert 'finalize_observability' in source, "CrewAIAdapter.run should call finalize_observability"
-            assert 'status=' in source, "CrewAIAdapter.run should call finalize_observability with status parameter"
-            
-        except ImportError:
-            # Skip if CrewAI dependencies not available
-            pytest.skip("CrewAI dependencies not available")
-    
-    def test_praisonai_adapter_finalization_calls(self):
-        """Test PraisonAIAdapter calls finalize_observability with correct status."""
-        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
-        
-        # Verify the class exists and has both run and arun methods
-        assert hasattr(PraisonAIAdapter, 'run')
-        assert hasattr(PraisonAIAdapter, 'arun')
-        
-        # Check that both implementations call finalize_observability
+    def test_generator_owns_observability_lifecycle(self):
+        """Generator brackets the run with observability_session so init/finalize
+        are always paired for EVERY adapter.
+
+        The observability lifecycle is no longer a by-convention per-adapter
+        call (which let the AutoGen path leak a run on every invocation); it is
+        owned by AgentsGenerator, so both the sync and async kickoff paths must
+        wrap adapter.run/arun in ``observability_session``.
+        """
+        from praisonai.agents_generator import AgentsGenerator
         import inspect
 
-        arun_source = inspect.getsource(PraisonAIAdapter.arun)
+        sync_source = inspect.getsource(AgentsGenerator.generate_crew_and_kickoff)
+        async_source = inspect.getsource(AgentsGenerator.agenerate_crew_and_kickoff)
 
-        assert 'finalize_observability' in arun_source, "PraisonAIAdapter.arun should call finalize_observability"
-        assert 'status=' in arun_source, "PraisonAIAdapter.arun should call finalize_observability with status parameter"
+        assert 'observability_session' in sync_source, (
+            "generate_crew_and_kickoff should bracket the run with observability_session"
+        )
+        assert 'observability_session' in async_source, (
+            "agenerate_crew_and_kickoff should bracket the run with observability_session"
+        )
+
+    def test_adapters_do_not_finalize_observability(self):
+        """Adapters must not finalize observability themselves.
+
+        Finalizing per-adapter is the exact by-convention pattern Gap 3 removed:
+        the generator owns init+finalize via the context manager, so leaving a
+        stray finalize in an adapter would double-finalize / re-introduce drift.
+        """
+        import inspect
+
+        from praisonai.framework_adapters.crewai_adapter import CrewAIAdapter
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+        assert 'finalize_observability' not in inspect.getsource(CrewAIAdapter.run)
+        assert 'finalize_observability' not in inspect.getsource(PraisonAIAdapter.arun)
+
+    def test_adapter_setup_runs_inside_observability_session(self):
+        """adapter.setup() must run INSIDE the observability_session.
+
+        Regression guard: an earlier revision opened the session only around
+        adapter.run(), leaving setup (and any setup/import failure) outside
+        observability so setup events were dropped and a failed setup produced
+        no finalized run. _prepare_for_run must therefore NOT call setup, and
+        both kickoff paths must invoke the setup seam within the session.
+        """
+        from praisonai.agents_generator import AgentsGenerator
+        import inspect
+
+        prep_source = inspect.getsource(AgentsGenerator._prepare_for_run)
+        assert '.setup(' not in prep_source, (
+            "_prepare_for_run must not run adapter.setup() outside the session"
+        )
+
+        for name in ("generate_crew_and_kickoff", "agenerate_crew_and_kickoff"):
+            src = inspect.getsource(getattr(AgentsGenerator, name))
+            session_idx = src.index('observability_session')
+            setup_idx = src.index('_run_adapter_setup')
+            assert setup_idx > session_idx, (
+                f"{name} must run _run_adapter_setup inside observability_session"
+            )
