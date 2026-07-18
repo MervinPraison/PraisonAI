@@ -234,7 +234,17 @@ def restart() -> Dict[str, Any]:
         )
         if query.returncode != 0 or TASK_NAME not in query.stdout:
             return {"ok": False, "error": "Scheduled task not installed"}
-        subprocess.run(["schtasks", "/End", "/TN", TASK_NAME], capture_output=True)
+        # Stop the running task first. If /End fails while the old gateway is
+        # still active, relaunching would collide on the PID lock / port or
+        # start a duplicate channel consumer, so abort instead (#3161).
+        end = subprocess.run(
+            ["schtasks", "/End", "/TN", TASK_NAME], capture_output=True, text=True,
+        )
+        if end.returncode != 0:
+            return {
+                "ok": False,
+                "error": f"schtasks /End failed: {end.stderr.strip()}",
+            }
         result = subprocess.run(
             ["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True,
         )

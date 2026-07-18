@@ -219,8 +219,14 @@ def gateway_restart(
     Daemon-aware: if the gateway is installed as an OS service
     (launchd / systemd / scheduled task), the service manager restarts it so
     operators never hand-copy ``launchctl kickstart`` / ``systemctl --user
-    restart`` / ``schtasks`` per platform. Otherwise it drains the running
-    PID and relaunches directly (#3161).
+    restart`` / ``schtasks`` per platform, preserving the installed unit's
+    launch arguments. Otherwise it drains the running PID and relaunches
+    directly (#3161).
+
+    Note: the direct (non-service) relaunch cannot recover CLI-only flags the
+    original process was started with (e.g. ``--openai-api``,
+    ``--max-concurrent-runs``); put production settings in ``gateway.yaml`` (or
+    install as a service) so a restart preserves them.
 
     Examples:
         praisonai gateway restart
@@ -258,9 +264,11 @@ def gateway_restart(
         )
 
     # Direct path: gracefully stop the running gateway (honouring drain), then
-    # start a fresh instance in the foreground.
+    # start a fresh instance in the foreground. The requested drain window is
+    # applied to the OLD process too, so a long --drain-timeout is not cut off
+    # by a fixed 10s wait before force-kill (#3161).
     handler = GatewayHandler()
-    handler.stop(host=host, port=port, force=False)
+    handler.stop(host=host, port=port, force=False, drain_timeout=drain_timeout)
 
     output.print_info("Relaunching gateway...")
     handler.start(
@@ -744,30 +752,48 @@ def gateway_channels(
             print(f"{name:<20} {platform:<12} {has_token:<12}")
 
 
-def _resolve_gateway_rest_url(url: Optional[str]) -> str:
+def _resolve_gateway_rest_url(
+    url: Optional[str],
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
     """Resolve the gateway REST base URL for channel control commands.
 
     When ``--url`` is not passed, resolve the running gateway from the PID
     lock/config (host+port) rather than forcing the operator to hand-type a
-    WebSocket URL (#3161). Falls back to ``127.0.0.1:8765`` when no lock is
-    found. An explicit ``--url`` (ws/wss/http/https) always wins.
+    WebSocket URL (#3161). The lock file is keyed by host+port, so an explicit
+    ``--host``/``--port`` (or ``GATEWAY_PORT``) is honoured to locate a gateway
+    bound to a non-default endpoint; otherwise it falls back to
+    ``127.0.0.1:8765``. An explicit ``--url`` (ws/wss/http/https) always wins.
     """
+    import os
     from urllib.parse import urlparse, urlunparse
 
     if url:
         parsed = urlparse(url)
         scheme = "https" if parsed.scheme in ("wss", "https") else "http"
     else:
-        host, port = "127.0.0.1", 8765
+        resolved_host = host or "127.0.0.1"
+        if port is None:
+            try:
+                resolved_port = int(os.environ.get("GATEWAY_PORT", "8765"))
+            except ValueError:
+                resolved_port = 8765
+        else:
+            resolved_port = port
         try:
             from praisonai_bot.gateway.port_utils import GatewayPIDLock
 
-            info = GatewayPIDLock().get_lock_info()
+            # Key the lock lookup by the requested host+port so a gateway on a
+            # non-default endpoint is found instead of silently probing 8765.
+            info = GatewayPIDLock(
+                host=resolved_host, port=resolved_port
+            ).get_lock_info()
             if info and info.get("is_running"):
-                host, port = info["host"], info["port"]
+                resolved_host, resolved_port = info["host"], info["port"]
         except Exception:  # pragma: no cover — advisory only
             pass
-        parsed = urlparse(f"http://{host}:{port}")
+        parsed = urlparse(f"http://{resolved_host}:{resolved_port}")
         scheme = "http"
 
     rest_url = urlunparse(
@@ -778,12 +804,18 @@ def _resolve_gateway_rest_url(url: Optional[str]) -> str:
     return rest_url
 
 
-def _channel_control(name: str, action: str, url: Optional[str]) -> None:
+def _channel_control(
+    name: str,
+    action: str,
+    url: Optional[str],
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> None:
     """POST a pause/resume/reconnect action to the running gateway."""
     import requests
     import sys
 
-    rest_url = _resolve_gateway_rest_url(url)
+    rest_url = _resolve_gateway_rest_url(url, host=host, port=port)
     try:
         response = requests.post(f"{rest_url}api/channels/{name}/{action}", timeout=10)
         response.raise_for_status()
@@ -809,16 +841,24 @@ def gateway_pause_channel(
         None, "--url",
         help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
     ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Pause a gateway channel.
 
-    Resolves the running gateway from the PID lock when --url is omitted.
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
 
     Examples:
         praisonai gateway pause telegram
         praisonai gateway pause discord --url ws://localhost:8000
+        praisonai gateway pause telegram --port 9000
     """
-    _channel_control(name, "pause", url)
+    _channel_control(name, "pause", url, host=host, port=port)
 
 
 @app.command("resume")
@@ -828,16 +868,24 @@ def gateway_resume_channel(
         None, "--url",
         help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
     ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Resume a paused gateway channel.
 
-    Resolves the running gateway from the PID lock when --url is omitted.
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
 
     Examples:
         praisonai gateway resume telegram
         praisonai gateway resume discord --url ws://localhost:8000
+        praisonai gateway resume telegram --port 9000
     """
-    _channel_control(name, "resume", url)
+    _channel_control(name, "resume", url, host=host, port=port)
 
 
 @app.command("reconnect")
@@ -847,16 +895,24 @@ def gateway_reconnect_channel(
         None, "--url",
         help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
     ),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Gateway host to locate (for non-default binds)",
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Gateway port to locate (for non-default binds)",
+    ),
 ):
     """Reconnect a gateway channel.
 
-    Resolves the running gateway from the PID lock when --url is omitted.
+    Resolves the running gateway from the PID lock when --url is omitted;
+    pass --host/--port to control a gateway bound to a non-default endpoint.
 
     Examples:
         praisonai gateway reconnect telegram
         praisonai gateway reconnect discord --url ws://localhost:8000
+        praisonai gateway reconnect telegram --port 9000
     """
-    _channel_control(name, "reconnect", url)
+    _channel_control(name, "reconnect", url, host=host, port=port)
 
 
 @app.command("install")
