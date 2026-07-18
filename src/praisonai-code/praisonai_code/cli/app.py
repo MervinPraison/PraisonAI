@@ -147,6 +147,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "env": (".commands.environment", "app", "Environment and diagnostics"),
     "auth": (".commands.auth", "app", "Credential management"),
     "session": (".commands.session", "app", "Session management"),
+    "usage": (".commands.usage", "app", "Local token/cost usage reporting"),
     "completion": (".commands.completion", "app", "Shell completion scripts"),
     "version": (".commands.version", "app", "Version information"),
     "upgrade": (".commands.upgrade", "app", "Update the managed PraisonAI CLI install"),
