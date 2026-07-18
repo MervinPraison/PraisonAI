@@ -208,5 +208,44 @@ class TestHistoryWithSession:
         assert agent._history_session_id == "my-auto-session"
 
 
+class TestWorkspaceScopedSessionId:
+    """Auto-derived session id should be workspace-aware (Issue #3154)."""
+
+    def test_workspace_id_is_stable(self):
+        """workspace_id() returns a stable, non-empty string."""
+        from praisonaiagents.session import workspace_id
+
+        wid = workspace_id()
+        assert isinstance(wid, str) and wid
+        assert workspace_id() == wid  # cached / deterministic
+
+    def test_auto_id_folds_in_workspace(self):
+        """Auto id should be sha256('{workspace}:{name}') and not name-only."""
+        import hashlib
+        from praisonaiagents import Agent
+        from praisonaiagents.session import workspace_id
+
+        agent = Agent(name="assistant", instructions="Test", memory="history")
+
+        wid = workspace_id()
+        expected = "history_" + hashlib.sha256(f"{wid}:assistant".encode()).hexdigest()[:8]
+        name_only = "history_" + hashlib.sha256(b"assistant").hexdigest()[:8]
+
+        assert agent._history_session_id == expected
+        # The workspace-scoped id must differ from the old name-only id
+        assert agent._history_session_id != name_only
+
+    def test_global_scope_opt_out(self, monkeypatch):
+        """PRAISONAI_GLOBAL_SESSIONS=true reverts to name-only global id."""
+        import hashlib
+        from praisonaiagents import Agent
+
+        monkeypatch.setenv("PRAISONAI_GLOBAL_SESSIONS", "true")
+        agent = Agent(name="assistant", instructions="Test", memory="history")
+
+        expected = "history_" + hashlib.sha256(b"global:assistant").hexdigest()[:8]
+        assert agent._history_session_id == expected
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -1273,16 +1273,31 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             session_id = _history_session_id
         elif _history_enabled and session_id is None and _history_session_id is None:
             import hashlib as _hl
-            _agent_hash = _hl.sha256((name or "agent").encode()).hexdigest()[:8]
-            # Backward compat: check if legacy md5-based session exists first
-            _legacy_hash = _hl.md5((name or "agent").encode()).hexdigest()[:8]
-            _legacy_id = f"history_{_legacy_hash}"
-            _new_id = f"history_{_agent_hash}"
-            # Prefer legacy if it exists on disk, else use new SHA-256 ID
             import os as _os
+            _name = name or "agent"
+            # Workspace-scoped id so same-named agents in different projects don't
+            # collide (Issue #3154). Opt out with PRAISONAI_GLOBAL_SESSIONS=true for
+            # name-only global continuity.
+            _global_scope = _os.environ.get("PRAISONAI_GLOBAL_SESSIONS", "").lower() in ("1", "true", "yes")
+            if _global_scope:
+                _workspace_id = "global"
+            else:
+                from ..session.workspace import workspace_id as _wid
+                _workspace_id = _wid()
+            _workspace_hash = _hl.sha256(f"{_workspace_id}:{_name}".encode()).hexdigest()[:8]
+            _new_id = f"history_{_workspace_hash}"
+            # Backward-compat ids (resolution order: name-only sha256, then md5)
+            _name_sha_id = f"history_{_hl.sha256(_name.encode()).hexdigest()[:8]}"
+            _name_md5_id = f"history_{_hl.md5(_name.encode()).hexdigest()[:8]}"
             _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
-            if _os.path.exists(_os.path.join(_session_dir, f"{_legacy_id}.json")):
-                session_id = _legacy_id  # preserve existing history
+            # Prefer an existing workspace-scoped session, then fall back to any
+            # pre-workspace session file so prior history keeps resolving.
+            if _os.path.exists(_os.path.join(_session_dir, f"{_new_id}.json")):
+                session_id = _new_id
+            elif _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
+                session_id = _name_sha_id  # preserve existing history
+            elif _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
+                session_id = _name_md5_id  # preserve existing history
             else:
                 session_id = _new_id
             _history_session_id = session_id

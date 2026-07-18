@@ -153,6 +153,12 @@ def __getattr__(name: str):
         _module_cache[name] = clear_session_context
         return clear_session_context
 
+    # Workspace-scoped default session identity (Issue #3154)
+    if name == "workspace_id":
+        from .workspace import workspace_id
+        _module_cache[name] = workspace_id
+        return workspace_id
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -181,4 +187,5 @@ __all__ = [
     "set_session_context",
     "get_session_context",
     "clear_session_context",
+    "workspace_id",
 ]
