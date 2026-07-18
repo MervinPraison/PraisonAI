@@ -36,6 +36,48 @@ def gateway_start(
         "--mcp",
         help="Serve an MCP JSON-RPC endpoint (/mcp) exposing the gateway's agents",
     ),
+    drain_timeout: Optional[float] = typer.Option(
+        None, "--drain-timeout",
+        help="Seconds to wait for in-flight agent turns to finish on shutdown "
+        "(0 disables; #2375)",
+    ),
+    max_concurrent_runs: Optional[int] = typer.Option(
+        None, "--max-concurrent-runs",
+        help="Gateway-wide ceiling on simultaneously-running agent turns "
+        "(0 disables; #2454)",
+    ),
+    queue_depth: Optional[int] = typer.Option(
+        None, "--queue-depth",
+        help="Bounded wait queue depth when at the concurrency ceiling (#2454)",
+    ),
+    overflow_policy: Optional[str] = typer.Option(
+        None, "--overflow-policy",
+        help="Behaviour when the wait queue is full: reject | queue | shed_oldest "
+        "(default: reject; #2454)",
+    ),
+    reliability: Optional[str] = typer.Option(
+        None, "--reliability",
+        help="Named reliability posture composing drain + admission in one switch: "
+        "production | default | off (#2531)",
+    ),
+    identity_store: Optional[str] = typer.Option(
+        None, "--identity-store",
+        help="Enable cross-platform conversation continuity: path to the identity "
+        "link-map JSON (default ~/.praisonai/identity.json). Paired/linked users "
+        "share one session + memory across channels (#3020)",
+    ),
+    scale_to_zero: bool = typer.Option(
+        False, "--scale-to-zero",
+        help="Quiesce the gateway when idle for --idle-minutes (scale-to-zero; #3021)",
+    ),
+    idle_minutes: Optional[float] = typer.Option(
+        None, "--idle-minutes",
+        help="Minutes of no inbound / in-flight work before quiescing (#3021)",
+    ),
+    drain_marker: Optional[str] = typer.Option(
+        None, "--drain-marker",
+        help="Path to watch for an epoch-aware external drain marker file (#3021)",
+    ),
 ):
     """Start the gateway server.
 
@@ -45,6 +87,8 @@ def gateway_start(
         praisonai gateway start --agents agents.yaml --port 9000
         praisonai gateway start --config gateway.yaml --no-preflight
         praisonai gateway start --config gateway.yaml --openai-api --mcp
+        praisonai gateway start --config gateway.yaml --reliability production
+        praisonai gateway start --config gateway.yaml --max-concurrent-runs 8 --queue-depth 32
         GATEWAY_PORT=9000 praisonai gateway start
     """
     import os
@@ -96,7 +140,10 @@ def gateway_start(
 
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
-    # YAML ``gateway.api.*`` value (None = "fall back to config").
+    # YAML ``gateway.api.*`` value (None = "fall back to config"). The same
+    # None-means-fall-back-to-YAML rule applies to the reliability/admission/
+    # idle/drain/identity flags below, so operators get one canonical, fully
+    # discoverable ``gateway start --help`` surface (#3161).
     #
     # Propagate the supervisor-friendly exit code (#2437, #3160): Typer ignores
     # a plain returned int, so a fatal-config (78) / transient (75) / clean (0)
@@ -111,6 +158,15 @@ def gateway_start(
         config_file=config,
         openai_api=True if openai_api else None,
         mcp=True if mcp else None,
+        drain_timeout=drain_timeout,
+        max_concurrent_runs=max_concurrent_runs,
+        queue_depth=queue_depth,
+        overflow_policy=overflow_policy,
+        reliability=reliability,
+        identity_store=identity_store,
+        scale_to_zero=True if scale_to_zero else None,
+        idle_minutes=idle_minutes,
+        drain_marker=drain_marker,
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 
@@ -141,6 +197,79 @@ def gateway_stop(
     
     handler = GatewayHandler()
     handler.stop(host=host, port=port, force=force)
+
+
+@app.command("restart")
+def gateway_restart(
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Path to gateway.yaml (for direct relaunch)"
+    ),
+    agents: Optional[str] = typer.Option(
+        None, "--agents", help="Path to agent configuration file (for direct relaunch)"
+    ),
+    drain_timeout: float = typer.Option(
+        10.0, "--drain-timeout",
+        help="Seconds to wait for in-flight agent turns to finish before relaunch",
+    ),
+):
+    """Gracefully drain in-flight turns, then relaunch the gateway.
+
+    Daemon-aware: if the gateway is installed as an OS service
+    (launchd / systemd / scheduled task), the service manager restarts it so
+    operators never hand-copy ``launchctl kickstart`` / ``systemctl --user
+    restart`` / ``schtasks`` per platform. Otherwise it drains the running
+    PID and relaunches directly (#3161).
+
+    Examples:
+        praisonai gateway restart
+        praisonai gateway restart --config gateway.yaml
+        praisonai gateway restart --drain-timeout 30
+    """
+    import os
+    from praisonai_bot.daemon import restart_daemon, get_daemon_status
+    from ..features.gateway import GatewayHandler
+    from ..output.console import get_output_controller
+
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
+
+    output = get_output_controller()
+
+    # Daemon-aware path: let the service manager perform the restart when a
+    # service is installed, so drain/relaunch semantics match `install`.
+    try:
+        daemon_status = get_daemon_status()
+    except Exception:
+        daemon_status = {"installed": False}
+
+    if daemon_status.get("installed"):
+        result = restart_daemon()
+        if result.get("ok"):
+            output.print_success(result.get("message", "Service restarted"))
+            return
+        output.print_warning(
+            f"Daemon restart unavailable ({result.get('error', 'unknown')}); "
+            "falling back to direct drain + relaunch."
+        )
+
+    # Direct path: gracefully stop the running gateway (honouring drain), then
+    # start a fresh instance in the foreground.
+    handler = GatewayHandler()
+    handler.stop(host=host, port=port, force=False)
+
+    output.print_info("Relaunching gateway...")
+    handler.start(
+        host=host,
+        port=port,
+        agent_file=agents,
+        config_file=config,
+        drain_timeout=drain_timeout,
+    )
 
 
 @app.command("status")
@@ -615,130 +744,119 @@ def gateway_channels(
             print(f"{name:<20} {platform:<12} {has_token:<12}")
 
 
+def _resolve_gateway_rest_url(url: Optional[str]) -> str:
+    """Resolve the gateway REST base URL for channel control commands.
+
+    When ``--url`` is not passed, resolve the running gateway from the PID
+    lock/config (host+port) rather than forcing the operator to hand-type a
+    WebSocket URL (#3161). Falls back to ``127.0.0.1:8765`` when no lock is
+    found. An explicit ``--url`` (ws/wss/http/https) always wins.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    if url:
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme in ("wss", "https") else "http"
+    else:
+        host, port = "127.0.0.1", 8765
+        try:
+            from praisonai_bot.gateway.port_utils import GatewayPIDLock
+
+            info = GatewayPIDLock().get_lock_info()
+            if info and info.get("is_running"):
+                host, port = info["host"], info["port"]
+        except Exception:  # pragma: no cover — advisory only
+            pass
+        parsed = urlparse(f"http://{host}:{port}")
+        scheme = "http"
+
+    rest_url = urlunparse(
+        (scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+    if not rest_url.endswith("/"):
+        rest_url += "/"
+    return rest_url
+
+
+def _channel_control(name: str, action: str, url: Optional[str]) -> None:
+    """POST a pause/resume/reconnect action to the running gateway."""
+    import requests
+    import sys
+
+    rest_url = _resolve_gateway_rest_url(url)
+    try:
+        response = requests.post(f"{rest_url}api/channels/{name}/{action}", timeout=10)
+        response.raise_for_status()
+
+        result = response.json()
+        if result.get("success"):
+            print(f"✅ Channel '{name}' {action}{'ed' if action != 'pause' else 'd'} successfully")
+        else:
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to {action} channel '{name}': {message}")
+            sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"❌ Error running {action} on channel '{name}': {str(e)}")
+        sys.exit(1)
+
+
 @app.command("pause")
 def gateway_pause_channel(
     name: str = typer.Argument(help="Channel name to pause"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
 ):
     """Pause a gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted.
+
     Examples:
         praisonai gateway pause telegram
         praisonai gateway pause discord --url ws://localhost:8000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/pause", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' paused successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to pause channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error pausing channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "pause", url)
 
 
 @app.command("resume")
 def gateway_resume_channel(
     name: str = typer.Argument(help="Channel name to resume"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
 ):
     """Resume a paused gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted.
+
     Examples:
         praisonai gateway resume telegram
         praisonai gateway resume discord --url ws://localhost:8000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/resume", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' resumed successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to resume channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error resuming channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "resume", url)
 
 
 @app.command("reconnect")
 def gateway_reconnect_channel(
     name: str = typer.Argument(help="Channel name to reconnect"),
-    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+    url: Optional[str] = typer.Option(
+        None, "--url",
+        help="Gateway WebSocket/HTTP URL (default: resolved from the PID lock)",
+    ),
 ):
     """Reconnect a gateway channel.
-    
+
+    Resolves the running gateway from the PID lock when --url is omitted.
+
     Examples:
         praisonai gateway reconnect telegram
         praisonai gateway reconnect discord --url ws://localhost:8000
     """
-    import requests
-    import sys
-    from urllib.parse import urlparse, urlunparse
-    
-    try:
-        # Parse URL and convert WebSocket to HTTP
-        parsed = urlparse(url)
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        # Reconstruct base URL preserving path and query
-        rest_url = urlunparse((
-            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
-        ))
-        if not rest_url.endswith("/"):
-            rest_url += "/"
-        
-        response = requests.post(f"{rest_url}api/channels/{name}/reconnect", timeout=10)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result.get("success"):
-            print(f"✅ Channel '{name}' reconnected successfully")
-        else:
-            message = result.get("message", result.get("error", "Unknown error"))
-            print(f"❌ Failed to reconnect channel '{name}': {message}")
-            sys.exit(1)
-    
-    except Exception as e:
-        print(f"❌ Error reconnecting channel '{name}': {str(e)}")
-        sys.exit(1)
+    _channel_control(name, "reconnect", url)
 
 
 @app.command("install")
@@ -979,6 +1097,75 @@ def gateway_send(
         raise typer.Exit(1)
 
 
+hooks_app = typer.Typer(
+    help="Manage inbound trigger hooks (POST /hooks/<path>) in gateway.yaml",
+    no_args_is_help=True,
+)
+app.add_typer(hooks_app, name="hooks")
+
+
+def _run_hooks_action(**kwargs) -> None:
+    """Reuse GatewayHandler.hooks() by adapting kwargs to its Namespace API."""
+    from types import SimpleNamespace
+    from ..features.gateway import GatewayHandler
+
+    code = GatewayHandler().hooks(SimpleNamespace(**kwargs))
+    if code:
+        raise typer.Exit(code)
+
+
+@hooks_app.command("add")
+def gateway_hooks_add(
+    path: str = typer.Argument(..., help="Hook path, e.g. 'gmail' -> POST /hooks/gmail"),
+    agent: Optional[str] = typer.Option(None, "--agent", help="Agent id to run (default: first agent)"),
+    action_type: str = typer.Option(
+        "agent", "--action",
+        help="agent runs a turn, wake nudges a session (agent | wake)",
+    ),
+    auth: Optional[str] = typer.Option(None, "--auth", help="Bearer token / shared secret for this hook"),
+    session_key: Optional[str] = typer.Option(None, "--session-key", help="Session key template"),
+    idempotency_key: Optional[str] = typer.Option(None, "--idempotency-key", help="Idempotency key template"),
+    deliver_to: Optional[str] = typer.Option(None, "--deliver-to", help="channel:target for the reply"),
+    message: Optional[str] = typer.Option(None, "--message", help="Message template from the payload"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Add an inbound trigger hook to gateway.yaml.
+
+    Examples:
+        praisonai gateway hooks add gmail --agent inbox --deliver-to telegram:12345
+    """
+    _run_hooks_action(
+        hooks_command="add", path=path, agent=agent, action_type=action_type,
+        auth=auth, session_key=session_key, idempotency_key=idempotency_key,
+        deliver_to=deliver_to, message=message, config_file=config,
+    )
+
+
+@hooks_app.command("list")
+def gateway_hooks_list(
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """List configured inbound trigger hooks.
+
+    Examples:
+        praisonai gateway hooks list
+    """
+    _run_hooks_action(hooks_command="list", config_file=config)
+
+
+@hooks_app.command("remove")
+def gateway_hooks_remove(
+    path: str = typer.Argument(..., help="Hook path to remove"),
+    config: str = typer.Option("gateway.yaml", "--config", help="Path to gateway.yaml"),
+):
+    """Remove an inbound trigger hook from gateway.yaml.
+
+    Examples:
+        praisonai gateway hooks remove gmail
+    """
+    _run_hooks_action(hooks_command="remove", path=path, config_file=config)
+
+
 @app.callback(invoke_without_command=True)
 def gateway_callback(ctx: typer.Context):
     """Show gateway help if no subcommand provided."""
@@ -990,15 +1177,22 @@ Manage the gateway server: praisonai gateway <command>
 
 [bold]Commands:[/bold]
   [green]start[/green]       Start the gateway server
+  [green]restart[/green]     Gracefully drain + relaunch (daemon-aware)
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)
   [green]send[/green]        Send a test message to a channel
+  [green]hooks[/green]       Manage inbound trigger hooks (add | list | remove)
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
   [green]logs[/green]        Show daemon service logs
   [green]mint-link[/green]   Generate a one-time magic link (options: --ttl, --host, --port)
+
+[bold]Production Start Flags:[/bold]
+  --reliability {production,default,off}  --max-concurrent-runs N  --queue-depth N
+  --overflow-policy {reject,queue,shed_oldest}  --drain-timeout S
+  --scale-to-zero --idle-minutes N  --identity-store PATH  --drain-marker PATH
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml

@@ -56,6 +56,25 @@ def install_daemon(config_path: str = "bot.yaml", **kwargs: Any) -> Dict[str, An
     return {"ok": False, "error": f"Unsupported platform: {plat}"}
 
 
+def restart_daemon() -> Dict[str, Any]:
+    """Restart the installed bot daemon service (graceful, daemon-aware).
+
+    Returns ``ok: False`` when no service is installed for the platform so the
+    caller can fall back to a direct drain + relaunch (Issue #3161).
+    """
+    plat = _detect_platform()
+    if plat == "systemd":
+        from .systemd import restart
+        return restart()
+    elif plat == "launchd":
+        from .launchd import restart
+        return restart()
+    elif plat == "windows":
+        from .windows import restart
+        return restart()
+    return {"ok": False, "error": f"Unsupported platform: {plat}"}
+
+
 def uninstall_daemon() -> Dict[str, Any]:
     """Uninstall the bot daemon service."""
     plat = _detect_platform()

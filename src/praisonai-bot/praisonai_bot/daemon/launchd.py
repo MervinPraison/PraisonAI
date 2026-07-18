@@ -120,6 +120,29 @@ def uninstall() -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+def restart() -> Dict[str, Any]:
+    """Restart the launchd agent via kickstart -k (graceful re-exec)."""
+    plist_path = _plist_path()
+    if not os.path.exists(plist_path):
+        return {"ok": False, "error": "Service not installed"}
+    uid = os.getuid()
+    try:
+        result = subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{uid}/{LABEL}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            return {"ok": True, "message": f"Service restarted: {LABEL}"}
+        # Fall back to unload/load for older launchd without kickstart.
+        subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+        subprocess.run(["launchctl", "load", plist_path], check=True, capture_output=True)
+        return {"ok": True, "message": f"Service reloaded: {LABEL}"}
+    except subprocess.CalledProcessError as e:
+        return {"ok": False, "error": f"launchctl error: {e.stderr.decode()[:300] if e.stderr else str(e)}"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "launchctl not found."}
+
+
 def get_status() -> Dict[str, Any]:
     """Get the status of the launchd agent."""
     plist_path = _plist_path()

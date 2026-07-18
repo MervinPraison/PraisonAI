@@ -117,3 +117,69 @@ def test_gateway_status_with_daemon(mock_handler_class, mock_status):
     mock_status.assert_called_once()
     mock_handler.status.assert_called_once_with(host="127.0.0.1", port=8765)
     assert result.exit_code == 0
+
+
+def test_gateway_restart_command_registered():
+    """`gateway restart` must be a first-class, discoverable command (#3161)."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "restart" in result.output
+
+
+@patch("praisonai_bot.daemon.restart_daemon")
+@patch("praisonai_bot.daemon.get_daemon_status")
+def test_gateway_restart_daemon_aware(mock_status, mock_restart):
+    """When a service is installed, restart delegates to the daemon manager."""
+    mock_status.return_value = {"installed": True, "running": True, "platform": "systemd"}
+    mock_restart.return_value = {"ok": True, "message": "Service restarted"}
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["restart"])
+
+    mock_restart.assert_called_once()
+    assert result.exit_code == 0
+
+
+@patch("praisonai_bot.cli.features.gateway.GatewayHandler")
+@patch("praisonai_bot.daemon.restart_daemon")
+@patch("praisonai_bot.daemon.get_daemon_status")
+def test_gateway_restart_direct_when_no_daemon(mock_status, mock_restart, mock_handler_class):
+    """With no installed service, restart drains + relaunches directly (#3161)."""
+    mock_status.return_value = {"installed": False}
+    mock_handler = MagicMock()
+    mock_handler_class.return_value = mock_handler
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["restart", "--config", "gateway.yaml"])
+
+    mock_restart.assert_not_called()
+    mock_handler.stop.assert_called_once()
+    mock_handler.start.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_gateway_hooks_subcommands_registered():
+    """`gateway hooks {add,list,remove}` must be discoverable (#3161)."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["hooks", "--help"])
+    assert result.exit_code == 0
+    for sub in ("add", "list", "remove"):
+        assert sub in result.output
+
+
+@patch("praisonai_bot.cli.features.gateway.GatewayHandler")
+def test_gateway_hooks_list_delegates(mock_handler_class):
+    """`gateway hooks list` reuses GatewayHandler.hooks()."""
+    mock_handler = MagicMock()
+    mock_handler.hooks.return_value = 0
+    mock_handler_class.return_value = mock_handler
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["hooks", "list", "--config", "gw.yaml"])
+
+    assert result.exit_code == 0
+    mock_handler.hooks.assert_called_once()
+    ns = mock_handler.hooks.call_args.args[0]
+    assert ns.hooks_command == "list"
+    assert ns.config_file == "gw.yaml"
