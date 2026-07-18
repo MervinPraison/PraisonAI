@@ -408,3 +408,28 @@ class TestFrameworkAdapterExceptionPaths:
 
         assert 'finalize_observability' not in inspect.getsource(CrewAIAdapter.run)
         assert 'finalize_observability' not in inspect.getsource(PraisonAIAdapter.arun)
+
+    def test_adapter_setup_runs_inside_observability_session(self):
+        """adapter.setup() must run INSIDE the observability_session.
+
+        Regression guard: an earlier revision opened the session only around
+        adapter.run(), leaving setup (and any setup/import failure) outside
+        observability so setup events were dropped and a failed setup produced
+        no finalized run. _prepare_for_run must therefore NOT call setup, and
+        both kickoff paths must invoke the setup seam within the session.
+        """
+        from praisonai.agents_generator import AgentsGenerator
+        import inspect
+
+        prep_source = inspect.getsource(AgentsGenerator._prepare_for_run)
+        assert '.setup(' not in prep_source, (
+            "_prepare_for_run must not run adapter.setup() outside the session"
+        )
+
+        for name in ("generate_crew_and_kickoff", "agenerate_crew_and_kickoff"):
+            src = inspect.getsource(getattr(AgentsGenerator, name))
+            session_idx = src.index('observability_session')
+            setup_idx = src.index('_run_adapter_setup')
+            assert setup_idx > session_idx, (
+                f"{name} must run _run_adapter_setup inside observability_session"
+            )

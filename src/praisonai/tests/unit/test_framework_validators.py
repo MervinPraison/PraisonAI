@@ -121,6 +121,44 @@ class TestAssertFrameworkAvailableHonoursInjectedRegistry:
 
         assert "pip install my-tenant-shim" in str(exc_info.value)
 
+    def test_resolved_builtin_name_falls_back_to_default(self):
+        # A router/alias can resolve to a concrete built-in (e.g. autogen ->
+        # autogen_v2) whose key lives on the process default, not on a scoped
+        # injected registry. Validation must NOT reject it: it should fall back
+        # to the default registry which knows the resolved name.
+        injected = MagicMock()
+        injected.is_available.return_value = False  # scoped registry lacks it
+
+        default = MagicMock()
+        default.is_available.return_value = True  # default knows the resolved name
+
+        with patch(
+            "praisonai.framework_adapters.validators.get_default_registry",
+            return_value=default,
+        ):
+            # Must NOT raise thanks to the default-registry fallback.
+            assert_framework_available("autogen_v2", registry=injected)
+
+        injected.is_available.assert_called_once_with("autogen_v2")
+        default.is_available.assert_called_once_with("autogen_v2")
+
+    def test_no_fallback_when_default_also_missing(self):
+        # If neither the injected registry nor the default knows the name, the
+        # ImportError must still surface (fallback must not mask real absence).
+        injected = MagicMock()
+        injected.is_available.return_value = False
+        injected.create.return_value.install_hint = "pip install my-tenant-shim"
+
+        default = MagicMock()
+        default.is_available.return_value = False
+
+        with patch(
+            "praisonai.framework_adapters.validators.get_default_registry",
+            return_value=default,
+        ):
+            with pytest.raises(ImportError):
+                assert_framework_available("totally_unknown_fw", registry=injected)
+
 
 class TestRegistryImportErrorIsContained:
     """Registry must not leak raw ImportError from adapter construction."""
