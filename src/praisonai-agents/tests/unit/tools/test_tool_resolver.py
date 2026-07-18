@@ -91,3 +91,41 @@ class TestResolveToolNames:
             from praisonaiagents.tools.resolver import _closest_names
 
             assert "internet_search" in _closest_names("internet_serch")
+
+    def test_exported_from_tools_package(self):
+        from praisonaiagents.tools import (
+            ToolResolutionError as ExportedError,
+            resolve_tool_names as exported_resolve,
+        )
+
+        assert ExportedError is ToolResolutionError
+        assert exported_resolve is resolve_tool_names
+
+
+class TestToolsetStrictPropagation:
+    """Strict-mode toolset resolution must preserve the typed error.
+
+    Regression for the toolset path flattening ``ToolResolutionError`` into a
+    plain ``ValueError`` and dropping ``.unknown`` / ``.suggestions``.
+    """
+
+    def test_toolset_path_preserves_typed_error(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_STRICT_TOOLS", "true")
+        from praisonaiagents.agent.agent import Agent
+
+        with patch(
+            "praisonaiagents.toolsets.resolve_toolsets_for_model",
+            return_value=["totally_unknown_tool_xyz"],
+        ):
+            with patch(
+                "praisonaiagents.tools.resolver.resolve_tool_name",
+                return_value=None,
+            ):
+                with pytest.raises(ToolResolutionError) as exc_info:
+                    Agent(
+                        name="t",
+                        instructions="x",
+                        llm="gpt-4o-mini",
+                        toolsets=["some_group"],
+                    )
+        assert exc_info.value.unknown == ["totally_unknown_tool_xyz"]

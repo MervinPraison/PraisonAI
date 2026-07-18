@@ -15,6 +15,7 @@ from .call_executor import (
     ToolTimeoutError, ToolCancelledError,
 )
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
+from .resolver import resolve_tool_name, resolve_tool_names, ToolResolutionError
 from .tools import Tools
 
 # Export Injected type directly for easy access
@@ -409,6 +410,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'ToolTimeoutError', 'ToolCancelledError',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
+    'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
     'ToolProxy', 'build_tool_namespace',
     'Tools',
     # Validation and retry protocols

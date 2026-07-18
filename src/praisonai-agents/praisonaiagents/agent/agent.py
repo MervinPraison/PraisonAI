@@ -1759,6 +1759,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if toolsets:
             try:
                 from ..toolsets import resolve_toolsets_for_model
+                from ..tools.resolver import ToolResolutionError
                 # Advertise the model-family's preferred edit primitive first
                 # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
                 # non-string models fall back to the byte-for-byte default order.
@@ -1774,6 +1775,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 toolset_tools = self._resolve_tool_names(unique_tool_names)
                 self.tools.extend(toolset_tools)
                 logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+            except ToolResolutionError:
+                # Preserve the typed error (with .unknown / .suggestions) so
+                # strict-mode callers get the same self-correcting contract as
+                # the direct tools= path instead of a flattened ValueError.
+                raise
             except (ValueError, KeyError) as e:
                 raise ValueError(
                     f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
