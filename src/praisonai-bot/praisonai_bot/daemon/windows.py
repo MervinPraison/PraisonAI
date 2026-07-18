@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 TASK_NAME = "PraisonAIGateway"
 
+# Fatal-config exit code (EX_CONFIG) the gateway runtime emits to signal
+# "do not restart me" (see praisonaiagents.gateway.protocols). Matches
+# GATEWAY_FATAL_CONFIG_EXIT_CODE.
+GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
+
 
 def _python_executable() -> str:
     """Get the Python executable path."""
@@ -43,6 +48,12 @@ def _generate_startup_script(config_path: str) -> str:
 REM PraisonAI Bot Startup Script
 cd /d "{os.path.dirname(abs_config)}"
 "{python}" -m praisonai_bot gateway start --config "{abs_config}"
+REM Honour the gateway fatal-config exit code (78, EX_CONFIG): do NOT relaunch
+REM on a fatally broken config, otherwise a bad edit crash-loops forever.
+if "%ERRORLEVEL%"=="{GATEWAY_FATAL_CONFIG_EXIT_CODE}" (
+    echo PraisonAI gateway stopped: fatal config error {GATEWAY_FATAL_CONFIG_EXIT_CODE}. Fix the config and re-start.
+    exit /b 0
+)
 """
 
 
@@ -51,8 +62,15 @@ def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
     python = _python_executable()
     abs_config = os.path.abspath(config_path)
     # list2cmdline ensures Windows-safe escaping for command args (including config path).
-    task_command = subprocess.list2cmdline(
+    inner = subprocess.list2cmdline(
         [python, "-m", "praisonai_bot", "gateway", "start", "--config", abs_config]
+    )
+    # Wrap in cmd so the gateway fatal-config exit (78, EX_CONFIG) is mapped to a
+    # clean exit — the task then stays stopped instead of relaunching on a
+    # fatally broken config.
+    task_command = (
+        f'cmd /c "{inner} & if %ERRORLEVEL% EQU '
+        f'{GATEWAY_FATAL_CONFIG_EXIT_CODE} exit /b 0"'
     )
     
     # Build schtasks command

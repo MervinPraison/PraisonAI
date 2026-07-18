@@ -497,7 +497,11 @@ class TestDaemonService:
         assert "[Service]" in unit
         assert "praisonai" in unit
         assert "/tmp/test_bot.yaml" in unit
-        assert "Restart=always" in unit
+        # Honour the gateway exit-code contract: restart on failure but stop on
+        # the fatal-config exit (78) instead of crash-looping forever.
+        assert "Restart=on-failure" in unit
+        assert "RestartPreventExitStatus=78" in unit
+        assert "Restart=always" not in unit
 
     def test_launchd_plist_generation(self):
         from praisonai_bot.daemon.launchd import _generate_plist
@@ -506,6 +510,15 @@ class TestDaemonService:
         assert "ai.praison.bot" in plist
         assert "/tmp/test_bot.yaml" in plist
         assert "KeepAlive" in plist
+        # Only relaunch on failure/crash, never on a clean exit (not <true/>).
+        assert "<key>SuccessfulExit</key>" in plist
+        assert "<key>KeepAlive</key>\n    <true/>" not in plist
+
+    def test_windows_startup_script_honours_fatal_config_exit(self):
+        from praisonai_bot.daemon.windows import _generate_startup_script
+        script = _generate_startup_script("/tmp/test_bot.yaml")
+        assert "78" in script
+        assert "ERRORLEVEL" in script
 
     def test_detect_platform(self):
         from praisonai_bot.daemon import _detect_platform

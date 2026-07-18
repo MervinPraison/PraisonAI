@@ -60,8 +60,22 @@ def _generate_plist(config_path: str) -> str:
     <string>{working_dir}</string>
     <key>RunAtLoad</key>
     <true/>
+    <!--
+      Only relaunch on failure/crash, never on a clean exit (0). launchd has no
+      exit-code-specific stop like systemd's RestartPreventExitStatus, so the
+      gateway's fatal-config exit (78, EX_CONFIG) is bounded instead by
+      ThrottleInterval + the runtime's RestartLoopGuard rather than looping
+      every few seconds.
+    -->
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>{log_dir}/bot-stdout.log</string>
     <key>StandardErrorPath</key>
