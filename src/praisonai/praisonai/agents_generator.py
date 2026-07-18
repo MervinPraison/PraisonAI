@@ -705,17 +705,21 @@ class AgentsGenerator:
         framework_name = self.framework or config.get('framework', 'praisonai')
         adapter = self._select_framework(framework_name, config)
         
-        # Validate framework availability
+        # Validate framework availability through the injected registry so a
+        # scoped/per-tenant adapter registered on this generator's registry is
+        # not rejected just because it is absent from the process default.
         from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
+        assert_framework_available(adapter.name, registry=self._adapter_registry)
         
         # Validate cli_backend compatibility
         self._validate_cli_backend_compatibility(config, adapter.name, adapter=adapter)
         
-        # Initialize observability hooks
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-        
+        # Observability lifecycle is owned by the caller (generate_crew_and_kickoff /
+        # agenerate_crew_and_kickoff) via the observability_session context manager,
+        # so init and finalize are always paired regardless of the adapter. This
+        # removes the by-convention per-adapter finalize that let the AutoGen path
+        # leak a run on every invocation.
+
         # Run adapter setup hooks
         adapter.setup(framework_tag=adapter.name)
         
@@ -997,15 +1001,19 @@ class AgentsGenerator:
         prep = self._prepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return prep['adapter'].run(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        from .observability.hooks import observability_session
+        with observability_session(prep['adapter'].name):
+            return prep['adapter'].run(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
     async def _aload_config(self):
         """Async-safe config loading (blocking file I/O off the event loop)."""
@@ -1032,15 +1040,19 @@ class AgentsGenerator:
         prep = await self._aprepare_for_run(config)
         
         self.logger.info(f"Using framework: {prep['adapter'].name}")
-        return await prep['adapter'].arun(
-            prep['config'],
-            self.config_list,
-            prep['topic'],
-            tools_dict=prep['tools_dict'],
-            agent_callback=getattr(self, 'agent_callback', None),
-            task_callback=getattr(self, 'task_callback', None),
-            cli_config=getattr(self, 'cli_config', None),
-        )
+        # Own the observability lifecycle here so init and finalize are always
+        # paired for every adapter (the CM finalizes on success and error alike).
+        from .observability.hooks import observability_session
+        with observability_session(prep['adapter'].name):
+            return await prep['adapter'].arun(
+                prep['config'],
+                self.config_list,
+                prep['topic'],
+                tools_dict=prep['tools_dict'],
+                agent_callback=getattr(self, 'agent_callback', None),
+                task_callback=getattr(self, 'task_callback', None),
+                cli_config=getattr(self, 'cli_config', None),
+            )
 
 
     def _build_yaml_workflow(self, config):

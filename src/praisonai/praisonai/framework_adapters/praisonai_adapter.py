@@ -430,14 +430,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         This uses AgentTeam.astart() instead of thread offloading for true async execution.
         """
-        # Observability is initialized upstream (agents_generator._prepare_for_run);
-        # finalize here on EVERY exit path with the correct status so sessions are
-        # never orphaned "in progress" on errors / cancellation. The guard starts
-        # before the lazy imports and runtime startup so any failure or
-        # cancellation there still finalizes the session.
-        import sys as _sys
-        from ..observability.hooks import finalize_observability
-
+        # Observability init/finalize is owned by the generator via the
+        # observability_session context manager, so the adapter no longer
+        # finalizes here — this keeps the lifecycle symmetric across every
+        # adapter and prevents double-finalize.
         interactive_runtime = None
         try:
             # Import PraisonAI components only when needed
@@ -470,13 +466,6 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             logger.info("PraisonAI async execution completed")
             return result
         finally:
-            # Close observability session with status derived from exc state
-            status = "Failure" if _sys.exc_info()[0] is not None else "Success"
-            try:
-                finalize_observability(self.name, status=status)
-            except Exception as e:  # noqa: BLE001 -- telemetry must not crash the run
-                logger.error(f"Error finalizing observability: {e}")
-
             # Cleanup InteractiveRuntime if it was started
             if interactive_runtime is not None:
                 try:

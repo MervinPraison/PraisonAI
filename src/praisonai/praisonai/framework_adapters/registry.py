@@ -213,13 +213,18 @@ def list_available_frameworks() -> list[str]:
     return get_default_registry().list_available_frameworks()
 
 
-def get_install_hint(name: str) -> str:
+def get_install_hint(name: str, *, registry: Optional[FrameworkAdapterRegistry] = None) -> str:
     """Return install hint for a framework, consulting the adapter when registered.
 
     Falls back to ``pip install 'praisonai[<extra>]'`` when the adapter cannot
     be resolved (e.g. its dependencies are missing) or does not declare a hint.
+
+    Args:
+        name: Framework name to build the install hint for.
+        registry: Optional adapter registry to consult; defaults to the
+            process-default registry when omitted (DI-friendly).
     """
-    registry = get_default_registry()
+    registry = registry or get_default_registry()
     try:
         adapter = registry.create(name)
         hint = getattr(adapter, "install_hint", None)

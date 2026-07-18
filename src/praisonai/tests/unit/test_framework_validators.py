@@ -52,7 +52,11 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
-            mock_registry.create.return_value.install_hint = 'pip install "praisonai[crewai]"'
+            # No adapter-declared hint -> fall back to the frameworks extra. The
+            # validator now threads its (injected) registry into get_install_hint,
+            # so the registry the validator consults is the one that produces the
+            # hint — keeping DI intact end to end.
+            mock_registry.create.return_value.install_hint = None
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
@@ -82,6 +86,40 @@ class TestAssertFrameworkAvailableRaises:
                 assert_framework_available("some_unknown_framework_xyz")
             assert "some_unknown_framework_xyz" in str(exc_info.value)
             assert "praisonai-frameworks[some_unknown_framework_xyz]" in str(exc_info.value)
+
+
+class TestAssertFrameworkAvailableHonoursInjectedRegistry:
+    """The injected registry (DI seam) must drive validation, not the default."""
+
+    def test_injected_registry_is_consulted(self):
+        # An injected registry that reports availability must pass even if the
+        # process-default would reject the framework. This is the multi-tenant /
+        # scoped-adapter case the process-global default silently broke.
+        injected = MagicMock()
+        injected.is_available.return_value = True
+
+        with patch(
+            "praisonai.framework_adapters.validators.get_default_registry"
+        ) as mock_default:
+            mock_default.return_value = MagicMock(is_available=lambda name: False)
+            # Should NOT raise: the injected registry reports available.
+            assert_framework_available("tenant_scoped_fw", registry=injected)
+
+        injected.is_available.assert_called_once_with("tenant_scoped_fw")
+        # The process-default must not be consulted when a registry is injected.
+        mock_default.assert_not_called()
+
+    def test_injected_registry_drives_install_hint(self):
+        # When the injected registry rejects the framework, the hint must be
+        # derived from that same registry (DI end to end), not the default.
+        injected = MagicMock()
+        injected.is_available.return_value = False
+        injected.create.return_value.install_hint = "pip install my-tenant-shim"
+
+        with pytest.raises(ImportError) as exc_info:
+            assert_framework_available("tenant_scoped_fw", registry=injected)
+
+        assert "pip install my-tenant-shim" in str(exc_info.value)
 
 
 class TestRegistryImportErrorIsContained:
