@@ -5248,7 +5248,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return 4000  # Safe default
 
     def _setup_event_tracking(self, events: List[Any]) -> None:
-        """Setup callback functions for tracking model usage"""
+        """Setup callback functions for tracking model usage.
+
+        ``litellm.callbacks`` is a process-global list shared by every LLM
+        instance. Overwriting it wipes callbacks registered by other concurrent
+        agents, so we merge into it instead: only the callbacks *this* instance
+        previously registered are removed, and unrelated instances' callbacks
+        are never touched. An empty ``events`` list is a no-op.
+        """
+        if not events:
+            return
+
         try:
             import litellm
         except ImportError:
@@ -5267,8 +5277,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for event in litellm._async_success_callback[:]:
             if type(event) in event_types:
                 litellm._async_success_callback.remove(event)
-                
-        litellm.callbacks = events
+
+        # Merge into the global list rather than replacing it. Only remove the
+        # callbacks this instance registered on a prior call, then append the
+        # current ones, preserving other instances' callbacks.
+        if litellm.callbacks is None:
+            litellm.callbacks = []
+        for cb in getattr(self, "_registered_callbacks", []):
+            if cb in litellm.callbacks:
+                litellm.callbacks.remove(cb)
+        for event in events:
+            if event not in litellm.callbacks:
+                litellm.callbacks.append(event)
+        self._registered_callbacks = list(events)
 
     def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""

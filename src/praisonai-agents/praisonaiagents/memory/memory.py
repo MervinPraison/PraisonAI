@@ -246,6 +246,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         if self.use_rag and hasattr(adapter, 'collection'):
             self.chroma_col = adapter.collection
             self.chroma_client = adapter.client
+            self._collection_name = getattr(adapter, 'collection_name', 'memory_store')
             
         if self.use_mongodb:
             if hasattr(adapter, 'client'):
@@ -287,6 +288,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
         config["short_db"] = self.cfg.get("short_db", os.path.join(project_data, "short_term.db"))
         config["long_db"] = self.cfg.get("long_db", os.path.join(project_data, "long_term.db"))
         config["rag_db_path"] = self.cfg.get("rag_db_path", os.path.join(project_data, "chroma_db"))
+        config["collection_name"] = self.cfg.get("collection_name", "memory_store")
         config["verbose"] = self.verbose
         
         # Add specific configurations for different adapters
@@ -443,7 +445,8 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 )
             )
 
-            collection_name = "memory_store"
+            collection_name = self.cfg.get("collection_name", "memory_store")
+            self._collection_name = collection_name
             try:
                 self.chroma_col = self.chroma_client.get_collection(name=collection_name)
                 self._log_verbose("Using existing ChromaDB collection")
@@ -1150,8 +1153,19 @@ class Memory(SearchMixin, MemoryCoreMixin):
             except Exception as e:
                 self._log_verbose(f"Error clearing MongoDB long-term memory: {e}", logging.ERROR)
         if self.use_rag and hasattr(self, "chroma_client"):
-            self.chroma_client.reset()  # entire DB
-            self._init_chroma()         # re-init fresh
+            # Scope the reset to this instance's own collection. A full
+            # ``chroma_client.reset()`` wipes *every* collection in the shared
+            # persistent store, destroying other agents' long-term memory that
+            # happens to live in the same directory.
+            collection_name = getattr(self, "_collection_name", "memory_store")
+            try:
+                self.chroma_client.delete_collection(name=collection_name)
+            except Exception as e:
+                self._log_verbose(
+                    f"Error deleting ChromaDB collection '{collection_name}': {e}",
+                    logging.ERROR,
+                )
+            self._init_chroma()         # recreate only this collection
 
     # -------------------------------------------------------------------------
     #                       Selective Deletion Methods

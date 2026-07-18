@@ -351,7 +351,31 @@ class PermissionManager:
         """
         original_target = prefix + command
         try:
-            from .command_parser import parse_command
+            from .command_parser import parse_command, has_unresolvable_expansion
+        except Exception:
+            return None
+
+        # Shell parameter/command expansion (``${IFS}``, ``$(...)``, backticks)
+        # is resolved by bash at runtime and is invisible to the static
+        # tokenizer, so a payload like ``rm${IFS}-rf${IFS}/`` could slip past a
+        # specific deny rule while a broad ``bash:*`` allow matches. When such
+        # expansion is present we cannot statically verify the command: an
+        # explicit deny still wins, but otherwise we escalate to ASK rather than
+        # letting the flat matcher optimistically ALLOW it.
+        if has_unresolvable_expansion(command):
+            flat = self._check_flat(original_target, agent)
+            if flat.action == PermissionAction.DENY:
+                return flat
+            return PermissionResult(
+                action=PermissionAction.ASK,
+                target=original_target,
+                reason=(
+                    "Command contains shell expansion that cannot be "
+                    "statically verified; requires approval"
+                ),
+            )
+
+        try:
             ops = parse_command(command)
         except Exception:
             return None

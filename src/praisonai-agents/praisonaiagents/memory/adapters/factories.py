@@ -261,7 +261,8 @@ class ChromaMemoryAdapter:
         )
         
         # Initialize collection
-        collection_name = "memory_store"
+        collection_name = kwargs.get("collection_name", "memory_store")
+        self.collection_name = collection_name
         try:
             self.collection = self.client.get_collection(name=collection_name)
         except Exception:

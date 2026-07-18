@@ -15,6 +15,7 @@ Design goals:
   never silently weakened.
 """
 
+import re
 import shlex
 from dataclasses import dataclass, field
 from typing import List
@@ -22,6 +23,32 @@ from typing import List
 
 # Operators that separate simple-commands within a compound command.
 _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
+
+# Shell *parameter* expansion that bash resolves at runtime, invisibly to the
+# static tokenizer. ``rm${IFS}-rf${IFS}/`` tokenizes as one opaque token here
+# but bash word-splits it into ``rm -rf /`` when executed, so a broad allow
+# rule could match while a specific ``rm -rf *`` deny never does. Likewise a
+# ``${VAR}`` expands to an unknown value at runtime. Command substitution
+# (``$(...)`` / backticks) is deliberately *not* listed here: it is decomposed
+# and evaluated per-op by ``parse_command`` already, so a deny on the inner
+# command still fires. Only parameter expansion, which cannot be statically
+# resolved, is treated as unverifiable.
+_UNSAFE_EXPANSION_RE = re.compile(r"\$IFS\b|\$\{")
+
+
+def has_unresolvable_expansion(cmd: str) -> bool:
+    """Return ``True`` if *cmd* contains parameter expansion we cannot resolve.
+
+    Detects ``$IFS`` word-splitting tricks and ``${...}`` parameter expansion,
+    both resolved by bash at runtime and invisible to a static tokenizer, so
+    they cannot be safely matched against deny rules. Command substitution
+    (``$(...)``/backticks) is excluded because it is decomposed per-operation
+    elsewhere. Callers should escalate matching commands to ``ASK`` rather than
+    letting a broad allow rule short-circuit.
+    """
+    if not cmd:
+        return False
+    return _UNSAFE_EXPANSION_RE.search(cmd) is not None
 
 # Redirection operators that truncate/overwrite or append to a file.
 # These produce an additional ``write:<path>`` sub-target.
