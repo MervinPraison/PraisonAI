@@ -1032,7 +1032,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-mcp"
-version = "0.0.3"
+version = "0.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1072,7 +1072,7 @@ provides-extras = ["server", "auth", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.154"
+version = "1.6.155"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1096,8 +1096,6 @@ requires-dist = [
     { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.4.0" },
     { name = "dakera", marker = "extra == 'dakera'", specifier = ">=0.12.8" },
     { name = "ddgs", marker = "extra == 'search'", specifier = ">=9.0.0" },
-    { name = "docker", marker = "extra == 'sandbox-docker'", specifier = ">=7.0.0" },
-    { name = "e2b-code-interpreter", marker = "extra == 'sandbox'", specifier = ">=1.0.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
@@ -1125,7 +1123,6 @@ requires-dist = [
     { name = "praisonaiagents", extras = ["memory"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["os"], marker = "extra == 'all'" },
-    { name = "praisonaiagents", extras = ["sandbox"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["search"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["telemetry"], marker = "extra == 'all'" },
     { name = "pydantic", specifier = ">=2.10.0" },
@@ -1142,7 +1139,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
     { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
-provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "sandbox", "a2ui", "sandbox-docker", "all"]
+provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "os", "telemetry", "mongodb", "dakera", "auth", "autonomy", "search", "crawl", "a2ui", "all"]
 
 [[package]]
 name = "propcache"
