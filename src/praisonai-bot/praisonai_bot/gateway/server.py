@@ -831,6 +831,11 @@ class WebSocketGateway:
         
         # Multi-bot lifecycle
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
+        # Issue #3159: channels configured but skipped at startup because their
+        # credential was unavailable (empty token) are tracked here so they stay
+        # visible in ``health()`` as ``degraded`` instead of vanishing — a
+        # skipped channel must be distinguishable from one never configured.
+        self._degraded_channels: Dict[str, str] = {}  # channel_name -> reason
         # Issue #2624: resilient outbound delivery for the gateway's own
         # scheduled/hook path. Lazily built (see ``delivery_router``) so the
         # scheduled-job and hook replies share the same token-bucket rate
@@ -3924,7 +3929,21 @@ class WebSocketGateway:
                     "platform": platform,
                     "running": running,
                 }
-                
+
+        # Issue #3159: surface channels that were configured but skipped at
+        # startup because their credential was unavailable. Without this a
+        # degraded channel silently disappears from health() and can't be told
+        # apart from one that was never configured.
+        for name, reason in self._degraded_channels.items():
+            if name in channel_status:
+                continue
+            channel_status[name] = {
+                "platform": name,
+                "running": False,
+                "status": "degraded",
+                "reason": reason,
+            }
+
         result = {
             "status": "healthy" if self._is_running else "stopped",
             "uptime": uptime,
@@ -4729,7 +4748,14 @@ class WebSocketGateway:
             is_email_platform = channel_type in ("email", "agentmail")
             if not token and not wa_web_mode and not is_email_platform:
                 logger.warning(f"No token for channel '{channel_name}', skipping")
+                # Issue #3159: keep the skipped channel queryable as degraded so
+                # a monitor can tell "configured-but-unavailable" apart from
+                # "never configured". Healthy channels keep serving unaffected.
+                self._degraded_channels[channel_name] = "credential unavailable"
                 continue
+            # Recovered on (re)start: a channel that previously degraded but now
+            # has a token must not linger in the degraded set.
+            self._degraded_channels.pop(channel_name, None)
 
             routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
             self._routing_rules[channel_name] = routes
@@ -5691,8 +5717,12 @@ class WebSocketGateway:
         
         if not token and not wa_web_mode and not is_email_platform:
             logger.warning(f"No token for channel '{channel_name}', skipping")
+            # Issue #3159: a channel that degrades on hot-reload stays queryable.
+            self._degraded_channels[channel_name] = "credential unavailable"
             return
-        
+        # Recovered on hot-reload: clear any prior degraded marker.
+        self._degraded_channels.pop(channel_name, None)
+
         routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
         self._routing_rules[channel_name] = routes
         self._routing_bindings[channel_name] = self._parse_bindings(

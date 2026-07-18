@@ -350,6 +350,20 @@ class TestConfigSchema:
         finally:
             del os.environ["_TEST_HEALTHY_TOKEN"]
 
+    def test_degraded_channel_visible_in_health(self):
+        # Observability (Issue #3159): a channel skipped at startup because its
+        # credential was unavailable must stay queryable in health() as
+        # ``degraded`` — it must not silently vanish and become
+        # indistinguishable from a channel that was never configured.
+        from praisonai_bot.gateway.server import GatewayConfig, WebSocketGateway
+
+        gw = WebSocketGateway(GatewayConfig())
+        gw._degraded_channels["telegram"] = "credential unavailable"
+        health = gw.health()
+        assert "telegram" in health["channels"]
+        assert health["channels"]["telegram"]["status"] == "degraded"
+        assert health["channels"]["telegram"]["running"] is False
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 6. Smart Defaults for Bot
