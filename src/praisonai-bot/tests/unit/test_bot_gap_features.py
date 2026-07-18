@@ -328,11 +328,41 @@ class TestConfigSchema:
         finally:
             del os.environ["_TEST_BOT_TOKEN"]
 
-    def test_missing_env_var_fails(self):
+    def test_missing_env_var_isolates_channel(self):
+        # Partial-credential isolation (Issue #3159): an unset channel token
+        # env var must NOT abort the whole gateway config. The channel keeps
+        # a degraded (empty) token so the runtime skips only that channel and
+        # every healthy channel keeps serving.
         from praisonai_bot.bots._config_schema import validate_bot_config
         os.environ.pop("_NONEXISTENT_TOKEN", None)
-        with pytest.raises(ValueError, match="not set"):
-            validate_bot_config({"channels": {"telegram": {"token": "${_NONEXISTENT_TOKEN}"}}})
+        os.environ["_TEST_HEALTHY_TOKEN"] = "healthy-token"
+        try:
+            result = validate_bot_config({
+                "channels": {
+                    "telegram": {"token": "${_NONEXISTENT_TOKEN}"},
+                    "slack": {"token": "${_TEST_HEALTHY_TOKEN}"},
+                }
+            })
+            # Degraded channel: empty token → runtime skips it.
+            assert result.channels["telegram"].token == ""
+            # Healthy channel is unaffected and keeps serving.
+            assert result.channels["slack"].token == "healthy-token"
+        finally:
+            del os.environ["_TEST_HEALTHY_TOKEN"]
+
+    def test_degraded_channel_visible_in_health(self):
+        # Observability (Issue #3159): a channel skipped at startup because its
+        # credential was unavailable must stay queryable in health() as
+        # ``degraded`` — it must not silently vanish and become
+        # indistinguishable from a channel that was never configured.
+        from praisonai_bot.gateway.server import GatewayConfig, WebSocketGateway
+
+        gw = WebSocketGateway(GatewayConfig())
+        gw._degraded_channels["telegram"] = "credential unavailable"
+        health = gw.health()
+        assert "telegram" in health["channels"]
+        assert health["channels"]["telegram"]["status"] == "degraded"
+        assert health["channels"]["telegram"]["running"] is False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

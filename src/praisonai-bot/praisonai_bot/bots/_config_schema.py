@@ -356,17 +356,25 @@ class ChannelConfigSchema(BaseModel):
         if v is None or v == "":
             return v
 
-        # Plain ${ENV} kept inline to preserve the original error message and
-        # avoid importing core for the common case.
+        # Plain ${ENV} kept inline to avoid importing core for the common case.
         if isinstance(v, str):
             if v.startswith("${") and v.endswith("}"):
                 env_key = v[2:-1]
                 resolved = os.environ.get(env_key, "")
                 if not resolved:
-                    raise ValueError(
-                        f"Environment variable '{env_key}' not set. "
-                        f"Set it with: export {env_key}=your_token"
+                    # Partial-credential isolation (Issue #3159): an unset
+                    # channel token env var (rotation, expiry, a fresh deploy)
+                    # must NOT abort the whole gateway. Return an empty token
+                    # so the runtime skips just this channel and every healthy
+                    # channel keeps serving; ``gateway status``/``doctor``
+                    # report it as configured-unavailable.
+                    logger.warning(
+                        "Channel token env var '%s' not set — channel will be "
+                        "skipped (degraded). Set it with: export %s=your_token",
+                        env_key,
+                        env_key,
                     )
+                    return ""
                 _register_redaction(resolved)
                 return resolved
             _register_redaction(v)
@@ -374,21 +382,30 @@ class ChannelConfigSchema(BaseModel):
 
         # Reference form (dict / SecretRef) → resolve via core.
         try:
-            from praisonaiagents.secrets import resolve_secret, MISSING
+            from praisonaiagents.secrets import resolve_secret
         except ImportError:  # pragma: no cover - core always present in-tree
             raise ValueError(
                 "Secret-reference form requires praisonaiagents.secrets; "
                 "use a plaintext string or ${ENV} reference instead."
             )
         result = resolve_secret(v)
-        if result.status == MISSING or result.value is None:
-            raise ValueError(
-                f"Secret reference could not be resolved: {result.detail or 'missing'}"
+        if not result.available or result.value is None:
+            # Partial-credential isolation (Issue #3159): a channel whose
+            # secret is ``configured-but-unavailable``/``missing`` (rotation,
+            # expiry, a secret-store blip) must NOT abort the whole gateway.
+            # Return an empty token and mark the channel degraded so the
+            # runtime skips just this channel and every healthy channel keeps
+            # serving. Fail-closed stays reserved for structurally invalid
+            # config and the gateway's own ingress/auth secret (validated
+            # elsewhere). ``gateway status``/``doctor`` still report the
+            # per-channel availability from the raw reference.
+            detail = result.detail or "unavailable"
+            logger.warning(
+                "Channel secret configured-unavailable — channel will be "
+                "skipped (degraded): %s",
+                detail,
             )
-        if not result.available:
-            raise ValueError(
-                f"Secret reference unavailable: {result.detail or 'unavailable'}"
-            )
+            return ""
         return result.value
     
     @field_validator("group_policy")
