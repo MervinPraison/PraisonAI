@@ -97,7 +97,14 @@ def gateway_start(
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
     # YAML ``gateway.api.*`` value (None = "fall back to config").
-    handler.start(
+    #
+    # Propagate the supervisor-friendly exit code (#2437, #3160): Typer ignores
+    # a plain returned int, so a fatal-config (78) / transient (75) / clean (0)
+    # result must be surfaced via ``typer.Exit`` — otherwise the installed
+    # daemon (which runs ``python -m praisonai_bot gateway start``) always exits
+    # 0, and the generated units' Restart=on-failure / RestartPreventExitStatus
+    # / KeepAlive.SuccessfulExit directives never see the real code.
+    code = handler.start(
         host=host,
         port=port,
         agent_file=agents,
@@ -105,6 +112,7 @@ def gateway_start(
         openai_api=True if openai_api else None,
         mcp=True if mcp else None,
     )
+    raise typer.Exit(code if isinstance(code, int) else 0)
 
 
 @app.command("stop")

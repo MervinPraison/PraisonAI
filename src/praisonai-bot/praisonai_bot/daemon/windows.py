@@ -58,21 +58,25 @@ if "%ERRORLEVEL%"=="{GATEWAY_FATAL_CONFIG_EXIT_CODE}" (
 
 
 def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
-    """Create a Windows Scheduled Task for the bot."""
-    python = _python_executable()
-    abs_config = os.path.abspath(config_path)
-    # list2cmdline ensures Windows-safe escaping for command args (including config path).
-    inner = subprocess.list2cmdline(
-        [python, "-m", "praisonai_bot", "gateway", "start", "--config", abs_config]
-    )
-    # Wrap in cmd so the gateway fatal-config exit (78, EX_CONFIG) is mapped to a
-    # clean exit — the task then stays stopped instead of relaunching on a
-    # fatally broken config.
-    task_command = (
-        f'cmd /c "{inner} & if %ERRORLEVEL% EQU '
-        f'{GATEWAY_FATAL_CONFIG_EXIT_CODE} exit /b 0"'
-    )
-    
+    """Create a Windows Scheduled Task for the bot.
+
+    The task points at the generated ``.cmd`` wrapper rather than an inline
+    ``cmd /c "<python> ... & if %ERRORLEVEL% ..."`` string. Inlining forced a
+    nested double-quote boundary (the python/config paths are themselves quoted
+    by ``list2cmdline``) that ``schtasks``/``cmd.exe`` can misparse for common
+    paths under ``C:\\Program Files`` — splitting the config path or failing to
+    start. The wrapper script owns the fatal-config exit-78 translation with a
+    single, well-formed quoting level and is reused for both install paths.
+    """
+    startup_folder = _startup_folder()
+    os.makedirs(startup_folder, exist_ok=True)
+    script_path = _startup_script_path()
+    with open(script_path, "w") as f:
+        f.write(_generate_startup_script(config_path))
+
+    # /TR is a single quoted path to the wrapper — no nested quoting hazard.
+    task_command = subprocess.list2cmdline([script_path])
+
     # Build schtasks command
     cmd = [
         "schtasks", "/Create",

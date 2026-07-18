@@ -130,3 +130,49 @@ def test_serve_gateway_command_clean_shutdown_exits_zero(monkeypatch):
     with pytest.raises(typer.Exit) as excinfo:
         serve_cmd.serve_gateway(host="127.0.0.1", port=8765, agents_file=None)
     assert excinfo.value.exit_code == GATEWAY_OK_EXIT_CODE
+
+
+def test_bot_gateway_start_command_propagates_fatal_exit_code(monkeypatch):
+    # #3160: the installed daemons run `python -m praisonai_bot gateway start`,
+    # which routes through the standalone `praisonai_bot` Typer command. That
+    # command discarded start()'s int return, so a fatal-config (78) start
+    # exited the process with 0 — the generated units' RestartPreventExitStatus
+    # / Restart=on-failure / KeepAlive.SuccessfulExit directives never saw the
+    # real code. The command must surface it via typer.Exit.
+    import typer
+
+    from praisonai_bot.cli.commands import gateway as bot_gateway_cmd
+
+    def fake_start(self, **kwargs):
+        return GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.gateway.GatewayHandler.start", fake_start
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        bot_gateway_cmd.gateway_start(
+            host="127.0.0.1", port=8765, agents="/missing.yaml",
+            config=None, preflight=False, openai_api=False, mcp=False,
+        )
+    assert excinfo.value.exit_code == GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+
+def test_bot_gateway_start_command_clean_shutdown_exits_zero(monkeypatch):
+    import typer
+
+    from praisonai_bot.cli.commands import gateway as bot_gateway_cmd
+
+    def fake_start(self, **kwargs):
+        return GATEWAY_OK_EXIT_CODE
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.gateway.GatewayHandler.start", fake_start
+    )
+
+    with pytest.raises(typer.Exit) as excinfo:
+        bot_gateway_cmd.gateway_start(
+            host="127.0.0.1", port=8765, agents=None,
+            config=None, preflight=False, openai_api=False, mcp=False,
+        )
+    assert excinfo.value.exit_code == GATEWAY_OK_EXIT_CODE

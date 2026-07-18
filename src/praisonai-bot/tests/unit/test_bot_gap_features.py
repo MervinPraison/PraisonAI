@@ -520,6 +520,43 @@ class TestDaemonService:
         assert "78" in script
         assert "ERRORLEVEL" in script
 
+    def test_windows_scheduled_task_points_at_wrapper_no_nested_quotes(self, monkeypatch, tmp_path):
+        # #3160 / Greptile P1: the task must invoke the generated .cmd wrapper
+        # (single, well-formed quoting) rather than an inline
+        # `cmd /c "<python> ... & if %ERRORLEVEL% ..."` string, which nests
+        # double quotes and misparses paths under `C:\Program Files`.
+        from praisonai_bot.daemon import windows as win
+
+        captured = {}
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = cmd
+
+            class R:
+                returncode = 0
+                stdout = "SUCCESS"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(win.subprocess, "run", fake_run)
+        monkeypatch.setattr(win, "_startup_folder", lambda: str(tmp_path))
+
+        result = win._create_scheduled_task("/tmp/test_bot.yaml")
+        assert result["ok"]
+
+        tr_value = captured["cmd"][captured["cmd"].index("/TR") + 1]
+        # The task command is just the wrapper path — no inline cmd /c chain.
+        assert "cmd /c" not in tr_value
+        assert "%ERRORLEVEL%" not in tr_value
+        assert win.TASK_NAME in tr_value
+        # The wrapper script was written and owns the exit-78 translation.
+        script_path = win._startup_script_path()
+        assert os.path.exists(script_path)
+        with open(script_path) as f:
+            body = f.read()
+        assert str(win.GATEWAY_FATAL_CONFIG_EXIT_CODE) in body
+        assert "ERRORLEVEL" in body
+
     def test_detect_platform(self):
         from praisonai_bot.daemon import _detect_platform
         plat = _detect_platform()
