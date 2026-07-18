@@ -28,23 +28,27 @@ _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
 # static tokenizer. ``rm${IFS}-rf${IFS}/`` tokenizes as one opaque token here
 # but bash word-splits it into ``rm -rf /`` when executed, so a broad allow
 # rule could match while a specific ``rm -rf *`` deny never does. Likewise a
-# ``${VAR}`` expands to an unknown value at runtime. Command substitution
-# (``$(...)`` / backticks) is deliberately *not* listed here: it is decomposed
-# and evaluated per-op by ``parse_command`` already, so a deny on the inner
-# command still fires. Only parameter expansion, which cannot be statically
-# resolved, is treated as unverifiable.
-_UNSAFE_EXPANSION_RE = re.compile(r"\$IFS\b|\$\{")
+# ``${VAR}`` or bare ``$VAR`` (e.g. ``rm -rf $HOME``) expands to an unknown
+# value at runtime that could evade a value-specific deny while matching a
+# broad ``bash:*`` allow. Command substitution (``$(...)`` / backticks) is
+# deliberately *not* matched here: it is decomposed and evaluated per-op by
+# ``parse_command`` already, so a deny on the inner command still fires. The
+# pattern only accepts ``${`` or ``$`` followed by an identifier char, so
+# ``$(`` (command substitution) never matches. Only parameter expansion,
+# which cannot be statically resolved, is treated as unverifiable.
+_UNSAFE_EXPANSION_RE = re.compile(r"\$(?:\{|[A-Za-z_])")
 
 
 def has_unresolvable_expansion(cmd: str) -> bool:
     """Return ``True`` if *cmd* contains parameter expansion we cannot resolve.
 
-    Detects ``$IFS`` word-splitting tricks and ``${...}`` parameter expansion,
-    both resolved by bash at runtime and invisible to a static tokenizer, so
-    they cannot be safely matched against deny rules. Command substitution
-    (``$(...)``/backticks) is excluded because it is decomposed per-operation
-    elsewhere. Callers should escalate matching commands to ``ASK`` rather than
-    letting a broad allow rule short-circuit.
+    Detects ``${...}`` parameter expansion and bare ``$VAR`` references
+    (including ``$IFS`` word-splitting tricks), both resolved by bash at
+    runtime and invisible to a static tokenizer, so they cannot be safely
+    matched against deny rules. Command substitution (``$(...)``/backticks) is
+    excluded because it is decomposed per-operation elsewhere. Callers should
+    escalate matching commands to ``ASK`` rather than letting a broad allow
+    rule short-circuit.
     """
     if not cmd:
         return False

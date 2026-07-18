@@ -1161,10 +1161,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
             try:
                 self.chroma_client.delete_collection(name=collection_name)
             except Exception as e:
+                # Surface the failure instead of swallowing it: reopening the
+                # unchanged collection below would otherwise let the caller
+                # believe the reset succeeded while the long-term memories
+                # remain fully available.
                 self._log_verbose(
                     f"Error deleting ChromaDB collection '{collection_name}': {e}",
                     logging.ERROR,
                 )
+                raise
             self._init_chroma()         # recreate only this collection
 
     # -------------------------------------------------------------------------
