@@ -165,34 +165,45 @@ class PersistenceOrchestrator:
             logger.debug("No conversation store configured, skipping session load")
             return []
         
+        from .conversation._ops import resume_or_create_session
+
         # Try to load existing session
         session = None
         if resume:
             session = self._sync(self.conversation.get_session(session_id))
-        
+
         if session:
             logger.info(f"Resuming session: {session_id}")
             self._current_session = session
             self._cache_put(session)
-            
-            # Load previous messages
-            messages = self._sync(self.conversation.get_messages(session_id))
-            return messages
-        else:
-            # Create new session
-            agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-            session = ConversationSession(
-                session_id=session_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                name=f"Session {session_id[:8]}",
-                metadata={"agent_type": type(agent).__name__},
-            )
-            self._sync(self.conversation.create_session(session))
+
+        # Build the new session eagerly so the exact instance the helper
+        # persists is the same one we cache (identical timestamps/identity).
+        agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
+        new_session = ConversationSession(
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            name=f"Session {session_id[:8]}",
+            metadata={"agent_type": type(agent).__name__},
+        )
+
+        messages = resume_or_create_session(
+            self.conversation,
+            session,
+            session_id,
+            build_session=lambda: new_session,
+            get_messages=lambda: self._sync(self.conversation.get_messages(session_id)),
+        )
+
+        if messages is None:
+            # New session was created inside the helper; capture and cache it.
             logger.info(f"Created new session: {session_id}")
-            self._current_session = session
-            self._cache_put(session)
+            self._current_session = new_session
+            self._cache_put(new_session)
             return []
+
+        return messages
     
     def on_message(
         self,
@@ -291,46 +302,64 @@ class PersistenceOrchestrator:
             logger.debug("No conversation store configured, skipping session load")
             return []
         
+        from .conversation._ops import aresume_or_create_session
+
+        is_async = isinstance(self.conversation, AsyncConversationStore)
+
+        async def _get_session():
+            if is_async:
+                return await self.conversation.get_session(session_id)
+            # Run blocking store off the loop so we don't block multi-agent execution
+            return await asyncio.to_thread(self.conversation.get_session, session_id)
+
+        async def _create_session(s):
+            if is_async:
+                return await self.conversation.create_session(s)
+            return await asyncio.to_thread(self.conversation.create_session, s)
+
+        async def _get_messages():
+            if is_async:
+                return await self.conversation.get_messages(session_id)
+            return await asyncio.to_thread(self.conversation.get_messages, session_id)
+
         # Try to load existing session
         session = None
         if resume:
-            if isinstance(self.conversation, AsyncConversationStore):
-                session = await self.conversation.get_session(session_id)
-            else:
-                # Run blocking store off the loop so we don't block multi-agent execution
-                session = await asyncio.to_thread(self.conversation.get_session, session_id)
-        
+            session = await _get_session()
+
         if session:
             logger.info(f"Resuming session: {session_id}")
             self._current_session = session
             self._cache_put(session)
-            
-            # Load previous messages
-            if isinstance(self.conversation, AsyncConversationStore):
-                messages = await self.conversation.get_messages(session_id)
-            else:
-                messages = await asyncio.to_thread(self.conversation.get_messages, session_id)
-            return messages
-        else:
-            # Create new session
-            agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-            session = ConversationSession(
-                session_id=session_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                name=f"Session {session_id[:8]}",
-                metadata={"agent_type": type(agent).__name__},
-            )
-            
-            if isinstance(self.conversation, AsyncConversationStore):
-                await self.conversation.create_session(session)
-            else:
-                await asyncio.to_thread(self.conversation.create_session, session)
-                
+
+        # Build the new session eagerly so the exact instance the helper
+        # persists is the same one we cache (identical timestamps/identity).
+        agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
+        new_session = ConversationSession(
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            name=f"Session {session_id[:8]}",
+            metadata={"agent_type": type(agent).__name__},
+        )
+
+        messages = await aresume_or_create_session(
+            self.conversation,
+            session,
+            session_id,
+            build_session=lambda: new_session,
+            create_session=_create_session,
+            get_messages=_get_messages,
+        )
+
+        if messages is None:
+            # New session was created inside the helper; capture and cache it.
             logger.info(f"Created new session: {session_id}")
-            self._current_session = session
-            self._cache_put(session)
+            self._current_session = new_session
+            self._cache_put(new_session)
             return []
+
+        return messages
     
     async def aon_message(
         self,
