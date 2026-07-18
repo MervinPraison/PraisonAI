@@ -177,27 +177,35 @@ class PersistenceOrchestrator:
             self._current_session = session
             self._cache_put(session)
 
-        # Build the new session eagerly so the exact instance the helper
-        # persists is the same one we cache (identical timestamps/identity).
-        agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-        new_session = ConversationSession(
-            session_id=session_id,
-            user_id=user_id,
-            agent_id=agent_id,
-            name=f"Session {session_id[:8]}",
-            metadata={"agent_type": type(agent).__name__},
-        )
+        # Build the new session lazily inside the factory so the resume path
+        # never touches the agent's identity or constructs a discarded object.
+        # The factory captures the exact instance the helper persists so the
+        # same object (identical timestamps/identity) is cached below.
+        created: List[ConversationSession] = []
+
+        def _build_session() -> ConversationSession:
+            agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
+            new_session = ConversationSession(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                name=f"Session {session_id[:8]}",
+                metadata={"agent_type": type(agent).__name__},
+            )
+            created.append(new_session)
+            return new_session
 
         messages = resume_or_create_session(
             self.conversation,
             session,
             session_id,
-            build_session=lambda: new_session,
+            build_session=_build_session,
             get_messages=lambda: self._sync(self.conversation.get_messages(session_id)),
         )
 
         if messages is None:
             # New session was created inside the helper; capture and cache it.
+            new_session = created[0]
             logger.info(f"Created new session: {session_id}")
             self._current_session = new_session
             self._cache_put(new_session)
@@ -332,28 +340,36 @@ class PersistenceOrchestrator:
             self._current_session = session
             self._cache_put(session)
 
-        # Build the new session eagerly so the exact instance the helper
-        # persists is the same one we cache (identical timestamps/identity).
-        agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
-        new_session = ConversationSession(
-            session_id=session_id,
-            user_id=user_id,
-            agent_id=agent_id,
-            name=f"Session {session_id[:8]}",
-            metadata={"agent_type": type(agent).__name__},
-        )
+        # Build the new session lazily inside the factory so the resume path
+        # never touches the agent's identity or constructs a discarded object.
+        # The factory captures the exact instance the helper persists so the
+        # same object (identical timestamps/identity) is cached below.
+        created: List[ConversationSession] = []
+
+        def _build_session() -> ConversationSession:
+            agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
+            new_session = ConversationSession(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                name=f"Session {session_id[:8]}",
+                metadata={"agent_type": type(agent).__name__},
+            )
+            created.append(new_session)
+            return new_session
 
         messages = await aresume_or_create_session(
             self.conversation,
             session,
             session_id,
-            build_session=lambda: new_session,
+            build_session=_build_session,
             create_session=_create_session,
             get_messages=_get_messages,
         )
 
         if messages is None:
             # New session was created inside the helper; capture and cache it.
+            new_session = created[0]
             logger.info(f"Created new session: {session_id}")
             self._current_session = new_session
             self._cache_put(new_session)
