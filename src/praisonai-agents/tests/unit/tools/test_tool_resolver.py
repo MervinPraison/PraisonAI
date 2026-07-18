@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from praisonaiagents.tools.resolver import resolve_tool_name, resolve_tool_names
+from praisonaiagents.tools.resolver import (
+    ToolResolutionError,
+    resolve_tool_name,
+    resolve_tool_names,
+)
 
 
 class TestResolveToolName:
@@ -44,3 +48,46 @@ class TestResolveToolNames:
         ):
             resolved = resolve_tool_names(["a", "b", "c"])
         assert len(resolved) == 2
+
+    def test_strict_raises_on_unknown(self):
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            with pytest.raises(ToolResolutionError) as exc_info:
+                resolve_tool_names(["web_serch"], strict=True)
+        assert exc_info.value.unknown == ["web_serch"]
+        assert "web_serch" in exc_info.value.suggestions
+
+    def test_strict_from_env(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_STRICT_TOOLS", "true")
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            with pytest.raises(ToolResolutionError):
+                resolve_tool_names(["nope_xyz"])
+
+    def test_non_strict_invokes_on_unknown_callback(self):
+        seen = {}
+
+        def _cb(unknown, suggestions):
+            seen["unknown"] = unknown
+            seen["suggestions"] = suggestions
+
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            resolved = resolve_tool_names(["nope_xyz"], strict=False, on_unknown=_cb)
+        assert resolved == []
+        assert seen["unknown"] == ["nope_xyz"]
+
+    def test_suggestion_for_typo(self):
+        with patch(
+            "praisonaiagents.tools.resolver._available_tool_names",
+            return_value=["internet_search", "duckduckgo"],
+        ):
+            from praisonaiagents.tools.resolver import _closest_names
+
+            assert "internet_search" in _closest_names("internet_serch")
