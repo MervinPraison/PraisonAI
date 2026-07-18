@@ -597,6 +597,16 @@ class HookSchema(BaseModel):
     message: Optional[str] = None
     enabled: bool = True
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Provider signature verification (#3165)
+    secret: Optional[str] = None
+    signature_header: Optional[str] = None
+    signature_algo: str = "sha256"
+    signature_prefix: Optional[str] = None
+    # Event-type filtering (#3165)
+    events: Optional[List[str]] = None
+    event_header: Optional[str] = None
+    # No-LLM pass-through delivery (#3165)
+    deliver_only: bool = False
 
     @field_validator("path")
     @classmethod
