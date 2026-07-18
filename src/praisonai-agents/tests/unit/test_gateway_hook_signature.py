@@ -103,6 +103,26 @@ def test_deliver_only_and_roundtrip_redacts_secrets():
     assert rebuilt.signature_algo == "sha256"
 
 
+def test_event_filter_missing_action_fails_closed():
+    # A namespaced filter (``issues.opened``) must NOT admit a bare ``issues``
+    # delivery when the payload omits ``action`` — fail-closed (#3166 review).
+    hook = HookConfig(path="gh", events=["issues.opened"], event_header="X-GitHub-Event")
+    headers = {"X-GitHub-Event": "issues"}
+    assert hook.event_allowed({}, headers) is False
+    assert hook.event_allowed({"action": "opened"}, headers) is True
+
+
+def test_secret_without_header_gets_default_header():
+    # A configured secret with no explicit header defaults to the GitHub-style
+    # header instead of rejecting every request (#3166 review).
+    secret = "s"
+    body = b'{"a":1}'
+    hook = HookConfig(path="gh", secret=secret, signature_prefix="sha256=")
+    assert hook.signature_header == "X-Hub-Signature-256"
+    sig = _sign(secret, body, prefix="sha256=")
+    assert hook.verify_signature(body, {"X-Hub-Signature-256": sig}) is True
+
+
 def test_backward_compatible_auth_only_hook():
     # An existing hook with only ``auth`` keeps today's shape: no secret,
     # no events, no deliver_only.

@@ -272,6 +272,12 @@ class HookConfig:
             )
         if isinstance(self.events, str):
             self.events = [self.events]
+        # A configured secret with no explicit header would otherwise read no
+        # signature and reject every request. Default to the widely-used
+        # ``X-Hub-Signature-256`` (GitHub/webhook convention) so ``secret`` on
+        # its own is a working, verifying configuration rather than a 401 trap.
+        if self.secret and not self.signature_header:
+            self.signature_header = "X-Hub-Signature-256"
 
     def verify_signature(
         self, raw_body: bytes, headers: Dict[str, str]
@@ -338,7 +344,11 @@ class HookConfig:
             if event == allowed:
                 return True
             base, sep, sub = allowed.partition(".")
-            if sep and base == event and (action is None or str(action) == sub):
+            # Namespaced sub-type (e.g. ``issues.opened``): fail-closed — the
+            # payload must actually carry the matching ``action``. A delivery
+            # that omits ``action`` is NOT admitted, so an ``issues`` event
+            # cannot slip through a filter that only allows ``issues.opened``.
+            if sep and base == event and action is not None and str(action) == sub:
                 return True
         return False
 

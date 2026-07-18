@@ -3425,6 +3425,17 @@ class WebSocketGateway:
                     "error": "deliver_only hook requires 'deliver_to'",
                     "session": session_key,
                 }
+            # An empty rendered message is a no-op: never hand ""  to the
+            # delivery backend (channels that reject it would 500 → retry loop;
+            # channels that accept it would record a contentless delivery).
+            if not message.strip():
+                return {
+                    "ok": True,
+                    "action": "deliver",
+                    "session": session_key,
+                    "delivered": False,
+                    "skipped": "empty message",
+                }
             delivered = await self._deliver_hook_reply(hook.deliver_to, message)
             if not delivered:
                 return {
