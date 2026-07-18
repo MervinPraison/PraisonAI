@@ -1789,8 +1789,25 @@ class WebSocketGateway:
             if auth_err:
                 return auth_err
 
+            import json
+
+            # Read the raw body once so an HMAC signature can be verified over
+            # the exact bytes the provider signed, then parse it as JSON.
+            raw_body = await request.body()
+
+            # Provider signature verification (#3165). Fail-closed: when a
+            # ``secret`` is configured, a missing/invalid signature is rejected
+            # with 401 before any agent runs. A hook without ``secret`` is
+            # unaffected (backward compatible).
+            verify = getattr(hook, "verify_signature", None)
+            if callable(verify) and getattr(hook, "secret", None):
+                if not verify(raw_body, dict(request.headers)):
+                    return JSONResponse(
+                        {"error": "invalid signature"}, status_code=401,
+                    )
+
             try:
-                payload = await request.json()
+                payload = json.loads(raw_body) if raw_body else {}
             except ValueError:
                 # Malformed JSON: reject rather than silently running on {} so a
                 # bad request never triggers an agent with an unintended message.
@@ -1800,6 +1817,15 @@ class WebSocketGateway:
                 )
             if not isinstance(payload, dict):
                 payload = {"value": payload}
+
+            # Event-type filter (#3165): a delivery whose event is not in the
+            # configured allow-list is acknowledged (200) without spending a
+            # turn, so an unrelated webhook event is a cheap no-op.
+            event_allowed = getattr(hook, "event_allowed", None)
+            if callable(event_allowed) and not event_allowed(
+                payload, dict(request.headers)
+            ):
+                return JSONResponse({"ok": True, "skipped": "event"})
 
             # Atomically reserve the idempotency key. ``_hook_reserve`` rejects
             # keys already recorded *or* currently in flight, so concurrent
@@ -3386,6 +3412,34 @@ class WebSocketGateway:
         Returns a JSON-serializable result dict describing what happened.
         """
         session_key = hook.resolve_session_key(payload)
+
+        # deliver_only (#3165): the rendered message *is* the delivered content
+        # — route it straight through ``deliver_to`` with no LLM turn, for
+        # zero-cost, sub-second notification forwarding. Independent of
+        # ``action`` so it composes with either.
+        if getattr(hook, "deliver_only", False):
+            message = hook.resolve_message(payload) or ""
+            if not hook.deliver_to:
+                return {
+                    "ok": False,
+                    "error": "deliver_only hook requires 'deliver_to'",
+                    "session": session_key,
+                }
+            delivered = await self._deliver_hook_reply(hook.deliver_to, message)
+            if not delivered:
+                return {
+                    "ok": False,
+                    "error": "hook delivery failed",
+                    "action": "deliver",
+                    "session": session_key,
+                    "delivered": False,
+                }
+            return {
+                "ok": True,
+                "action": "deliver",
+                "session": session_key,
+                "delivered": True,
+            }
 
         # action == "wake": just nudge an existing session, no new turn.
         if hook.action == "wake":

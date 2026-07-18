@@ -133,6 +133,7 @@ from .hooks import (
     InboundTriggerProtocol,
     render_template,
     compute_idempotency_key,
+    verify_webhook_signature,
 )
 from .config import (
     GatewayConfig,
@@ -319,6 +320,7 @@ __all__ = [
     "InboundTriggerProtocol",
     "render_template",
     "compute_idempotency_key",
+    "verify_webhook_signature",
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",

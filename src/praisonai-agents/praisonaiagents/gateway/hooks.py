@@ -27,9 +27,10 @@ process; this fires from an external HTTP request.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 __all__ = [
     "HookAction",
@@ -37,6 +38,7 @@ __all__ = [
     "InboundTriggerProtocol",
     "compute_idempotency_key",
     "render_template",
+    "verify_webhook_signature",
 ]
 
 
@@ -148,6 +150,56 @@ def compute_idempotency_key(
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
+def verify_webhook_signature(
+    secret: Optional[str],
+    raw_body: bytes,
+    signature: Optional[str],
+    *,
+    algo: str = "sha256",
+    prefix: Optional[str] = None,
+) -> bool:
+    """Constant-time HMAC verification of a webhook body (dependency-free).
+
+    A pure counterpart to ``compute_idempotency_key`` that lets the core
+    contract validate a provider signature over the *raw* request bytes without
+    importing the wrapper's crypto. Mirrors the wrapper's ``verify_hmac``: it is
+    fail-closed (a missing secret/signature or unknown ``algo`` returns
+    ``False`` rather than raising) and prefix-aware.
+
+    Args:
+        secret: Shared signing secret. Falsy → ``False``.
+        raw_body: The exact raw request body bytes the provider signed.
+        signature: The signature header value the provider sent.
+        algo: Hash algorithm name (e.g. ``"sha256"``, ``"sha1"``).
+        prefix: Optional signature prefix (e.g. ``"sha256="``). When provided,
+            the comparison is against the fully-prefixed computed value, so the
+            caller passes the raw header value unchanged. When omitted, an
+            ``algo=`` style prefix on the provided signature is auto-stripped.
+
+    Returns:
+        ``True`` only if a non-empty signature matches the computed HMAC using a
+        constant-time comparison.
+    """
+    if not secret or not signature:
+        return False
+
+    secret_bytes = secret.encode("utf-8") if isinstance(secret, str) else secret
+    body_bytes = raw_body if isinstance(raw_body, bytes) else str(raw_body).encode("utf-8")
+
+    try:
+        computed = hmac.new(secret_bytes, body_bytes, algo).hexdigest()
+    except (ValueError, TypeError):
+        return False
+
+    provided = signature
+    if prefix:
+        return hmac.compare_digest(f"{prefix}{computed}", provided)
+
+    if "=" in provided and provided.split("=", 1)[0].isalnum():
+        provided = provided.split("=", 1)[1]
+    return hmac.compare_digest(computed, provided)
+
+
 @dataclass
 class HookConfig:
     """Declarative definition of an inbound event trigger.
@@ -172,6 +224,20 @@ class HookConfig:
         message: Template for the message built from the payload.
         enabled: Whether the hook is active.
         metadata: Free-form extra settings.
+        secret: Optional HMAC signing secret. When set, the gateway verifies the
+            provider signature over the *raw* body before any agent runs and
+            rejects (401) a missing/invalid signature — fail-closed.
+        signature_header: Header carrying the signature, e.g.
+            ``"X-Hub-Signature-256"``.
+        signature_algo: Digest for the HMAC, e.g. ``"sha256"``.
+        signature_prefix: Optional signature prefix, e.g. ``"sha256="``.
+        events: Optional allow-list of event types. A delivery whose event is
+            not listed is acknowledged (200) without running a turn.
+        event_header: Header carrying the event type, e.g. ``"X-GitHub-Event"``.
+            When omitted the event is read from the payload (dotted path) via
+            ``resolve_event``.
+        deliver_only: When ``True`` the rendered ``message`` *is* the delivered
+            content, routed straight through ``deliver_to`` with no LLM turn.
     """
 
     path: str
@@ -184,6 +250,16 @@ class HookConfig:
     message: Optional[str] = None
     enabled: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Signature verification (over the RAW body, before the agent runs).
+    secret: Optional[str] = None
+    signature_header: Optional[str] = None
+    signature_algo: str = "sha256"
+    signature_prefix: Optional[str] = None
+    # Event filtering.
+    events: Optional[List[str]] = None
+    event_header: Optional[str] = None
+    # Pass-through: deliver the rendered message with no LLM turn.
+    deliver_only: bool = False
 
     def __post_init__(self) -> None:
         self.path = (self.path or "").strip().strip("/")
@@ -194,6 +270,77 @@ class HookConfig:
                 f"HookConfig.action must be one of {HookAction.all()}, "
                 f"got {self.action!r}"
             )
+        if isinstance(self.events, str):
+            self.events = [self.events]
+
+    def verify_signature(
+        self, raw_body: bytes, headers: Dict[str, str]
+    ) -> bool:
+        """Verify the provider HMAC signature over ``raw_body``.
+
+        Returns ``True`` when no ``secret`` is configured (signature checking is
+        opt-in); otherwise delegates to :func:`verify_webhook_signature`, which
+        is fail-closed on a missing/invalid signature.
+        """
+        if not self.secret:
+            return True
+        signature = None
+        if self.signature_header:
+            lowered = {k.lower(): v for k, v in headers.items()}
+            signature = lowered.get(self.signature_header.lower())
+        return verify_webhook_signature(
+            self.secret,
+            raw_body,
+            signature,
+            algo=self.signature_algo,
+            prefix=self.signature_prefix,
+        )
+
+    def resolve_event(
+        self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None
+    ) -> str:
+        """Resolve the event type from a header or the payload.
+
+        Reads ``event_header`` from ``headers`` when configured, else treats
+        ``event_header`` as a dotted payload path (defaulting to ``"event"``).
+        Returns the base event name only (e.g. GitHub's ``"issues"``); a
+        payload ``action`` sub-type (``"issues.opened"``) is matched separately
+        by :meth:`event_allowed` so both ``issues`` and ``issues.opened`` work.
+        """
+        if self.event_header and headers:
+            lowered = {k.lower(): v for k, v in headers.items()}
+            value = lowered.get(self.event_header.lower())
+            if value:
+                return str(value)
+        path = self.event_header or "event"
+        value = _lookup(path, payload)
+        return "" if value is None else str(value)
+
+    def event_allowed(
+        self, payload: Dict[str, Any], headers: Optional[Dict[str, str]] = None
+    ) -> bool:
+        """Whether the delivery's event passes the configured ``events`` filter.
+
+        Returns ``True`` when no filter is set. The resolved base event (e.g.
+        GitHub's ``"issues"``) matches a listed name that is equal to it or is
+        namespaced under it (``"issues.opened"``); in the namespaced case the
+        payload's ``action`` (when present) must equal the sub-type, so
+        ``events: [issues.opened]`` accepts an ``issues`` delivery only when
+        ``action == "opened"``.
+        """
+        if not self.events:
+            return True
+        event = self.resolve_event(payload, headers)
+        if not event:
+            return False
+        action = payload.get("action") if isinstance(payload, dict) else None
+        for allowed in self.events:
+            if event == allowed:
+                return True
+            base, sep, sub = allowed.partition(".")
+            if sep and base == event and (action is None or str(action) == sub):
+                return True
+        return False
 
     @property
     def route(self) -> str:
@@ -223,7 +370,7 @@ class HookConfig:
         return render_template(self.message, payload)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to a dictionary (hides the auth secret)."""
+        """Convert to a dictionary (hides the auth/signing secrets)."""
         return {
             "path": self.path,
             "agent": self.agent,
@@ -235,6 +382,13 @@ class HookConfig:
             "message": self.message,
             "enabled": self.enabled,
             "metadata": dict(self.metadata),
+            "secret": "***" if self.secret else None,
+            "signature_header": self.signature_header,
+            "signature_algo": self.signature_algo,
+            "signature_prefix": self.signature_prefix,
+            "events": list(self.events) if self.events else None,
+            "event_header": self.event_header,
+            "deliver_only": self.deliver_only,
         }
 
     @classmethod
@@ -251,6 +405,13 @@ class HookConfig:
             "message",
             "enabled",
             "metadata",
+            "secret",
+            "signature_header",
+            "signature_algo",
+            "signature_prefix",
+            "events",
+            "event_header",
+            "deliver_only",
         }
         return cls(
             path=data.get("path", ""),
@@ -262,6 +423,13 @@ class HookConfig:
             deliver_to=data.get("deliver_to"),
             message=data.get("message"),
             enabled=data.get("enabled", True),
+            secret=data.get("secret"),
+            signature_header=data.get("signature_header"),
+            signature_algo=data.get("signature_algo", "sha256"),
+            signature_prefix=data.get("signature_prefix"),
+            events=data.get("events"),
+            event_header=data.get("event_header"),
+            deliver_only=data.get("deliver_only", False),
             metadata={
                 **(data.get("metadata") or {}),
                 **{k: v for k, v in data.items() if k not in known},
