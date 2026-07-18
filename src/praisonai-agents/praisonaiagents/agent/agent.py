@@ -1289,14 +1289,25 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # Backward-compat ids (resolution order: name-only sha256, then md5)
             _name_sha_id = f"history_{_hl.sha256(_name.encode()).hexdigest()[:8]}"
             _name_md5_id = f"history_{_hl.md5(_name.encode()).hexdigest()[:8]}"
-            _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
-            # Prefer an existing workspace-scoped session, then fall back to any
-            # pre-workspace session file so prior history keeps resolving.
+            # Resolve the migration lookup against the SAME directory the session
+            # store uses at runtime, so a custom PRAISONAI_HOME is honoured (the
+            # store reads from get_sessions_dir()). Fall back to the default path
+            # only if that helper is unavailable.
+            try:
+                from ..paths import get_sessions_dir as _get_sessions_dir
+                _session_dir = str(_get_sessions_dir())
+            except Exception:
+                _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
+            # Prefer an existing workspace-scoped session. Legacy (pre-workspace)
+            # name-only files are only adopted in global scope: doing so in a
+            # workspace-scoped run would silently share Project A's history with a
+            # same-named agent in Project B (Issue #3154). Global scope is the
+            # explicit opt-in for that name-only continuity.
             if _os.path.exists(_os.path.join(_session_dir, f"{_new_id}.json")):
                 session_id = _new_id
-            elif _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
+            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
                 session_id = _name_sha_id  # preserve existing history
-            elif _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
+            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
                 session_id = _name_md5_id  # preserve existing history
             else:
                 session_id = _new_id

@@ -246,6 +246,42 @@ class TestWorkspaceScopedSessionId:
         expected = "history_" + hashlib.sha256(b"global:assistant").hexdigest()[:8]
         assert agent._history_session_id == expected
 
+    def test_workspace_id_tracks_directory_change(self, tmp_path, monkeypatch):
+        """A cwd change resolves a new identity (no stale process-wide cache)."""
+        import os
+        from praisonaiagents.session import workspace as _ws
+
+        # Force the non-git path so identity is purely directory-derived.
+        monkeypatch.setattr(_ws, "_git_root_commit", lambda cwd: None)
+
+        a = tmp_path / "proj_a"
+        b = tmp_path / "proj_b"
+        a.mkdir()
+        b.mkdir()
+
+        id_a = _ws._resolve(os.path.realpath(str(a)))
+        id_b = _ws._resolve(os.path.realpath(str(b)))
+        assert id_a != id_b
+        assert id_a == _ws._resolve(os.path.realpath(str(a)))  # per-dir cached
+
+    def test_legacy_fallback_only_in_global_scope(self, tmp_path, monkeypatch):
+        """A pre-existing name-only session must NOT be adopted when workspace-scoped."""
+        import hashlib
+        import os
+        from praisonaiagents import Agent
+        import praisonaiagents.paths as _paths
+
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        name_only = "history_" + hashlib.sha256(b"assistant").hexdigest()[:8]
+        (sessions / f"{name_only}.json").write_text("{}")
+
+        monkeypatch.setattr(_paths, "get_sessions_dir", lambda: sessions)
+
+        agent = Agent(name="assistant", instructions="Test", memory="history")
+        # Workspace-scoped run must ignore the legacy name-only file (isolation).
+        assert agent._history_session_id != name_only
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

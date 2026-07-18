@@ -24,12 +24,12 @@ from functools import lru_cache
 __all__ = ["workspace_id"]
 
 
-def _git_root_commit() -> str | None:
+def _git_root_commit(cwd: str) -> str | None:
     """Return the repo's first (root) commit sha, or ``None`` if unavailable.
 
     The root commit is stable across clones and independent of the checkout
     path, making it a good project identity. Falls back silently when git is
-    absent or the cwd is not a repository.
+    absent or ``cwd`` is not a repository.
     """
     try:
         result = subprocess.run(
@@ -38,6 +38,7 @@ def _git_root_commit() -> str | None:
             text=True,
             timeout=2,
             check=False,
+            cwd=cwd,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -51,20 +52,24 @@ def _git_root_commit() -> str | None:
 
 
 @lru_cache(maxsize=None)
-def _resolve() -> str:
-    root = _git_root_commit()
+def _resolve(cwd: str) -> str:
+    root = _git_root_commit(cwd)
     if root:
         return f"git:{root}"
-    try:
-        return f"dir:{os.path.realpath(os.getcwd())}"
-    except OSError:
-        return "global"
+    return f"dir:{cwd}"
 
 
 def workspace_id() -> str:
     """Return a stable identity for the current workspace/project.
 
     Prefers a git root-commit identity, falls back to the resolved cwd, then
-    ``"global"``. Cached for the process lifetime.
+    ``"global"``. Results are cached per working directory, so a long-lived
+    process that changes directory (CLI, notebook, test suite) resolves the
+    correct identity for each workspace while avoiding repeated ``git`` calls
+    for the same directory.
     """
-    return _resolve()
+    try:
+        cwd = os.path.realpath(os.getcwd())
+    except OSError:
+        return "global"
+    return _resolve(cwd)
