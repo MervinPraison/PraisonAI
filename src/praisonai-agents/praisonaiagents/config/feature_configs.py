@@ -1441,10 +1441,19 @@ class MultiAgentMemoryConfig:
 # Resolve ToolSearchConfig from tools module to avoid duplication.
 # Deferred via PEP 562 module-level __getattr__ so that `import Agent`
 # does not eagerly initialise the whole tools subsystem (see issue #3191).
+_TOOL_SEARCH_CONFIG_CACHE = None
+
+
 def _resolve_tool_search_config():
+    # Memoize so the resolved class (including the ImportError fallback) is a
+    # single stable object. Without this, the fallback path would define a new
+    # dataclass per call, breaking isinstance() checks across invocations.
+    global _TOOL_SEARCH_CONFIG_CACHE
+    if _TOOL_SEARCH_CONFIG_CACHE is not None:
+        return _TOOL_SEARCH_CONFIG_CACHE
     try:
         from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
-        return _ToolSearchConfig
+        _TOOL_SEARCH_CONFIG_CACHE = _ToolSearchConfig
     except ImportError:
         # Fallback minimal config if tools module not available
         @dataclass
@@ -1454,7 +1463,8 @@ def _resolve_tool_search_config():
             search_default_limit: int = 5
             max_search_limit: int = 20
             core_tools: Optional[FrozenSet[str]] = None
-        return FallbackToolSearchConfig
+        _TOOL_SEARCH_CONFIG_CACHE = FallbackToolSearchConfig
+    return _TOOL_SEARCH_CONFIG_CACHE
 
 
 class AutonomyLevel(str, Enum):
