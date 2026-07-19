@@ -171,6 +171,7 @@ class RichFrontend:
         preview = request.change_preview()
         try:
             from rich.console import Console
+            from rich.markup import escape
             from rich.panel import Panel
             console = Console()
             
@@ -186,7 +187,7 @@ class RichFrontend:
             # content, not just a tool label.
             if preview:
                 console.print(Panel(
-                    preview,
+                    escape(preview),
                     title="[cyan]Change Preview[/cyan]",
                     border_style="cyan",
                 ))

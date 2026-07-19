@@ -127,9 +127,11 @@ class ApprovalDialog:
             # actual mutation, not just a tool label.
             preview = self.request.change_preview()
             if preview:
+                from rich.markup import escape
+
                 children.append(
                     VerticalScroll(
-                        Static(preview, id="approval-preview"),
+                        Static(escape(preview), id="approval-preview"),
                         id="approval-preview-scroll",
                     )
                 )

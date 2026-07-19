@@ -96,6 +96,26 @@ def render_change_preview(
             header = f"# {path}\n" if path else ""
             return f"{header}{shown}"
 
+    # Synthesise an inline diff for ``edit`` when only old/new strings are
+    # given, so the user still sees the concrete change.
+    if tool_name == "edit":
+        old = args.get("old_string")
+        new = args.get("new_string")
+        if isinstance(old, str) and isinstance(new, str):
+            import difflib
+
+            path = args.get("path") or args.get("file_path") or "file"
+            synth = "".join(
+                difflib.unified_diff(
+                    old.splitlines(keepends=True),
+                    new.splitlines(keepends=True),
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                )
+            )
+            if synth.strip():
+                return synth
+
     return None
 
 
