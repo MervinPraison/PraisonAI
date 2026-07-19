@@ -447,20 +447,22 @@ version: 1.0.0
         return name.replace("-", "").replace("_", "").isalnum()
     
     def _is_safe_path(self, file_path: str) -> bool:
-        """Check if file path is safe (no path traversal attempts)."""
+        """Fast syntactic prefilter rejecting absolute paths and parent traversal.
+
+        Real containment (symlinks, resolved paths) is enforced by the caller
+        with ``file_to_edit.resolve().relative_to(skill_path.resolve())``. This
+        is a prefilter, not the security boundary, so nested skill files such as
+        ``references/palette.md`` or ``scripts/helper.py`` are allowed while
+        ``../etc/passwd``, ``/etc/passwd`` and ``~/.ssh/id_rsa`` are rejected.
+        """
         if not file_path:
             return False
-        
-        # Check for path traversal patterns
-        dangerous_patterns = ["..", "/", "\\", "~"]
-        if any(pattern in file_path for pattern in dangerous_patterns):
+        if file_path.startswith(("/", "~")) or "\0" in file_path:
             return False
-        
-        # Must be a simple filename or simple relative path
-        normalized = os.path.normpath(file_path)
-        if normalized != file_path or normalized.startswith("/"):
+        # Split on either separator so "..\\x" is caught on all OSes.
+        parts = file_path.replace("\\", "/").split("/")
+        if any(p in ("..", "") for p in parts):
             return False
-            
         return True
     
     def _find_skill(self, name: str) -> Optional[Path]:

@@ -39,10 +39,12 @@ def test_effective_timeout_cli_wins_over_role():
     assert gen._resolve_effective_tool_timeout(config) == 5.0
 
 
-def test_effective_timeout_uses_max_declared_role():
+def test_effective_timeout_uses_tightest_declared_role():
+    # Safe by default: the smallest declared timeout wins so a fast agent is
+    # never forced to wait for a slower agent's larger budget (issue #3175).
     gen = _make_generator()
     config = {"roles": {"a": {"tool_timeout": 30}, "b": {"tool_timeout": 10}}}
-    assert gen._resolve_effective_tool_timeout(config) == 30.0
+    assert gen._resolve_effective_tool_timeout(config) == 10.0
 
 
 def test_effective_timeout_reads_agents_section():
