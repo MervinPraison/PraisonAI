@@ -29,10 +29,12 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from ._approval_base import DEFAULT_APPROVAL_TIMEOUT, DurableApprovalMixin
+
 logger = logging.getLogger(__name__)
 
 
-class WebhookApproval:
+class WebhookApproval(DurableApprovalMixin):
     """Approval backend that sends HTTP webhook requests and polls for decisions.
 
     Posts a JSON payload to ``webhook_url`` with the approval request details,
@@ -67,8 +69,9 @@ class WebhookApproval:
         webhook_url: Optional[str] = None,
         status_url: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: float = 300,
+        timeout: float = DEFAULT_APPROVAL_TIMEOUT,
         poll_interval: float = 5.0,
+        store: Optional[Any] = None,
     ):
         self._webhook_url = webhook_url or os.environ.get("APPROVAL_WEBHOOK_URL", "")
         if not self._webhook_url:
@@ -79,6 +82,7 @@ class WebhookApproval:
         self._headers = headers or {}
         self._timeout = timeout
         self._poll_interval = poll_interval
+        self._init_store(store)
 
     def __repr__(self) -> str:
         return f"WebhookApproval(webhook_url={self._webhook_url!r})"
@@ -131,6 +135,8 @@ class WebhookApproval:
         from praisonaiagents.approval.protocols import ApprovalDecision
         import aiohttp
 
+        await self._persist_pending(request, self._timeout)
+
         request_id = str(uuid.uuid4())
 
         payload = {
@@ -153,12 +159,14 @@ class WebhookApproval:
                 # Check for immediate decision
                 if isinstance(post_data, dict):
                     if "approved" in post_data:
-                        return ApprovalDecision(
+                        decision = ApprovalDecision(
                             approved=bool(post_data["approved"]),
                             reason=post_data.get("reason", "Webhook immediate response"),
                             approver=post_data.get("approver"),
                             metadata={"platform": "webhook", "request_id": request_id},
                         )
+                        await self._resolve_pending(request, decision)
+                        return decision
 
                 # 2. Poll for decision
                 status_url = self._status_url or f"{self._webhook_url}/{request_id}"
@@ -168,6 +176,7 @@ class WebhookApproval:
                 decision = await self._poll_for_decision(
                     status_url, request_id, session=session,
                 )
+                await self._resolve_pending(request, decision)
                 return decision
 
             except Exception as e:

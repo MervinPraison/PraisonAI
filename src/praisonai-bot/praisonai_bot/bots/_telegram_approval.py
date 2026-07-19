@@ -28,6 +28,8 @@ import time
 from typing import Any, Dict, Iterable, Optional
 
 from ._approval_base import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    DurableApprovalMixin,
     classify_keyword,
     classify_with_llm,
     is_authorized_actor,
@@ -38,7 +40,7 @@ from ._approval_base import (
 logger = logging.getLogger(__name__)
 
 
-class TelegramApproval:
+class TelegramApproval(DurableApprovalMixin):
     """Approval backend that sends Telegram messages with inline buttons.
 
     Posts a formatted message with Approve/Deny inline keyboard buttons,
@@ -71,9 +73,10 @@ class TelegramApproval:
         self,
         token: Optional[str] = None,
         chat_id: Optional[str] = None,
-        timeout: float = 300,
+        timeout: float = DEFAULT_APPROVAL_TIMEOUT,
         poll_interval: float = 2.0,
         allowed_approvers: Optional[Iterable[str]] = None,
+        store: Optional[Any] = None,
     ):
         self._token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
         if not self._token:
@@ -92,6 +95,7 @@ class TelegramApproval:
         # (e.g. corporate proxy / CA issues)
         _v = os.environ.get("PRAISONAI_TELEGRAM_SSL_VERIFY", "true").lower()
         self._ssl_verify = _v not in ("false", "0", "no")
+        self._init_store(store)
 
     def __repr__(self) -> str:
         masked = f"...{self._token[-4:]}" if len(self._token) > 4 else "***"
@@ -131,6 +135,8 @@ class TelegramApproval:
         """Send a Telegram message with inline buttons and poll for response."""
         from praisonaiagents.approval.protocols import ApprovalDecision
         import aiohttp
+
+        await self._persist_pending(request, self._timeout)
 
         chat_id = self._chat_id
         if not chat_id:
@@ -172,6 +178,7 @@ class TelegramApproval:
                     chat_id, message_id, request, decision, session=session,
                 )
 
+                await self._resolve_pending(request, decision)
                 return decision
 
             except Exception as e:

@@ -28,6 +28,8 @@ import time
 from typing import Any, Dict, Iterable, Optional
 
 from ._approval_base import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    DurableApprovalMixin,
     classify_keyword,
     classify_with_llm,
     is_authorized_actor,
@@ -40,7 +42,7 @@ logger = logging.getLogger(__name__)
 _DISCORD_API_BASE = "https://discord.com/api/v10"
 
 
-class DiscordApproval:
+class DiscordApproval(DurableApprovalMixin):
     """Approval backend that sends Discord embeds and polls for text replies.
 
     Posts a rich embed message to a Discord channel, then polls the channel
@@ -73,9 +75,10 @@ class DiscordApproval:
         self,
         token: Optional[str] = None,
         channel_id: Optional[str] = None,
-        timeout: float = 300,
+        timeout: float = DEFAULT_APPROVAL_TIMEOUT,
         poll_interval: float = 3.0,
         allowed_approvers: Optional[Iterable[str]] = None,
+        store: Optional[Any] = None,
     ):
         self._token = token or os.environ.get("DISCORD_BOT_TOKEN", "")
         if not self._token:
@@ -94,6 +97,7 @@ class DiscordApproval:
         # (e.g. corporate proxy / CA issues)
         _v = os.environ.get("PRAISONAI_DISCORD_SSL_VERIFY", "true").lower()
         self._ssl_verify = _v not in ("false", "0", "no")
+        self._init_store(store)
 
     def __repr__(self) -> str:
         masked = f"...{self._token[-4:]}" if len(self._token) > 4 else "***"
@@ -146,6 +150,8 @@ class DiscordApproval:
         from praisonaiagents.approval.protocols import ApprovalDecision
         import aiohttp
 
+        await self._persist_pending(request, self._timeout)
+
         channel_id = self._channel_id
         if not channel_id:
             return ApprovalDecision(
@@ -184,6 +190,7 @@ class DiscordApproval:
                     channel_id, msg_id, request, decision, session=session,
                 )
 
+                await self._resolve_pending(request, decision)
                 return decision
 
             except Exception as e:

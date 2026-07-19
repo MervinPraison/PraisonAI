@@ -27,10 +27,12 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from ._approval_base import DEFAULT_APPROVAL_TIMEOUT, DurableApprovalMixin
+
 logger = logging.getLogger(__name__)
 
 
-class HTTPApproval:
+class HTTPApproval(DurableApprovalMixin):
     """Approval backend that serves a local HTTP dashboard for approvals.
 
     Starts an ephemeral aiohttp web server when the first approval is
@@ -54,7 +56,8 @@ class HTTPApproval:
         self,
         host: str = "127.0.0.1",
         port: int = 8899,
-        timeout: float = 300,
+        timeout: float = DEFAULT_APPROVAL_TIMEOUT,
+        store: Optional[Any] = None,
     ):
         self._host = host
         self._port = port
@@ -63,6 +66,7 @@ class HTTPApproval:
         self._server_started = False
         self._runner: Optional[Any] = None
         self._site: Optional[Any] = None
+        self._init_store(store)
 
     def __repr__(self) -> str:
         return f"HTTPApproval(host={self._host!r}, port={self._port})"
@@ -193,6 +197,8 @@ async function decide(d) {{
         """Start server, register request, poll for decision."""
         from praisonaiagents.approval.protocols import ApprovalDecision
 
+        await self._persist_pending(request, self._timeout)
+
         await self._ensure_server()
 
         request_id = str(uuid.uuid4())
@@ -220,20 +226,24 @@ async function decide(d) {{
             if pending.get("decided"):
                 # Cleanup
                 del self._pending[request_id]
-                return ApprovalDecision(
+                decision = ApprovalDecision(
                     approved=pending["approved"],
                     reason=pending.get("reason", ""),
                     approver=pending.get("approver"),
                     metadata={"platform": "http", "request_id": request_id, "url": url},
                 )
+                await self._resolve_pending(request, decision)
+                return decision
 
         # Timeout — cleanup
         self._pending.pop(request_id, None)
-        return ApprovalDecision(
+        decision = ApprovalDecision(
             approved=False,
             reason=f"Timed out waiting for HTTP approval ({int(self._timeout)}s)",
             metadata={"platform": "http", "request_id": request_id, "timeout": True},
         )
+        await self._resolve_pending(request, decision)
+        return decision
 
     def request_approval_sync(self, request) -> Any:
         """Synchronous wrapper — delegates to the shared async bridge."""

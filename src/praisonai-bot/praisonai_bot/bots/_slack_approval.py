@@ -25,6 +25,8 @@ import time
 from typing import Any, Dict, Iterable, List, Optional
 
 from ._approval_base import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    DurableApprovalMixin,
     classify_keyword,
     classify_with_llm,
     is_authorized_actor,
@@ -35,7 +37,7 @@ from ._approval_base import (
 logger = logging.getLogger(__name__)
 
 
-class SlackApproval:
+class SlackApproval(DurableApprovalMixin):
     """Approval backend that sends Slack messages and polls for responses.
 
     Sends a rich Block Kit message with tool details to a Slack channel or DM,
@@ -55,6 +57,11 @@ class SlackApproval:
             resolve a gated tool. When ``None`` (default) any user may respond
             (legacy behaviour, backward compatible). Falls back to a
             comma-separated ``SLACK_APPROVERS`` env var when not passed.
+        store: Optional durable :class:`ApprovalStore`. When supplied, the
+            pending approval is persisted before polling and the final decision
+            recorded, so an outstanding approval survives a process restart
+            (call :meth:`rehydrate` on startup to recover it). ``None`` (default)
+            keeps the legacy in-memory-only behaviour.
 
     Example::
 
@@ -69,9 +76,10 @@ class SlackApproval:
         self,
         token: Optional[str] = None,
         channel: Optional[str] = None,
-        timeout: float = 300,
+        timeout: float = DEFAULT_APPROVAL_TIMEOUT,
         poll_interval: float = 3.0,
         allowed_approvers: Optional[Iterable[str]] = None,
+        store: Optional[Any] = None,
     ):
         self._token = token or os.environ.get("SLACK_BOT_TOKEN", "")
         if not self._token:
@@ -86,6 +94,7 @@ class SlackApproval:
             if _env:
                 allowed_approvers = [a.strip() for a in _env.split(",") if a.strip()]
         self._allowed_approvers = normalize_approvers(allowed_approvers)
+        self._init_store(store)
 
     def __repr__(self) -> str:
         masked = f"xoxb-...{self._token[-4:]}" if len(self._token) > 4 else "***"
@@ -142,6 +151,8 @@ class SlackApproval:
 
         import aiohttp
 
+        await self._persist_pending(request, self._timeout)
+
         channel = self._channel
         async with aiohttp.ClientSession() as session:
             if not channel:
@@ -187,6 +198,7 @@ class SlackApproval:
                     msg_channel, msg_ts, request, decision, session=session,
                 )
 
+                await self._resolve_pending(request, decision)
                 return decision
 
             except Exception as e:
