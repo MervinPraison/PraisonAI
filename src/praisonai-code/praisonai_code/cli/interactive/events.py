@@ -114,6 +114,70 @@ class ApprovalRequest:
         return fnmatch.fnmatch(str(path), path_pattern)
 
 
+def derive_permission_pattern(request: "ApprovalRequest", scope: str = "command") -> str:
+    """Derive the persisted permission pattern for an approval request.
+
+    Mirrors the console backend's ``_create_pattern`` so interactive frontends
+    and the non-interactive console backend scope grants identically.
+
+    Args:
+        request: The approval request being persisted.
+        scope: ``"command"`` (default) derives the *narrowest reasonable*
+            pattern so approving a single command does not silently grant
+            unrestricted use of a tool. ``"tool"`` is the explicit, clearly
+            labelled "allow all uses of this tool" choice that emits the
+            blanket ``action_type:*`` pattern.
+
+    Returns:
+        A permission glob pattern. For ``scope="command"`` the result is
+        **never** the blanket ``action_type:*``: shell commands are generalised
+        to a reusable command-prefix (e.g. ``shell_command:git status *``) via
+        the shared core helper, and other tools scope to the concrete
+        path/argument, falling back to a literal (single-use) target so the
+        rule can only match the exact invocation the user approved.
+    """
+    action_type = request.action_type
+
+    # Explicit, clearly-labelled "always allow all uses of this tool" only.
+    if scope == "tool":
+        return f"{action_type}:*"
+
+    params = request.parameters or {}
+
+    # Shell tools: generalise to a reusable command-prefix via the shared core
+    # helper so interactive and declarative rules scope identically. Unknown or
+    # compound commands stay literal (fail-closed).
+    command = params.get("command")
+    if isinstance(command, str) and command.strip():
+        try:
+            from praisonaiagents.permissions import derive_pattern
+
+            # derive_pattern only generalises bash:/shell: targets, so map the
+            # action type onto a shell prefix for derivation, then restore it.
+            derived = derive_pattern(f"shell:{command}")
+            suffix = derived[len("shell:"):]
+            return f"{action_type}:{suffix}"
+        except ImportError:
+            pass
+        except Exception:  # pragma: no cover - fail-closed on unexpected errors
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "derive_pattern failed for %r; falling back to literal command",
+                command,
+                exc_info=True,
+            )
+        return f"{action_type}:{command}"
+
+    # Non-shell tools: scope to the concrete path/target when available so the
+    # persisted rule matches only that resource, never the whole tool.
+    path = params.get("path")
+    if isinstance(path, str) and path:
+        return f"{action_type}:{path}"
+
+    # No usable target: match only the bare invocation, never the wildcard.
+    return f"{action_type}:"
+
+
 @dataclass
 class ApprovalResponse:
     """Response to an approval request."""
