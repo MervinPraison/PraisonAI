@@ -513,10 +513,13 @@ class DurableDelivery:
             import uuid
             idempotency_key = str(uuid.uuid4())
         
-        # Prepare payload
+        # Prepare payload. Carry the idempotency key inside the payload so a
+        # crash-recovered re-send can embed it in the platform message (letting
+        # a reconciling adapter later confirm the send via was_delivered).
         payload = {
             "content": content,
             "kwargs": send_kwargs,
+            "idempotency_key": idempotency_key,
         }
         
         # Enqueue
@@ -549,6 +552,28 @@ class DurableDelivery:
         
         return success
     
+    def _send_accepts_idempotency_key(self) -> bool:
+        """Whether the adapter's ``send_message`` accepts an idempotency key.
+
+        Only adapters that can embed the key in the platform message (so a
+        later ``was_delivered`` can confirm the send) expose the parameter;
+        adapters with a fixed signature must not be passed the extra kwarg.
+        """
+        send = getattr(self.adapter, "send_message", None)
+        if send is None:
+            return False
+        import inspect
+
+        try:
+            params = inspect.signature(send).parameters
+        except (TypeError, ValueError):  # pragma: no cover — builtins/edge cases
+            return False
+        if "idempotency_key" in params:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     def _build_reconciler(self) -> Optional[Callable[[Any], Awaitable[bool]]]:
         """Build a reconciler for the outbox drain, if the adapter supports it.
 
@@ -559,7 +584,8 @@ class DurableDelivery:
 
         An adapter opts in by declaring
         ``PlatformCapabilities.reconciles_unknown_send`` and exposing an async
-        ``was_delivered(idempotency_key) -> bool`` method.
+        ``was_delivered(target, idempotency_key) -> bool`` method (a legacy
+        single-argument ``was_delivered(idempotency_key)`` is still accepted).
         """
         adapter = self.adapter
         if adapter is None:
@@ -573,7 +599,19 @@ class DurableDelivery:
         if not callable(was_delivered):
             return None
 
+        # An adapter needs the target channel to query the platform for the
+        # delivery state, so pass it when ``was_delivered`` accepts it. Fall
+        # back to the legacy single-argument form for older adapters.
+        import inspect
+
+        try:
+            wants_target = len(inspect.signature(was_delivered).parameters) >= 2
+        except (TypeError, ValueError):  # pragma: no cover — builtins/edge cases
+            wants_target = False
+
         async def reconciler(entry: Any) -> bool:
+            if wants_target:
+                return bool(await was_delivered(entry.target, entry.idempotency_key))
             return bool(await was_delivered(entry.idempotency_key))
 
         return reconciler
@@ -611,8 +649,16 @@ class DurableDelivery:
             
             # Extract content and kwargs
             content = payload.get("content", "")
-            send_kwargs = payload.get("kwargs", {})
-            
+            send_kwargs = dict(payload.get("kwargs", {}))
+
+            # Forward the idempotency key to adapters whose send_message can
+            # embed it in the platform message, so a later was_delivered() can
+            # confirm this (re-)send landed (effectively-once). Adapters with a
+            # fixed signature are left untouched to stay backward-compatible.
+            idempotency_key = payload.get("idempotency_key")
+            if idempotency_key and self._send_accepts_idempotency_key():
+                send_kwargs.setdefault("idempotency_key", idempotency_key)
+
             # Attempt delivery with retry
             success, error = await deliver_with_retry(
                 self.adapter,

@@ -25,7 +25,12 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    PlatformCapabilities,
 )
+
+# Slack message metadata carrying our client-side idempotency key so a
+# crash-recovered send can be reconciled (effectively-once) via was_delivered.
+_OUTBOUND_EVENT_TYPE = "praisonai_outbound"
 
 from .media import split_media_from_output, is_audio_file
 from ._commands import (
@@ -285,7 +290,28 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             "edit_rate_limit": 1.0,
             "reaction_rate_limit": 0.5,
         }
-    
+
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Return Slack platform capabilities."""
+        return self.default_capabilities()
+
+    @classmethod
+    def default_capabilities(cls) -> PlatformCapabilities:
+        """Default Slack platform capabilities.
+
+        Slack can confirm whether a recently-sent message landed by reading
+        back recent channel history and matching the client-side idempotency
+        key carried in the message ``metadata`` (see :meth:`was_delivered`), so
+        it opts into effectively-once delivery via ``reconciles_unknown_send``.
+        """
+        return PlatformCapabilities(
+            max_message_length=40000,
+            supports_edit=True,
+            markdown_dialect="slack",
+            reconciles_unknown_send=True,
+        )
+
     async def start(self) -> None:
         """Start the Slack bot."""
         if self._is_running:
@@ -759,8 +785,15 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         content: Union[str, Dict[str, Any]],
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> BotMessage:
-        """Send a message to a channel."""
+        """Send a message to a channel.
+
+        When ``idempotency_key`` is supplied (e.g. by the durable outbox on a
+        crash-recovered re-send), it is stamped into the Slack message
+        ``metadata`` so a later :meth:`was_delivered` can confirm the send
+        landed and avoid a duplicate (effectively-once delivery).
+        """
         if not self._client:
             raise RuntimeError("Bot not started")
         
@@ -769,6 +802,11 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         kwargs = {"channel": channel_id, "text": text}
         if thread_id:
             kwargs["thread_ts"] = thread_id
+        if idempotency_key:
+            kwargs["metadata"] = {
+                "event_type": _OUTBOUND_EVENT_TYPE,
+                "event_payload": {"idempotency_key": str(idempotency_key)},
+            }
         
         # Durable delivery: retry transient failures with backoff and park the
         # reply in the outbound DLQ on permanent failure instead of dropping it.
@@ -787,6 +825,42 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             message_type=MessageType.TEXT,
             channel=BotChannel(channel_id=channel_id),
         )
+
+    async def was_delivered(self, target: str, idempotency_key: str) -> bool:
+        """Confirm whether a prior send for ``idempotency_key`` already landed.
+
+        Enables effectively-once delivery: after a crash between the Slack API
+        call and the durable ack, the outbox asks this before re-sending. We
+        read back recent channel history and match the client-side idempotency
+        key carried in each message's ``metadata.event_payload`` — so a
+        confirmed send is marked ``sent`` instead of producing a duplicate.
+
+        Returns ``False`` (fall back to at-least-once re-send) when the lookup
+        is unavailable or the key is not found.
+        """
+        if not self._client or not idempotency_key:
+            return False
+
+        # ``target`` is the outbox target ("slack:<channel>"); strip the prefix.
+        channel_id = target.split(":", 1)[1] if ":" in target else target
+        try:
+            response = await self._client.conversations_history(
+                channel=channel_id,
+                limit=100,
+                include_all_metadata=True,
+            )
+        except Exception as e:  # noqa: BLE001 — best-effort; never crash drain
+            logger.debug("was_delivered history lookup failed: %s", e)
+            return False
+
+        for message in response.get("messages", []) or []:
+            metadata = message.get("metadata") or {}
+            if metadata.get("event_type") != _OUTBOUND_EVENT_TYPE:
+                continue
+            payload = metadata.get("event_payload") or {}
+            if str(payload.get("idempotency_key", "")) == str(idempotency_key):
+                return True
+        return False
     
     async def _send_long_message(self, say, text: str, thread_ts: Optional[str] = None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
