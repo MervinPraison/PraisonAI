@@ -134,11 +134,14 @@ class ApprovalDialog:
         except ImportError:
             pass
     
-    def on_button_pressed(self, button_id: str) -> ApprovalResponse:
+    def on_button_pressed(self, button_id: str, reason: Optional[str] = None) -> ApprovalResponse:
         """Handle button press.
         
         Args:
             button_id: ID of the pressed button.
+            reason: Optional one-line denial reason captured from the user to
+                steer the agent when the ``reject`` button is pressed. Empty or
+                ``None`` preserves today's plain-denial behaviour.
         
         Returns:
             ApprovalResponse based on the button pressed.
@@ -174,5 +177,6 @@ class ApprovalDialog:
         else:  # reject
             return ApprovalResponse(
                 request_id=self.request.request_id,
-                decision=ApprovalDecision.REJECT
+                decision=ApprovalDecision.REJECT,
+                reason=(reason.strip() or None) if reason else None,
             )
