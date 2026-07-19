@@ -36,7 +36,6 @@ def _yaml_safe_load(stream):
 
 def _strict_validation_enabled() -> bool:
     """True when PRAISONAI_VALIDATE_STRICT is set to a truthy value."""
-    import os
     return os.getenv("PRAISONAI_VALIDATE_STRICT", "false").lower() == "true"
 
 
@@ -811,7 +810,7 @@ class AgentsGenerator:
         if isinstance(cli_timeout, (int, float)) and not isinstance(cli_timeout, bool):
             return float(cli_timeout)
 
-        entities = {**config.get("roles", {}), **config.get("agents", {})}
+        entities = {**(config.get("roles") or {}), **(config.get("agents") or {})}
 
         def _declared(entity):
             v = entity.get("tool_timeout") if isinstance(entity, dict) else None
@@ -857,8 +856,8 @@ class AgentsGenerator:
         """Validate that cli_backend and runtime are only used with compatible frameworks."""
         # Check if any agent/role defines cli_backend or runtime
         all_entities = {
-            **config.get('roles', {}),
-            **config.get('agents', {}),
+            **(config.get('roles') or {}),
+            **(config.get('agents') or {}),
         }
         
         has_cli_backend = any(
