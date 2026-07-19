@@ -69,14 +69,35 @@ _EVAL_EXTRA_LENGTHS: Dict[str, int] = {
     "mixtral-8x7b-32768": 32768,
 }
 
+# Guard the invariant that eval-only extras never silently shadow canonical
+# entries. If a key is later added to the canonical budgeter table, it should be
+# removed from _EVAL_EXTRA_LENGTHS so the single source of truth stays authoritative.
+_overlapping_keys = set(_EVAL_EXTRA_LENGTHS) & {
+    k for k in _CANONICAL_LIMITS if k != "default"
+}
+assert not _overlapping_keys, (
+    "_EVAL_EXTRA_LENGTHS keys overlap with canonical MODEL_LIMITS; remove the "
+    f"duplicate(s) from the eval table: {sorted(_overlapping_keys)}"
+)
+
 # Default context lengths for common models (fallback when litellm unavailable).
 # Built by merging the canonical budgeter table (context/budgeter.MODEL_LIMITS)
 # with eval-specific extras, so a single source of truth is maintained and new
 # model families (e.g. gpt-5, gpt-4.1) resolve consistently across both paths.
-DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = {
-    **{k: v for k, v in _CANONICAL_LIMITS.items() if k != "default"},
-    **_EVAL_EXTRA_LENGTHS,
-}
+#
+# Keys are ordered by descending length so that get_context_length's partial
+# matching checks specific names (e.g. "gpt-4-32k") before shorter prefixes
+# (e.g. "gpt-4") and returns the most precise context window.
+DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = dict(
+    sorted(
+        {
+            **{k: v for k, v in _CANONICAL_LIMITS.items() if k != "default"},
+            **_EVAL_EXTRA_LENGTHS,
+        }.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+)
 
 # Default context length for unknown models
 DEFAULT_CONTEXT_LENGTH = 128000
