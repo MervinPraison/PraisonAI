@@ -15,6 +15,7 @@ from ..events import (
     ApprovalRequest,
     ApprovalResponse,
     ApprovalDecision,
+    derive_permission_pattern,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,8 +88,9 @@ class ApprovalDialog:
     
     This provides the same approval options as the Rich frontend:
     - Allow once
-    - Always allow this pattern
-    - Always allow for this session
+    - Always allow this command (narrow, command-scoped pattern)
+    - Always allow this command for this session
+    - Always allow ALL uses of the tool (explicit blanket pattern)
     - Reject
     """
     
@@ -107,6 +109,9 @@ class ApprovalDialog:
             from textual.containers import Vertical, Horizontal
             from textual.widgets import Static, Button
             
+            narrow_pattern = derive_permission_pattern(self.request, scope="command")
+            blanket_pattern = derive_permission_pattern(self.request, scope="tool")
+
             yield Vertical(
                 Static(f"[bold]Approval Required[/bold]", id="title"),
                 Static(f"\n{self.request.description}\n"),
@@ -114,8 +119,9 @@ class ApprovalDialog:
                 Static(f"Action: {self.request.action_type}\n"),
                 Horizontal(
                     Button("Allow Once", id="once", variant="primary"),
-                    Button("Always Allow", id="always", variant="success"),
+                    Button(f"Always Allow This Command ({narrow_pattern})", id="always", variant="success"),
                     Button("Session Only", id="session", variant="default"),
+                    Button(f"Always Allow All ({blanket_pattern})", id="always_tool", variant="warning"),
                     Button("Reject", id="reject", variant="error"),
                     id="buttons"
                 ),
@@ -133,8 +139,11 @@ class ApprovalDialog:
         Returns:
             ApprovalResponse based on the button pressed.
         """
-        pattern = f"{self.request.action_type}:*"
-        
+        # "Always allow" defaults to the narrowest reasonable command-scoped
+        # pattern; the blanket ``action_type:*`` grant is a separate, explicit
+        # choice so a single benign approval never whitelists an entire tool.
+        narrow_pattern = derive_permission_pattern(self.request, scope="command")
+
         if button_id == "once":
             return ApprovalResponse(
                 request_id=self.request.request_id,
@@ -144,13 +153,19 @@ class ApprovalDialog:
             return ApprovalResponse(
                 request_id=self.request.request_id,
                 decision=ApprovalDecision.ALWAYS,
-                remember_pattern=pattern
+                remember_pattern=narrow_pattern
             )
         elif button_id == "session":
             return ApprovalResponse(
                 request_id=self.request.request_id,
                 decision=ApprovalDecision.ALWAYS_SESSION,
-                remember_pattern=pattern
+                remember_pattern=narrow_pattern
+            )
+        elif button_id == "always_tool":
+            return ApprovalResponse(
+                request_id=self.request.request_id,
+                decision=ApprovalDecision.ALWAYS,
+                remember_pattern=derive_permission_pattern(self.request, scope="tool")
             )
         else:  # reject
             return ApprovalResponse(
