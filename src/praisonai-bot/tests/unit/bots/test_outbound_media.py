@@ -372,3 +372,48 @@ def test_send_media_no_primitive_returns_false_without_retry(tmp_path):
     ok = asyncio.run(router.send_media("telegram:42", str(f)))
 
     assert ok is False
+
+
+def test_discord_media_transient_error_propagates_for_retry(tmp_path):
+    # The Discord native path must let a transient ``channel.send`` error
+    # propagate so ``deliver_with_retry`` can back off and retry it — the same
+    # resilience text and the other transports get. Previously it swallowed the
+    # exception into ``False`` on the first blip, silently dropping the file.
+    pytest.importorskip("discord")
+
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class _Channel:
+        def __init__(self):
+            self.calls = 0
+
+        async def send(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls < 2:
+                raise ConnectionError("connection reset")
+
+    class _Client:
+        def __init__(self, channel):
+            self._channel = channel
+
+        def get_channel(self, _id):
+            return self._channel
+
+    channel = _Channel()
+
+    class Adapter:
+        platform = "discord"
+        _client = _Client(channel)
+
+    async def _run():
+        return await deliver_media_to_adapter(Adapter(), "42", str(f))
+
+    # First call raises (propagates, is NOT swallowed into False)…
+    with pytest.raises(ConnectionError):
+        asyncio.run(_run())
+    assert channel.calls == 1
+    # …and a retry succeeds.
+    ok = asyncio.run(_run())
+    assert ok is True
+    assert channel.calls == 2
