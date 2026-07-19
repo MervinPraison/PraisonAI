@@ -531,6 +531,15 @@ class DurableDelivery:
             metadata=metadata,
         )
         
+        # Forward the idempotency key on the FIRST send too (not just the
+        # crash-recovered drain), so a crash between a successful send and
+        # mark_sent() can be reconciled instead of blindly re-sent as a
+        # duplicate. Only adapters that accept the param are stamped; others
+        # stay backward-compatible.
+        first_send_kwargs = dict(send_kwargs)
+        if self._send_accepts_idempotency_key():
+            first_send_kwargs.setdefault("idempotency_key", idempotency_key)
+
         # Attempt delivery
         success, error = await deliver_with_retry(
             self.adapter,
@@ -539,7 +548,7 @@ class DurableDelivery:
             backoff=self.backoff,
             max_attempts=self.max_attempts,
             platform=self.platform,
-            **send_kwargs
+            **first_send_kwargs
         )
         
         # Update status
@@ -568,11 +577,11 @@ class DurableDelivery:
             params = inspect.signature(send).parameters
         except (TypeError, ValueError):  # pragma: no cover — builtins/edge cases
             return False
-        if "idempotency_key" in params:
-            return True
-        return any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-        )
+        # Require an explicit ``idempotency_key`` parameter. A ``**kwargs``
+        # fallback would silently forward the key to any generic adapter that
+        # relays kwargs to its platform SDK, which most SDKs reject. Adapters
+        # opt in by declaring the parameter explicitly.
+        return "idempotency_key" in params
 
     def _build_reconciler(self) -> Optional[Callable[[Any], Awaitable[bool]]]:
         """Build a reconciler for the outbox drain, if the adapter supports it.
@@ -601,18 +610,45 @@ class DurableDelivery:
 
         # An adapter needs the target channel to query the platform for the
         # delivery state, so pass it when ``was_delivered`` accepts it. Fall
-        # back to the legacy single-argument form for older adapters.
+        # back to the legacy single-argument form for older adapters. If the
+        # adapter also accepts a ``thread_id`` it is passed so threaded sends
+        # (invisible to a channel-history scan) can be reconciled too.
         import inspect
+        import json
 
         try:
-            wants_target = len(inspect.signature(was_delivered).parameters) >= 2
+            params = inspect.signature(was_delivered).parameters
         except (TypeError, ValueError):  # pragma: no cover — builtins/edge cases
-            wants_target = False
+            params = {}
+        wants_target = len(params) >= 2
+        wants_thread = "thread_id" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
+        def _thread_id_of(entry: Any) -> Optional[str]:
+            payload = getattr(entry, "payload", None)
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (ValueError, TypeError):
+                    return None
+            if not isinstance(payload, dict):
+                return None
+            kwargs = payload.get("kwargs") or {}
+            return kwargs.get("thread_id") if isinstance(kwargs, dict) else None
 
         async def reconciler(entry: Any) -> bool:
-            if wants_target:
-                return bool(await was_delivered(entry.target, entry.idempotency_key))
-            return bool(await was_delivered(entry.idempotency_key))
+            if not wants_target:
+                return bool(await was_delivered(entry.idempotency_key))
+            if wants_thread:
+                return bool(
+                    await was_delivered(
+                        entry.target,
+                        entry.idempotency_key,
+                        thread_id=_thread_id_of(entry),
+                    )
+                )
+            return bool(await was_delivered(entry.target, entry.idempotency_key))
 
         return reconciler
 

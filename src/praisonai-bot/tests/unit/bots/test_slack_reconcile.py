@@ -44,6 +44,18 @@ class _FakeSlackClient:
     async def conversations_history(self, **kwargs):
         return {"messages": list(self.history)}
 
+    async def conversations_replies(self, **kwargs):
+        return {"messages": list(self.history)}
+
+
+class _MissingScopeClient(_FakeSlackClient):
+    """Slack client that rejects ``metadata`` unless the scope is granted."""
+
+    async def chat_postMessage(self, **kwargs):
+        if kwargs.get("metadata"):
+            raise Exception("missing_scope: metadata.message:write required")
+        return await super().chat_postMessage(**kwargs)
+
 
 def _make_slack_bot(client):
     from praisonai_bot.bots.slack import SlackBot
@@ -178,6 +190,46 @@ def test_drain_resends_when_prior_send_not_found(tmp_path):
         # The re-send re-stamps the key so a future reconcile can confirm it.
         assert (
             client.sent[0]["metadata"]["event_payload"]["idempotency_key"] == "key-2"
+        )
+
+    asyncio.run(run())
+
+
+def test_send_falls_back_when_metadata_scope_missing():
+    """A missing metadata scope must degrade to at-least-once, not lose the msg."""
+
+    async def run():
+        client = _MissingScopeClient()
+        bot = _make_slack_bot(client)
+        msg = await bot.send_message("C123", "hi", idempotency_key="key-1")
+        # Delivered (at-least-once) even though metadata was rejected.
+        assert msg.message_id
+        assert len(client.sent) == 1
+        assert client.sent[0].get("metadata") is None
+
+    asyncio.run(run())
+
+
+def test_was_delivered_uses_replies_for_threaded_send():
+    """Threaded sends are reconciled via conversations.replies, not history."""
+
+    async def run():
+        client = _FakeSlackClient()
+        bot = _make_slack_bot(client)
+        # Simulate a threaded reply that landed with our metadata. It must be
+        # found even though conversations.history would exclude thread replies.
+        client.history.insert(
+            0,
+            {
+                "ts": "ts-reply",
+                "metadata": {
+                    "event_type": "praisonai_outbound",
+                    "event_payload": {"idempotency_key": "key-t"},
+                },
+            },
+        )
+        assert (
+            await bot.was_delivered("slack:C123", "key-t", thread_id="1.0") is True
         )
 
     asyncio.run(run())

@@ -32,6 +32,25 @@ from praisonaiagents.bots import (
 # crash-recovered send can be reconciled (effectively-once) via was_delivered.
 _OUTBOUND_EVENT_TYPE = "praisonai_outbound"
 
+
+def _is_missing_metadata_scope(err: BaseException) -> bool:
+    """Whether a Slack send failed only because the metadata scope is absent.
+
+    Stamping ``metadata`` requires the ``metadata.message:write`` OAuth scope,
+    which is not granted to existing Slack apps by default. When it is missing
+    Slack raises ``missing_scope`` (or ``invalid_metadata`` / rejects the
+    ``metadata`` argument). Detecting this lets the caller retry without
+    metadata so delivery stays at-least-once instead of being lost.
+    """
+    text = str(getattr(err, "response", err)).lower() + " " + str(err).lower()
+    return any(
+        marker in text
+        for marker in ("missing_scope", "invalid_metadata", "metadata")
+    ) and any(
+        marker in text
+        for marker in ("scope", "invalid_metadata", "not authorized", "missing")
+    )
+
 from .media import split_media_from_output, is_audio_file
 from ._commands import (
     format_status, 
@@ -811,8 +830,26 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Durable delivery: retry transient failures with backoff and park the
         # reply in the outbound DLQ on permanent failure instead of dropping it.
         send_kwargs = dict(kwargs)
+
+        async def _post() -> Any:
+            try:
+                return await self._client.chat_postMessage(**send_kwargs)
+            except Exception as e:  # noqa: BLE001
+                # Stamping metadata needs the ``metadata.message:write`` OAuth
+                # scope, which is not standard on existing Slack apps. If it is
+                # missing, retry WITHOUT metadata so delivery degrades to
+                # at-least-once instead of being lost as a permanent failure.
+                if "metadata" in send_kwargs and _is_missing_metadata_scope(e):
+                    logger.warning(
+                        "Slack metadata scope missing; sending without "
+                        "idempotency metadata (at-least-once fallback)"
+                    )
+                    send_kwargs.pop("metadata", None)
+                    return await self._client.chat_postMessage(**send_kwargs)
+                raise
+
         response = await self.deliver_outbound(
-            lambda: self._client.chat_postMessage(**send_kwargs),
+            _post,
             channel_id=channel_id,
             reply_text=text,
             thread_id=thread_id,
@@ -826,14 +863,23 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             channel=BotChannel(channel_id=channel_id),
         )
 
-    async def was_delivered(self, target: str, idempotency_key: str) -> bool:
+    async def was_delivered(
+        self,
+        target: str,
+        idempotency_key: str,
+        thread_id: Optional[str] = None,
+    ) -> bool:
         """Confirm whether a prior send for ``idempotency_key`` already landed.
 
         Enables effectively-once delivery: after a crash between the Slack API
         call and the durable ack, the outbox asks this before re-sending. We
-        read back recent channel history and match the client-side idempotency
-        key carried in each message's ``metadata.event_payload`` — so a
-        confirmed send is marked ``sent`` instead of producing a duplicate.
+        read back recent messages and match the client-side idempotency key
+        carried in each message's ``metadata.event_payload`` — so a confirmed
+        send is marked ``sent`` instead of producing a duplicate.
+
+        For a threaded send we query ``conversations.replies`` (thread replies
+        are *not* returned by ``conversations.history``); otherwise we scan
+        recent channel history.
 
         Returns ``False`` (fall back to at-least-once re-send) when the lookup
         is unavailable or the key is not found.
@@ -844,13 +890,21 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # ``target`` is the outbox target ("slack:<channel>"); strip the prefix.
         channel_id = target.split(":", 1)[1] if ":" in target else target
         try:
-            response = await self._client.conversations_history(
-                channel=channel_id,
-                limit=100,
-                include_all_metadata=True,
-            )
+            if thread_id:
+                response = await self._client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_id,
+                    limit=200,
+                    include_all_metadata=True,
+                )
+            else:
+                response = await self._client.conversations_history(
+                    channel=channel_id,
+                    limit=100,
+                    include_all_metadata=True,
+                )
         except Exception as e:  # noqa: BLE001 — best-effort; never crash drain
-            logger.debug("was_delivered history lookup failed: %s", e)
+            logger.debug("was_delivered lookup failed: %s", e)
             return False
 
         for message in response.get("messages", []) or []:
