@@ -806,13 +806,15 @@ Write the complete compiled report:"""
                         finally:
                             self.verbose = original_verbose_chat
                             # Restore original callback under the lock. The identity
-                            # check ensures we only touch the entry if it's still ours,
-                            # so a concurrent verbose agent isn't clobbered.
+                            # check guards the entire restore, so we only mutate the
+                            # entry while it's still ours and never clobber a callback
+                            # a concurrent verbose agent has since installed.
                             with _callbacks_lock:
-                                if original_tool_callback:
-                                    sync_display_callbacks['tool_call'] = original_tool_callback
-                                elif sync_display_callbacks.get('tool_call') is status_tool_callback:
-                                    del sync_display_callbacks['tool_call']
+                                if sync_display_callbacks.get('tool_call') is status_tool_callback:
+                                    if original_tool_callback:
+                                        sync_display_callbacks['tool_call'] = original_tool_callback
+                                    else:
+                                        del sync_display_callbacks['tool_call']
                     
                     # Start chat in background thread
                     chat_thread = threading.Thread(target=run_chat)
