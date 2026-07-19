@@ -191,3 +191,12 @@ class TestProfileIsolation:
         m = resolve_route(bindings, RouteFacts(chat_type="dm"))
         assert m.binding is not None
         assert m.profile is None
+
+    def test_blank_profile_is_normalised_to_none(self):
+        # An empty or whitespace-only profile must be treated as unscoped
+        # (None), not as an empty-named scope, to honour the fail-closed
+        # contract a wrapper checking ``if profile is not None`` relies on.
+        assert RouteBinding(agent="a", profile="").profile is None
+        assert RouteBinding(agent="a", profile="   ").profile is None
+        assert RouteBinding.from_dict({"agent": "a", "profile": ""}).profile is None
+        assert RouteBinding.from_dict({"agent": "a", "profile": "  "}).profile is None

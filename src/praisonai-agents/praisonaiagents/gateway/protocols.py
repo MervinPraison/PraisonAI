@@ -1716,13 +1716,21 @@ class RouteBinding:
     }
 
     def __post_init__(self) -> None:
-        """Normalise ``trust`` so config typos cannot silently fail open.
+        """Normalise ``trust``/``profile`` so config typos cannot fail open.
 
         Whitespace/case variants of a known tier (e.g. ``" Untrusted "``) are
         canonicalised. Any *unknown* non-empty value is treated as the most
         restrictive tier (``untrusted``) rather than as "no policy", so a
         misconfigured route can never accidentally expose the full toolset.
+        A blank ``profile`` is coerced to ``None`` (unscoped) for the same
+        fail-closed reason.
         """
+        # Blank/whitespace-only profile means "unscoped" (None), never an
+        # empty-named scope, so a wrapper checking ``if profile is not None``
+        # fails closed rather than entering an anonymous namespace.
+        if self.profile is not None and not str(self.profile).strip():
+            self.profile = None
+
         if self.trust is None:
             return
         normalized = str(self.trust).strip().lower()
