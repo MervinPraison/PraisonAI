@@ -1685,6 +1685,12 @@ class RouteBinding:
             ``standard`` / ``trusted`` apply no tier deny-list.
         allow_tools: If set, only these tool names are exposed on this route.
         deny_tools: Tool names removed before the run on this route.
+        profile: Optional isolated tenant-profile name (Issue #3189). Names a
+            per-route isolation scope the wrapper enters for the turn (e.g. its
+            own memory namespace / secret scope / home), so one gateway can
+            safely multiplex tenants. ``None`` means the route is unscoped; the
+            wrapper must fail closed (never fall back to another tenant's
+            profile) rather than silently share memory/secrets.
     """
 
     agent: str
@@ -1697,6 +1703,7 @@ class RouteBinding:
     trust: Optional[str] = None
     allow_tools: Optional[List[str]] = None
     deny_tools: Optional[List[str]] = None
+    profile: Optional[str] = None
 
     # Specificity weights — exact peer beats role/channel beats account
     # beats chat-type. Higher means more specific.
@@ -1792,6 +1799,7 @@ class RouteBinding:
             trust=_as_opt_str(data.get("trust")),
             allow_tools=_as_opt_str_list(data.get("allow_tools")),
             deny_tools=_as_opt_str_list(data.get("deny_tools")),
+            profile=_as_opt_str(data.get("profile")),
         )
 
 
@@ -1822,11 +1830,18 @@ class RouteMatch:
         agent: The resolved agent id.
         binding: The binding that matched, or ``None`` when the fallback was used.
         reason: Short human-readable explanation for logging/debugging.
+        profile: The isolated tenant-profile named by the matched binding, or
+            ``None`` when the route is unscoped / the fallback was used (Issue
+            #3189). Surfaced here so the wrapper can enter the profile's memory
+            namespace / secret scope for the turn without re-resolving, and so
+            an unmatched route fails closed (never inherits another tenant's
+            profile).
     """
 
     agent: str
     binding: Optional[RouteBinding] = None
     reason: str = ""
+    profile: Optional[str] = None
 
 
 def _as_opt_str(value: Any) -> Optional[str]:
@@ -1892,6 +1907,7 @@ def resolve_route(
                 f"matched binding (priority={best.priority}, "
                 f"specificity={best.specificity})"
             ),
+            profile=best.profile,
         )
 
     return RouteMatch(
