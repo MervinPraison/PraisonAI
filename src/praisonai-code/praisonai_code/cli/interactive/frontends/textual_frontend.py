@@ -139,9 +139,13 @@ class ApprovalDialog:
         
         Args:
             button_id: ID of the pressed button.
-            reason: Optional one-line denial reason captured from the user to
-                steer the agent when the ``reject`` button is pressed. Empty or
-                ``None`` preserves today's plain-denial behaviour.
+            reason: Optional one-line denial reason to steer the agent when the
+                ``reject`` button is pressed. Empty or ``None`` preserves today's
+                plain-denial behaviour. Note: the live Textual TUI currently
+                approves/denies via the ``y``/``n`` key handler in
+                ``tui/widgets/tool_panel.py`` and does not yet collect a reason;
+                this parameter keeps the dialog contract consistent for when a
+                reason-capture widget is wired in.
         
         Returns:
             ApprovalResponse based on the button pressed.
