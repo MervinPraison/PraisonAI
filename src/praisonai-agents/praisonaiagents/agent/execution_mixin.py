@@ -742,7 +742,7 @@ Write the complete compiled report:"""
                 
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
-                    from ..main import PRAISON_COLORS, sync_display_callbacks
+                    from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
                     import threading
                     import time as time_module
                     
@@ -763,9 +763,11 @@ Write the complete compiled report:"""
                             tools_called.append(tool_name)
                             current_status[0] = f"Calling tool: {tool_name}..."
                     
-                    # Store original callback and register ours
-                    original_tool_callback = sync_display_callbacks.get('tool_call')
-                    sync_display_callbacks['tool_call'] = status_tool_callback
+                    # Store original callback and register ours (use the module's
+                    # own lock so this doesn't race concurrent verbose agents)
+                    with _callbacks_lock:
+                        original_tool_callback = sync_display_callbacks.get('tool_call')
+                        sync_display_callbacks['tool_call'] = status_tool_callback
                     
                     # Animation state
                     result_holder = [None]
@@ -803,11 +805,14 @@ Write the complete compiled report:"""
                             error_holder[0] = e
                         finally:
                             self.verbose = original_verbose_chat
-                            # Restore original callback
-                            if original_tool_callback:
-                                sync_display_callbacks['tool_call'] = original_tool_callback
-                            elif 'tool_call' in sync_display_callbacks:
-                                del sync_display_callbacks['tool_call']
+                            # Restore original callback under the lock. The identity
+                            # check ensures we only touch the entry if it's still ours,
+                            # so a concurrent verbose agent isn't clobbered.
+                            with _callbacks_lock:
+                                if original_tool_callback:
+                                    sync_display_callbacks['tool_call'] = original_tool_callback
+                                elif sync_display_callbacks.get('tool_call') is status_tool_callback:
+                                    del sync_display_callbacks['tool_call']
                     
                     # Start chat in background thread
                     chat_thread = threading.Thread(target=run_chat)

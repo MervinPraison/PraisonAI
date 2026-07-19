@@ -1115,6 +1115,30 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
             return task_output, True  # Signal retry needed
 
+    def _run_task_start_hook(self, task, task_id):
+        """Run the on_task_start hook and propagate global variables to the task.
+
+        Shared by run_task (sync) and arun_task (async) so the lifecycle hooks
+        and variable propagation stay consistent across both paths.
+        """
+        if self.on_task_start:
+            try:
+                self.on_task_start(task, task_id)
+            except Exception as e:
+                logger.error(f"Error in on_task_start callback: {e}")
+
+        # Apply global variables to task if not already set
+        if self.variables and not getattr(task, 'variables', None):
+            task.variables = self.variables
+
+    def _run_task_complete_hook(self, task, task_output):
+        """Run the on_task_complete hook. Shared by run_task and arun_task."""
+        if self.on_task_complete:
+            try:
+                self.on_task_complete(task, task_output)
+            except Exception as e:
+                logger.error(f"Error in on_task_complete callback: {e}")
+
 
     async def arun_task(self, task_id):
         """Async version of run_task method"""
@@ -1125,6 +1149,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "completed":
             logger.info(f"Task with ID {task_id} is already completed")
             return
+
+        # Call on_task_start callback and propagate variables (shared with run_task)
+        self._run_task_start_hook(task, task_id)
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -1154,6 +1181,10 @@ class AgentTeam(SpawnAnnounceProtocol):
                             raise
                             
                     self.save_output_to_file(task, task_output)
+
+                    # Call on_task_complete callback (shared with run_task)
+                    self._run_task_complete_hook(task, task_output)
+
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} completed successfully.")
                 else:
@@ -1349,17 +1380,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
-        # Call on_task_start callback if provided
-        if self.on_task_start:
-            try:
-                self.on_task_start(task, task_id)
-            except Exception as e:
-                logger.error(f"Error in on_task_start callback: {e}")
-        
-        # Apply global variables to task if not already set
-        if self.variables and not getattr(task, 'variables', None):
-            task.variables = self.variables
-        
+        # Call on_task_start callback and propagate variables (shared with arun_task)
+        self._run_task_start_hook(task, task_id)
+
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
         retries = 0
@@ -1384,14 +1407,10 @@ class AgentTeam(SpawnAnnounceProtocol):
                         logger.exception(e)
                             
                     self.save_output_to_file(task, task_output)
-                    
-                    # Call on_task_complete callback if provided
-                    if self.on_task_complete:
-                        try:
-                            self.on_task_complete(task, task_output)
-                        except Exception as e:
-                            logger.error(f"Error in on_task_complete callback: {e}")
-                    
+
+                    # Call on_task_complete callback (shared with arun_task)
+                    self._run_task_complete_hook(task, task_output)
+
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} completed successfully.")
                 else:
