@@ -140,10 +140,12 @@ class TelegramApproval(DurableApprovalMixin):
 
         chat_id = self._chat_id
         if not chat_id:
-            return ApprovalDecision(
+            decision = ApprovalDecision(
                 approved=False,
                 reason="No Telegram chat_id configured",
             )
+            await self._resolve_pending(request, decision)
+            return decision
 
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=self._ssl_verify),
@@ -161,10 +163,12 @@ class TelegramApproval(DurableApprovalMixin):
                 }, session=session)
 
                 if not post_data.get("ok"):
-                    return ApprovalDecision(
+                    decision = ApprovalDecision(
                         approved=False,
                         reason=f"Failed to send Telegram message: {post_data.get('description', 'unknown')}",
                     )
+                    await self._resolve_pending(request, decision)
+                    return decision
 
                 message_id = post_data["result"]["message_id"]
 
@@ -183,10 +187,12 @@ class TelegramApproval(DurableApprovalMixin):
 
             except Exception as e:
                 logger.error(f"TelegramApproval error: {e}")
-                return ApprovalDecision(
+                decision = ApprovalDecision(
                     approved=False,
                     reason=f"Telegram approval error: {e}",
                 )
+                await self._resolve_pending(request, decision)
+                return decision
 
     def request_approval_sync(self, request) -> Any:
         """Synchronous wrapper — runs async method in a new event loop."""

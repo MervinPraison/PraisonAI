@@ -163,10 +163,12 @@ class SlackApproval(DurableApprovalMixin):
                 except Exception:
                     pass
                 if not channel:
-                    return ApprovalDecision(
+                    decision = ApprovalDecision(
                         approved=False,
                         reason="No Slack channel configured and could not resolve bot user",
                     )
+                    await self._resolve_pending(request, decision)
+                    return decision
 
             # 1. Post approval message
             blocks = self._build_blocks(request)
@@ -180,10 +182,12 @@ class SlackApproval(DurableApprovalMixin):
                 }, session=session)
 
                 if not post_data.get("ok"):
-                    return ApprovalDecision(
+                    decision = ApprovalDecision(
                         approved=False,
                         reason=f"Failed to post Slack message: {post_data.get('error', 'unknown')}",
                     )
+                    await self._resolve_pending(request, decision)
+                    return decision
 
                 msg_ts = post_data["ts"]
                 msg_channel = post_data["channel"]
@@ -203,10 +207,12 @@ class SlackApproval(DurableApprovalMixin):
 
             except Exception as e:
                 logger.error(f"SlackApproval error: {e}")
-                return ApprovalDecision(
+                decision = ApprovalDecision(
                     approved=False,
                     reason=f"Slack approval error: {e}",
                 )
+                await self._resolve_pending(request, decision)
+                return decision
 
     def request_approval_sync(self, request) -> Any:
         """Synchronous wrapper — runs async method in a new event loop."""

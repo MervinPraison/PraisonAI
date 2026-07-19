@@ -181,10 +181,12 @@ class WebhookApproval(DurableApprovalMixin):
 
             except Exception as e:
                 logger.error(f"WebhookApproval error: {e}")
-                return ApprovalDecision(
+                decision = ApprovalDecision(
                     approved=False,
                     reason=f"Webhook approval error: {e}",
                 )
+                await self._resolve_pending(request, decision)
+                return decision
 
     def request_approval_sync(self, request) -> Any:
         """Synchronous wrapper — delegates to the shared async bridge."""

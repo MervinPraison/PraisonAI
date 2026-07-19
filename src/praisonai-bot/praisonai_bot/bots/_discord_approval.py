@@ -154,10 +154,12 @@ class DiscordApproval(DurableApprovalMixin):
 
         channel_id = self._channel_id
         if not channel_id:
-            return ApprovalDecision(
+            decision = ApprovalDecision(
                 approved=False,
                 reason="No Discord channel_id configured",
             )
+            await self._resolve_pending(request, decision)
+            return decision
 
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=self._ssl_verify),
@@ -175,10 +177,12 @@ class DiscordApproval(DurableApprovalMixin):
 
                 msg_id = post_data.get("id")
                 if not msg_id:
-                    return ApprovalDecision(
+                    decision = ApprovalDecision(
                         approved=False,
                         reason=f"Failed to post Discord message: {post_data.get('message', 'unknown')}",
                     )
+                    await self._resolve_pending(request, decision)
+                    return decision
 
                 # 2. Poll for text reply
                 decision = await self._poll_for_response(
@@ -195,10 +199,12 @@ class DiscordApproval(DurableApprovalMixin):
 
             except Exception as e:
                 logger.error(f"DiscordApproval error: {e}")
-                return ApprovalDecision(
+                decision = ApprovalDecision(
                     approved=False,
                     reason=f"Discord approval error: {e}",
                 )
+                await self._resolve_pending(request, decision)
+                return decision
 
     def request_approval_sync(self, request) -> Any:
         """Synchronous wrapper — runs async method in a new event loop."""

@@ -151,5 +151,71 @@ def test_http_backend_persists_then_resolves():
     asyncio.run(run())
 
 
+# ── Early-exit / failure paths must also resolve the pending row ────────────
+
+def test_telegram_early_exit_resolves_pending():
+    """A missing chat_id fails closed *and* clears the durable pending row."""
+    async def run():
+        from praisonai_bot.bots._telegram_approval import TelegramApproval
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _store(tmp)
+            backend = TelegramApproval(token="x", chat_id="", store=store)
+            request = _make_request("tg-early-1")
+
+            decision = await backend.request_approval(request)
+
+            assert decision.approved is False
+            # Row was persisted then resolved — not left dangling as pending,
+            # so a restart won't rehydrate an already-denied request.
+            assert store.pending_count() == 0
+            assert store.get("tg-early-1") is not None
+            assert await backend.rehydrate() == []
+
+    asyncio.run(run())
+
+
+def test_discord_early_exit_resolves_pending():
+    async def run():
+        from praisonai_bot.bots._discord_approval import DiscordApproval
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _store(tmp)
+            backend = DiscordApproval(token="x", channel_id="", store=store)
+            request = _make_request("dc-early-1")
+
+            decision = await backend.request_approval(request)
+
+            assert decision.approved is False
+            assert store.pending_count() == 0
+            assert await backend.rehydrate() == []
+
+    asyncio.run(run())
+
+
+def test_backend_exception_path_resolves_pending():
+    """An exception during send fails closed and clears the pending row."""
+    async def run():
+        from praisonai_bot.bots._telegram_approval import TelegramApproval
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _store(tmp)
+            backend = TelegramApproval(token="x", chat_id="123", store=store)
+            request = _make_request("tg-exc-1")
+
+            async def _boom(*args, **kwargs):
+                raise RuntimeError("network down")
+
+            backend._telegram_api = _boom  # type: ignore[assignment]
+
+            decision = await backend.request_approval(request)
+
+            assert decision.approved is False
+            assert store.pending_count() == 0
+            assert await backend.rehydrate() == []
+
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
