@@ -827,12 +827,35 @@ class DeliveryRouter:
             # underlying adapter, so unwrap it before dispatch.
             media_target = getattr(bot, "adapter", None) or bot
 
-            ok = await deliver_media_to_adapter(
-                media_target,
-                channel_id,
-                safe_path,
-                caption=caption,
-                thread_id=thread_id,
+            # Give media the same transient-failure resilience text already
+            # enjoys (issue #3184): the text path wraps every ``send_message``
+            # in ``deliver_with_retry`` (bounded exponential backoff honouring a
+            # server ``Retry-After``) inside the adapters, but a raw media
+            # upload was attempted exactly once — a network blip silently
+            # dropped the file. Wrap the upload in the same retry helper so a
+            # transient upload error (HTTP 5xx, rate limit, reset) is retried
+            # with backoff instead of dropped. A non-retryable ``False`` return
+            # (adapter exposes no upload primitive) is left untouched, and a
+            # permanent error still raises through to the caller's False path.
+            from ._resilience import BackoffPolicy, deliver_with_retry
+
+            backoff = getattr(media_target, "_outbound_backoff", None)
+            if not isinstance(backoff, BackoffPolicy):
+                backoff = BackoffPolicy(
+                    initial_ms=1000, max_ms=10000, factor=1.5, max_attempts=3
+                )
+
+            async def _upload() -> bool:
+                return await deliver_media_to_adapter(
+                    media_target,
+                    channel_id,
+                    safe_path,
+                    caption=caption,
+                    thread_id=thread_id,
+                )
+
+            ok = await deliver_with_retry(
+                _upload, policy=backoff, platform=platform
             )
             if ok:
                 logger.info(
