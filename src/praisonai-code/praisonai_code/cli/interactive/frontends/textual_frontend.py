@@ -110,17 +110,31 @@ class ApprovalDialog:
     def compose(self):
         """Compose the dialog widgets (for Textual)."""
         try:
-            from textual.containers import Vertical, Horizontal
+            from textual.containers import Vertical, Horizontal, VerticalScroll
             from textual.widgets import Static, Button
             
             narrow_pattern = self._narrow_pattern
             blanket_pattern = self._blanket_pattern
 
-            yield Vertical(
+            children = [
                 Static("[bold]Approval Required[/bold]", id="title"),
                 Static(f"\n{self.request.description}\n"),
                 Static(f"Tool: {self.request.tool_name}"),
                 Static(f"Action: {self.request.action_type}\n"),
+            ]
+            
+            # Show the concrete change (diff/content) so the user approves the
+            # actual mutation, not just a tool label.
+            preview = self.request.change_preview()
+            if preview:
+                children.append(
+                    VerticalScroll(
+                        Static(preview, id="approval-preview"),
+                        id="approval-preview-scroll",
+                    )
+                )
+            
+            children.append(
                 Horizontal(
                     Button("Allow Once", id="once", variant="primary"),
                     Button(f"Always Allow This Command ({narrow_pattern})", id="always", variant="success"),
@@ -128,9 +142,10 @@ class ApprovalDialog:
                     Button(f"Always Allow All ({blanket_pattern})", id="always_tool", variant="warning"),
                     Button("Reject", id="reject", variant="error"),
                     id="buttons"
-                ),
-                id="approval-dialog"
+                )
             )
+            
+            yield Vertical(*children, id="approval-dialog")
         except ImportError:
             pass
     
