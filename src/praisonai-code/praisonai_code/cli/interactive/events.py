@@ -157,8 +157,16 @@ def derive_permission_pattern(request: "ApprovalRequest", scope: str = "command"
             derived = derive_pattern(f"shell:{command}")
             suffix = derived[len("shell:"):]
             return f"{action_type}:{suffix}"
-        except Exception:
-            return f"{action_type}:{command}"
+        except ImportError:
+            pass
+        except Exception:  # pragma: no cover - fail-closed on unexpected errors
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "derive_pattern failed for %r; falling back to literal command",
+                command,
+                exc_info=True,
+            )
+        return f"{action_type}:{command}"
 
     # Non-shell tools: scope to the concrete path/target when available so the
     # persisted rule matches only that resource, never the whole tool.

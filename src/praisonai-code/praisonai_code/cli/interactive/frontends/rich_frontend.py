@@ -188,7 +188,7 @@ class RichFrontend:
             console.print("[5] Reject")
             
         except ImportError:
-            print(f"\n=== Approval Required ===")
+            print("\n=== Approval Required ===")
             print(f"Description: {request.description}")
             print(f"Tool: {request.tool_name}")
             print(f"Action: {request.action_type}")
