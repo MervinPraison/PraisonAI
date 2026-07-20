@@ -121,6 +121,20 @@ class TestClaimDue:
             # And all 20 due jobs were claimed exactly once in total.
             assert len(claimed_ids) == 20
 
+    def test_failed_persist_does_not_return_claim(self):
+        # If the atomic write fails the lease/last_run_at advance is not on
+        # disk; returning the job would let the runner fire it while the next
+        # poll re-reads the unchanged file and fires a duplicate. The claim
+        # must be dropped (empty result) so it is retried cleanly.
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            job = _make_job()
+            store.add(job)
+            store._save = lambda: False
+            claimed = store.claim_due(time.time(), owner_id="A", lease_seconds=300)
+            assert claimed == []
+            assert store._held_leases == {}
+
     def test_lease_round_trips_through_dict(self):
         job = _make_job()
         job._lease_until = 12345.0
@@ -282,6 +296,16 @@ class TestConfigYamlClaimDue:
             claimed_b = store_b.claim_due(now, owner_id="B", lease_seconds=300)
             total = len(claimed_a) + len(claimed_b)
             assert total == 1
+
+    def test_failed_persist_does_not_return_claim(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._make_store(d)
+            job = _make_job()
+            store.add(job)
+            store._save = lambda: False
+            claimed = store.claim_due(time.time(), owner_id="A", lease_seconds=300)
+            assert claimed == []
+            assert store._held_leases == {}
 
     def test_runner_supports_atomic_claim_on_default_store(self):
         with tempfile.TemporaryDirectory() as d:

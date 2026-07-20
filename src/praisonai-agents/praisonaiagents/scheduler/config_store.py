@@ -166,7 +166,15 @@ class ConfigYamlScheduleStore:
                     # One-shot: remove now so no competitor re-claims it.
                     del self._jobs[job.id]
             if changed:
-                self._save()
+                if not self._save():
+                    # The lease/last_run_at advance was NOT persisted (full
+                    # disk, permissions, failed replace). Returning these jobs
+                    # would let the runner execute them while the next poll —
+                    # reloading the unchanged file — sees them as due again and
+                    # fires a duplicate. Drop the claim so it is retried cleanly.
+                    for job in claimed:
+                        self._held_leases.pop(job.id, None)
+                    return []
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:
@@ -305,10 +313,13 @@ class ConfigYamlScheduleStore:
         except Exception as e:
             logger.warning("Failed to load schedules from %s: %s", self._path, e)
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         """Write schedule jobs into config.yaml's ``schedules`` key.
 
         Preserves all other top-level keys (agents, server, etc.).
+
+        Returns ``True`` if the write succeeded, ``False`` otherwise so
+        callers (e.g. ``claim_due``) can avoid acting on unpersisted state.
         """
         try:
             import yaml
@@ -331,8 +342,10 @@ class ConfigYamlScheduleStore:
             with open(tmp, "w") as f:
                 yaml.dump(data, f, default_flow_style=False, sort_keys=False)
             os.replace(tmp, self._path)
+            return True
         except Exception as e:
             logger.warning("Failed to save schedules to %s: %s", self._path, e)
+            return False
 
     def _load_history(self) -> None:
         """Load execution history from run_history.yaml."""

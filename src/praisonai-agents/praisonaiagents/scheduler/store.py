@@ -164,7 +164,15 @@ class FileScheduleStore:
                     # One-shot: remove now so no competitor re-claims it.
                     del self._jobs[job.id]
             if changed:
-                self._save()
+                if not self._save():
+                    # The lease/last_run_at advance was NOT persisted (full
+                    # disk, permissions, failed replace). Returning these jobs
+                    # would let the runner execute them while the next poll —
+                    # reloading the unchanged file — sees them as due again and
+                    # fires a duplicate. Drop the claim so it is retried cleanly.
+                    for job in claimed:
+                        self._held_leases.pop(job.id, None)
+                    return []
         return claimed
 
     def complete(self, job_id: str, owner_id: str) -> None:
@@ -295,7 +303,12 @@ class FileScheduleStore:
         except Exception as e:
             logger.warning("Failed to load schedule store from %s: %s", self._path, e)
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
+        """Persist jobs to disk.
+
+        Returns ``True`` if the write succeeded, ``False`` otherwise so
+        callers (e.g. ``claim_due``) can avoid acting on unpersisted state.
+        """
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [j.to_dict() for j in self._jobs.values()]
@@ -303,8 +316,10 @@ class FileScheduleStore:
             with open(tmp, "w") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp, self._path)
+            return True
         except Exception as e:
             logger.warning("Failed to save schedule store to %s: %s", self._path, e)
+            return False
 
     def _load_history(self) -> None:
         """Load execution history from history.json."""
