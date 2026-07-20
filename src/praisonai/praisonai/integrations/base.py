@@ -14,6 +14,7 @@ Features:
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Optional, Dict, Any, Tuple, List
 import asyncio
+import contextlib
 import shutil
 import os
 import threading
@@ -259,6 +260,7 @@ class BaseCLIIntegration(ABC):
         # stderr/wait drain so a stalled subprocess cannot hang forever.
         deadline = (time.monotonic() + timeout) if timeout else None
         stderr_buffer = []
+        stderr_task = None
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -313,6 +315,13 @@ class BaseCLIIntegration(ABC):
             if proc.returncode is None:
                 proc.kill()
                 await proc.wait()
+            # Always finish the concurrent stderr reader so it cannot outlive this
+            # generator as a pending task or surface an uncollected exception on
+            # the caller's loop (e.g. when the timeout branch above bailed early).
+            if stderr_task is not None and not stderr_task.done():
+                stderr_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await stderr_task
     
     def as_tool(self) -> callable:
         """

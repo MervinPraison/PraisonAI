@@ -189,8 +189,13 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         Returns:
             bool: True if adapter exists and is available
         """
+        # Normalize the cache key the same way the underlying registry resolves
+        # names (case-insensitive, see PluginRegistry.resolve). Without this,
+        # is_available("CrewAI") and invalidate_availability("crewai") would key
+        # different cache entries, leaving the documented escape hatch inert.
+        key = name.lower()
         with self._avail_lock:
-            cached = self._avail_cache.get(name)
+            cached = self._avail_cache.get(key)
         if cached is not None:
             return cached
 
@@ -208,7 +213,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             ok = False
 
         with self._avail_lock:
-            self._avail_cache[name] = ok
+            self._avail_cache[key] = ok
         return ok
 
     def invalidate_availability(self, name: Optional[str] = None) -> None:
@@ -224,7 +229,8 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             if name is None:
                 self._avail_cache.clear()
             else:
-                self._avail_cache.pop(name, None)
+                # Match the case-insensitive key used by is_available().
+                self._avail_cache.pop(name.lower(), None)
 
 
 # Default registry access - replaced by FrameworkAdapterRegistry.default()
