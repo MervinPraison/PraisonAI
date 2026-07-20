@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-browser"
-version = "0.0.5"
+version = "0.0.6"
 description = "Browser automation for PraisonAI — Chrome extension bridge, CDP, and Playwright agents extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
