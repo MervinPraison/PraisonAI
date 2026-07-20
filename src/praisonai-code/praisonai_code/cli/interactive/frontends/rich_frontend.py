@@ -168,8 +168,10 @@ class RichFrontend:
         # a command-scoped grant, not a blanket ``action_type:*`` whitelist.
         narrow_pattern = derive_permission_pattern(request, scope="command")
         blanket_pattern = derive_permission_pattern(request, scope="tool")
+        preview = request.change_preview()
         try:
             from rich.console import Console
+            from rich.markup import escape
             from rich.panel import Panel
             console = Console()
             
@@ -180,6 +182,15 @@ class RichFrontend:
                 title="[yellow]Approval Required[/yellow]",
                 border_style="yellow"
             ))
+            
+            # Show the concrete change so the user approves the actual diff/
+            # content, not just a tool label.
+            if preview:
+                console.print(Panel(
+                    escape(preview),
+                    title="[cyan]Change Preview[/cyan]",
+                    border_style="cyan",
+                ))
             
             console.print("[1] Allow once")
             console.print(f"[2] Always allow this command ({narrow_pattern})")
@@ -192,6 +203,10 @@ class RichFrontend:
             print(f"Description: {request.description}")
             print(f"Tool: {request.tool_name}")
             print(f"Action: {request.action_type}")
+            if preview:
+                print("\n--- Change Preview ---")
+                print(preview)
+                print("--- End Preview ---")
             print("[1] Allow once")
             print(f"[2] Always allow this command ({narrow_pattern})")
             print(f"[3] Always allow this command for this session ({narrow_pattern})")

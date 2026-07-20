@@ -68,6 +68,57 @@ class InteractiveEvent:
         }
 
 
+def render_change_preview(
+    tool_name: str, parameters: Optional[Dict[str, Any]]
+) -> Optional[str]:
+    """Render a change preview for file-mutating tools.
+
+    For ``edit``/``apply_patch`` a unified diff is shown when available; for
+    ``write`` the new content (truncated) is shown. Returns ``None`` when there
+    is nothing meaningful to preview (e.g. non-mutating tools). Mirrors
+    ``approval_backend._render_preview`` so interactive frontends approve the
+    concrete change rather than just a tool label.
+    """
+    args = parameters or {}
+    if tool_name not in ("edit", "write", "apply_patch"):
+        return None
+
+    # Prefer an already-computed unified diff/patch when supplied.
+    diff = args.get("diff") or args.get("patch")
+    if isinstance(diff, str) and diff.strip():
+        return diff
+
+    if tool_name == "write":
+        content = args.get("content") or args.get("text")
+        path = args.get("path") or args.get("file_path") or ""
+        if isinstance(content, str):
+            shown = content if len(content) <= 2000 else content[:2000] + "\n... (truncated)"
+            header = f"# {path}\n" if path else ""
+            return f"{header}{shown}"
+
+    # Synthesise an inline diff for ``edit`` when only old/new strings are
+    # given, so the user still sees the concrete change.
+    if tool_name == "edit":
+        old = args.get("old_string")
+        new = args.get("new_string")
+        if isinstance(old, str) and isinstance(new, str):
+            import difflib
+
+            path = args.get("path") or args.get("file_path") or "file"
+            synth = "".join(
+                difflib.unified_diff(
+                    old.splitlines(keepends=True),
+                    new.splitlines(keepends=True),
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                )
+            )
+            if synth.strip():
+                return synth
+
+    return None
+
+
 @dataclass
 class ApprovalRequest:
     """Request for user approval before executing an action."""
@@ -87,6 +138,15 @@ class ApprovalRequest:
             "tool_name": self.tool_name,
             "parameters": self.parameters,
         }
+    
+    def change_preview(self) -> Optional[str]:
+        """Render a change preview for file-mutating tools.
+
+        Delegates to :func:`render_change_preview` so interactive frontends can
+        display the concrete change (a unified diff when available, otherwise
+        the truncated new content) before the user approves it.
+        """
+        return render_change_preview(self.tool_name, self.parameters)
     
     def matches_pattern(self, pattern: str) -> bool:
         """Check if this request matches an approval pattern.
