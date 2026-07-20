@@ -61,26 +61,17 @@ class ResolvedSession:
 def _canonical_stores(project_path: Optional[str] = None):
     """Yield the canonical CLI session stores, project-scoped first then global.
 
-    Mirrors the search order used by ``rehydrate_session`` /
-    ``list_project_sessions`` so listing, resuming, showing, deleting and
-    exporting all address one coherent set of stores (Issue #3133).
+    Delegates to the single source of truth in ``project_sessions`` so that
+    ``show``/``delete``/``export`` address the *exact same* stores, in the same
+    order, that ``list``/``resume``/``--continue`` use — by construction, not
+    by two hand-kept copies of the list (Issue #3201, extends #3133).
     """
-    stores = []
     try:
-        from .project_sessions import get_project_session_store
+        from .project_sessions import canonical_cli_stores
 
-        stores.append(get_project_session_store(project_path))
+        return canonical_cli_stores(project_path)
     except Exception:
-        pass
-
-    try:
-        from praisonaiagents.session.store import get_default_session_store
-
-        stores.append(get_default_session_store())
-    except Exception:
-        pass
-
-    return stores
+        return []
 
 
 def _store_for(session_id: str, project_path: Optional[str] = None):

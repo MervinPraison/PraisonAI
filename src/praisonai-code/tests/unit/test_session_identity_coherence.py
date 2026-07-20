@@ -234,6 +234,29 @@ def test_delete_sweeps_legacy_duplicate(project, monkeypatch):
     assert resolve_session("dup-id").found is False
 
 
+def test_list_and_resolver_enumerate_identical_stores(project):
+    """list/continue and show/delete/export enumerate the *same* stores.
+
+    Issue #3201: the list-path (``list_project_sessions``/``find_last_session``)
+    and the resolver-path (``session_resolver``) must draw from one canonical
+    set of stores by construction, not two hand-kept copies. Both now delegate
+    to ``canonical_cli_stores``, so the store instances they see are identical.
+    """
+    from praisonai_code.cli.state import session_resolver
+    from praisonai_code.cli.state.project_sessions import canonical_cli_stores
+
+    shared = canonical_cli_stores()
+    resolver_view = session_resolver._canonical_stores()
+
+    # Same number and same concrete store classes, in the same order.
+    assert len(shared) == len(resolver_view)
+    assert [type(s) for s in shared] == [type(s) for s in resolver_view]
+    # And the project-scoped store is first in both (search-order invariant).
+    assert [s.session_dir for s in shared] == [
+        s.session_dir for s in resolver_view
+    ]
+
+
 def test_read_failure_does_not_leak_other_session(project, monkeypatch):
     """A read failure on the owning store reports not-found, not another record.
 
