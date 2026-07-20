@@ -873,12 +873,14 @@ async def run_browser_agent_with_progress(
     # Wait for extension to connect to bridge server before sending goal.
     # Cap the wait by the overall timeout and allow it to be skipped entirely
     # (e.g. in unit tests / CI where websockets is mocked and no live bridge
-    # exists) via the PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT env var or when
-    # running under pytest.
-    skip_extension_wait = bool(
-        os.environ.get("PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT")
-        or os.environ.get("PYTEST_CURRENT_TEST")
-    )
+    # exists) via the PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT env var.
+    #
+    # Only explicit truthy values ("1", "true", "yes", "on") enable the skip so
+    # that PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT=false (or any inherited value)
+    # does not accidentally bypass the readiness check on live integration runs.
+    skip_extension_wait = os.environ.get(
+        "PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
     max_wait_for_extension = min(15.0, timeout)  # Wait up to 15 seconds for extension
     extension_connected = skip_extension_wait
     

@@ -14,6 +14,18 @@ from praisonai_browser.cli.commands.browser import app
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _skip_extension_wait(monkeypatch):
+    """Bypass the live bridge readiness poll for these mocked tests.
+
+    The tests patch ``websockets.connect`` but not the aiohttp ``/health``
+    poll, so without this the mocked path would block on a non-existent
+    bridge. Setting the flag explicitly (rather than relying on
+    ``PYTEST_CURRENT_TEST``) keeps live integration tests unaffected.
+    """
+    monkeypatch.setenv("PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT", "1")
+
+
 class TestLaunchCommandEngineFlag:
     """Test that --engine flag is properly exposed in launch command."""
     
