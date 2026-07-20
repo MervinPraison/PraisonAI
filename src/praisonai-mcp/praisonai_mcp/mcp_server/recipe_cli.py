@@ -14,6 +14,7 @@ Commands:
 import argparse
 import json
 import logging
+import shutil
 import sys
 from typing import List
 
@@ -464,6 +465,17 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
             self._print_error(str(e))
             return self.EXIT_ERROR
     
+    def _stdio_recipe_command(self, recipe_name: str) -> tuple:
+        """Resolve (command, args) for STDIO recipe serve based on install type.
+
+        Standalone installs expose the ``praisonai-mcp`` entry point which
+        accepts ``serve-recipe`` directly. Umbrella installs expose
+        ``praisonai`` which requires the ``mcp serve-recipe`` subcommand.
+        """
+        if shutil.which("praisonai-mcp"):
+            return "praisonai-mcp", ["serve-recipe", recipe_name, "--transport", "stdio"]
+        return "praisonai", ["mcp", "serve-recipe", recipe_name, "--transport", "stdio"]
+
     def cmd_config_generate_recipe(self, args: List[str]) -> int:
         """Generate client config for recipe MCP server."""
         parser = argparse.ArgumentParser(prog="praisonai mcp config-generate-recipe")
@@ -482,9 +494,10 @@ Serve PraisonAI recipes as MCP servers for Claude Desktop, Cursor, Windsurf, and
         
         # Generate config
         if parsed.transport == "stdio":
+            command, cmd_args = self._stdio_recipe_command(parsed.recipe_name)
             server_config = {
-                "command": "praisonai",
-                "args": ["mcp", "serve-recipe", parsed.recipe_name, "--transport", "stdio"],
+                "command": command,
+                "args": cmd_args,
             }
         else:
             server_config = {
