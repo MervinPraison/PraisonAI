@@ -19,14 +19,23 @@ app = typer.Typer(help="Session management")
 
 
 def _create_backend(backend_type: str, storage_path: Optional[str]):
-    """Create storage backend from CLI options."""
+    """Create storage backend from CLI options.
+
+    Defaults anchor under the *canonical* data home (``get_sessions_dir()`` →
+    ``~/.praisonai/sessions``) rather than the legacy ``~/.praison`` root, so a
+    backend-selected store lives under the same home as the project/global
+    stores instead of silently splitting sessions across two home roots
+    (Issue #3201).
+    """
     try:
+        from praisonaiagents.paths import get_data_dir, get_sessions_dir
+
         if backend_type == "file":
             from praisonaiagents.storage import FileBackend
-            return FileBackend(storage_dir=storage_path or "~/.praison/sessions")
+            return FileBackend(storage_dir=storage_path or str(get_sessions_dir()))
         elif backend_type == "sqlite":
             from praisonaiagents.storage import SQLiteBackend
-            db_path = storage_path or "~/.praison/sessions.db"
+            db_path = storage_path or str(get_data_dir() / "sessions.db")
             return SQLiteBackend(db_path=db_path)
         elif backend_type.startswith("redis://"):
             from praisonaiagents.storage import RedisBackend
