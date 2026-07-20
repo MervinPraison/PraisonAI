@@ -75,6 +75,26 @@ class ContextAggregator:
         """Estimate token count via the canonical heuristic."""
         from .tokens import estimate_tokens_heuristic
         return estimate_tokens_heuristic(text)
+
+    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
+        """Return the longest prefix of ``text`` whose estimated tokens fit ``max_tokens``.
+
+        Uses the canonical estimator so dense non-ASCII scripts (e.g. CJK) are
+        truncated correctly rather than assuming a flat 4-chars-per-token ratio.
+        """
+        if max_tokens <= 0 or not text:
+            return ""
+        if self._estimate_tokens(text) <= max_tokens:
+            return text
+        # Binary search for the longest prefix within budget.
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if self._estimate_tokens(text[:mid]) <= max_tokens:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo]
     
     def register_source(
         self,
@@ -220,9 +240,15 @@ class ContextAggregator:
                 # Try to fit partial
                 remaining = max_tokens - total_tokens - separator_tokens
                 if remaining > 100:
-                    # Truncate context
-                    chars_to_keep = int(remaining * 4 * 0.9)
-                    truncated = context[:chars_to_keep] + "..."
+                    # Reserve budget for the label and ellipsis so the retained
+                    # prefix (canonically estimated) stays within ``remaining``.
+                    ellipsis_tokens = self._estimate_tokens("...")
+                    label_tokens = (
+                        self._estimate_tokens(f"**{name}**:\n")
+                        if self.include_source_labels else 0
+                    )
+                    prefix_budget = remaining - ellipsis_tokens - label_tokens
+                    truncated = self._truncate_to_tokens(context, prefix_budget) + "..."
                     
                     if self.include_source_labels:
                         merged_parts.append(f"**{name}**:\n{truncated}")
