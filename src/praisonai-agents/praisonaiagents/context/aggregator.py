@@ -72,8 +72,9 @@ class ContextAggregator:
         self._sources: Dict[str, Tuple[Callable, int]] = {}
     
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count (4 chars per token heuristic)."""
-        return len(text) // 4 + 1
+        """Estimate token count via the canonical heuristic."""
+        from .tokens import estimate_tokens_heuristic
+        return estimate_tokens_heuristic(text)
     
     def register_source(
         self,
