@@ -1016,6 +1016,9 @@ class DefaultSessionStore:
                             # sessions from sub-agent/forked children (Issue #2655).
                             "parent_id": data.get("parent_id") or (data.get("metadata") or {}).get("parent_id"),
                             "parent_session_id": data.get("parent_session_id") or (data.get("metadata") or {}).get("parent_session_id"),
+                            # Surface the agent_key tag written by Session._save_agent_chat_histories
+                            # so bulk restore resolves it exactly (no prefix-parse ambiguity).
+                            "agent_key": data.get("agent_key") or (data.get("metadata") or {}).get("agent_key"),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
                             "message_count": len(data.get("messages", [])),

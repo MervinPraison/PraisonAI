@@ -335,10 +335,29 @@ class Session:
             list_sessions = getattr(session_store, "list_sessions", None)
             if callable(list_sessions):
                 for entry in list_sessions():
-                    stored_id = entry.get("session_id") if isinstance(entry, dict) else entry
-                    if not (isinstance(stored_id, str) and stored_id.startswith(prefix)):
-                        continue
-                    agent_key = stored_id[len(prefix):]
+                    if isinstance(entry, dict):
+                        stored_id = entry.get("session_id")
+                        # Prefer the explicit parent/agent_key tags written on
+                        # save; this disambiguates overlapping composite ids
+                        # (e.g. "chat"+"support_agent" vs "chat_support"+"agent").
+                        tagged_parent = entry.get("parent_session_id")
+                        tagged_key = entry.get("agent_key")
+                        if tagged_parent == self.session_id and tagged_key:
+                            agent_key = tagged_key
+                        elif (
+                            tagged_parent is None
+                            and isinstance(stored_id, str)
+                            and stored_id.startswith(prefix)
+                        ):
+                            # Legacy sessions saved before the tag existed.
+                            agent_key = stored_id[len(prefix):]
+                        else:
+                            continue
+                    else:
+                        stored_id = entry
+                        if not (isinstance(stored_id, str) and stored_id.startswith(prefix)):
+                            continue
+                        agent_key = stored_id[len(prefix):]
                     messages = session_store.get_chat_history(stored_id)
                     if agent_key and messages:
                         self._agents[agent_key] = {
@@ -408,6 +427,17 @@ class Session:
                         logging.debug(f"No chat history to persist for session {session_id}")
                     elif hasattr(session_store, "set_chat_history"):
                         session_store.set_chat_history(session_id, messages)
+                        # Tag the child session so bulk restore can resolve the
+                        # exact agent_key without ambiguous composite-key prefix
+                        # parsing (e.g. "chat" + "support_agent" vs "chat_support"
+                        # + "agent" both collapse to "chat_support_agent").
+                        update_meta = getattr(session_store, "update_session_metadata", None)
+                        if callable(update_meta):
+                            update_meta(
+                                session_id,
+                                parent_session_id=self.session_id,
+                                agent_key=agent_key,
+                            )
                     else:
                         # Fallback to add_message - may create duplicates on repeated calls
                         logging.warning(
