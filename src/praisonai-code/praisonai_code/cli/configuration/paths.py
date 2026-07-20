@@ -109,13 +109,39 @@ def get_user_config_path() -> Path:
     exists there but a legacy ``~/.praison/config.toml`` does, the legacy path is
     returned so existing installs keep resolving until migrated.
     """
-    primary = get_user_config_dir() / "config.toml"
+    primary = get_user_config_write_path()
     if primary.exists():
         return primary
     legacy = _legacy_user_config_dir() / "config.toml"
     if legacy.exists():
         return legacy
     return primary
+
+
+def _canonical_home_root() -> Path:
+    """Canonical home root for *writes*, ignoring the legacy fallback.
+
+    Honours ``PRAISONAI_HOME`` (with ``~`` expansion, matching the core SDK and
+    ``setup``) but, unlike :func:`home_root`, never resolves to the legacy
+    ``~/.praison`` directory even when it is the only one present — writes must
+    always land on the canonical location.
+    """
+    env_path = os.environ.get("PRAISONAI_HOME")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path.home() / ".praisonai"
+
+
+def get_user_config_write_path() -> Path:
+    """Get the canonical user config file path for *writing*.
+
+    Always resolves to ``config.toml`` under the canonical ``~/.praisonai`` home
+    (or ``PRAISONAI_HOME``) and never the legacy ``~/.praison`` location — even
+    when only the legacy directory currently exists. Writers (e.g. ``config
+    set``/``reset``) must use this so an update never mutates the legacy
+    read-only fallback; new values are always persisted to the canonical file.
+    """
+    return _canonical_home_root() / "config.toml"
 
 
 def get_project_config_dir(project_root: Optional[Path] = None) -> Path:
