@@ -25,6 +25,17 @@ def _root_context() -> click.Context:
     return click.Context(command, info_name="praisonai")
 
 
+def _invoke_help():
+    """Invoke ``--help`` with a utf-8, colour-free harness.
+
+    Mirrors real-terminal behaviour so the grouped-panel assertions measure the
+    CLI rather than the CliRunner capture buffer's locale encoding (cp1252 on
+    Windows, which otherwise makes Rich raise and the command exit 1).
+    """
+    runner = CliRunner(env={"PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"})
+    return runner.invoke(app, ["--help"], color=False)
+
+
 def test_every_registered_command_has_a_category():
     """No advertised command may fall through to an unknown category.
 
@@ -74,13 +85,13 @@ def test_get_command_tags_help_panel():
 
 def test_help_output_is_grouped_not_flat():
     """The rendered help groups commands into categorised panels."""
-    result = CliRunner().invoke(app, ["--help"])
-    assert result.exit_code == 0
+    result = _invoke_help()
+    assert result.exit_code == 0, result.exception
     # At least a couple of the category panel titles must appear.
     assert "Get started" in result.output
     assert "Run & chat" in result.output
 
 
 def test_help_still_exits_zero():
-    result = CliRunner().invoke(app, ["--help"])
-    assert result.exit_code == 0
+    result = _invoke_help()
+    assert result.exit_code == 0, result.exception

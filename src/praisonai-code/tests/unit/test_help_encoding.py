@@ -14,6 +14,36 @@ from typer.testing import CliRunner
 from praisonai_code.cli.app import app
 
 
+def _invoke_help():
+    """Invoke ``--help`` the way a real terminal does.
+
+    On Windows the CliRunner buffer defaults to the cp1252 locale encoding, so
+    Rich raises a ``UnicodeEncodeError`` while rendering the box-drawing panels
+    and the command exits 1 — even though the same ``--help`` exits 0 in a real
+    console (Rich detects the terminal and downgrades to ASCII). Forcing utf-8
+    and disabling colour aligns the harness with real-terminal behaviour so the
+    test measures the CLI, not the capture buffer's encoding.
+    """
+    runner = CliRunner(env={"PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"})
+    return runner.invoke(app, ["--help"], color=False)
+
+
+def _assert_help_ok(result) -> None:
+    if result.exit_code != 0:
+        import traceback
+
+        exc = result.exception
+        tb = (
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            if exc is not None
+            else "<no exception captured>"
+        )
+        raise AssertionError(
+            f"praisonai-code --help exited {result.exit_code}\n"
+            f"exception={exc!r}\n{tb}\noutput={result.output[:2000]}"
+        )
+
+
 def _emoji_codepoints(text: str) -> list:
     return sorted({hex(ord(c)) for c in text if ord(c) >= 0x1F000})
 
@@ -44,17 +74,17 @@ def _cp1252_unsafe_chars(text: str) -> list:
 
 
 def test_main_help_exits_zero():
-    result = CliRunner().invoke(app, ["--help"])
-    assert result.exit_code == 0
+    result = _invoke_help()
+    _assert_help_ok(result)
 
 
 def test_main_help_has_no_emoji():
-    result = CliRunner().invoke(app, ["--help"])
+    result = _invoke_help()
     assert _emoji_codepoints(result.output) == []
 
 
 def test_main_help_is_cp1252_encodable():
-    result = CliRunner().invoke(app, ["--help"])
+    result = _invoke_help()
     assert _cp1252_unsafe_chars(result.output) == [], (
         "praisonai-code --help emitted characters that crash cp1252 consoles"
     )

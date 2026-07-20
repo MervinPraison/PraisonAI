@@ -103,7 +103,10 @@ def test_no_legacy_main_reentry_in_stub_modules():
     legacy_patterns = ("praison.main()", "PraisonAI().main()")
     offenders = []
     for name in STUB_MODULES:
-        text = (base / f"{name}.py").read_text()
+        # Read as UTF-8 explicitly: on Windows ``read_text()`` defaults to the
+        # locale encoding (cp1252), which raises ``UnicodeDecodeError`` on any
+        # multi-byte/UTF-8 byte (e.g. 0x81) present in a command module.
+        text = (base / f"{name}.py").read_text(encoding="utf-8")
         if any(pattern in text for pattern in legacy_patterns):
             offenders.append(name)
     assert offenders == [], f"legacy re-entry still present in: {offenders}"
