@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from praisonaiagents.tools.resolver import resolve_tool_name, resolve_tool_names
+from praisonaiagents.tools.resolver import (
+    ToolResolutionError,
+    resolve_tool_name,
+    resolve_tool_names,
+)
 
 
 class TestResolveToolName:
@@ -44,3 +48,84 @@ class TestResolveToolNames:
         ):
             resolved = resolve_tool_names(["a", "b", "c"])
         assert len(resolved) == 2
+
+    def test_strict_raises_on_unknown(self):
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            with pytest.raises(ToolResolutionError) as exc_info:
+                resolve_tool_names(["web_serch"], strict=True)
+        assert exc_info.value.unknown == ["web_serch"]
+        assert "web_serch" in exc_info.value.suggestions
+
+    def test_strict_from_env(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_STRICT_TOOLS", "true")
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            with pytest.raises(ToolResolutionError):
+                resolve_tool_names(["nope_xyz"])
+
+    def test_non_strict_invokes_on_unknown_callback(self):
+        seen = {}
+
+        def _cb(unknown, suggestions):
+            seen["unknown"] = unknown
+            seen["suggestions"] = suggestions
+
+        with patch(
+            "praisonaiagents.tools.resolver.resolve_tool_name",
+            return_value=None,
+        ):
+            resolved = resolve_tool_names(["nope_xyz"], strict=False, on_unknown=_cb)
+        assert resolved == []
+        assert seen["unknown"] == ["nope_xyz"]
+
+    def test_suggestion_for_typo(self):
+        with patch(
+            "praisonaiagents.tools.resolver._available_tool_names",
+            return_value=["internet_search", "duckduckgo"],
+        ):
+            from praisonaiagents.tools.resolver import _closest_names
+
+            assert "internet_search" in _closest_names("internet_serch")
+
+    def test_exported_from_tools_package(self):
+        from praisonaiagents.tools import (
+            ToolResolutionError as ExportedError,
+            resolve_tool_names as exported_resolve,
+        )
+
+        assert ExportedError is ToolResolutionError
+        assert exported_resolve is resolve_tool_names
+
+
+class TestToolsetStrictPropagation:
+    """Strict-mode toolset resolution must preserve the typed error.
+
+    Regression for the toolset path flattening ``ToolResolutionError`` into a
+    plain ``ValueError`` and dropping ``.unknown`` / ``.suggestions``.
+    """
+
+    def test_toolset_path_preserves_typed_error(self, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_STRICT_TOOLS", "true")
+        from praisonaiagents.agent.agent import Agent
+
+        with patch(
+            "praisonaiagents.toolsets.resolve_toolsets_for_model",
+            return_value=["totally_unknown_tool_xyz"],
+        ):
+            with patch(
+                "praisonaiagents.tools.resolver.resolve_tool_name",
+                return_value=None,
+            ):
+                with pytest.raises(ToolResolutionError) as exc_info:
+                    Agent(
+                        name="t",
+                        instructions="x",
+                        llm="gpt-4o-mini",
+                        toolsets=["some_group"],
+                    )
+        assert exc_info.value.unknown == ["totally_unknown_tool_xyz"]

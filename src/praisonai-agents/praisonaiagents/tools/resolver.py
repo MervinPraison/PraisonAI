@@ -8,13 +8,24 @@ Resolution order (first match wins):
 
 from __future__ import annotations
 
+import difflib
 import importlib.util
 import logging
-from typing import Any, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _praisonai_tools_available: Optional[bool] = None
+
+
+class ToolResolutionError(ValueError):
+    """Raised in strict mode when one or more tool names cannot be resolved."""
+
+    def __init__(self, unknown: List[str], suggestions: Dict[str, List[str]]):
+        self.unknown = unknown
+        self.suggestions = suggestions
+        super().__init__(_format_unknown(unknown, suggestions))
 
 
 def resolve_tool_name(name: str) -> Optional[Any]:
@@ -63,13 +74,92 @@ def resolve_tool_name(name: str) -> Optional[Any]:
     return None
 
 
-def resolve_tool_names(names: List[str]) -> List[Any]:
-    """Resolve tool name strings to callables/instances."""
-    resolved = []
+def _available_tool_names() -> List[str]:
+    """Best-effort catalogue of known tool names for suggestions."""
+    names: set = set()
+
+    try:
+        from .registry import get_registry
+
+        names.update(get_registry().list_tools())
+    except Exception:
+        pass
+
+    try:
+        from . import TOOL_MAPPINGS
+
+        names.update(TOOL_MAPPINGS.keys())
+    except Exception:
+        pass
+
+    global _praisonai_tools_available
+    if _praisonai_tools_available is None:
+        _praisonai_tools_available = importlib.util.find_spec("praisonai_tools") is not None
+    if _praisonai_tools_available:
+        try:
+            import praisonai_tools
+
+            names.update(getattr(praisonai_tools, "__all__", []) or [])
+        except Exception:
+            pass
+
+    return sorted(names)
+
+
+def _closest_names(name: str, limit: int = 3) -> List[str]:
+    """Return the closest known tool names to ``name``."""
+    return difflib.get_close_matches(name, _available_tool_names(), n=limit, cutoff=0.6)
+
+
+def _format_unknown(unknown: List[str], suggestions: Dict[str, List[str]]) -> str:
+    parts = []
+    for name in unknown:
+        near = suggestions.get(name) or []
+        if near:
+            hint = " Did you mean {}?".format(" or ".join(repr(s) for s in near))
+        else:
+            hint = ""
+        parts.append("Unknown tool {!r}.{} Run 'praisonai tools list'.".format(name, hint))
+    return " ".join(parts)
+
+
+def _default_report(unknown: List[str], suggestions: Dict[str, List[str]]) -> None:
+    """User-visible (not log-only) diagnostic for unresolved tool names."""
+    logger.warning("%s", _format_unknown(unknown, suggestions))
+
+
+def resolve_tool_names(
+    names: List[str],
+    *,
+    strict: Optional[bool] = None,
+    on_unknown: Optional[Callable[[List[str], Dict[str, List[str]]], None]] = None,
+) -> List[Any]:
+    """Resolve tool name strings to callables/instances.
+
+    Args:
+        names: Tool name strings to resolve.
+        strict: If True, raise ``ToolResolutionError`` when any name is unknown.
+            Defaults to the ``PRAISONAI_STRICT_TOOLS`` environment variable
+            (falsey by default for backward compatibility).
+        on_unknown: Optional callback ``(unknown, suggestions)`` invoked for
+            unresolved names in non-strict mode instead of the default report.
+    """
+    if strict is None:
+        strict = os.getenv("PRAISONAI_STRICT_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+    resolved: List[Any] = []
+    unknown: List[str] = []
     for name in names:
         tool = resolve_tool_name(name)
         if tool is not None:
             resolved.append(tool)
         else:
-            logger.warning("Tool %r not found (registry, TOOL_MAPPINGS, praisonai-tools)", name)
+            unknown.append(name)
+
+    if unknown:
+        suggestions = {name: _closest_names(name) for name in unknown}
+        if strict:
+            raise ToolResolutionError(unknown=unknown, suggestions=suggestions)
+        (on_unknown or _default_report)(unknown, suggestions)
+
     return resolved
