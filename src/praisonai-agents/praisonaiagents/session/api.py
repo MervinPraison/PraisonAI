@@ -286,7 +286,21 @@ class Session:
         """
         if self.is_remote:
             return []
-        
+
+        # G-2 FIX: mirror the save path priority — read SessionStore first so
+        # history persisted by _save_agent_chat_histories() is actually found.
+        session_store = None
+        try:
+            from . import get_default_session_store
+            session_store = get_default_session_store()
+        except ImportError:
+            pass
+
+        if session_store is not None and hasattr(session_store, "get_chat_history"):
+            messages = session_store.get_chat_history(f"{self.session_id}_{agent_key}")
+            if messages:
+                return messages
+
         results = self.memory.search_short_term(
             query="Agent chat history for",
             limit=10
@@ -306,7 +320,32 @@ class Session:
         """Restore all agent chat histories from memory."""
         if self.is_remote:
             return
-        
+
+        # G-2 FIX: read SessionStore first (where save_state now writes), then
+        # fall back to Memory for backward compatibility.
+        session_store = None
+        try:
+            from . import get_default_session_store
+            session_store = get_default_session_store()
+        except ImportError:
+            pass
+
+        if session_store is not None and hasattr(session_store, "get_chat_history"):
+            prefix = f"{self.session_id}_"
+            list_sessions = getattr(session_store, "list_sessions", None)
+            if callable(list_sessions):
+                for entry in list_sessions():
+                    stored_id = entry.get("session_id") if isinstance(entry, dict) else entry
+                    if not (isinstance(stored_id, str) and stored_id.startswith(prefix)):
+                        continue
+                    agent_key = stored_id[len(prefix):]
+                    messages = session_store.get_chat_history(stored_id)
+                    if agent_key and messages:
+                        self._agents[agent_key] = {
+                            "agent": None,
+                            "chat_history": messages
+                        }
+
         results = self.memory.search_short_term(
             query="Agent chat history for",
             limit=50
@@ -319,7 +358,7 @@ class Session:
                 agent_key = metadata.get("agent_key")
                 chat_history = metadata.get("chat_history", [])
                 
-                if agent_key and chat_history:
+                if agent_key and chat_history and agent_key not in self._agents:
                     self._agents[agent_key] = {
                         "agent": None,
                         "chat_history": chat_history

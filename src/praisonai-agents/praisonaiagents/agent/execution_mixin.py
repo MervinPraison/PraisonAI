@@ -1143,6 +1143,68 @@ Write the complete compiled report:"""
                 turn_tools = self._turn_tools_used
             turn_tools.append(function_name)
 
+        # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,
+        # mirroring the sync execute_tool path in tool_execution.py. Without
+        # this the primary async path (_execute_unified_achat_completion) would
+        # silently skip HookEvent.BEFORE_TOOL gating registered via
+        # Agent(hooks=HookRegistry(...)). Zero overhead when no hooks apply.
+        hook_runner = getattr(self, '_hook_runner', None)
+        if hook_runner is not None:
+            from ..hooks import HookEvent
+            if hook_runner.registry.has_hooks(HookEvent.BEFORE_TOOL):
+                from ..hooks import BeforeToolInput
+                before_tool_input = BeforeToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.BEFORE_TOOL,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments,
+                )
+                before_results = await hook_runner.execute(
+                    HookEvent.BEFORE_TOOL, before_tool_input, target=function_name
+                )
+                if hook_runner.is_blocked(before_results):
+                    logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                    return f"Execution of {function_name} was blocked by security policy."
+                for res in before_results:
+                    if res.output and res.output.modified_input:
+                        arguments.update(res.output.modified_input)
+
+            result = await self._execute_tool_async_dispatch(
+                function_name, arguments, tool_call_id, tools_override
+            )
+
+            if hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
+                from ..hooks import AfterToolInput
+                after_tool_input = AfterToolInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_TOOL,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    tool_name=function_name,
+                    tool_input=arguments,
+                    tool_output=result,
+                )
+                after_results = await hook_runner.execute(
+                    HookEvent.AFTER_TOOL, after_tool_input, target=function_name
+                )
+                extra_context = hook_runner.aggregate_context(after_results)
+                if extra_context:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{extra_context}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", extra_context)
+            return result
+
+        return await self._execute_tool_async_dispatch(
+            function_name, arguments, tool_call_id, tools_override
+        )
+
+    async def _execute_tool_async_dispatch(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Route an async tool call through the middleware chain (if any) then retry loop."""
         # Route async tool calls through the same tool middleware chain as the
         # sync path. The chain (before_tool/after_tool/wrap_tool_call) is
         # synchronous, so we run it in a worker thread and bridge its final
