@@ -4921,6 +4921,10 @@ class WebSocketGateway:
                 # so this channel keys sessions by canonical identity (unified
                 # user) instead of a per-platform key. No-op when unconfigured.
                 self._stamp_identity_resolver(bot)
+                # Issue #3232: share one per-turn LockMap so channels that unify
+                # to the same session serialise turns on the resolved id. No-op
+                # without an identity resolver (single-channel behaviour).
+                self._stamp_turn_lock_map(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -5129,6 +5133,42 @@ class WebSocketGateway:
             sess._identity_resolver = resolver
         elif hasattr(bot, "_identity_resolver"):
             bot._identity_resolver = resolver
+
+    def _stamp_turn_lock_map(self, bot: Any) -> None:
+        """Share one per-turn ``LockMap`` with a channel bot (Issue #3232).
+
+        The identity resolver unifies distinct platform users onto one persisted
+        session, but each channel bot's ``BotSessionManager`` owns its own
+        ``LockMap`` keyed on the resolved id. Two channels resolving to the same
+        unified id therefore hold two distinct locks, so near-simultaneous turns
+        run concurrently against one transcript — interleaving read-modify-write
+        and breaking strict user/assistant alternation.
+
+        Stamping a single shared map onto every channel session makes those turns
+        serialise on the resolved id regardless of which channel a message
+        arrives on. Mirrors :meth:`_stamp_identity_resolver` /
+        :meth:`_stamp_admission_gate` and ``BotOS._wire_turn_locks``: wired only
+        when an identity resolver is configured (the sole case where distinct
+        channels unify to one session), so single-channel gateways keep their own
+        map and today's behaviour is preserved exactly. Called from both
+        ``start_channels`` and ``_start_single_channel`` (hot-reload) so a
+        restarted channel keeps sharing the same lock map.
+        """
+        if getattr(self, "_identity_resolver", None) is None:
+            return
+        lock_map = getattr(self, "_turn_lock_map", None)
+        if lock_map is None:
+            from .._lockmap import LockMap
+            lock_map = LockMap()
+            self._turn_lock_map = lock_map
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_locks"):
+            sess._locks = lock_map
+        elif hasattr(bot, "_turn_lock_map"):
+            bot._turn_lock_map = lock_map
 
     def _create_bot(
         self,
@@ -5873,6 +5913,10 @@ class WebSocketGateway:
             # Issue #3020: stamp the identity resolver on the hot-reloaded
             # channel too, so a restarted channel keeps cross-platform continuity.
             self._stamp_identity_resolver(bot)
+            # Issue #3232: re-share the same per-turn LockMap on the hot-reloaded
+            # channel so a restarted channel keeps serialising turns on the
+            # resolved id alongside its still-running siblings.
+            self._stamp_turn_lock_map(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
