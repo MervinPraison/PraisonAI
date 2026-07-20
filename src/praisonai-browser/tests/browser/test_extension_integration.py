@@ -280,9 +280,13 @@ class TestEngineIndicator:
         
         # Force connection error to get default result
         with patch('websockets.connect', side_effect=ConnectionRefusedError()):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_browser_agent_with_progress(goal="test", timeout=1.0)
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(
+                    run_browser_agent_with_progress(goal="test", timeout=1.0)
+                )
+            finally:
+                loop.close()
             
             # Even on error, engine should be set
             assert result["engine"] == "extension"

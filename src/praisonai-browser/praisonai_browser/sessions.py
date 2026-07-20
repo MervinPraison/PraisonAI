@@ -33,6 +33,10 @@ class SessionManager:
             praisonai_dir = os.path.join(home, ".praisonai")
             os.makedirs(praisonai_dir, exist_ok=True)
             db_path = os.path.join(praisonai_dir, "browser_sessions.db")
+        else:
+            parent = os.path.dirname(os.path.abspath(db_path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
         
         self.db_path = db_path
         self._local = threading.local()
