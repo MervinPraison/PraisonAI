@@ -609,7 +609,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         Args:
             agents: List of Agent instances
             tasks: Optional list of Task instances (auto-generated from agents if None)
-            process: Execution process type ("sequential", "parallel", "hierarchical")
+            process: Execution process type ("sequential", "workflow", "hierarchical").
+                For parallel fan-out, set async_execution=True on individual Task
+                objects within a "workflow" or "sequential" process.
             manager_llm: LLM model for manager agent
             llm: Default LLM model for all agents
             name: Name for this agent collection
@@ -816,6 +818,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         self._state_lock = threading.Lock()  # Thread-safe state mutations
         self.verbose = _verbose
         self.max_retries = _max_retries
+        _VALID_PROCESSES = {"workflow", "sequential", "hierarchical"}
+        if process not in _VALID_PROCESSES:
+            raise ValueError(
+                f"Unknown process type {process!r}. Valid values are: "
+                f"{sorted(_VALID_PROCESSES)}. Note: parallel fan-out is achieved "
+                f"by setting async_execution=True on individual Task objects within "
+                f"a 'workflow' or 'sequential' process, not via process=\"parallel\"."
+            )
         self.process = process
         self.stream = _stream
         self.name = name
