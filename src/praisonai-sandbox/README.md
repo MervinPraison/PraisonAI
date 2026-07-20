@@ -41,6 +41,10 @@ from praisonai.sandbox import SubprocessSandbox  # shim → praisonai_sandbox
 
 ## Validating your install
 
+> **Note:** The `e2e-validation/` bundle and `tests/` ship with the source
+> repository, not the published wheel. Run these commands from a checkout of
+> this repo (`src/praisonai-sandbox/`), not from a `pip install`ed environment.
+
 Run the single-command end-to-end smoke suite (no API keys needed for the
 subprocess path; Docker is optional and skipped when unavailable):
 
