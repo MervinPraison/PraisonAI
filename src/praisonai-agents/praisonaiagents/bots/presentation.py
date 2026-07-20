@@ -413,6 +413,35 @@ class MessagePresentation:
         
         return MessagePresentation(blocks=blocks)
 
+    @staticmethod
+    def question(
+        prompt: str,
+        options: List[Any],
+        context: Optional[str] = None,
+    ) -> "MessagePresentation":
+        """Create a structured question presentation with option buttons.
+
+        The symmetric counterpart to :meth:`approval` for non-binary
+        clarifications ("which of these?"). Each option renders as a typed
+        ``reply``-action button (via :meth:`PresentationBlock.quick_replies`),
+        so a tap feeds the chosen value straight back into the next agent turn
+        across any channel, reusing the existing reply routing and byte-safe
+        callback encoding — no new store, protocol, or correlation machinery.
+
+        Args:
+            prompt: The question text.
+            options: Choices as ``(label, value)`` pairs or plain strings.
+            context: Optional context information rendered under the prompt.
+
+        Returns:
+            A presentation with the prompt and one reply button per option.
+        """
+        blocks = [PresentationBlock.make_text(prompt)]
+        if context:
+            blocks.append(PresentationBlock.make_context(context))
+        blocks.append(PresentationBlock.quick_replies(options))
+        return MessagePresentation(blocks=blocks)
+
 
 @dataclass
 class PresentationLimits:

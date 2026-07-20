@@ -48,6 +48,44 @@ def test_quick_replies_builds_reply_buttons():
     assert block.buttons[1].action.value == "Prod"
 
 
+def test_question_builds_prompt_and_reply_options():
+    pres = MessagePresentation.question(
+        "Which environment should I deploy to?",
+        options=[("Staging", "staging"), "production", "cancel"],
+    )
+    # First block is the prompt text.
+    assert pres.blocks[0].type == BlockType.TEXT
+    assert "environment" in pres.blocks[0].text
+    # Last block is the reply-action option buttons.
+    buttons = pres.blocks[-1].buttons
+    assert pres.blocks[-1].type == BlockType.BUTTONS
+    assert buttons[0].action.type == ActionType.REPLY
+    assert buttons[0].action.value == "staging"
+    assert buttons[1].action.value == "production"
+    assert buttons[2].label == "cancel"
+
+
+def test_question_includes_optional_context():
+    pres = MessagePresentation.question(
+        "Pick a plan",
+        options=["basic", "pro"],
+        context="Billing applies immediately.",
+    )
+    assert pres.blocks[0].type == BlockType.TEXT
+    assert pres.blocks[1].type == BlockType.CONTEXT
+    assert pres.blocks[1].text == "Billing applies immediately."
+    assert pres.blocks[2].type == BlockType.BUTTONS
+
+
+def test_question_options_render_as_native_buttons_per_channel():
+    pres = MessagePresentation.question("Pick", options=["a", "b"])
+    adapted = adapt_presentation(pres, PresentationLimits.telegram())
+    btn = adapted.blocks[-1].buttons[0]
+    # Reply degrades to a channel-safe callback so native renderers can carry it.
+    assert btn.action.type == ActionType.CALLBACK
+    assert btn.action.value == "reply:a"
+
+
 def test_encode_reply_action():
     enc = encode_action("ignored", PresentationAction.reply("pick=a"))
     assert enc == "reply:pick=a"
