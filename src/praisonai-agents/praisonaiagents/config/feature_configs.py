@@ -1438,11 +1438,22 @@ class MultiAgentMemoryConfig:
         }
 
 
-# Import ToolSearchConfig from tools module to avoid duplication
-def __get_tool_search_config():
+# Resolve ToolSearchConfig from tools module to avoid duplication.
+# Deferred via PEP 562 module-level __getattr__ so that `import Agent`
+# does not eagerly initialise the whole tools subsystem (see issue #3191).
+_TOOL_SEARCH_CONFIG_CACHE = None
+
+
+def _resolve_tool_search_config():
+    # Memoize so the resolved class (including the ImportError fallback) is a
+    # single stable object. Without this, the fallback path would define a new
+    # dataclass per call, breaking isinstance() checks across invocations.
+    global _TOOL_SEARCH_CONFIG_CACHE
+    if _TOOL_SEARCH_CONFIG_CACHE is not None:
+        return _TOOL_SEARCH_CONFIG_CACHE
     try:
         from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
-        return _ToolSearchConfig
+        _TOOL_SEARCH_CONFIG_CACHE = _ToolSearchConfig
     except ImportError:
         # Fallback minimal config if tools module not available
         @dataclass
@@ -1452,9 +1463,8 @@ def __get_tool_search_config():
             search_default_limit: int = 5
             max_search_limit: int = 20
             core_tools: Optional[FrozenSet[str]] = None
-        return FallbackToolSearchConfig
-
-ToolSearchConfig = __get_tool_search_config()
+        _TOOL_SEARCH_CONFIG_CACHE = FallbackToolSearchConfig
+    return _TOOL_SEARCH_CONFIG_CACHE
 
 
 class AutonomyLevel(str, Enum):
@@ -1477,7 +1487,7 @@ CachingParam = Union[bool, CachingConfig]
 HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
 AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
-ToolSearchParam = Union[bool, str, Dict[str, Any], ToolSearchConfig]
+ToolSearchParam = Union[bool, str, Dict[str, Any], "ToolSearchConfig"]
 ToolParam = Union[bool, ToolConfig]  # bool = defaults, ToolConfig = custom
 
 
@@ -1621,7 +1631,7 @@ def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
     return _resolve(value, AutonomyConfig)
 
 
-def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
+def resolve_tool_search(value: ToolSearchParam) -> Optional["ToolSearchConfig"]:
     """
     Resolve tool_search= parameter following precedence ladder.
     
@@ -1631,6 +1641,9 @@ def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
     # Simple implementation since it's unused
     if value is None or value is False:
         return None
+    # Lazy-load ToolSearchConfig only when tool search is actually configured,
+    # so the tools subsystem is not imported on the `import Agent` path.
+    ToolSearchConfig = _resolve_tool_search_config()
     if value is True:
         return ToolSearchConfig()
     if isinstance(value, str):
@@ -1813,3 +1826,17 @@ __all__ = [
     "resolve_tools",
     "resolve_runtime",
 ]
+
+
+def __getattr__(name):
+    """PEP 562 lazy attribute access.
+
+    ``ToolSearchConfig`` is resolved (and the tools subsystem imported) only on
+    first access, so ``from praisonaiagents import Agent`` does not eagerly load
+    the entire tools package (issue #3191).
+    """
+    if name == "ToolSearchConfig":
+        cfg = _resolve_tool_search_config()
+        globals()["ToolSearchConfig"] = cfg  # cache for subsequent access
+        return cfg
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
