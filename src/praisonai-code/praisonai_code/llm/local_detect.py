@@ -40,9 +40,19 @@ class LocalModel:
     base_url: str
 
 
-# Process-local cache: (monotonic_deadline, result). ``result`` is ``None`` for
-# a cached negative probe.
-_cache: Optional[tuple[float, Optional[LocalModel]]] = None
+# Process-local cache: (monotonic_deadline, endpoint_key, result). ``result`` is
+# ``None`` for a cached negative probe. ``endpoint_key`` pins the cache to the
+# endpoint that produced it so a mid-process env change (OPENAI_BASE_URL /
+# OLLAMA_HOST) is never served a stale result for a different server.
+_cache: Optional[tuple[float, str, Optional[LocalModel]]] = None
+
+
+def _root_host(host: str) -> str:
+    """Return ``host`` without a trailing ``/v1`` (Ollama's native API root)."""
+    host = host.rstrip("/")
+    if host.endswith("/v1"):
+        host = host[: -len("/v1")]
+    return host.rstrip("/")
 
 
 def _normalise_base(host: str) -> str:
@@ -64,9 +74,8 @@ def _candidate_host() -> str:
     return _DEFAULT_OLLAMA_HOST
 
 
-def _probe_ollama_tags(host: str) -> Optional[str]:
-    """Return the first model name from Ollama's ``/api/tags``, or ``None``."""
-    url = host.rstrip("/") + "/api/tags"
+def _get_json(url: str) -> Optional[dict]:
+    """GET ``url`` and return decoded JSON, or ``None`` on any failure."""
     try:
         with urllib.request.urlopen(url, timeout=_PROBE_TIMEOUT_S) as resp:
             if resp.status != 200:
@@ -74,11 +83,39 @@ def _probe_ollama_tags(host: str) -> Optional[str]:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
-    models = data.get("models") if isinstance(data, dict) else None
-    if isinstance(models, list) and models:
-        name = models[0].get("name") if isinstance(models[0], dict) else None
-        if isinstance(name, str) and name:
-            return name
+    return data if isinstance(data, dict) else None
+
+
+def _probe_ollama_tags(host: str) -> Optional[str]:
+    """Return the first model name from a reachable local endpoint, or ``None``.
+
+    Probes Ollama's native ``/api/tags`` at the server *root* (so a base URL
+    ending in ``/v1`` is not mangled into ``/v1/api/tags``). Falls back to the
+    OpenAI-compatible ``/v1/models`` so a generic local server (llama.cpp,
+    LM Studio, vLLM) that only speaks the OpenAI API is still detected.
+    """
+    root = _root_host(host)
+
+    data = _get_json(root + "/api/tags")
+    if data is not None:
+        models = data.get("models")
+        if isinstance(models, list) and models:
+            name = models[0].get("name") if isinstance(models[0], dict) else None
+            if isinstance(name, str) and name:
+                return f"ollama/{name}"
+
+    data = _get_json(_normalise_base(host) + "/models")
+    if data is not None:
+        items = data.get("data")
+        if isinstance(items, list) and items:
+            first = items[0]
+            model_id = first.get("id") if isinstance(first, dict) else None
+            if isinstance(model_id, str) and model_id:
+                # A generic OpenAI-compatible server (llama.cpp / LM Studio /
+                # vLLM). Route it through the ``openai/`` provider against the
+                # local base URL rather than mislabelling it as an Ollama model.
+                return f"openai/{model_id}"
+
     return None
 
 
@@ -93,24 +130,27 @@ def detect_local_model(*, use_cache: bool = True) -> Optional[LocalModel]:
     """
     global _cache
 
+    host = _candidate_host()
+
+    # Pin the cache to the resolved endpoint so a mid-process env change is never
+    # served a stale positive/negative for a different server.
     if use_cache and _cache is not None:
-        deadline, cached = _cache
-        if time.monotonic() < deadline:
+        deadline, cached_key, cached = _cache
+        if cached_key == host and time.monotonic() < deadline:
             return cached
 
-    host = _candidate_host()
-    model_name = _probe_ollama_tags(host)
+    model_id = _probe_ollama_tags(host)
 
     result: Optional[LocalModel] = None
-    if model_name:
+    if model_id:
         result = LocalModel(
-            model=f"ollama/{model_name}",
+            model=model_id,
             base_url=_normalise_base(host),
         )
 
     # Cache negatives briefly; a positive is stable enough to cache for the same
     # TTL (a server going away mid-session is rare and self-heals on expiry).
-    _cache = (time.monotonic() + _NEGATIVE_CACHE_TTL_S, result)
+    _cache = (time.monotonic() + _NEGATIVE_CACHE_TTL_S, host, result)
     return result
 
 

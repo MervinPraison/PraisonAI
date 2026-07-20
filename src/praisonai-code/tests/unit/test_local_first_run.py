@@ -59,7 +59,7 @@ def test_detect_local_model_none_when_unreachable(clean_env, monkeypatch):
 
 def test_detect_local_model_returns_ollama_model(clean_env, monkeypatch):
     monkeypatch.setattr(
-        local_detect, "_probe_ollama_tags", lambda host: "llama3.2:latest"
+        local_detect, "_probe_ollama_tags", lambda host: "ollama/llama3.2:latest"
     )
     result = local_detect.detect_local_model(use_cache=False)
     assert result is not None
@@ -73,12 +73,64 @@ def test_detect_honours_openai_base_url(clean_env, monkeypatch):
 
     def _probe(host):
         seen["host"] = host
-        return "mymodel"
+        return "ollama/mymodel"
 
     monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
     result = local_detect.detect_local_model(use_cache=False)
     assert seen["host"] == "http://localhost:1234"
     assert result.base_url == "http://localhost:1234/v1"
+
+
+def test_probe_uses_root_ollama_tags_when_base_url_ends_in_v1(clean_env, monkeypatch):
+    """A base URL ending in /v1 must probe the root /api/tags, not /v1/api/tags."""
+    clean_env.setenv("OPENAI_BASE_URL", "http://127.0.0.1:11434/v1")
+    urls = []
+
+    def _fake_get_json(url):
+        urls.append(url)
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": "llama3.2:latest"}]}
+        return None
+
+    monkeypatch.setattr(local_detect, "_get_json", _fake_get_json)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert result.model == "ollama/llama3.2:latest"
+    assert "http://127.0.0.1:11434/api/tags" in urls
+    assert "http://127.0.0.1:11434/v1/api/tags" not in urls
+
+
+def test_probe_falls_back_to_openai_v1_models(clean_env, monkeypatch):
+    """A generic OpenAI-compatible server (only /v1/models) must be detected."""
+    clean_env.setenv("OPENAI_BASE_URL", "http://localhost:1234")
+
+    def _fake_get_json(url):
+        if url.endswith("/v1/models"):
+            return {"data": [{"id": "local-model"}]}
+        return None  # /api/tags unreachable
+
+    monkeypatch.setattr(local_detect, "_get_json", _fake_get_json)
+    result = local_detect.detect_local_model(use_cache=False)
+    assert result is not None
+    assert result.model == "openai/local-model"
+    assert result.base_url == "http://localhost:1234/v1"
+
+
+def test_cache_is_keyed_by_endpoint(clean_env, monkeypatch):
+    """A changed endpoint must not be served the previous endpoint's result."""
+    def _probe(host):
+        # Positive only for the second endpoint.
+        return "ollama/m" if "5678" in host else None
+
+    monkeypatch.setattr(local_detect, "_probe_ollama_tags", _probe)
+
+    clean_env.setenv("OPENAI_BASE_URL", "http://localhost:1234")
+    assert local_detect.detect_local_model() is None  # cached negative for :1234
+
+    clean_env.setenv("OPENAI_BASE_URL", "http://localhost:5678")
+    result = local_detect.detect_local_model()  # must re-probe the new endpoint
+    assert result is not None
+    assert result.model == "ollama/m"
 
 
 def test_detect_honours_ollama_host_without_scheme(clean_env, monkeypatch):
