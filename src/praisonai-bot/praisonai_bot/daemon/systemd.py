@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "praisonai-bot"
 UNIT_FILE_NAME = f"{SERVICE_NAME}.service"
 
+# Exit-code contract the gateway runtime speaks (see
+# praisonaiagents.gateway.protocols): 75 (EX_TEMPFAIL) asks the supervisor to
+# restart; 78 (EX_CONFIG) is a fatal config error meaning "do not restart".
+GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
+
 
 def _user_unit_dir() -> str:
     """Get the systemd user unit directory."""
@@ -37,13 +42,17 @@ def _generate_unit(config_path: str) -> str:
     return f"""[Unit]
 Description=PraisonAI Bot Service
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 WorkingDirectory={working_dir}
 ExecStart={python} -m praisonai_bot gateway start --config {abs_config}
-Restart=always
+Restart=on-failure
 RestartSec=5
+SuccessExitStatus=0
+RestartPreventExitStatus={GATEWAY_FATAL_CONFIG_EXIT_CODE}
 Environment=PATH={os.environ.get('PATH', '/usr/bin')}
 
 [Install]

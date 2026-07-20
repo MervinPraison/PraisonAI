@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 TASK_NAME = "PraisonAIGateway"
 
+# Fatal-config exit code (EX_CONFIG) the gateway runtime emits to signal
+# "do not restart me" (see praisonaiagents.gateway.protocols). Matches
+# GATEWAY_FATAL_CONFIG_EXIT_CODE.
+GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
+
 
 def _python_executable() -> str:
     """Get the Python executable path."""
@@ -43,18 +48,35 @@ def _generate_startup_script(config_path: str) -> str:
 REM PraisonAI Bot Startup Script
 cd /d "{os.path.dirname(abs_config)}"
 "{python}" -m praisonai_bot gateway start --config "{abs_config}"
+REM Honour the gateway fatal-config exit code (78, EX_CONFIG): do NOT relaunch
+REM on a fatally broken config, otherwise a bad edit crash-loops forever.
+if "%ERRORLEVEL%"=="{GATEWAY_FATAL_CONFIG_EXIT_CODE}" (
+    echo PraisonAI gateway stopped: fatal config error {GATEWAY_FATAL_CONFIG_EXIT_CODE}. Fix the config and re-start.
+    exit /b 0
+)
 """
 
 
 def _create_scheduled_task(config_path: str) -> Dict[str, Any]:
-    """Create a Windows Scheduled Task for the bot."""
-    python = _python_executable()
-    abs_config = os.path.abspath(config_path)
-    # list2cmdline ensures Windows-safe escaping for command args (including config path).
-    task_command = subprocess.list2cmdline(
-        [python, "-m", "praisonai_bot", "gateway", "start", "--config", abs_config]
-    )
-    
+    """Create a Windows Scheduled Task for the bot.
+
+    The task points at the generated ``.cmd`` wrapper rather than an inline
+    ``cmd /c "<python> ... & if %ERRORLEVEL% ..."`` string. Inlining forced a
+    nested double-quote boundary (the python/config paths are themselves quoted
+    by ``list2cmdline``) that ``schtasks``/``cmd.exe`` can misparse for common
+    paths under ``C:\\Program Files`` — splitting the config path or failing to
+    start. The wrapper script owns the fatal-config exit-78 translation with a
+    single, well-formed quoting level and is reused for both install paths.
+    """
+    startup_folder = _startup_folder()
+    os.makedirs(startup_folder, exist_ok=True)
+    script_path = _startup_script_path()
+    with open(script_path, "w") as f:
+        f.write(_generate_startup_script(config_path))
+
+    # /TR is a single quoted path to the wrapper — no nested quoting hazard.
+    task_command = subprocess.list2cmdline([script_path])
+
     # Build schtasks command
     cmd = [
         "schtasks", "/Create",
