@@ -226,6 +226,26 @@ class TrainingStorage:
         }
         self._save()
 
+    def close(self) -> None:
+        """
+        Close the underlying storage backend if it holds open resources.
+
+        Backends such as SQLite keep a database connection open. Closing it
+        releases the file handle so callers (and tests) can safely delete the
+        database file, avoiding ``PermissionError`` (WinError 32) on Windows
+        and ``ResourceWarning: unclosed database`` warnings.
+        """
+        backend = getattr(self, "_backend", None)
+        close = getattr(backend, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> "TrainingStorage":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
 
 def list_training_sessions(
     storage_dir: Optional[Path] = None,
