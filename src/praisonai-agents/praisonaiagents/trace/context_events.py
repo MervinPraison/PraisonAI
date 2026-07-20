@@ -885,6 +885,8 @@ class ContextTraceEmitter:
             sources: List of source documents/files
             top_score: Score of top result (if available)
         """
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.KNOWLEDGE_SEARCH,
             timestamp=time.time(),
@@ -913,6 +915,8 @@ class ContextTraceEmitter:
             chunk_count: Number of chunks created
             metadata: Optional metadata about the indexing
         """
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.KNOWLEDGE_ADD,
             timestamp=time.time(),
