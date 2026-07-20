@@ -120,9 +120,18 @@ class BotSessionManager:
         timestamps: bool = False,
         timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] ",
         admission_gate: Optional[Any] = None,
+        turn_lock_map: Optional["LockMap"] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
-        self._locks = LockMap()
+        # Issue #3232: the per-turn lock map is keyed on the *resolved* storage
+        # key (unified user id when an identity resolver is configured), so
+        # serialisation already holds within one adapter. When several adapters
+        # resolve the same human to one unified session, BotOS injects a single
+        # shared ``LockMap`` here so those adapters share one lock per resolved
+        # id and turns run serially across platforms — no interleaved transcript.
+        # Absent injection (single-adapter / direct use) each manager keeps its
+        # own map, preserving today's behaviour exactly.
+        self._locks = turn_lock_map if turn_lock_map is not None else LockMap()
         self._agent_locks: "weakref.WeakKeyDictionary[Any, asyncio.Lock]" = weakref.WeakKeyDictionary()
         self._max_history = max_history
         self._store = store

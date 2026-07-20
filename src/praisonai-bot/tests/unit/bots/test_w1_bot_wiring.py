@@ -109,3 +109,101 @@ class TestSessionContextPropagation:
         await mgr.chat(agent, user_id="12345", prompt="hi")
         ctx = agent.observed_context
         assert ctx.unified_user_id == "alice-global"
+
+
+class TestSharedTurnLock:
+    """Issue #3232 — turns serialise on the RESOLVED session id across adapters.
+
+    Two adapters that resolve the same human to one unified session must share
+    a single per-turn lock, so concurrent cross-platform turns run serially and
+    never interleave the persisted transcript.
+    """
+
+    @pytest.mark.asyncio
+    async def test_shared_lockmap_yields_same_lock_for_unified_id(self):
+        """With a shared LockMap, two managers on different platforms resolving
+        to one unified id return the *same* asyncio.Lock object."""
+        from praisonai_bot._lockmap import LockMap
+
+        resolver = InMemoryIdentityResolver()
+        resolver.link("telegram", "tg-1", "alice-global")
+        resolver.link("discord", "dc-9", "alice-global")
+
+        shared = LockMap()
+        tg = BotSessionManager(
+            platform="telegram", identity_resolver=resolver, turn_lock_map=shared
+        )
+        dc = BotSessionManager(
+            platform="discord", identity_resolver=resolver, turn_lock_map=shared
+        )
+        lock_tg = tg._get_lock("tg-1")
+        lock_dc = dc._get_lock("dc-9")
+        assert lock_tg is lock_dc
+
+    @pytest.mark.asyncio
+    async def test_separate_lockmaps_yield_distinct_locks(self):
+        """Without sharing (today's default) the two managers hold distinct
+        locks even for the same unified id — the bug this issue describes."""
+        resolver = InMemoryIdentityResolver()
+        resolver.link("telegram", "tg-1", "alice-global")
+        resolver.link("discord", "dc-9", "alice-global")
+
+        tg = BotSessionManager(platform="telegram", identity_resolver=resolver)
+        dc = BotSessionManager(platform="discord", identity_resolver=resolver)
+        assert tg._get_lock("tg-1") is not dc._get_lock("dc-9")
+
+
+class TestBotOSTurnLockWiring:
+    """Issue #3232 — BotOS shares one turn LockMap across managed bots."""
+
+    def _fake_bot(self, platform, resolver=None):
+        class _FakeSession:
+            def __init__(self):
+                from praisonai_bot._lockmap import LockMap
+
+                self._locks = LockMap()
+
+        class _FakeBot:
+            def __init__(self):
+                self.platform = platform
+                self._identity_resolver = resolver
+                self._turn_lock_map = None
+                self._session = _FakeSession()
+
+        return _FakeBot()
+
+    def test_wire_shares_single_map_when_resolver_present(self):
+        resolver = InMemoryIdentityResolver()
+        os = BotOS(identity_resolver=resolver)
+        bot_a = self._fake_bot("telegram")
+        bot_b = self._fake_bot("discord")
+        os._bots = {"telegram": bot_a, "discord": bot_b}
+
+        os._wire_turn_locks()
+
+        assert bot_a._turn_lock_map is os._turn_lock_map
+        assert bot_b._turn_lock_map is os._turn_lock_map
+        # Already-built sessions are wired in place too.
+        assert bot_a._session._locks is os._turn_lock_map
+        assert bot_b._session._locks is os._turn_lock_map
+
+    def test_wire_is_noop_without_resolver(self):
+        os = BotOS()
+        bot = self._fake_bot("telegram")
+        os._bots = {"telegram": bot}
+
+        os._wire_turn_locks()
+
+        assert bot._turn_lock_map is None
+        assert bot._session._locks is not os._turn_lock_map
+
+    def test_wire_detects_per_bot_resolver(self):
+        """A resolver set on a bot (not BotOS-level) still triggers sharing."""
+        resolver = InMemoryIdentityResolver()
+        os = BotOS()
+        bot = self._fake_bot("telegram", resolver=resolver)
+        os._bots = {"telegram": bot}
+
+        os._wire_turn_locks()
+
+        assert bot._turn_lock_map is os._turn_lock_map
