@@ -2636,7 +2636,9 @@ CONCISE SUMMARY:"""
                     except Exception:
                         # Fallback to truncation-based summarization
                         optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
-                else:
+                elif tokens >= 1500:
+                    # Only truncate above the same threshold the LLM summariser uses;
+                    # below it, previous behaviour passed context through unchanged.
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
                 
                 if verbose and optimized_previous != previous_output:
