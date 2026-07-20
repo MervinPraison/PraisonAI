@@ -219,6 +219,44 @@ def get_status() -> Dict[str, Any]:
     return status
 
 
+def restart() -> Dict[str, Any]:
+    """Restart the Windows scheduled task (end then run).
+
+    The task is registered ``ONLOGON`` rather than as an always-running
+    service, so a graceful in-process drain is driven by the gateway itself
+    on stop. Returns ``ok: False`` when the task is not installed so the CLI
+    can fall back to a direct drain + relaunch.
+    """
+    try:
+        query = subprocess.run(
+            ["schtasks", "/Query", "/TN", TASK_NAME],
+            capture_output=True, text=True,
+        )
+        if query.returncode != 0 or TASK_NAME not in query.stdout:
+            return {"ok": False, "error": "Scheduled task not installed"}
+        # Stop the running task first. If /End fails while the old gateway is
+        # still active, relaunching would collide on the PID lock / port or
+        # start a duplicate channel consumer, so abort instead (#3161).
+        end = subprocess.run(
+            ["schtasks", "/End", "/TN", TASK_NAME], capture_output=True, text=True,
+        )
+        if end.returncode != 0:
+            return {
+                "ok": False,
+                "error": f"schtasks /End failed: {end.stderr.strip()}",
+            }
+        result = subprocess.run(
+            ["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            return {"ok": True, "message": f"Scheduled task '{TASK_NAME}' restarted"}
+        return {"ok": False, "error": f"schtasks failed: {result.stderr.strip()}"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "schtasks not found."}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def get_logs(lines: int = 50) -> str:
     """Get logs for the Windows service (limited functionality)."""
     # Windows doesn't have a unified log system like systemd/launchd

@@ -394,13 +394,24 @@ class GatewayHandler:
             agent_id = self._gateway.register_agent(agent)
             print(f"Registered agent: {agent_id}")
     
-    def stop(self, host: str = "127.0.0.1", port: int = 8765, force: bool = False) -> None:
+    def stop(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        force: bool = False,
+        drain_timeout: Optional[float] = None,
+    ) -> None:
         """Stop a running gateway instance.
         
         Args:
             host: Gateway host
             port: Gateway port 
             force: Force stop (kill process)
+            drain_timeout: Seconds to wait for the process to finish its
+                in-flight drain before force-killing. Defaults to a 10s grace
+                window; ``restart --drain-timeout N`` passes N here so the old
+                process is given the full requested drain window instead of a
+                fixed 10s (#3161).
         """
         try:
             from praisonai_bot.gateway.port_utils import GatewayPIDLock
@@ -426,33 +437,51 @@ class GatewayHandler:
         if force:
             self._force_kill_process(pid)
         else:
-            self._graceful_stop_process(pid)
+            self._graceful_stop_process(pid, drain_timeout=drain_timeout)
         
         # Clean up lock file
         pid_lock.release_lock()
         print(f"Gateway stopped (PID {pid})")
     
-    def _graceful_stop_process(self, pid: int) -> None:
-        """Gracefully stop a process by sending SIGTERM."""
+    def _graceful_stop_process(
+        self, pid: int, drain_timeout: Optional[float] = None
+    ) -> None:
+        """Gracefully stop a process by sending SIGTERM.
+
+        Waits up to ``drain_timeout`` seconds (default 10) for the process to
+        finish its in-flight drain and exit before force-killing. Passing the
+        gateway's configured drain timeout here (e.g. from
+        ``restart --drain-timeout``) ensures a long drain window is respected
+        instead of an unconditional 10s cut-off (#3161).
+        """
         import signal
         import time
         import os
-        
+
+        # Grace window: honour the caller's drain timeout with a small buffer so
+        # the process can flush after finishing turns; never below 10s so the
+        # default behaviour is unchanged.
+        if drain_timeout is not None and drain_timeout > 0:
+            grace_seconds = max(10.0, float(drain_timeout) + 5.0)
+        else:
+            grace_seconds = 10.0
+        iterations = max(1, int(grace_seconds / 0.1))
+
         try:
             print(f"Sending stop signal to PID {pid}...")
             os.kill(pid, signal.SIGTERM)
-            
-            # Wait up to 10 seconds for graceful shutdown
-            for _ in range(100):
+
+            # Wait for graceful shutdown up to the grace window.
+            for _ in range(iterations):
                 try:
                     os.kill(pid, 0)  # Check if process exists
                     time.sleep(0.1)
                 except (OSError, ProcessLookupError):
                     return  # Process has stopped
-            
+
             print(f"Process {pid} did not stop gracefully, forcing...")
             self._force_kill_process(pid)
-            
+
         except (OSError, ProcessLookupError):
             print(f"Process {pid} not found or already stopped")
     

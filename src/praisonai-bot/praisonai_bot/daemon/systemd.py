@@ -101,6 +101,22 @@ def uninstall() -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+def restart() -> Dict[str, Any]:
+    """Restart the systemd user service (graceful; unit config drives drain)."""
+    if not os.path.exists(_unit_path()):
+        return {"ok": False, "error": "Service not installed"}
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "restart", SERVICE_NAME],
+            check=True, capture_output=True,
+        )
+        return {"ok": True, "message": f"Service restarted: {SERVICE_NAME}"}
+    except subprocess.CalledProcessError as e:
+        return {"ok": False, "error": f"systemctl error: {e.stderr.decode()[:300] if e.stderr else str(e)}"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "systemctl not found. Is systemd available?"}
+
+
 def get_status() -> Dict[str, Any]:
     """Get the status of the systemd service."""
     unit_path = _unit_path()
