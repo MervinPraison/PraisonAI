@@ -14,26 +14,32 @@ def _build_config_list() -> list[dict[str, Any]]:
     return build_config_list()
 
 
-def _resolve_run_inputs(framework: str | None) -> tuple[str, list[dict[str, Any]]]:
+def _resolve_run_inputs(framework: str | None) -> tuple[Any, list[dict[str, Any]]]:
     """Single source of truth for wrapper entry-point resolution.
 
-    Resolves the framework (default selection or explicit validation) and builds
-    the LLM config list. This performs synchronous work — including credential /
-    config file I/O via ``_build_config_list`` — so async callers must invoke it
-    off the event loop (see ``arun``).
+    Resolves the framework (default selection or explicit validation), builds
+    the resolved adapter once, and builds the LLM config list. Returning the
+    adapter lets ``AgentsGenerator`` reuse it instead of constructing (and
+    re-validating) the winning adapter a second time on the hot path.
+
+    This performs synchronous work — including credential / config file I/O via
+    ``_build_config_list`` — so async callers must invoke it off the event loop
+    (see ``arun``).
     """
     from .framework_adapters.registry import get_default_registry
 
+    registry = get_default_registry()
     if framework is None:
         # Single source of truth for default selection: the registry, which
         # honours entry-point plugins as well as the built-in priority order.
-        framework = get_default_registry().pick_default()
+        framework = registry.pick_default()
     else:
         # Validate explicit framework like CLI does
         from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(framework)
+        assert_framework_available(framework, registry=registry)
 
-    return framework, _build_config_list()
+    adapter = registry.create(framework)
+    return adapter, _build_config_list()
 
 
 def run(agent_file: str,
@@ -45,15 +51,16 @@ def run(agent_file: str,
     """One-line Python entry point. Equivalent to `praisonai <agent_file>`."""
     from .agents_generator import AgentsGenerator
 
-    framework, config_list = _resolve_run_inputs(framework)
+    adapter, config_list = _resolve_run_inputs(framework)
 
     gen = AgentsGenerator(
         agent_file=agent_file,
-        framework=framework,
+        framework=adapter.name,
         config_list=config_list,
         tools=tools,
         agent_yaml=agent_yaml,
         cli_config=cli_config,
+        adapter=adapter,
     )
     return gen.generate_crew_and_kickoff()
 
@@ -72,14 +79,15 @@ async def arun(agent_file: str,
     # Resolve framework + build config_list off the caller's event loop so the
     # synchronous credential/config-file I/O does not block it. This is the
     # reason arun exists: a FastAPI handler awaiting arun must not stall the loop.
-    framework, config_list = await asyncio.to_thread(_resolve_run_inputs, framework)
+    adapter, config_list = await asyncio.to_thread(_resolve_run_inputs, framework)
 
     gen = AgentsGenerator(
         agent_file=agent_file,
-        framework=framework,
+        framework=adapter.name,
         config_list=config_list,
         tools=tools,
         agent_yaml=agent_yaml,
         cli_config=cli_config,
+        adapter=adapter,
     )
     return await gen.agenerate_crew_and_kickoff()
