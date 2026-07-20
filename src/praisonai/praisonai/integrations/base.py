@@ -250,9 +250,14 @@ class BaseCLIIntegration(ABC):
             str: Each line of output
             
         Raises:
+            TimeoutError: If the stream exceeds the timeout budget
             CLIExecutionError: If the command fails with non-zero exit code
         """
+        import time
         timeout = timeout or self.timeout
+        # Deadline-based budget: applied to each stdout read and to the final
+        # stderr/wait drain so a stalled subprocess cannot hang forever.
+        deadline = (time.monotonic() + timeout) if timeout else None
         stderr_buffer = []
         
         proc = await asyncio.create_subprocess_exec(
@@ -262,6 +267,12 @@ class BaseCLIIntegration(ABC):
             cwd=self.workspace,
             env=self.get_env()
         )
+        
+        def _remaining():
+            """Remaining timeout budget in seconds, or None when unbounded."""
+            if deadline is None:
+                return None
+            return max(0.0, deadline - time.monotonic())
         
         try:
             async def read_stderr():
@@ -275,19 +286,19 @@ class BaseCLIIntegration(ABC):
             # Start reading stderr in background
             stderr_task = asyncio.create_task(read_stderr())
             
-            async def read_lines():
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    yield line.decode(errors="replace").rstrip('\n')
+            while True:
+                remaining = _remaining()
+                if remaining is not None and remaining <= 0:
+                    raise asyncio.TimeoutError
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+                if not line:
+                    break
+                yield line.decode(errors="replace").rstrip('\n')
             
-            async for line in read_lines():
-                yield line
-            
-            # Wait for stderr reading to complete and process to finish
-            await stderr_task
-            await proc.wait()
+            # Wait for stderr reading to complete and process to finish,
+            # bounded by the remaining budget so drain cannot hang either.
+            await asyncio.wait_for(stderr_task, timeout=_remaining())
+            await asyncio.wait_for(proc.wait(), timeout=_remaining())
             
             # Check exit code and raise error if non-zero
             if proc.returncode != 0:
@@ -297,7 +308,7 @@ class BaseCLIIntegration(ABC):
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            raise TimeoutError(f"Stream timed out after {timeout}s")
+            raise TimeoutError(f"Stream timed out after {timeout}s: {' '.join(cmd)}")
         finally:
             if proc.returncode is None:
                 proc.kill()

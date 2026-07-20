@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, Type, Optional
 import inspect
 import logging
+import threading
 
 from .base import FrameworkAdapter
 from .._registry import PluginRegistry
@@ -75,6 +76,13 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             builtins=_BUILTIN_ADAPTERS,
             discover_entry_points=discover_entry_points,
         )
+        # Hot-path caches: availability is probed once per process (invalidatable
+        # in tests), and protocol validation runs once per adapter class rather
+        # than on every create()/run()/arun(). Both are guarded by a lock so
+        # multi-tenant/threaded callers don't race.
+        self._avail_cache: dict[str, bool] = {}
+        self._avail_lock = threading.Lock()
+        self._validated_classes: set[type] = set()
 
     def pick_default(self) -> str:
         """Return the name of the default framework to use.
@@ -115,13 +123,22 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         )
     
     def _validate_adapter(self, name: str, adapter) -> None:
-        """Validate that adapter implements the required protocol signature."""
+        """Validate that adapter implements the required protocol signature.
+
+        Signature inspection is memoised per adapter *class* so repeated
+        ``create()`` calls on the hot path do not re-run ``inspect.signature``.
+        """
+        cls = type(adapter)
+        if cls in self._validated_classes:
+            return
+
         if getattr(adapter, "is_router", False):
+            self._validated_classes.add(cls)
             return
 
         _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
 
-        sig = inspect.signature(type(adapter).run)
+        sig = inspect.signature(cls.run)
         kw_only = {
             p.name for p in sig.parameters.values()
             if p.kind in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
@@ -132,6 +149,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
                 f"FrameworkAdapter {name!r} does not implement the protocol: "
                 f"missing keyword-only parameters {sorted(missing)}"
             )
+        self._validated_classes.add(cls)
 
     def create(self, name: str, *args, **kwargs):
         """Create an adapter instance with protocol validation."""
@@ -158,27 +176,55 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     def is_available(self, name: str) -> bool:
         """
         Check if a framework adapter is available and functional.
-        
+
+        The probe (adapter construction + ``adapter.is_available()``, which may
+        run import machinery for a third-party package) is memoised per process
+        so hot-path callers like ``pick_default`` — invoked on every default
+        ``run()``/``arun()`` — do not re-probe. Use
+        :meth:`invalidate_availability` to drop cached results in tests.
+
         Args:
             name: Name of the adapter to check
-            
+
         Returns:
             bool: True if adapter exists and is available
         """
+        with self._avail_lock:
+            cached = self._avail_cache.get(name)
+        if cached is not None:
+            return cached
+
         try:
             adapter = self.create(name)
-        except (ValueError, TypeError, ImportError):
             # ImportError covers ModuleNotFoundError raised when an adapter's
             # constructor touches a missing optional dependency; treat the
             # framework as simply unavailable rather than leaking a raw import
             # error to callers (CLI validation, doctor checks, pick_default).
-            return False
-        
-        try:
-            return adapter.is_available()
+            ok = bool(adapter.is_available())
+        except (ValueError, TypeError, ImportError):
+            ok = False
         except Exception:
             logger.warning("is_available() raised for adapter %r", name, exc_info=True)
-            return False
+            ok = False
+
+        with self._avail_lock:
+            self._avail_cache[name] = ok
+        return ok
+
+    def invalidate_availability(self, name: Optional[str] = None) -> None:
+        """Drop cached availability probe results.
+
+        Test hook / runtime escape hatch for when an optional framework is
+        installed or removed after the first probe.
+
+        Args:
+            name: Adapter name to invalidate, or ``None`` to clear the whole cache.
+        """
+        with self._avail_lock:
+            if name is None:
+                self._avail_cache.clear()
+            else:
+                self._avail_cache.pop(name, None)
 
 
 # Default registry access - replaced by FrameworkAdapterRegistry.default()

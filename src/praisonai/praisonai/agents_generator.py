@@ -401,7 +401,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None, tool_resolver=None, adapter=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -461,6 +461,12 @@ class AgentsGenerator:
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
         self._adapter_registry = adapter_registry or _get_default_adapter_registry()
+
+        # Optional pre-resolved adapter handed down from the entry point so the
+        # winning adapter from pick_default() is not constructed (and re-validated)
+        # a second time on the hot path. Reused only when the requested framework
+        # matches; otherwise we fall back to registry.create().
+        self._adapter = adapter
 
         # Instance-owned tool-timeout executor so multi-tenant runtimes can scope
         # it per session (no process-wide singleton). Created lazily on first use
@@ -556,6 +562,12 @@ class AgentsGenerator:
         Raises:
             ValueError: If framework is not supported
         """
+        # Reuse the pre-resolved adapter from the entry point when it matches the
+        # requested framework, avoiding a second construction + protocol
+        # re-validation on the hot path.
+        injected = getattr(self, "_adapter", None)
+        if injected is not None and getattr(injected, "name", None) == framework:
+            return injected
         return self._adapter_registry.create(framework)
 
     def _merge_cli_config(self, config, cli_config):

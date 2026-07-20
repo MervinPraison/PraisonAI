@@ -153,6 +153,81 @@ class RecipeScheduler:
         return False
 
 
+async def arun_background(
+    name: str,
+    *,
+    input: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
+    timeout_sec: Optional[int] = None,
+    max_concurrent: int = 5,
+    on_complete: Optional[callable] = None,
+) -> BackgroundTaskHandle:
+    """
+    Run a recipe as a background task from an async context.
+
+    This is the async-native entry point. Async callers (FastAPI handlers,
+    Jupyter cells, other ``async def`` code) MUST use this instead of
+    ``run_background`` — calling the sync form from a running event loop
+    would deadlock.
+
+    Args:
+        name: Recipe name
+        input: Input data for the recipe
+        config: Configuration overrides
+        session_id: Session ID for conversation continuity
+        timeout_sec: Timeout in seconds (default: 300)
+        max_concurrent: Max concurrent tasks (default: 5)
+        on_complete: Callback when task completes
+
+    Returns:
+        BackgroundTaskHandle for tracking the task
+
+    Example:
+        task = await recipe.arun_background("my-recipe", input={"query": "test"})
+        result = await task.wait()
+    """
+    from .bridge import resolve, execute_resolved_recipe
+
+    # Resolve the recipe
+    resolved = resolve(
+        name,
+        input_data=input,
+        config=config,
+        session_id=session_id,
+        options={'timeout_sec': timeout_sec or DEFAULT_TIMEOUT_SEC},
+    )
+
+    # Import BackgroundRunner lazily
+    try:
+        from praisonaiagents.background import BackgroundRunner
+    except ImportError:
+        raise RuntimeError(
+            "Background tasks require praisonaiagents. "
+            "Install with: pip install praisonaiagents"
+        )
+
+    runner = BackgroundRunner(max_concurrent_tasks=max_concurrent)
+
+    def recipe_task():
+        return execute_resolved_recipe(resolved)
+
+    task = await runner.submit(
+        recipe_task,
+        name=f"recipe:{resolved.name}",
+        timeout=timeout_sec,
+        on_complete=on_complete,
+    )
+
+    return BackgroundTaskHandle(
+        task_id=task.id,
+        recipe_name=resolved.name,
+        session_id=resolved.session_id,
+        _runner=runner,
+        _task=task,
+    )
+
+
 def run_background(
     name: str,
     *,
@@ -164,8 +239,12 @@ def run_background(
     on_complete: Optional[callable] = None,
 ) -> BackgroundTaskHandle:
     """
-    Run a recipe as a background task.
-    
+    Run a recipe as a background task (synchronous entry point).
+
+    IMPORTANT: This must NOT be called from within a running event loop.
+    Async callers must use :func:`arun_background` instead. Calling this from
+    a running loop raises a clear ``RuntimeError`` rather than deadlocking.
+
     Args:
         name: Recipe name
         input: Input data for the recipe
@@ -174,79 +253,36 @@ def run_background(
         timeout_sec: Timeout in seconds (default: 300)
         max_concurrent: Max concurrent tasks (default: 5)
         on_complete: Callback when task completes
-        
+
     Returns:
         BackgroundTaskHandle for tracking the task
-        
+
     Example:
         task = recipe.run_background("my-recipe", input={"query": "test"})
         print(f"Task ID: {task.task_id}")
         result = await task.wait()
     """
-    import asyncio
-    from .bridge import resolve, execute_resolved_recipe
-    
-    # Resolve the recipe
-    resolved = resolve(
+    # Route through the wrapper's async bridge, which runs the coroutine on a
+    # dedicated background loop and raises a clear error (instead of a silent
+    # 10s stall) if invoked from an already-running event loop.
+    from .._async_bridge import run_sync
+    coro = arun_background(
         name,
-        input_data=input,
+        input=input,
         config=config,
         session_id=session_id,
-        options={'timeout_sec': timeout_sec or DEFAULT_TIMEOUT_SEC},
+        timeout_sec=timeout_sec,
+        max_concurrent=max_concurrent,
+        on_complete=on_complete,
     )
-    
-    # Import BackgroundRunner lazily
     try:
-        from praisonaiagents.background import BackgroundRunner
-    except ImportError:
-        raise RuntimeError(
-            "Background tasks require praisonaiagents. "
-            "Install with: pip install praisonaiagents"
-        )
-    
-    # Create or get runner
-    runner = BackgroundRunner(max_concurrent_tasks=max_concurrent)
-    
-    # Define the task function
-    def recipe_task():
-        return execute_resolved_recipe(resolved)
-    
-    # Submit the task
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # We're in an async context, use create_task
-        import concurrent.futures
-        future = concurrent.futures.Future()
-        
-        async def submit_and_return():
-            task = await runner.submit(
-                recipe_task,
-                name=f"recipe:{resolved.name}",
-                timeout=timeout_sec,
-                on_complete=on_complete,
-            )
-            return task
-        
-        asyncio.ensure_future(submit_and_return()).add_done_callback(
-            lambda f: future.set_result(f.result())
-        )
-        task = future.result(timeout=10)
-    else:
-        # Sync context
-        task = loop.run_until_complete(runner.submit(
-            recipe_task,
-            name=f"recipe:{resolved.name}",
-            timeout=timeout_sec,
-            on_complete=on_complete,
-        ))
-    
-    return BackgroundTaskHandle(
-        task_id=task.id,
-        recipe_name=resolved.name,
-        session_id=resolved.session_id,
-        _runner=runner,
-        _task=task,
-    )
+        return run_sync(coro)
+    except RuntimeError:
+        # run_sync refused (called from a running loop). Close the unstarted
+        # coroutine so it does not leak an "never awaited" warning, then
+        # re-raise the actionable error pointing async callers at arun_background.
+        coro.close()
+        raise
 
 
 def submit_job(
