@@ -322,11 +322,11 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            # Register all tools
-            register_all_tools()
+            # Register all tools, resources, and prompts (parity with serve/doctor)
+            register_all()
             
             registry = get_tool_registry()
             tools, next_cursor = registry.list_paginated(
@@ -458,10 +458,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             read_only = True if parsed.read_only else None
@@ -521,10 +521,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             tool = registry.get(parsed.name)
@@ -585,10 +585,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_ERROR
         
         try:
-            from .adapters import register_all_tools
+            from .adapters import register_all
             from .registry import get_tool_registry
             
-            register_all_tools()
+            register_all()
             registry = get_tool_registry()
             
             tool = registry.get(parsed.name)
