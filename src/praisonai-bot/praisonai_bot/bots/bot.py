@@ -135,6 +135,13 @@ class Bot:
         # post-construction pattern as the delivery router).
         self._admission_gate: Optional[Any] = None
 
+        # Issue #3232: optional shared per-turn ``LockMap``, set by the owning
+        # BotOS so every adapter's ``_session`` serialises turns on the *resolved*
+        # session id across platforms. Without it each session keeps its own map
+        # (per-adapter serialisation only) — today's behaviour. Spliced into the
+        # adapter session in ``_build_adapter`` like the wire-ups above.
+        self._turn_lock_map: Optional[Any] = None
+
         # Issue #2869: supervise the single-Bot inbound run loop by default so
         # every channel (not just Telegram) auto-reconnects with capped backoff
         # and health-based restart, matching BotOS/gateway robustness.
@@ -284,6 +291,18 @@ class Bot:
             )
             if session is not None and hasattr(session, "_admission_gate"):
                 session._admission_gate = self._admission_gate
+
+        # Issue #3232: splice the shared per-turn ``LockMap`` into the adapter's
+        # session so turns are serialised on the resolved session id across every
+        # adapter that resolves to the same unified user. Same duck-typed
+        # post-construction wire-up; a session that already exposes ``_locks``
+        # (BotSessionManager-compatible) has it replaced with the shared map.
+        if self._turn_lock_map is not None:
+            session = getattr(adapter, "_session", None) or getattr(
+                adapter, "_session_mgr", None
+            )
+            if session is not None and hasattr(session, "_locks"):
+                session._locks = self._turn_lock_map
 
         return adapter
 

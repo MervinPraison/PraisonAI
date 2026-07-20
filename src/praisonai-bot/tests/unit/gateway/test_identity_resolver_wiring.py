@@ -15,14 +15,21 @@ from praisonaiagents import Agent
 from praisonai_bot.gateway.server import WebSocketGateway
 
 
+from praisonai_bot._lockmap import LockMap
+
+
 class _FakeSession:
     def __init__(self):
         self._identity_resolver = None
+        # Mirror BotSessionManager: each session owns its own per-turn LockMap
+        # unless a shared one is injected (Issue #3232).
+        self._locks = LockMap()
 
 
 class _FakeBot:
     def __init__(self):
         self._session = _FakeSession()
+        self._turn_lock_map = None
 
 
 class _StubResolver:
@@ -198,6 +205,110 @@ def test_reconcile_never_clobbers_explicit_resolver(tmp_path):
     assert gateway._identity_resolver is resolver
     gateway._reconcile_identity_resolver({"enabled": False})
     assert gateway._identity_resolver is resolver
+
+
+# ── _stamp_turn_lock_map (Issue #3232: shared per-turn lock) ────────
+
+
+def test_turn_lock_stamp_is_noop_without_resolver():
+    """Without a resolver each channel keeps its own LockMap (today's behaviour)."""
+    gateway = _gateway_with_agent()
+    assert gateway._identity_resolver is None
+    bot = _FakeBot()
+    original = bot._session._locks
+    gateway._stamp_turn_lock_map(bot)
+    # The session's own map is untouched — no cross-channel unification exists.
+    assert bot._session._locks is original
+    assert getattr(gateway, "_turn_lock_map", None) is None
+
+
+def test_turn_lock_stamp_shares_one_map_with_session():
+    """A configured resolver stamps the gateway's shared LockMap onto the session."""
+    resolver = _StubResolver()
+    gateway = WebSocketGateway(
+        host="127.0.0.1", port=8904, identity_resolver=resolver
+    )
+    bot = _FakeBot()
+    gateway._stamp_turn_lock_map(bot)
+    assert bot._session._locks is gateway._turn_lock_map
+
+
+@pytest.mark.asyncio
+async def test_turn_lock_shared_across_two_channels_yields_same_lock():
+    """Two channels resolving to one unified id acquire the SAME lock (the fix).
+
+    This is the exact bug: two adapters unify to one session but, with separate
+    maps, hold two distinct locks so turns run concurrently. Sharing one map
+    makes both resolve the same lock for the unified id. ``LockMap.get`` needs a
+    running loop, so this test is async.
+    """
+    resolver = _StubResolver()  # always resolves to "user:alice"
+    gateway = WebSocketGateway(
+        host="127.0.0.1", port=8905, identity_resolver=resolver
+    )
+    telegram = _FakeBot()
+    discord = _FakeBot()
+    gateway._stamp_identity_resolver(telegram)
+    gateway._stamp_identity_resolver(discord)
+    gateway._stamp_turn_lock_map(telegram)
+    gateway._stamp_turn_lock_map(discord)
+
+    # Both sessions share one map -> one lock per resolved id across platforms.
+    assert telegram._session._locks is discord._session._locks
+    unified = resolver.resolve("telegram", "123")
+    assert (
+        telegram._session._locks.get(unified)
+        is discord._session._locks.get(unified)
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_channels_shares_turn_lock_across_bots():
+    """The startup path shares one LockMap across every created channel bot."""
+    resolver = _StubResolver()
+    gateway = _gateway_with_agent()
+    gateway._identity_resolver = resolver
+    created = {}
+
+    def mock_create_bot(channel_type, token, agent, config, ch_cfg):
+        bot = _FakeBot()
+        created[channel_type] = bot
+        return bot
+
+    with patch.object(gateway, "_create_bot", side_effect=mock_create_bot):
+        with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
+            await gateway.start_channels(
+                {"telegram": {"token": "t"}, "discord": {"token": "d"}}
+            )
+
+    assert (
+        created["telegram"]._session._locks
+        is created["discord"]._session._locks
+    )
+
+
+@pytest.mark.asyncio
+async def test_hot_reload_shares_same_turn_lock():
+    """A hot-reloaded channel re-shares the gateway's existing LockMap."""
+    resolver = _StubResolver()
+    gateway = _gateway_with_agent()
+    gateway._identity_resolver = resolver
+    created = {}
+
+    def mock_create_bot(channel_type, token, agent, config, ch_cfg):
+        bot = _FakeBot()
+        created[channel_type] = bot
+        return bot
+
+    with patch.object(gateway, "_create_bot", side_effect=mock_create_bot):
+        with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
+            await gateway.start_channels({"telegram": {"token": "t"}})
+            await gateway._start_single_channel("discord", {"token": "d"})
+
+    assert (
+        created["telegram"]._session._locks
+        is created["discord"]._session._locks
+    )
 
 
 if __name__ == "__main__":
