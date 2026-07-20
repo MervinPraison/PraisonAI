@@ -319,6 +319,40 @@ def test_scheduled_delivery_falls_back_when_outbox_unavailable(monkeypatch):
     assert bot.sends == [("-100123", "fallback text", None)]
 
 
+def test_scheduled_delivery_with_backlogged_row_uses_own_key():
+    """A backlogged row in the shared outbox is sent under ITS OWN key.
+
+    Issue #3231 regression: the shared ``scheduled_outbox`` is drained whole on
+    every scheduled delivery. An earlier fix stamped this call's idempotency key
+    on every drained row, so an older backlogged row was sent under the current
+    key — poisoning the router LRU so the current row was later suppressed as a
+    duplicate and lost. Here a first send fails (leaving a retryable row), then a
+    second, distinct scheduled result fires. Both rows must reach the channel:
+    the backlog under its own key and the new result under its own key.
+    """
+    path = _fresh_outbox_path()
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    # First result fails on send → its row stays retryable (non-terminal).
+    bot1 = _RecordingBot(fail_times=1)
+    gw1 = _make_gateway_with_bot(bot1, outbox_path=path)
+    asyncio.run(gw1._deliver_scheduled_result(delivery, "backlogged report"))
+    assert bot1.sends == []
+
+    # Same DB, fresh gateway (empty LRU). A NEW result fires; draining now sees
+    # BOTH the retryable backlog and the new row. Each must go out under its own
+    # key so neither is suppressed as a duplicate of the other.
+    bot2 = _RecordingBot()
+    gw2 = _make_gateway_with_bot(bot2, outbox_path=path)
+    asyncio.run(gw2._deliver_scheduled_result(delivery, "fresh report"))
+
+    texts = sorted(text for _cid, text, _tid in bot2.sends)
+    assert texts == ["backlogged report", "fresh report"]
+
+
 # ─── DeliveryRouter thread routing (issue #3141) ─────────────────────
 
 

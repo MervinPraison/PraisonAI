@@ -4301,7 +4301,7 @@ class WebSocketGateway:
             await outbox.enqueue(
                 idempotency_key=idem,
                 target=route,
-                payload={"text": text},
+                payload={"text": text, "idempotency_key": idem},
             )
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
@@ -4310,25 +4310,38 @@ class WebSocketGateway:
             )
             return await router.deliver(route, text, idempotency_key=idem)
 
+        # The ``scheduled_outbox`` is a single shared queue, so ``drain`` may
+        # process rows other than the one we just enqueued. The sender must use
+        # each *row's own* idempotency key (carried in its payload) rather than
+        # this call's ``idem`` — otherwise an older row would be sent under our
+        # key, poisoning the router's LRU so our real row is later suppressed as
+        # a duplicate and lost. Fall back to the row's ``target`` for any legacy
+        # payload written before this field existed.
         async def _send(target: str, payload: Dict[str, Any]) -> bool:
             return await router.deliver(
-                target, payload.get("text", ""), idempotency_key=idem,
+                target,
+                payload.get("text", ""),
+                idempotency_key=payload.get("idempotency_key") or target,
             )
 
         try:
-            succeeded, _ = await outbox.drain(_send)
+            await outbox.drain(_send)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
                 "Outbox drain failed for %s, falling back to router: %s",
                 route, e,
             )
-            return await router.deliver(route, text, idempotency_key=idem)
-        if succeeded > 0:
-            return True
-        # Drain sent nothing for this key. A re-fired job whose original send
-        # already reached the terminal ``sent`` state is a suppressed duplicate,
-        # not a failure — report success so the caller does not log a spurious
-        # error. Any other status (still pending/failed) is a genuine miss.
+            # The drain may have failed before reaching our row. Only report
+            # success if the durable ledger confirms our own key already reached
+            # the terminal ``sent`` state; otherwise the row stays non-terminal
+            # and is re-delivered at-least-once on the next drain — do not
+            # blind-re-send here, which would duplicate that pending row.
+            return outbox.status_for(idem) == "sent"
+        # Report the result of *this* delivery from the durable ledger, scoped to
+        # our own key — never the aggregate drain count, which conflates
+        # unrelated rows in the shared queue. ``"sent"`` covers both a fresh send
+        # and a re-fired job whose original already landed (suppressed duplicate,
+        # issue #3231); any other status is a genuine miss for this key.
         return outbox.status_for(idem) == "sent"
 
     def _start_scheduler_tick(self, interval: float = 15.0) -> None:
