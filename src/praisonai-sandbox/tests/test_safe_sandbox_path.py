@@ -24,16 +24,16 @@ def _can_create_symlinks() -> bool:
     """
     if sys.platform != "win32":
         return True
-    with tempfile.TemporaryDirectory() as probe_dir:
-        target = os.path.join(probe_dir, "probe_target")
-        link = os.path.join(probe_dir, "probe_link")
-        with open(target, "w") as f:
-            f.write("probe")
-        try:
+    try:
+        with tempfile.TemporaryDirectory() as probe_dir:
+            target = os.path.join(probe_dir, "probe_target")
+            link = os.path.join(probe_dir, "probe_link")
+            with open(target, "w") as f:
+                f.write("probe")
             os.symlink(target, link)
-        except (OSError, NotImplementedError):
-            return False
-        return True
+    except (OSError, NotImplementedError):
+        return False
+    return True
 
 
 class TestSafeSandboxPath:
