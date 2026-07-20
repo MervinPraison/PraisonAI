@@ -6,18 +6,21 @@ the ``schedules`` top-level key.  Thread-safe, preserves all
 other config.yaml content.
 """
 
+import contextlib
 import logging
 from praisonaiagents._logging import get_logger
 import os
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
+from .due import is_due as _is_due
 
 logger = get_logger(__name__)
 
 _HISTORY_FILE = "run_history.yaml"
+_LOCK_FILE = "config.schedules.lock"
 _MAX_HISTORY = 200
 
 class ConfigYamlScheduleStore:
@@ -35,10 +38,15 @@ class ConfigYamlScheduleStore:
             config_path = str(get_data_dir() / "config.yaml")
         self._path = config_path
         self._history_path = os.path.join(os.path.dirname(config_path), _HISTORY_FILE)
+        self._lock_path = os.path.join(os.path.dirname(config_path), _LOCK_FILE)
         self._max_history = max_history
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
         self._history: List[RunRecord] = []
+        # In-memory record of leases we currently hold, so ``complete`` can
+        # release them. Cross-process leases live in the persisted job
+        # (``lease_until`` / ``lease_owner``) which is the source of truth.
+        self._held_leases: Dict[str, str] = {}
         self._load()
         self._load_history()
 
@@ -46,7 +54,11 @@ class ConfigYamlScheduleStore:
 
     def add(self, job: ScheduleJob) -> None:
         """Add a job. Raises ``ValueError`` if id already exists."""
-        with self._lock:
+        with self._lock, self._file_lock():
+            # Reload under the cross-process lock so we don't overwrite lease
+            # / last_run_at written by a concurrent ``claim_due`` in another
+            # process before applying our change.
+            self._reload_locked()
             if job.id in self._jobs:
                 raise ValueError(f"Job '{job.id}' already exists")
             self._jobs[job.id] = job
@@ -71,12 +83,22 @@ class ConfigYamlScheduleStore:
         return jobs
 
     def update(self, job: ScheduleJob) -> None:
-        with self._lock:
+        with self._lock, self._file_lock():
+            # Reload latest on-disk state, then preserve any active lease held
+            # for this job (written by a concurrent ``claim_due``) so a plain
+            # ``update`` from a stale in-memory copy cannot silently drop it.
+            self._reload_locked()
+            existing = self._jobs.get(job.id)
+            if existing is not None:
+                if not getattr(job, "_lease_until", 0.0):
+                    job._lease_until = getattr(existing, "_lease_until", 0.0) or 0.0
+                    job._lease_owner = getattr(existing, "_lease_owner", None)
             self._jobs[job.id] = job
             self._save()
 
     def remove(self, job_id: str) -> bool:
-        with self._lock:
+        with self._lock, self._file_lock():
+            self._reload_locked()
             if job_id in self._jobs:
                 del self._jobs[job_id]
                 self._save()
@@ -84,13 +106,142 @@ class ConfigYamlScheduleStore:
             return False
 
     def remove_by_name(self, name: str) -> bool:
-        with self._lock:
+        with self._lock, self._file_lock():
+            self._reload_locked()
             for jid, job in list(self._jobs.items()):
                 if job.name == name:
                     del self._jobs[jid]
                     self._save()
                     return True
             return False
+
+    # ── atomic claim / lease ──────────────────────────────────────────
+
+    def claim_due(
+        self,
+        now: float,
+        owner_id: str,
+        lease_seconds: float = 300.0,
+    ) -> List[ScheduleJob]:
+        """Atomically claim due jobs; return only those won by ``owner_id``.
+
+        Under a cross-process OS advisory file lock we re-read the on-disk
+        state (so we see claims made by other processes), then for each enabled
+        job that is due and not already leased by someone else we:
+
+        * advance ``last_run_at`` to ``now`` (pre-advancing the schedule so a
+          later poll no longer sees it as due — at-least-once → at-most-once),
+        * take a lease (``lease_until = now + lease_seconds``, ``lease_owner``),
+          persisting both in the same atomic write,
+        * remove one-shot jobs (``delete_after_run``) immediately so no other
+          ticker can pick them up.
+
+        A crashed run leaves a lease that expires after ``lease_seconds``; the
+        job then becomes due again and is retried. Losers of the race simply do
+        not see the job in their returned list.
+        """
+        claimed: List[ScheduleJob] = []
+        with self._lock, self._file_lock():
+            # Re-read from disk so we observe cross-process claims/leases.
+            self._reload_locked()
+            changed = False
+            for job in list(self._jobs.values()):
+                if not job.enabled:
+                    continue
+                lease_until = getattr(job, "_lease_until", 0.0) or 0.0
+                lease_owner = getattr(job, "_lease_owner", None)
+                # An unexpired lease held by another owner blocks the claim.
+                if lease_until > now and lease_owner != owner_id:
+                    continue
+                if not _is_due(job, now):
+                    continue
+                # Win the claim: pre-advance + lease atomically.
+                job.last_run_at = now
+                job._lease_until = now + lease_seconds
+                job._lease_owner = owner_id
+                self._held_leases[job.id] = owner_id
+                claimed.append(job)
+                changed = True
+                if job.delete_after_run:
+                    # One-shot: remove now so no competitor re-claims it.
+                    del self._jobs[job.id]
+            if changed:
+                self._save()
+        return claimed
+
+    def complete(self, job_id: str, owner_id: str) -> None:
+        """Release the lease for ``job_id`` if held by ``owner_id`` (idempotent)."""
+        with self._lock, self._file_lock():
+            self._reload_locked()
+            self._held_leases.pop(job_id, None)
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            if getattr(job, "_lease_owner", None) != owner_id:
+                return
+            job._lease_until = 0.0
+            job._lease_owner = None
+            self._save()
+
+    # ── cross-process lock ────────────────────────────────────────────
+
+    @contextlib.contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        """Hold an OS advisory lock on a sidecar file for the block's duration.
+
+        Uses ``fcntl`` on POSIX and ``msvcrt`` on Windows. If neither is
+        available (or locking fails) we degrade to the in-process
+        ``threading`` lock already held by callers — correctness within a
+        single process is preserved, only cross-process atomicity is lost.
+        """
+        lock_dir = os.path.dirname(self._lock_path)
+        if lock_dir:
+            os.makedirs(lock_dir, exist_ok=True)
+        fh = None
+        locked = False
+        try:
+            fh = open(self._lock_path, "a+")
+            try:
+                import fcntl  # type: ignore[import-not-found]
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                locked = True
+            except ImportError:
+                try:
+                    import msvcrt  # type: ignore[import-not-found]
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    locked = True
+                except Exception as e:  # pragma: no cover - platform dependent
+                    logger.debug("No OS file lock available (%s); using thread lock only", e)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("Failed to acquire file lock (%s); using thread lock only", e)
+            yield
+        finally:
+            if fh is not None:
+                try:
+                    if locked:
+                        try:
+                            import fcntl  # type: ignore[import-not-found]
+                            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                        except ImportError:
+                            try:
+                                import msvcrt  # type: ignore[import-not-found]
+                                fh.seek(0)
+                                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                            except Exception:  # pragma: no cover
+                                pass
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                fh.close()
+
+    def _reload_locked(self) -> None:
+        """Re-read jobs from disk (caller must hold both thread + file lock).
+
+        Ensures a claim decision is based on the latest cross-process state so
+        a job already claimed/leased by another process is observed.
+        """
+        self._jobs = {}
+        self._load()
 
     # ── execution history ─────────────────────────────────────────────
 
