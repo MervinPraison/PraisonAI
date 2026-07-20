@@ -10,6 +10,7 @@ Provides CLI commands for managing the MCP server:
 import argparse
 import json
 import logging
+import shutil
 import sys
 from typing import List
 
@@ -695,14 +696,26 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         
         return self.EXIT_SUCCESS
     
+    def _stdio_command(self) -> tuple:
+        """Resolve (command, args) for STDIO serve based on install type.
+
+        Standalone installs expose the ``praisonai-mcp`` entry point which
+        accepts ``serve`` directly. Umbrella installs expose ``praisonai``
+        which requires the ``mcp serve`` subcommand.
+        """
+        if shutil.which("praisonai-mcp"):
+            return "praisonai-mcp", ["serve", "--transport", "stdio"]
+        return "praisonai", ["mcp", "serve", "--transport", "stdio"]
+
     def _generate_claude_desktop_config(self, args) -> dict:
         """Generate Claude Desktop config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcpServers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
@@ -719,11 +732,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def _generate_cursor_config(self, args) -> dict:
         """Generate Cursor config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcpServers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
@@ -739,11 +753,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def _generate_vscode_config(self, args) -> dict:
         """Generate VSCode MCP config."""
         if args.transport == "stdio":
+            command, cmd_args = self._stdio_command()
             return {
                 "mcp.servers": {
                     "praisonai": {
-                        "command": "praisonai",
-                        "args": ["mcp", "serve", "--transport", "stdio"],
+                        "command": command,
+                        "args": cmd_args,
                     }
                 }
             }
