@@ -29,10 +29,16 @@ class SetupHandler(CommandHandler):
         return ["wizard", "config", "reset"]
     
     def get_praison_home(self) -> Path:
-        """Get the PraisonAI home directory."""
+        """Get the PraisonAI home directory.
+
+        Expands ``~`` in ``PRAISONAI_HOME`` so the override resolves to the same
+        directory the core SDK and the configuration resolver use (both call
+        ``Path(...).expanduser()``); otherwise ``setup`` could write under a
+        literal ``~`` path invisible to the rest of the CLI.
+        """
         home = os.getenv("PRAISONAI_HOME")
         if home:
-            return Path(home)
+            return Path(home).expanduser()
         return Path.home() / ".praisonai"
     
     def execute(

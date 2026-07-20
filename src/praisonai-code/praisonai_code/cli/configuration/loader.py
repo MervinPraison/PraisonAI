@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from .paths import (
     get_config_paths,
     get_user_config_path,
+    get_user_config_write_path,
     get_project_config_path,
     get_env_prefix,
     ensure_config_dirs,
@@ -287,13 +288,18 @@ class ConfigLoader:
         """
         if scope == "project":
             config_path = get_project_config_path(self.project_root)
+            read_path = config_path
         else:
-            config_path = get_user_config_path()
+            # Always write to the canonical location; never mutate the legacy
+            # read-only fallback. Seed from whichever config currently resolves
+            # (canonical or legacy) so existing values migrate forward.
+            config_path = get_user_config_write_path()
+            read_path = get_user_config_path()
         
         # Load existing config or create empty
-        if config_path.exists():
+        if read_path.exists():
             try:
-                existing = _load_toml(config_path)
+                existing = _load_toml(read_path)
             except Exception:
                 existing = {}
         else:
@@ -302,10 +308,11 @@ class ConfigLoader:
         # Set the value
         _set_dotted_value(existing, key, value)
         
-        # Ensure directory exists
+        # Ensure directory exists. Always create the parent of the actual
+        # write target (canonical user home may differ from the legacy-aware
+        # read dir created by ensure_config_dirs()).
         ensure_config_dirs()
-        if scope == "project":
-            config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Save
         _save_toml(config_path, existing)
