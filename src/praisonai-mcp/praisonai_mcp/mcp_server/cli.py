@@ -607,8 +607,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def cmd_list_resources(self, args: List[str]) -> int:
         """List available MCP resources."""
         try:
+            from .adapters import register_all
             from .registry import get_resource_registry
             
+            register_all()
             registry = get_resource_registry()
             resources = registry.list_schemas()
             
@@ -632,8 +634,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def cmd_list_prompts(self, args: List[str]) -> int:
         """List available MCP prompts."""
         try:
+            from .adapters import register_all
             from .registry import get_prompt_registry
             
+            register_all()
             registry = get_prompt_registry()
             prompts = registry.list_schemas()
             
