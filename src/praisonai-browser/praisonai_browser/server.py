@@ -865,47 +865,60 @@ async def run_browser_agent_with_progress(
         result["error"] = "websockets package required. Install with: pip install websockets"
         return result
     
+    import os
+
     ws_url = f"ws://localhost:{port}/ws"
     start_time = time.time()
     
-    # Wait for extension to connect to bridge server before sending goal
-    max_wait_for_extension = 15.0  # Wait up to 15 seconds for extension
-    extension_connected = False
+    # Wait for extension to connect to bridge server before sending goal.
+    # Cap the wait by the overall timeout and allow it to be skipped entirely
+    # (e.g. in unit tests / CI where websockets is mocked and no live bridge
+    # exists) via the PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT env var.
+    #
+    # Only explicit truthy values ("1", "true", "yes", "on") enable the skip so
+    # that PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT=false (or any inherited value)
+    # does not accidentally bypass the readiness check on live integration runs.
+    skip_extension_wait = os.environ.get(
+        "PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    max_wait_for_extension = min(15.0, timeout)  # Wait up to 15 seconds for extension
+    extension_connected = skip_extension_wait
     
-    try:
-        import aiohttp
-        wait_start = time.time()
-        while time.time() - wait_start < max_wait_for_extension:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"http://localhost:{port}/health",
-                        timeout=aiohttp.ClientTimeout(total=2)
-                    ) as resp:
-                        if resp.status == 200:
-                            health = await resp.json()
-                            connections = health.get("connections", 0)
-                            if debug:
-                                logger.debug(f"[Extension] Health: {connections} connections")
-                            if connections >= 1:  # At least one extension connected
-                                extension_connected = True
+    if not skip_extension_wait:
+        try:
+            import aiohttp
+            wait_start = time.time()
+            while time.time() - wait_start < max_wait_for_extension:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            f"http://localhost:{port}/health",
+                            timeout=aiohttp.ClientTimeout(total=2)
+                        ) as resp:
+                            if resp.status == 200:
+                                health = await resp.json()
+                                connections = health.get("connections", 0)
                                 if debug:
-                                    logger.info(f"[Extension] Extension connected!")
-                                break
-            except Exception as e:
+                                    logger.debug(f"[Extension] Health: {connections} connections")
+                                if connections >= 1:  # At least one extension connected
+                                    extension_connected = True
+                                    if debug:
+                                        logger.info(f"[Extension] Extension connected!")
+                                    break
+                except Exception as e:
+                    if debug:
+                        logger.debug(f"[Extension] Health check: {e}")
+                await asyncio.sleep(1.0)
+            
+            if not extension_connected:
+                elapsed = int(time.time() - wait_start)
+                result["error"] = f"Extension did not connect to bridge server within {elapsed}s"
                 if debug:
-                    logger.debug(f"[Extension] Health check: {e}")
-            await asyncio.sleep(1.0)
-        
-        if not extension_connected:
-            elapsed = int(time.time() - wait_start)
-            result["error"] = f"Extension did not connect to bridge server within {elapsed}s"
+                    logger.warning(f"[Extension] No extension connected after {elapsed}s")
+                return result
+        except ImportError:
             if debug:
-                logger.warning(f"[Extension] No extension connected after {elapsed}s")
-            return result
-    except ImportError:
-        if debug:
-            logger.warning("[Extension] aiohttp not available, skipping extension check")
+                logger.warning("[Extension] aiohttp not available, skipping extension check")
     
     try:
         async with websockets.connect(ws_url, close_timeout=10, ping_interval=30) as ws:
