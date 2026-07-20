@@ -192,7 +192,10 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         mark = "\u2713" if self._supports_unicode() else "[OK]"
         try:
             from rich import print as rprint
-            rprint(f"[green]{mark} {message}[/green]")
+            from rich.markup import escape
+            # Escape the marker so Rich renders "[OK]" literally instead of
+            # trying to parse it as a (invalid) markup tag.
+            rprint(f"[green]{escape(mark)} {escape(message)}[/green]")
         except ImportError:
             print(f"{mark} {message}")
     
@@ -783,13 +786,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     
     def cmd_doctor(self, args: List[str]) -> int:
         """Check MCP server health and configuration."""
+        as_json = "--json" in args
         try:
             import os
             from .server import PROTOCOL_VERSION, SUPPORTED_VERSIONS
             from .registry import get_tool_registry, get_resource_registry, get_prompt_registry
             from .adapters import register_all
-
-            as_json = "--json" in args
 
             # Register all components
             register_all()
@@ -875,7 +877,13 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             return self.EXIT_SUCCESS
 
         except Exception as e:
-            self._print_error(str(e))
+            # In --json mode automation parses stdout, so emit a JSON error
+            # object there instead of Rich-formatted text that would corrupt
+            # the machine-readable stream.
+            if as_json:
+                print(json.dumps({"error": str(e), "ready": False}, indent=2))
+            else:
+                self._print_error(str(e))
             return self.EXIT_ERROR
 
 
