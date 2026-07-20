@@ -530,17 +530,29 @@ class ConfigResolver:
         return configs[0] if configs else None
     
     def _load_project_config(self) -> Optional[Dict[str, Any]]:
-        """Load project configuration with walk-up discovery."""
+        """Load project configuration with walk-up discovery.
+
+        Walk-up stops at (and never searches) the user's home directory so that
+        the legacy ``~/.praison/config.toml`` — which is loaded separately by
+        ``_load_global_config()`` with a ``global:`` label — is not also
+        discovered here and mislabelled as a ``project:`` source. A discovered
+        git root still short-circuits the walk earlier when present.
+        """
         # Build search paths from current directory up to git root (or filesystem root)
         git_root = get_git_root(str(self.cwd))
         search_paths = []
         
         # Walk up from cwd to root (or git root if found)
         current = self.cwd.resolve()
-        stop_at = Path("/")
+        try:
+            home = Path.home().resolve()
+        except (RuntimeError, OSError):
+            home = None
         
         # Collect paths from current directory upward
         while current != current.parent:
+            if home is not None and current == home:
+                break  # Legacy ~/.praison/config.toml is a global source, not project
             search_paths.append(current)
             if git_root and current == git_root:
                 break  # Stop at git root if found
