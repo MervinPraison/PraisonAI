@@ -63,6 +63,51 @@ def test_strict_fields_fail_closed_on_unknown_field():
     assert desc.resolve({"text": "hi", "mutate": True}) == OperatorScope.ADMIN
 
 
+def test_incomparable_scopes_escalate_to_admin():
+    """APPROVALS and PAIRING are siblings, not one-implies-the-other.
+
+    Combining them (baseline APPROVALS + a field requiring PAIRING) must not
+    silently collapse to either capability — it escalates to ADMIN so a
+    single-scope check cannot be satisfied by holding only one of them.
+    """
+    desc = GatewayMethodDescriptor(
+        name="x",
+        required_scope=OperatorScope.APPROVALS,
+        escalate_fields={"pair": OperatorScope.PAIRING},
+    )
+    assert desc.resolve({"other": 1}) == OperatorScope.APPROVALS
+    assert desc.resolve({"pair": True}) == OperatorScope.ADMIN
+
+    # Order-independent: PAIRING baseline + APPROVALS field also escalates.
+    desc2 = GatewayMethodDescriptor(
+        name="y",
+        required_scope=OperatorScope.PAIRING,
+        escalate_fields={"approve": OperatorScope.APPROVALS},
+    )
+    assert desc2.resolve({"approve": True}) == OperatorScope.ADMIN
+
+
+def test_descriptor_collections_are_immutable_after_construction():
+    """Mutating the collections passed in must not change resolution."""
+    escalate = {"cfg": OperatorScope.ADMIN}
+    safe = {"text"}
+    desc = GatewayMethodDescriptor(
+        name="x",
+        required_scope=OperatorScope.WRITE,
+        escalate_fields=escalate,
+        strict_fields=True,
+        safe_fields=safe,
+    )
+    # Mutate the originals after construction.
+    escalate["injected"] = OperatorScope.READ
+    safe.add("mutate")
+    # Descriptor kept its own copies -> unaffected.
+    assert "injected" not in desc.escalate_fields
+    assert "mutate" not in desc.safe_fields
+    # Unknown structural field still fails closed.
+    assert desc.resolve({"text": "hi", "mutate": True}) == OperatorScope.ADMIN
+
+
 def test_register_gateway_method_and_resolve():
     name = "test.plugin.method.3206"
     try:

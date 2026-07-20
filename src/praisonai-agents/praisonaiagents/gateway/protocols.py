@@ -4350,6 +4350,21 @@ class GatewayMethodDescriptor:
     safe_fields: Set[str] = field(default_factory=set)
     escalate_unknown_scope: OperatorScope = OperatorScope.ADMIN
 
+    def __post_init__(self) -> None:
+        """Defensively copy the mutable collections so the descriptor is a
+        genuinely immutable authorisation record.
+
+        ``@dataclass(frozen=True)`` blocks attribute *reassignment* but not
+        in-place mutation of the referenced dict/set. Direct construction
+        (e.g. a plugin building a descriptor without going through
+        :func:`register_gateway_method`) could otherwise mutate
+        ``escalate_fields`` / ``safe_fields`` after the fact and silently
+        change the resolved scope. Freeze them at construction so the resolved
+        scope can never drift after registration.
+        """
+        object.__setattr__(self, "escalate_fields", dict(self.escalate_fields))
+        object.__setattr__(self, "safe_fields", frozenset(self.safe_fields))
+
     def resolve(self, params: Optional[Dict[str, Any]] = None) -> OperatorScope:
         """Resolve the effective required scope for a call with ``params``.
 
@@ -4374,8 +4389,19 @@ class GatewayMethodDescriptor:
         return required
 
 
-# Strictly-increasing privilege order used to combine (never weaken) scopes.
-_SCOPE_ORDER: Dict[OperatorScope, int] = {
+# Privilege lattice used to combine (never weaken) scopes.
+#
+# READ < WRITE are a strict linear chain. APPROVALS and PAIRING are *sibling*
+# capabilities at the same tier: each is stricter than WRITE, but they are
+# **incomparable** to each other (holding APPROVALS does not imply PAIRING or
+# vice versa). ADMIN is the top of the lattice.
+#
+# ``_SCOPE_TIER`` gives the linear rank; APPROVALS and PAIRING share a tier only
+# to express "both above WRITE, both below ADMIN". Combining two *distinct*
+# scopes that sit at that same tier is unsound to collapse into one of them, so
+# :func:`_max_scope` escalates such a pair to their common upper bound, ADMIN
+# (fail closed) rather than silently picking whichever was passed first.
+_SCOPE_TIER: Dict[OperatorScope, int] = {
     OperatorScope.READ: 0,
     OperatorScope.WRITE: 1,
     OperatorScope.APPROVALS: 2,
@@ -4383,10 +4409,28 @@ _SCOPE_ORDER: Dict[OperatorScope, int] = {
     OperatorScope.ADMIN: 3,
 }
 
+# Scopes at a shared tier that are siblings (incomparable), so combining two
+# different ones must escalate rather than pick one.
+_INCOMPARABLE_TIERS = frozenset({2})
+
 
 def _max_scope(a: OperatorScope, b: OperatorScope) -> OperatorScope:
-    """Return the stricter (higher-privilege) of two scopes."""
-    return b if _SCOPE_ORDER.get(b, 3) > _SCOPE_ORDER.get(a, 3) else a
+    """Return the stricter scope, escalating incomparable siblings to ADMIN.
+
+    For the linear part of the lattice (READ < WRITE < ... < ADMIN) this
+    returns the higher-ranked scope. When ``a`` and ``b`` are two *distinct*
+    scopes sharing an incomparable tier (e.g. APPROVALS vs PAIRING), neither
+    implies the other, so the combined requirement is escalated to their common
+    upper bound (``ADMIN``) to stay fail-closed — a single-scope check can then
+    never be satisfied by holding only one of the two required capabilities.
+    """
+    if a == b:
+        return a
+    tier_a = _SCOPE_TIER.get(a, _SCOPE_TIER[OperatorScope.ADMIN])
+    tier_b = _SCOPE_TIER.get(b, _SCOPE_TIER[OperatorScope.ADMIN])
+    if tier_a == tier_b and tier_a in _INCOMPARABLE_TIERS:
+        return OperatorScope.ADMIN
+    return b if tier_b > tier_a else a
 
 
 # Module-level registry. Kept intentionally simple (a dict) so the contract is
