@@ -137,6 +137,9 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
   # Check MCP server health
   praisonai mcp doctor
 
+  # Machine-readable health check (no Unicode symbols)
+  praisonai mcp doctor --json
+
 [bold]Recipe Server Examples:[/bold]
   # Serve a recipe as STDIO MCP server
   praisonai mcp serve-recipe support-reply --transport stdio
@@ -149,6 +152,23 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
 """
         self._print_rich(help_text)
     
+    def _supports_unicode(self) -> bool:
+        """Return True when stdout can encode status symbols.
+
+        On Windows consoles using a legacy code page (e.g. cp1252) writing
+        Unicode symbols like the U+2713 check mark raises UnicodeEncodeError.
+        Detect that up front so callers can fall back to ASCII markers.
+        """
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        if encoding.lower().replace("-", "") in ("utf8", "utf16", "utf32"):
+            return True
+        for symbol in ("\u2713", "\u2717", "\u25cb"):
+            try:
+                symbol.encode(encoding, errors="strict")
+            except (UnicodeEncodeError, LookupError):
+                return False
+        return True
+
     def _print_rich(self, text: str) -> None:
         """Print with rich formatting if available."""
         try:
@@ -169,11 +189,12 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     
     def _print_success(self, message: str) -> None:
         """Print success message."""
+        mark = "\u2713" if self._supports_unicode() else "[OK]"
         try:
             from rich import print as rprint
-            rprint(f"[green]✓ {message}[/green]")
+            rprint(f"[green]{mark} {message}[/green]")
         except ImportError:
-            print(f"✓ {message}")
+            print(f"{mark} {message}")
     
     def cmd_serve(self, args: List[str]) -> int:
         """Start the MCP server."""
@@ -763,69 +784,86 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     def cmd_doctor(self, args: List[str]) -> int:
         """Check MCP server health and configuration."""
         try:
+            import os
             from .server import PROTOCOL_VERSION, SUPPORTED_VERSIONS
             from .registry import get_tool_registry, get_resource_registry, get_prompt_registry
             from .adapters import register_all
-            
-            print("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
-            
+
+            as_json = "--json" in args
+
             # Register all components
             register_all()
-            
-            # Check protocol version
-            print(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
-            print(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
-            print()
-            
-            # Check registries
+
             tools = get_tool_registry().list_all()
             resources = get_resource_registry().list_all()
             prompts = get_prompt_registry().list_all()
-            
-            print("[bold]Registered Components:[/bold]")
-            print(f"  • Tools: {len(tools)}")
-            print(f"  • Resources: {len(resources)}")
-            print(f"  • Prompts: {len(prompts)}")
-            print()
-            
-            # Check environment
-            import os
+
             env_checks = {
                 "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY")),
                 "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY")),
                 "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY")),
             }
-            
-            print("[bold]Environment:[/bold]")
-            for key, present in env_checks.items():
-                status = "[green]✓[/green]" if present else "[yellow]○[/yellow]"
-                print(f"  {status} {key}")
-            print()
-            
-            # Check dependencies
+
             deps = {
                 "starlette": False,
                 "uvicorn": False,
                 "praisonaiagents": False,
             }
-            
             for dep in deps:
                 try:
                     __import__(dep)
                     deps[dep] = True
                 except ImportError:
                     pass
-            
-            print("[bold]Dependencies:[/bold]")
-            for dep, available in deps.items():
-                status = "[green]✓[/green]" if available else "[red]✗[/red]"
-                print(f"  {status} {dep}")
-            print()
-            
-            # Overall status
+
             all_deps = all(deps.values())
             any_api_key = any(env_checks.values())
-            
+
+            if as_json:
+                print(json.dumps({
+                    "protocol_version": PROTOCOL_VERSION,
+                    "supported_versions": list(SUPPORTED_VERSIONS),
+                    "components": {
+                        "tools": len(tools),
+                        "resources": len(resources),
+                        "prompts": len(prompts),
+                    },
+                    "environment": env_checks,
+                    "dependencies": deps,
+                    "ready": all_deps and any_api_key,
+                }, indent=2))
+                return self.EXIT_SUCCESS if all_deps else self.EXIT_ERROR
+
+            unicode_ok = self._supports_unicode()
+            bullet = "\u2022" if unicode_ok else "-"
+            ok_mark = "[green]\u2713[/green]" if unicode_ok else "[green][OK][/green]"
+            skip_mark = "[yellow]\u25cb[/yellow]" if unicode_ok else "[yellow][--][/yellow]"
+            fail_mark = "[red]\u2717[/red]" if unicode_ok else "[red][X][/red]"
+
+            print("\n[bold cyan]PraisonAI MCP Server Health Check[/bold cyan]\n")
+
+            print(f"[bold]Protocol Version:[/bold] {PROTOCOL_VERSION}")
+            print(f"[bold]Supported Versions:[/bold] {', '.join(SUPPORTED_VERSIONS)}")
+            print()
+
+            print("[bold]Registered Components:[/bold]")
+            print(f"  {bullet} Tools: {len(tools)}")
+            print(f"  {bullet} Resources: {len(resources)}")
+            print(f"  {bullet} Prompts: {len(prompts)}")
+            print()
+
+            print("[bold]Environment:[/bold]")
+            for key, present in env_checks.items():
+                status = ok_mark if present else skip_mark
+                print(f"  {status} {key}")
+            print()
+
+            print("[bold]Dependencies:[/bold]")
+            for dep, available in deps.items():
+                status = ok_mark if available else fail_mark
+                print(f"  {status} {dep}")
+            print()
+
             if all_deps and any_api_key:
                 self._print_success("MCP server is ready to run")
             elif not all_deps:
@@ -833,9 +871,9 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 return self.EXIT_ERROR
             else:
                 print("[yellow]Warning: No API keys configured. Some tools may not work.[/yellow]")
-            
+
             return self.EXIT_SUCCESS
-            
+
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_ERROR
