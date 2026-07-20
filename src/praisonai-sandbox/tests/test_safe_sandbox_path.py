@@ -4,6 +4,7 @@ Unit tests for safe_sandbox_path traversal protection.
 Tests the path traversal vulnerability fixes implemented for issue #1869.
 """
 import os
+import sys
 import tempfile
 import pytest
 from pathlib import Path
@@ -13,6 +14,26 @@ try:
 except ImportError:
     # Handle missing dependencies gracefully in CI
     pytest.skip("praisonai_sandbox dependencies not available", allow_module_level=True)
+
+
+def _can_create_symlinks() -> bool:
+    """Probe whether symlink creation is permitted on this platform.
+
+    On Windows, creating symlinks requires either Developer Mode or the
+    SeCreateSymbolicLinkPrivilege, which default non-admin users lack.
+    """
+    if sys.platform != "win32":
+        return True
+    try:
+        with tempfile.TemporaryDirectory() as probe_dir:
+            target = os.path.join(probe_dir, "probe_target")
+            link = os.path.join(probe_dir, "probe_link")
+            with open(target, "w") as f:
+                f.write("probe")
+            os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        return False
+    return True
 
 
 class TestSafeSandboxPath:
@@ -102,6 +123,10 @@ class TestSafeSandboxPath:
         assert safe_sandbox_path(None, "test.txt") is None
         assert safe_sandbox_path("", "test.txt") is None
 
+    @pytest.mark.skipif(
+        not _can_create_symlinks(),
+        reason="Symlink creation requires Windows Developer Mode or elevated privilege",
+    )
     def test_symbolic_link_resolution(self, temp_sandbox):
         """Test that symbolic links are resolved properly."""
         # Create a symlink within the sandbox
