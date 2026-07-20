@@ -42,6 +42,11 @@ logger = get_logger(__name__)
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
 
+# Minimum number of parallel branches before an extra LLM summarisation call is
+# worth its cost. Below this, the cheaper truncation fallback is used since the
+# summarisation request consumes roughly as many tokens as it saves.
+MIN_BRANCHES_FOR_LLM_SUMMARY = 3
+
 # Guards lazy creation of each Workflow's per-instance _run_lock so two threads
 # entering run()/astart() concurrently on a fresh instance cannot each create
 # and acquire a *different* lock object (which would defeat the run guard).
@@ -2621,11 +2626,17 @@ CONCISE SUMMARY:"""
             from ..context.tokens import estimate_tokens_heuristic
             tokens = estimate_tokens_heuristic(previous_output)
             if tokens > 1000:
-                # Try LLM-based summarization first, fall back to truncation
-                try:
-                    optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
-                except Exception:
-                    # Fallback to truncation-based summarization
+                # LLM summarisation only pays off for larger fan-outs; for small
+                # branch counts the extra call costs roughly what it saves, so use
+                # the cheaper truncation fallback instead.
+                if num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
+                    # Try LLM-based summarization first, fall back to truncation
+                    try:
+                        optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
+                    except Exception:
+                        # Fallback to truncation-based summarization
+                        optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
+                else:
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
                 
                 if verbose and optimized_previous != previous_output:
