@@ -4327,3 +4327,216 @@ class LivenessPolicy:
         if now > self.reap_deadline(last_activity):
             return LivenessDecision.REAP
         return LivenessDecision.KEEP
+
+
+# ---------------------------------------------------------------------------
+# Declarative method -> required-scope registry (Issue #3206)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GatewayMethodDescriptor:
+    """Declarative authorisation descriptor for one gateway method.
+
+    A descriptor states — once, next to the protocol it guards — *what scope a
+    caller must hold* to invoke ``name``. The dispatcher resolves the required
+    scope from the registry instead of scattering ``_require_scope`` /
+    ``_client_has_scope`` calls per endpoint, so a newly added method is
+    **closed until explicitly classified** rather than reachable by omission.
+
+    Attributes:
+        name: The method / route / message-type identifier (e.g.
+            ``"agent.message"``, ``"channels.control"``).
+        required_scope: The baseline scope required to invoke the method.
+        owner: Who declared the method (``"core"``, a plugin name, ...). Purely
+            informational; helps auditing a growing control surface.
+        since: Optional version/date the method was classified.
+        escalate_fields: Optional per-payload-field escalation. Maps a param
+            field name to the stricter scope demanded when that field is
+            present. Fields not listed here are treated as *unknown/structural*
+            and escalate to :attr:`escalate_unknown_scope` (fail closed) when
+            :attr:`strict_fields` is True.
+        strict_fields: When True, any payload field not in ``escalate_fields``
+            (and not in ``safe_fields``) escalates to
+            :attr:`escalate_unknown_scope`. Defaults to False so today's
+            behaviour (no field-level derivation) is preserved unless opted in.
+        safe_fields: Field names that never escalate — read-only / benign
+            params. Only consulted when ``strict_fields`` is True.
+        escalate_unknown_scope: Scope demanded for unknown structural fields
+            under ``strict_fields``. Defaults to ``ADMIN`` (fail closed).
+    """
+
+    name: str
+    required_scope: OperatorScope = OperatorScope.ADMIN
+    owner: str = "core"
+    since: Optional[str] = None
+    escalate_fields: Dict[str, OperatorScope] = field(default_factory=dict)
+    strict_fields: bool = False
+    safe_fields: Set[str] = field(default_factory=set)
+    escalate_unknown_scope: OperatorScope = OperatorScope.ADMIN
+
+    def __post_init__(self) -> None:
+        """Defensively copy the mutable collections so the descriptor is a
+        genuinely immutable authorisation record.
+
+        ``@dataclass(frozen=True)`` blocks attribute *reassignment* but not
+        in-place mutation of the referenced dict/set. Direct construction
+        (e.g. a plugin building a descriptor without going through
+        :func:`register_gateway_method`) could otherwise mutate
+        ``escalate_fields`` / ``safe_fields`` after the fact and silently
+        change the resolved scope. Freeze them at construction so the resolved
+        scope can never drift after registration.
+        """
+        object.__setattr__(self, "escalate_fields", dict(self.escalate_fields))
+        object.__setattr__(self, "safe_fields", frozenset(self.safe_fields))
+
+    def resolve(self, params: Optional[Dict[str, Any]] = None) -> OperatorScope:
+        """Resolve the effective required scope for a call with ``params``.
+
+        Starts from :attr:`required_scope` and escalates (never de-escalates)
+        based on the payload:
+
+          * any field listed in :attr:`escalate_fields` raises the requirement
+            to that field's scope;
+          * under :attr:`strict_fields`, any field that is neither a
+            ``safe_field`` nor an ``escalate_field`` is treated as unknown /
+            structural and raises the requirement to
+            :attr:`escalate_unknown_scope` (fail closed on unknown fields).
+        """
+        required = self.required_scope
+        if params:
+            for key in params:
+                escalated = self.escalate_fields.get(key)
+                if escalated is not None:
+                    required = _max_scope(required, escalated)
+                elif self.strict_fields and key not in self.safe_fields:
+                    required = _max_scope(required, self.escalate_unknown_scope)
+        return required
+
+
+# Privilege lattice used to combine (never weaken) scopes.
+#
+# READ < WRITE are a strict linear chain. APPROVALS and PAIRING are *sibling*
+# capabilities at the same tier: each is stricter than WRITE, but they are
+# **incomparable** to each other (holding APPROVALS does not imply PAIRING or
+# vice versa). ADMIN is the top of the lattice.
+#
+# ``_SCOPE_TIER`` gives the linear rank; APPROVALS and PAIRING share a tier only
+# to express "both above WRITE, both below ADMIN". Combining two *distinct*
+# scopes that sit at that same tier is unsound to collapse into one of them, so
+# :func:`_max_scope` escalates such a pair to their common upper bound, ADMIN
+# (fail closed) rather than silently picking whichever was passed first.
+_SCOPE_TIER: Dict[OperatorScope, int] = {
+    OperatorScope.READ: 0,
+    OperatorScope.WRITE: 1,
+    OperatorScope.APPROVALS: 2,
+    OperatorScope.PAIRING: 2,
+    OperatorScope.ADMIN: 3,
+}
+
+# Scopes at a shared tier that are siblings (incomparable), so combining two
+# different ones must escalate rather than pick one.
+_INCOMPARABLE_TIERS = frozenset({2})
+
+
+def _max_scope(a: OperatorScope, b: OperatorScope) -> OperatorScope:
+    """Return the stricter scope, escalating incomparable siblings to ADMIN.
+
+    For the linear part of the lattice (READ < WRITE < ... < ADMIN) this
+    returns the higher-ranked scope. When ``a`` and ``b`` are two *distinct*
+    scopes sharing an incomparable tier (e.g. APPROVALS vs PAIRING), neither
+    implies the other, so the combined requirement is escalated to their common
+    upper bound (``ADMIN``) to stay fail-closed — a single-scope check can then
+    never be satisfied by holding only one of the two required capabilities.
+    """
+    if a == b:
+        return a
+    tier_a = _SCOPE_TIER.get(a, _SCOPE_TIER[OperatorScope.ADMIN])
+    tier_b = _SCOPE_TIER.get(b, _SCOPE_TIER[OperatorScope.ADMIN])
+    if tier_a == tier_b and tier_a in _INCOMPARABLE_TIERS:
+        return OperatorScope.ADMIN
+    return b if tier_b > tier_a else a
+
+
+# Module-level registry. Kept intentionally simple (a dict) so the contract is
+# a pure, dependency-free lookup that clients and the wrapper can share.
+GATEWAY_METHODS: Dict[str, GatewayMethodDescriptor] = {}
+
+
+def register_gateway_method(
+    name: str,
+    *,
+    scope: OperatorScope = OperatorScope.ADMIN,
+    owner: str = "core",
+    since: Optional[str] = None,
+    escalate_fields: Optional[Dict[str, OperatorScope]] = None,
+    strict_fields: bool = False,
+    safe_fields: Optional[Set[str]] = None,
+    escalate_unknown_scope: OperatorScope = OperatorScope.ADMIN,
+    replace: bool = False,
+) -> GatewayMethodDescriptor:
+    """Register (once) the required scope for a gateway method.
+
+    Core methods are registered at import time (see below); plugins that add
+    new gateway surface should register their descriptors through this same
+    function so they inherit default-deny semantics.
+
+    Raises:
+        ValueError: If ``name`` is already registered and ``replace`` is False.
+    """
+    if not replace and name in GATEWAY_METHODS:
+        raise ValueError(
+            f"gateway method {name!r} is already registered "
+            f"(pass replace=True to override)"
+        )
+    desc = GatewayMethodDescriptor(
+        name=name,
+        required_scope=scope,
+        owner=owner,
+        since=since,
+        escalate_fields=dict(escalate_fields or {}),
+        strict_fields=strict_fields,
+        safe_fields=set(safe_fields or ()),
+        escalate_unknown_scope=escalate_unknown_scope,
+    )
+    GATEWAY_METHODS[name] = desc
+    return desc
+
+
+def resolve_required_scope(
+    method: str, params: Optional[Dict[str, Any]] = None
+) -> OperatorScope:
+    """Resolve the scope required to invoke ``method`` with ``params``.
+
+    Default-deny: an unclassified/unknown method requires ``ADMIN`` so new
+    control surface is closed until explicitly classified — the omission fails
+    **closed** rather than open.
+    """
+    desc = GATEWAY_METHODS.get(method)
+    if desc is None:
+        return OperatorScope.ADMIN
+    return desc.resolve(params)
+
+
+# Core method classification. Registered once at import so the dispatcher can
+# consult the registry instead of scattered per-endpoint checks. Structural
+# mutations (channel control) demand ADMIN; sending as the agent needs WRITE;
+# status/read needs READ. Anything unregistered defaults to ADMIN (deny).
+def _register_core_gateway_methods() -> None:
+    core: Dict[str, OperatorScope] = {
+        "agent.message": OperatorScope.WRITE,
+        "message": OperatorScope.WRITE,
+        "session.status": OperatorScope.READ,
+        "session.transcript": OperatorScope.READ,
+        "approvals.resolve": OperatorScope.APPROVALS,
+        "pairing.approve": OperatorScope.PAIRING,
+        "pairing.revoke": OperatorScope.PAIRING,
+        "channels.control": OperatorScope.ADMIN,
+        "channels.pause": OperatorScope.ADMIN,
+        "channels.resume": OperatorScope.ADMIN,
+        "channels.reconnect": OperatorScope.ADMIN,
+    }
+    for name, scope in core.items():
+        register_gateway_method(name, scope=scope, owner="core", replace=True)
+
+
+_register_core_gateway_methods()

@@ -21,6 +21,11 @@ from .protocols import (
     EventType,
     OperatorScope,
     GatewayCloseCode,
+    # Declarative method -> required-scope registry (Issue #3206)
+    GatewayMethodDescriptor,
+    GATEWAY_METHODS,
+    register_gateway_method,
+    resolve_required_scope,
     # Config hot-reload observability (Issue #3049)
     ReloadStatus,
     compute_config_revision,
@@ -210,6 +215,11 @@ __all__ = [
     "EventType",
     "OperatorScope",
     "GatewayCloseCode",
+    # Declarative method -> required-scope registry (Issue #3206)
+    "GatewayMethodDescriptor",
+    "GATEWAY_METHODS",
+    "register_gateway_method",
+    "resolve_required_scope",
     # Config hot-reload observability (Issue #3049)
     "ReloadStatus",
     "compute_config_revision",
