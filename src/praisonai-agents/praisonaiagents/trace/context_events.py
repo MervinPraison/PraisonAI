@@ -441,6 +441,8 @@ class ContextTraceEmitter:
     
     def session_start(self, metadata: Optional[Dict[str, Any]] = None) -> None:
         """Emit session start event."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.SESSION_START,
             timestamp=time.time(),
@@ -450,6 +452,8 @@ class ContextTraceEmitter:
     
     def session_end(self, metadata: Optional[Dict[str, Any]] = None) -> None:
         """Emit session end event."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.SESSION_END,
             timestamp=time.time(),
@@ -765,6 +769,8 @@ class ContextTraceEmitter:
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """Emit context snapshot event with full context state."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.CONTEXT_SNAPSHOT,
             timestamp=time.time(),
@@ -786,6 +792,8 @@ class ContextTraceEmitter:
         context_passed: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Emit agent handoff event for tracking agent-to-agent flow."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.AGENT_HANDOFF,
             timestamp=time.time(),
@@ -814,6 +822,8 @@ class ContextTraceEmitter:
             content_length: Length of content being stored
             metadata: Optional metadata about the storage
         """
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.MEMORY_STORE,
             timestamp=time.time(),
@@ -843,6 +853,8 @@ class ContextTraceEmitter:
             memory_type: Type of memory searched
             top_score: Score of top result (if available)
         """
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.MEMORY_SEARCH,
             timestamp=time.time(),
