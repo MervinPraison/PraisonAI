@@ -149,3 +149,54 @@ class TestFromDict:
     def test_from_dict_ignores_unknown_keys(self):
         b = RouteBinding.from_dict({"agent": "a", "future_field": "x"})
         assert b.agent == "a"
+
+
+class TestProfileIsolation:
+    """Per-route isolated tenant-profile dimension (Issue #3189)."""
+
+    def test_profile_defaults_to_none(self):
+        assert RouteBinding(agent="a").profile is None
+
+    def test_from_dict_parses_profile(self):
+        b = RouteBinding.from_dict({"agent": "support", "profile": "acme"})
+        assert b.profile == "acme"
+
+    def test_from_dict_profile_is_string_coerced(self):
+        b = RouteBinding.from_dict({"agent": "a", "profile": 42})
+        assert b.profile == "42"
+
+    def test_resolve_surfaces_matched_profile(self):
+        bindings = [
+            RouteBinding(agent="support", channel_id="discord-acme", profile="acme"),
+            RouteBinding(agent="support", channel_id="slack-globex", profile="globex"),
+        ]
+        m = resolve_route(bindings, RouteFacts(channel_id="slack-globex"))
+        assert m.agent == "support"
+        assert m.profile == "globex"
+
+    def test_unmatched_route_fails_closed_no_profile(self):
+        # A route with no matching binding must never inherit another
+        # tenant's profile — the fallback carries profile=None.
+        bindings = [RouteBinding(agent="support", channel_id="discord-acme", profile="acme")]
+        m = resolve_route(
+            bindings,
+            RouteFacts(channel_id="unknown"),
+            default_agent="support",
+        )
+        assert m.binding is None
+        assert m.profile is None
+
+    def test_unscoped_binding_has_no_profile(self):
+        bindings = [RouteBinding(agent="support", chat_type="dm")]
+        m = resolve_route(bindings, RouteFacts(chat_type="dm"))
+        assert m.binding is not None
+        assert m.profile is None
+
+    def test_blank_profile_is_normalised_to_none(self):
+        # An empty or whitespace-only profile must be treated as unscoped
+        # (None), not as an empty-named scope, to honour the fail-closed
+        # contract a wrapper checking ``if profile is not None`` relies on.
+        assert RouteBinding(agent="a", profile="").profile is None
+        assert RouteBinding(agent="a", profile="   ").profile is None
+        assert RouteBinding.from_dict({"agent": "a", "profile": ""}).profile is None
+        assert RouteBinding.from_dict({"agent": "a", "profile": "  "}).profile is None
