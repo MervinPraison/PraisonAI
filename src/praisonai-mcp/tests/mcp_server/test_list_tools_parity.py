@@ -8,30 +8,58 @@ instead of the partial `register_all_tools()`.
 See issue #3208.
 """
 
+import pytest
+
+
+@pytest.fixture
+def isolated_tool_registry():
+    """Provide a clean tool registry and restore prior state after the test.
+
+    The tool registry is a process-wide singleton whose ``_tools`` and
+    ``_lazy_loaders`` are mutated by the parity assertions below. Snapshot and
+    restore both so tests running later in the same process are unaffected.
+    """
+    from praisonai_mcp.mcp_server.registry import get_tool_registry
+
+    registry = get_tool_registry()
+    saved_tools = dict(registry._tools)
+    saved_loaders = list(registry._lazy_loaders)
+    try:
+        registry._tools.clear()
+        registry._lazy_loaders.clear()
+        yield registry
+    finally:
+        registry._tools.clear()
+        registry._tools.update(saved_tools)
+        registry._lazy_loaders.clear()
+        registry._lazy_loaders.extend(saved_loaders)
+
 
 class TestListToolsParity:
     """Tool registration parity between listing commands and serve/doctor."""
 
-    def test_register_all_is_superset_of_register_all_tools(self):
-        """register_all() must expose at least as many tools as register_all_tools()."""
+    def test_register_all_is_superset_of_register_all_tools(self, isolated_tool_registry):
+        """register_all() must expose every tool register_all_tools() does, plus more."""
         from praisonai_mcp.mcp_server.adapters import register_all, register_all_tools
-        from praisonai_mcp.mcp_server.registry import get_tool_registry
 
-        registry = get_tool_registry()
+        registry = isolated_tool_registry
 
         registry._tools.clear()
+        registry._lazy_loaders.clear()
         register_all_tools()
-        partial_count = len(registry.list_all())
+        partial_names = {tool.name for tool in registry.list_all()}
 
         registry._tools.clear()
+        registry._lazy_loaders.clear()
         register_all()
-        full_count = len(registry.list_all())
+        full_names = {tool.name for tool in registry.list_all()}
 
-        assert full_count >= partial_count, (
-            f"register_all ({full_count}) must be a superset of "
-            f"register_all_tools ({partial_count})"
+        missing = partial_names - full_names
+        assert not missing, (
+            f"register_all() must be a strict superset of register_all_tools(); "
+            f"missing tools: {sorted(missing)}"
         )
-        assert full_count > partial_count, (
+        assert len(full_names) > len(partial_names), (
             "register_all should register extended and CLI bridge tools "
             "beyond register_all_tools"
         )
