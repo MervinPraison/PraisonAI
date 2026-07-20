@@ -9,6 +9,8 @@ idempotency dedup, and dead-target suppression, instead of a bare
 
 import asyncio
 import sys
+import tempfile
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,9 +36,32 @@ class _RecordingBot:
         return {"ok": True}
 
 
-def _make_gateway_with_bot(bot):
+def _fresh_outbox_path() -> Path:
+    """A unique SQLite path so each test's durable outbox starts empty."""
+    return Path(tempfile.gettempdir()) / f"gw_outbox_{uuid.uuid4().hex}.sqlite"
+
+
+def _make_gateway_with_bot(bot, *, outbox_path=None, backoff=None):
+    """Build a gateway wired to ``bot`` with an isolated durable outbox.
+
+    Issue #3231: the scheduled path now dedups through a durable
+    ``OutboundQueue``. Each gateway is given a fresh SQLite file so tests do not
+    contaminate each other (and so a "restart" can be simulated by pointing a
+    second gateway at the *same* file). ``backoff`` defaults to zero delay so a
+    failed-then-retry within one test re-sends immediately instead of waiting on
+    the production backoff window.
+    """
+    from praisonai_bot.bots import OutboundQueue
+    from praisonai_bot.bots._resilience import BackoffPolicy
+
     gw = WebSocketGateway()
     gw._channel_bots["telegram"] = bot
+    if outbox_path is None:
+        outbox_path = _fresh_outbox_path()
+    gw._scheduled_outbox = OutboundQueue(
+        outbox_path,
+        backoff=backoff if backoff is not None else BackoffPolicy(initial_ms=0),
+    )
     return gw
 
 
@@ -178,6 +203,154 @@ def test_scheduled_delivery_missing_target_is_skipped():
     asyncio.run(gw._deliver_scheduled_result(delivery, "nope"))
 
     assert bot.sends == []
+
+
+# ─── Durable scheduled dedup across restart (issue #3231) ────────────
+
+
+def test_scheduled_delivery_survives_restart_no_double_post():
+    """A crash-and-refire across a restart does NOT re-post the result.
+
+    Regression for issue #3231: dedup was previously a per-process LRU that is
+    empty after a restart, so the exact crash window a scheduler must survive
+    (fire, deliver, crash, restart, re-fire) re-posted the message. With the
+    durable outbox the second, *fresh-process* gateway (new object, empty LRU,
+    SAME sqlite file) finds the UNIQUE idempotency key already ``sent`` and
+    suppresses the duplicate.
+    """
+    path = _fresh_outbox_path()
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    # Process 1: deliver, then "crash" (drop the gateway, keep the sqlite).
+    bot1 = _RecordingBot()
+    gw1 = _make_gateway_with_bot(bot1, outbox_path=path)
+    asyncio.run(gw1._deliver_scheduled_result(delivery, "daily report"))
+    assert bot1.sends == [("-100123", "daily report", None)]
+
+    # Process 2: fresh gateway + fresh bot + EMPTY per-process LRU, same DB.
+    bot2 = _RecordingBot()
+    gw2 = _make_gateway_with_bot(bot2, outbox_path=path)
+    asyncio.run(gw2._deliver_scheduled_result(delivery, "daily report"))
+
+    # The durable UNIQUE key catches the duplicate — no re-post after restart.
+    assert bot2.sends == []
+
+
+def test_scheduled_delivery_after_restart_delivers_new_result():
+    """After a restart a genuinely NEW result (different text) is delivered.
+
+    Durable dedup must not swallow a distinct scheduled result: a different body
+    yields a different idempotency key, so it is enqueued fresh and delivered.
+    """
+    path = _fresh_outbox_path()
+
+    bot1 = _RecordingBot()
+    gw1 = _make_gateway_with_bot(bot1, outbox_path=path)
+    d1 = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+    asyncio.run(gw1._deliver_scheduled_result(d1, "monday report"))
+    assert bot1.sends == [("-100123", "monday report", None)]
+
+    bot2 = _RecordingBot()
+    gw2 = _make_gateway_with_bot(bot2, outbox_path=path)
+    d2 = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+    asyncio.run(gw2._deliver_scheduled_result(d2, "tuesday report"))
+    assert bot2.sends == [("-100123", "tuesday report", None)]
+
+
+def test_scheduled_delivery_failed_send_retries_after_restart():
+    """A send that never landed before a crash is re-delivered after restart.
+
+    If the pre-crash attempt failed (entry left non-terminal), the durable
+    ledger keeps it retryable so the post-restart re-fire actually delivers it
+    at-least-once — the honest recovery the issue asks for, not a silent drop.
+    """
+    path = _fresh_outbox_path()
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    # Process 1: the send raises, so the entry stays non-terminal (retryable).
+    bot1 = _RecordingBot(fail_times=1)
+    gw1 = _make_gateway_with_bot(bot1, outbox_path=path)
+    asyncio.run(gw1._deliver_scheduled_result(delivery, "will retry"))
+    assert bot1.sends == []
+
+    # Process 2: fresh gateway, same DB — the pending entry is delivered.
+    bot2 = _RecordingBot()
+    gw2 = _make_gateway_with_bot(bot2, outbox_path=path)
+    asyncio.run(gw2._deliver_scheduled_result(delivery, "will retry"))
+    assert bot2.sends == [("-100123", "will retry", None)]
+
+
+def test_scheduled_delivery_falls_back_when_outbox_unavailable(monkeypatch):
+    """With no durable outbox the path still delivers via the router LRU.
+
+    The outbox is best-effort: if it cannot be built the scheduled delivery must
+    still work (and still dedup in-process) exactly as before issue #3231.
+    """
+    bot = _RecordingBot()
+    gw = _make_gateway_with_bot(bot)
+    # Force the durable store to be reported unavailable so the router-LRU
+    # fallback branch is exercised.
+    monkeypatch.setattr(
+        type(gw), "scheduled_outbox", property(lambda self: None)
+    )
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    async def _run():
+        await gw._deliver_scheduled_result(delivery, "fallback text")
+        await gw._deliver_scheduled_result(delivery, "fallback text")
+
+    asyncio.run(_run())
+    # Router LRU dedup suppresses the second same-process send.
+    assert bot.sends == [("-100123", "fallback text", None)]
+
+
+def test_scheduled_delivery_with_backlogged_row_uses_own_key():
+    """A backlogged row in the shared outbox is sent under ITS OWN key.
+
+    Issue #3231 regression: the shared ``scheduled_outbox`` is drained whole on
+    every scheduled delivery. An earlier fix stamped this call's idempotency key
+    on every drained row, so an older backlogged row was sent under the current
+    key — poisoning the router LRU so the current row was later suppressed as a
+    duplicate and lost. Here a first send fails (leaving a retryable row), then a
+    second, distinct scheduled result fires. Both rows must reach the channel:
+    the backlog under its own key and the new result under its own key.
+    """
+    path = _fresh_outbox_path()
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    # First result fails on send → its row stays retryable (non-terminal).
+    bot1 = _RecordingBot(fail_times=1)
+    gw1 = _make_gateway_with_bot(bot1, outbox_path=path)
+    asyncio.run(gw1._deliver_scheduled_result(delivery, "backlogged report"))
+    assert bot1.sends == []
+
+    # Same DB, fresh gateway (empty LRU). A NEW result fires; draining now sees
+    # BOTH the retryable backlog and the new row. Each must go out under its own
+    # key so neither is suppressed as a duplicate of the other.
+    bot2 = _RecordingBot()
+    gw2 = _make_gateway_with_bot(bot2, outbox_path=path)
+    asyncio.run(gw2._deliver_scheduled_result(delivery, "fresh report"))
+
+    texts = sorted(text for _cid, text, _tid in bot2.sends)
+    assert texts == ["backlogged report", "fresh report"]
 
 
 # ─── DeliveryRouter thread routing (issue #3141) ─────────────────────

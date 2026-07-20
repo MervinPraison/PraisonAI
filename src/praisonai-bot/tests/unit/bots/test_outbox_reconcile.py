@@ -189,6 +189,21 @@ def test_reconciler_failure_falls_back_to_resend(tmp_path):
     asyncio.run(run())
 
 
+def test_status_for_reports_entry_state(tmp_path):
+    """``status_for`` returns the current status, or None for an unknown key."""
+    async def run():
+        q = _new_queue(tmp_path)
+        assert q.status_for("msg-1") is None  # not enqueued yet
+
+        key = await q.enqueue("msg-1", "telegram:123", {"content": "hi"})
+        assert q.status_for("msg-1") == "pending"
+
+        await q.mark_sent(key)
+        assert q.status_for("msg-1") == "sent"
+
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
     import tempfile
     from pathlib import Path
