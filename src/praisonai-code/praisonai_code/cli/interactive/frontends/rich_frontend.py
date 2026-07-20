@@ -228,7 +228,8 @@ class RichFrontend:
                 elif choice == "5":
                     return ApprovalResponse(
                         request_id=request.request_id,
-                        decision=ApprovalDecision.REJECT
+                        decision=ApprovalDecision.REJECT,
+                        reason=self._prompt_deny_reason(),
                     )
                 else:
                     print("Invalid choice. Please enter 1-5.")
@@ -237,6 +238,19 @@ class RichFrontend:
                     request_id=request.request_id,
                     decision=ApprovalDecision.REJECT
                 )
+
+    def _prompt_deny_reason(self) -> Optional[str]:
+        """Optionally capture a denial reason to steer the agent.
+
+        Returns the trimmed reason string, or ``None`` when the user provides
+        no feedback (blank input) or input is unavailable — preserving today's
+        plain-denial behaviour.
+        """
+        try:
+            reason = input("Reason for denial (optional, steers the agent): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        return reason or None
     
     async def run(self) -> None:
         """Run the interactive REPL loop."""

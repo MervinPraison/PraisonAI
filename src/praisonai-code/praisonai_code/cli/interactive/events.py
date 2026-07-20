@@ -185,6 +185,7 @@ class ApprovalResponse:
     request_id: str
     decision: ApprovalDecision
     remember_pattern: Optional[str] = None  # Pattern to remember for ALWAYS decisions
+    reason: Optional[str] = None  # Steering feedback captured on denial (REJECT)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -192,4 +193,5 @@ class ApprovalResponse:
             "request_id": self.request_id,
             "decision": self.decision.value,
             "remember_pattern": self.remember_pattern,
+            "reason": self.reason,
         }
