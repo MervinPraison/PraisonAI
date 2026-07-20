@@ -22,26 +22,22 @@ import logging
 from praisonaiagents._logging import get_logger
 from typing import Dict, Optional, Union
 
+from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+
 logger = get_logger(__name__)
 
-# Default context lengths for common models (fallback when litellm unavailable)
-# Based on official documentation as of January 2025
-DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = {
+# Eval-specific context lengths not present in the canonical budgeter table
+# (dated Anthropic snapshots, o1 variants, Mistral/DeepSeek/Groq, etc.).
+# Based on official documentation as of January 2025.
+_EVAL_EXTRA_LENGTHS: Dict[str, int] = {
     # OpenAI models
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4-turbo": 128000,
     "gpt-4-turbo-preview": 128000,
-    "gpt-4": 8192,
     "gpt-4-32k": 32768,
-    "gpt-3.5-turbo": 16385,
-    "gpt-3.5-turbo-16k": 16385,
     "o1": 200000,
     "o1-mini": 128000,
     "o1-preview": 128000,
-    "o3-mini": 200000,
-    
-    # Anthropic models
+
+    # Anthropic models (dated snapshots)
     "claude-3-5-sonnet-20241022": 200000,
     "claude-3-5-sonnet-latest": 200000,
     "claude-3-5-haiku-20241022": 200000,
@@ -50,30 +46,58 @@ DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = {
     "claude-3-haiku-20240307": 200000,
     "claude-2.1": 200000,
     "claude-2": 100000,
-    
+
     # Google models
-    "gemini-1.5-pro": 2097152,
-    "gemini-1.5-flash": 1048576,
     "gemini-1.5-flash-8b": 1048576,
     "gemini-2.0-flash-exp": 1048576,
     "gemini-pro": 32760,
-    
+
     # Mistral models
     "mistral-large-latest": 128000,
     "mistral-medium-latest": 32000,
     "mistral-small-latest": 32000,
     "codestral-latest": 32000,
-    
+
     # DeepSeek models
     "deepseek-chat": 64000,
     "deepseek-coder": 64000,
-    
+
     # Groq models
     "llama-3.3-70b-versatile": 128000,
     "llama-3.1-70b-versatile": 128000,
     "llama-3.1-8b-instant": 128000,
     "mixtral-8x7b-32768": 32768,
 }
+
+# Guard the invariant that eval-only extras never silently shadow canonical
+# entries. If a key is later added to the canonical budgeter table, it should be
+# removed from _EVAL_EXTRA_LENGTHS so the single source of truth stays authoritative.
+_overlapping_keys = set(_EVAL_EXTRA_LENGTHS) & {
+    k for k in _CANONICAL_LIMITS if k != "default"
+}
+assert not _overlapping_keys, (
+    "_EVAL_EXTRA_LENGTHS keys overlap with canonical MODEL_LIMITS; remove the "
+    f"duplicate(s) from the eval table: {sorted(_overlapping_keys)}"
+)
+
+# Default context lengths for common models (fallback when litellm unavailable).
+# Built by merging the canonical budgeter table (context/budgeter.MODEL_LIMITS)
+# with eval-specific extras, so a single source of truth is maintained and new
+# model families (e.g. gpt-5, gpt-4.1) resolve consistently across both paths.
+#
+# Keys are ordered by descending length so that get_context_length's partial
+# matching checks specific names (e.g. "gpt-4-32k") before shorter prefixes
+# (e.g. "gpt-4") and returns the most precise context window.
+DEFAULT_CONTEXT_LENGTHS: Dict[str, int] = dict(
+    sorted(
+        {
+            **{k: v for k, v in _CANONICAL_LIMITS.items() if k != "default"},
+            **_EVAL_EXTRA_LENGTHS,
+        }.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+)
 
 # Default context length for unknown models
 DEFAULT_CONTEXT_LENGTH = 128000
