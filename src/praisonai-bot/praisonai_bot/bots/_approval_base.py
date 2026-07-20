@@ -11,9 +11,15 @@ This is an internal module — end users import the concrete classes.
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Optional, Set, Union
+import time
+from typing import Any, Iterable, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger(__name__)
+
+# Single source of truth for the human-in-the-loop wait window shared by the
+# chat channel backends (Slack, Telegram, Discord, Webhook, HTTP). Individual
+# backends may still override via ``timeout=``.
+DEFAULT_APPROVAL_TIMEOUT: float = 300.0
 
 APPROVE_KEYWORDS: Set[str] = {
     "yes", "y", "approve", "approved", "ok", "allow", "go", "proceed", "confirm",
@@ -170,6 +176,77 @@ async def classify_with_llm(
     except Exception as e:
         logger.warning(f"LLM approval classification failed: {e}")
         return {"approved": False, "reason": f"Could not classify response: {text}", "modified_args": {}}
+
+
+class DurableApprovalMixin:
+    """Optional durability for chat-channel approval backends.
+
+    Pending approvals are normally held only in the per-call coroutine that
+    polls the platform for a reply; a gateway/bot restart while an approval is
+    outstanding strands the blocked agent run. Mixing this in gives every chat
+    backend a uniform, opt-in persistence path backed by the existing
+    :class:`ApprovalStore` (SQLite+WAL) without changing its transport logic:
+
+    * :meth:`_persist_pending` records the request before the backend starts
+      polling, so it survives a restart.
+    * :meth:`_resolve_pending` records the final decision as a durable audit
+      trail (and closes the row so a late reply can't re-resolve it).
+    * :meth:`rehydrate` lists still-pending approvals on startup so an operator
+      / caller can re-attach to them after a restart.
+
+    When no ``store`` is configured every method is a no-op, so existing
+    behaviour is unchanged and the feature is fully backward-compatible.
+    """
+
+    _approval_store: Optional[Any] = None
+
+    def _init_store(self, store: Optional[Any]) -> None:
+        """Record the optional durable store (call from ``__init__``)."""
+        self._approval_store = store
+
+    async def _persist_pending(self, request: Any, timeout: float) -> None:
+        """Durably persist *request* before waiting for a decision."""
+        store = getattr(self, "_approval_store", None)
+        if store is None or getattr(request, "approval_id", None) is None:
+            return
+        try:
+            expires_at = time.time() + float(timeout)
+            await store.persist(request.approval_id, request, expires_at=expires_at)
+        except Exception:  # persistence must never break the live approval
+            logger.warning(
+                "Failed to persist pending approval %s",
+                getattr(request, "approval_id", "?"),
+                exc_info=True,
+            )
+
+    async def _resolve_pending(self, request: Any, decision: Any) -> None:
+        """Record the final *decision* for *request* in the durable store."""
+        store = getattr(self, "_approval_store", None)
+        if store is None or getattr(request, "approval_id", None) is None:
+            return
+        try:
+            await store.resolve(request.approval_id, decision)
+        except Exception:
+            logger.warning(
+                "Failed to record approval decision %s",
+                getattr(request, "approval_id", "?"),
+                exc_info=True,
+            )
+
+    async def rehydrate(self) -> List[Tuple[str, Any]]:
+        """Return still-pending approvals from the durable store on startup.
+
+        Call once after a restart to recover outstanding approvals. Returns an
+        empty list when no store is configured.
+        """
+        store = getattr(self, "_approval_store", None)
+        if store is None:
+            return []
+        try:
+            return await store.list_pending()
+        except Exception:
+            logger.warning("Failed to rehydrate pending approvals", exc_info=True)
+            return []
 
 
 def sync_wrapper(async_fn, timeout: float):
