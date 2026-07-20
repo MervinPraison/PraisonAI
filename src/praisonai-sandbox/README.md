@@ -38,3 +38,20 @@ Backward-compatible imports via the umbrella package:
 ```python
 from praisonai.sandbox import SubprocessSandbox  # shim → praisonai_sandbox
 ```
+
+## Validating your install
+
+Run the single-command end-to-end smoke suite (no API keys needed for the
+subprocess path; Docker is optional and skipped when unavailable):
+
+```bash
+python e2e-validation/run_e2e.py
+```
+
+Or use the pytest live probes:
+
+```bash
+python -m pytest tests/test_live_sandbox.py -v
+```
+
+See [`e2e-validation/`](./e2e-validation/) for the manual guide.
