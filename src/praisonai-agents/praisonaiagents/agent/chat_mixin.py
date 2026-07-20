@@ -727,10 +727,12 @@ Your Goal: {self.goal}"""
         Returns the possibly-mutated list of tool definitions. Synchronous
         path; use ``_aapply_before_tool_definitions_hook`` in async contexts.
         """
-        if not formatted_tools or not getattr(self, '_hook_runner', None):
+        from ..hooks import HookEvent
+        _runner = getattr(self, '_hook_runner', None)
+        if (not formatted_tools or _runner is None
+                or not _runner.registry.has_hooks(HookEvent.BEFORE_TOOL_DEFINITIONS)):
             return formatted_tools
         try:
-            from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
             _results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
             # Fail closed on a blocking hook/plugin: a POLICY/GUARDRAIL that
@@ -759,10 +761,12 @@ Your Goal: {self.goal}"""
         ``execute_sync`` raises inside a running event loop, so the async chat
         path must await the hook runner directly to actually run the hook.
         """
-        if not formatted_tools or not getattr(self, '_hook_runner', None):
+        from ..hooks import HookEvent
+        _runner = getattr(self, '_hook_runner', None)
+        if (not formatted_tools or _runner is None
+                or not _runner.registry.has_hooks(HookEvent.BEFORE_TOOL_DEFINITIONS)):
             return formatted_tools
         try:
-            from ..hooks import HookEvent
             _inp = self._build_before_tool_definitions_input(formatted_tools)
             _results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
             # Fail closed on a blocking hook/plugin (see sync variant).
