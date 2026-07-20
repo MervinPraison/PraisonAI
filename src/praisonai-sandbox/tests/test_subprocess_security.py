@@ -11,6 +11,7 @@ Tests cover:
 
 import asyncio
 import os
+import sys
 import tempfile
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -324,6 +325,10 @@ class TestCrossPlatformCompatibility:
                 mock_proc.kill.assert_called()
                 assert result.status == SandboxStatus.TIMEOUT
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="os.killpg is POSIX-only and not available on Windows",
+    )
     @pytest.mark.asyncio
     async def test_timeout_handling_posix(self):
         """Timeout handling should use process groups on POSIX."""
