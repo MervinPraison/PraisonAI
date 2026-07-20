@@ -448,22 +448,35 @@ async def deliver_media_to_adapter(
 
     # 4) Discord (discord.py). A thread channel is itself addressable by id, so
     #    prefer the thread id as the send target when one is named.
+    #
+    #    A transport error from ``channel.send`` (HTTP 5xx, rate limit, reset) is
+    #    allowed to propagate so the caller's ``deliver_with_retry`` wrapper can
+    #    apply the same bounded backoff text and the other media transports get
+    #    (issue #3184). Swallowing it into ``False`` here would silently drop the
+    #    file on the first blip and defeat the retry entirely. Only the missing
+    #    ``discord`` dependency is caught locally — that is a permanent,
+    #    non-retryable condition — and unresolved channels fall through to the
+    #    ``False`` (no-primitive) return below.
     if client is not None and hasattr(client, "get_channel"):
         try:
             import discord  # type: ignore
-
-            target_id = thread_id or channel_id
-            channel = client.get_channel(int(target_id))
-            if channel is None and thread_id is not None:
-                channel = client.get_channel(int(channel_id))
-            if channel is not None:
-                await channel.send(
-                    content=caption or None, file=discord.File(path)
-                )
-                return True
-        except Exception as e:  # pragma: no cover — optional dep / runtime
-            logger.warning("Discord media upload failed for %s: %s", channel_id, e)
+        except Exception:  # pragma: no cover — optional dep missing
+            logger.warning(
+                "Discord media upload unavailable for %s: discord package "
+                "not importable",
+                channel_id,
+            )
             return False
+
+        target_id = thread_id or channel_id
+        channel = client.get_channel(int(target_id))
+        if channel is None and thread_id is not None:
+            channel = client.get_channel(int(channel_id))
+        if channel is not None:
+            await channel.send(
+                content=caption or None, file=discord.File(path)
+            )
+            return True
 
     logger.info(
         "Adapter for platform %r exposes no media-upload primitive; "

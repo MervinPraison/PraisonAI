@@ -277,3 +277,143 @@ def test_telegram_chat_id_preserves_username():
     assert _telegram_chat_id("123") == 123
     assert _telegram_chat_id("-100123") == -100123
     assert _telegram_chat_id("@channelusername") == "@channelusername"
+
+
+# ── Issue #3184: media upload gets the same retry/backoff as text ─────────
+
+
+def _media_router(adapter):
+    """Build a DeliveryRouter over a fake BotOS wrapping ``adapter``."""
+    from praisonai_bot.bots.delivery import DeliveryRouter
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return adapter if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+    return router
+
+
+def test_send_media_retries_transient_upload_failure(tmp_path, monkeypatch):
+    # A transient upload error is retried with backoff (like text) and finally
+    # delivered, instead of being dropped on the first blip.
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class Adapter:
+        platform = "telegram"
+        # Fast backoff so the test does not actually sleep.
+        from praisonai_bot.bots._resilience import BackoffPolicy
+
+        _outbound_backoff = BackoffPolicy(initial_ms=1, max_ms=2, max_attempts=3)
+
+        def __init__(self):
+            self.calls = 0
+
+        async def send_media(self, channel_id, path, caption=None):
+            self.calls += 1
+            if self.calls < 3:
+                raise ConnectionError("connection reset")
+
+    adapter = Adapter()
+    router = _media_router(adapter)
+
+    ok = asyncio.run(router.send_media("telegram:42", str(f)))
+
+    assert ok is True
+    assert adapter.calls == 3
+
+
+def test_send_media_gives_up_after_max_attempts(tmp_path):
+    # A persistently failing transient upload eventually returns False (not an
+    # unhandled crash) after the attempt budget is spent.
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class Adapter:
+        platform = "telegram"
+        from praisonai_bot.bots._resilience import BackoffPolicy
+
+        _outbound_backoff = BackoffPolicy(initial_ms=1, max_ms=2, max_attempts=2)
+
+        def __init__(self):
+            self.calls = 0
+
+        async def send_media(self, channel_id, path, caption=None):
+            self.calls += 1
+            raise ConnectionError("connection reset")
+
+    adapter = Adapter()
+    router = _media_router(adapter)
+
+    ok = asyncio.run(router.send_media("telegram:42", str(f)))
+
+    assert ok is False
+    assert adapter.calls == 2
+
+
+def test_send_media_no_primitive_returns_false_without_retry(tmp_path):
+    # An adapter exposing no upload primitive returns False cleanly and is not
+    # retried (nothing transient to recover from).
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class Adapter:
+        platform = "telegram"
+
+    router = _media_router(Adapter())
+
+    ok = asyncio.run(router.send_media("telegram:42", str(f)))
+
+    assert ok is False
+
+
+def test_discord_media_transient_error_propagates_for_retry(tmp_path):
+    # The Discord native path must let a transient ``channel.send`` error
+    # propagate so ``deliver_with_retry`` can back off and retry it — the same
+    # resilience text and the other transports get. Previously it swallowed the
+    # exception into ``False`` on the first blip, silently dropping the file.
+    pytest.importorskip("discord")
+
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class _Channel:
+        def __init__(self):
+            self.calls = 0
+
+        async def send(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls < 2:
+                raise ConnectionError("connection reset")
+
+    class _Client:
+        def __init__(self, channel):
+            self._channel = channel
+
+        def get_channel(self, _id):
+            return self._channel
+
+    channel = _Channel()
+
+    class Adapter:
+        platform = "discord"
+        _client = _Client(channel)
+
+    async def _run():
+        return await deliver_media_to_adapter(Adapter(), "42", str(f))
+
+    # First call raises (propagates, is NOT swallowed into False)…
+    with pytest.raises(ConnectionError):
+        asyncio.run(_run())
+    assert channel.calls == 1
+    # …and a retry succeeds.
+    ok = asyncio.run(_run())
+    assert ok is True
+    assert channel.calls == 2
