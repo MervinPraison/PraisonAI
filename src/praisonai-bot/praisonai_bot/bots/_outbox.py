@@ -615,6 +615,22 @@ class OutboundQueue:
         
         return deleted
     
+    def status_for(self, idempotency_key: str) -> Optional[str]:
+        """Return the current status of the entry for ``idempotency_key``.
+
+        Returns ``None`` when no entry exists for the key. Lets a caller that
+        enqueued under a stable key tell an already-delivered duplicate (status
+        ``"sent"``) apart from a genuine delivery failure after a drain — so a
+        deduplicated re-fire (issue #3231) is reported as a suppressed success
+        rather than a spurious failure.
+        """
+        with self._lock, closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT status FROM outbound_queue WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return row[0] if row else None
+
     def pending_count(self) -> int:
         """Get count of pending messages awaiting delivery."""
         with self._lock, closing(self._connect()) as conn:
