@@ -97,6 +97,20 @@ def inject_credentials_into_env() -> bool:
         return False
 
 
+def detect_local_endpoint():
+    """Return a detected local OpenAI-compatible endpoint, or ``None``.
+
+    Thin bridge over :func:`praisonai_code.llm.local_detect.detect_local_model`
+    so the CLI gates (`app.py`, `run.py`) can offer a keyless local-first path
+    without importing the detector directly. Never raises.
+    """
+    try:
+        from praisonai_code.llm.local_detect import detect_local_model
+        return detect_local_model()
+    except Exception:
+        return None
+
+
 def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
     """Map a model id to the environment variable(s) for its provider."""
     if not model:

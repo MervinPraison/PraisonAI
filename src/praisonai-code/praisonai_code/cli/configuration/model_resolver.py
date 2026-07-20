@@ -148,8 +148,32 @@ def resolve_default_model(
         return env_model
 
     try:
-        from praisonai_code.llm.env import default_model_for_available_provider
+        from praisonai_code.llm.env import (
+            default_model_for_available_provider,
+            has_provider_credential,
+        )
         model = default_model_for_available_provider()
+        # Keyless local-first: when no cloud provider credential is present,
+        # prefer a reachable local OpenAI-compatible endpoint (e.g. Ollama) so
+        # the first run works before any auth. The hosted-key path is untouched.
+        if not has_provider_credential():
+            try:
+                from praisonai_code.llm.local_detect import detect_local_model
+                local = detect_local_model()
+            except Exception:
+                local = None
+            if local:
+                if notify:
+                    try:
+                        import typer
+                        typer.echo(
+                            f"No cloud key found; using local model "
+                            f"{local.model}. Run `praisonai setup` to add a "
+                            f"hosted provider."
+                        )
+                    except Exception:
+                        pass
+                return local.model
     except Exception:
         model = _fallback_model()
 
