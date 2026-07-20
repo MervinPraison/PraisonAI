@@ -62,13 +62,13 @@ class TestYamlParityAgentMail:
         """)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
-            f.flush()
-            try:
-                config = load_and_validate_bot_yaml(f.name)
-                assert "agentmail" in config.channels
-                assert config.channels["agentmail"].token == "am_test_token"
-            finally:
-                os.unlink(f.name)
+            tmp_path = f.name
+        try:
+            config = load_and_validate_bot_yaml(tmp_path)
+            assert "agentmail" in config.channels
+            assert config.channels["agentmail"].token == "am_test_token"
+        finally:
+            os.unlink(tmp_path)
 
     def test_yaml_multi_channel_agentmail_with_telegram(self):
         """YAML with agentmail + telegram should validate both."""
