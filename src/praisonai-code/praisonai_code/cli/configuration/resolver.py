@@ -530,25 +530,48 @@ class ConfigResolver:
         return configs[0] if configs else None
     
     def _load_project_config(self) -> Optional[Dict[str, Any]]:
-        """Load project configuration with walk-up discovery."""
+        """Load project configuration with walk-up discovery.
+
+        Walk-up stops at (and does not walk past) the user's home directory.
+        Home itself is still searched for project configs, but the legacy
+        ``.praison/config.toml`` name is skipped there because that file is
+        loaded separately by ``_load_global_config()`` with a ``global:``
+        label; searching it here too would mislabel it as a ``project:``
+        source. Non-legacy project configs placed directly at ``$HOME`` (e.g.
+        ``~/praison.yaml``) remain discoverable. A discovered git root still
+        short-circuits the walk earlier when present.
+        """
         # Build search paths from current directory up to git root (or filesystem root)
         git_root = get_git_root(str(self.cwd))
         search_paths = []
         
         # Walk up from cwd to root (or git root if found)
         current = self.cwd.resolve()
-        stop_at = Path("/")
+        try:
+            home = Path.home().resolve()
+        except (RuntimeError, OSError):
+            home = None
         
         # Collect paths from current directory upward
         while current != current.parent:
             search_paths.append(current)
             if git_root and current == git_root:
                 break  # Stop at git root if found
+            if home is not None and current == home:
+                break  # Do not walk past home into shared parents
             current = current.parent
         
         # Search for config files
         for search_dir in search_paths:
             for config_name in self.PROJECT_CONFIG_NAMES:
+                # The legacy global config is owned by _load_global_config();
+                # skipping it at $HOME avoids duplicating it as a project source.
+                if (
+                    home is not None
+                    and search_dir == home
+                    and config_name == ".praison/config.toml"
+                ):
+                    continue
                 config_path = search_dir / config_name
                 if config_path.exists():
                     data = self._read_config_file(config_path)
