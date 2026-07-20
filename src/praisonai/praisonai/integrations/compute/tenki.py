@@ -76,10 +76,24 @@ class TenkiCompute:
         workspaces = identity.workspaces
         if not workspaces:
             raise RuntimeError("No Tenki workspaces available for this API key")
-        ws = next((w for w in workspaces if w.id == self._workspace_id), workspaces[0]) if self._workspace_id else workspaces[0]
+        if self._workspace_id:
+            ws = next((w for w in workspaces if w.id == self._workspace_id), None)
+            if ws is None:
+                raise RuntimeError(
+                    f"Tenki workspace {self._workspace_id!r} not found for this API key"
+                )
+        else:
+            ws = workspaces[0]
         if not ws.projects:
             raise RuntimeError(f"No Tenki projects available in workspace {ws.id}")
-        proj = next((p for p in ws.projects if p.id == self._project_id), ws.projects[0]) if self._project_id else ws.projects[0]
+        if self._project_id:
+            proj = next((p for p in ws.projects if p.id == self._project_id), None)
+            if proj is None:
+                raise RuntimeError(
+                    f"Tenki project {self._project_id!r} not found in workspace {ws.id}"
+                )
+        else:
+            proj = ws.projects[0]
         self._workspace_id, self._project_id = ws.id, proj.id
         return ws.id, proj.id
 
@@ -108,6 +122,11 @@ class TenkiCompute:
         workspace_id, project_id = self._resolve_ids(client)
         instance_id = f"tenki_{uuid.uuid4().hex[:12]}"
 
+        # Honour restricted networking: only allow outbound when the caller
+        # has not explicitly requested isolation.
+        networking = config.networking or {}
+        allow_outbound = networking.get("type", "unrestricted") != "restricted"
+
         create_kwargs: Dict[str, Any] = {
             "name": instance_id,
             "workspace_id": workspace_id,
@@ -115,12 +134,17 @@ class TenkiCompute:
             "cpu_cores": config.cpu,
             "memory_mb": config.memory_mb,
             "env": config.env or None,
-            # Tools generally need outbound network for package installs / APIs.
-            "allow_outbound": True,
+            # Tools generally need outbound network for package installs / APIs,
+            # unless the caller requested a restricted networking policy.
+            "allow_outbound": allow_outbound,
         }
-        # Custom images map to a Tenki registry image / template; default stock
-        # image otherwise (keeps the provider on stable features).
+        # A custom image maps to a Tenki registry image / template. Prefer the
+        # explicit ``tenki_image`` metadata override, then fall back to a
+        # non-default ``config.image``; otherwise keep the stock image (which
+        # keeps the provider on stable features).
         image = (config.metadata or {}).get("tenki_image")
+        if not image and config.image and config.image != "python:3.12-slim":
+            image = config.image
         if image:
             create_kwargs["image"] = image
         if config.auto_shutdown:
@@ -138,7 +162,20 @@ class TenkiCompute:
         }
 
         if config.packages:
-            self._install_packages_sync(sandbox, config.packages)
+            try:
+                self._install_packages_sync(sandbox, config.packages)
+            except Exception:
+                # A half-provisioned sandbox with missing dependencies is worse
+                # than a clean failure: tear it down before surfacing the error.
+                self._sandboxes.pop(instance_id, None)
+                try:
+                    sandbox.terminate()
+                except Exception as term_err:
+                    logger.warning(
+                        "[tenki_compute] cleanup after failed install errored: %s",
+                        term_err,
+                    )
+                raise
 
         logger.info("[tenki_compute] provisioned: %s sandbox=%s", instance_id, sandbox_id)
 
@@ -156,13 +193,19 @@ class TenkiCompute:
         await loop.run_in_executor(None, self._shutdown_sync, instance_id)
 
     def _shutdown_sync(self, instance_id: str) -> None:
-        info = self._sandboxes.pop(instance_id, None)
-        if info:
-            try:
-                info["sandbox"].terminate()
-            except Exception as e:
-                logger.warning("[tenki_compute] shutdown error: %s", e)
-            logger.info("[tenki_compute] shutdown: %s", instance_id)
+        info = self._sandboxes.get(instance_id)
+        if not info:
+            return
+        # Only drop the local handle once remote termination succeeds, so a
+        # transient failure does not orphan the cloud sandbox; the caller can
+        # retry shutdown and get_status keeps reporting it as running.
+        try:
+            info["sandbox"].terminate()
+        except Exception as e:
+            logger.warning("[tenki_compute] shutdown error: %s", e)
+            raise
+        self._sandboxes.pop(instance_id, None)
+        logger.info("[tenki_compute] shutdown: %s", instance_id)
 
     async def get_status(self, instance_id: str) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
@@ -281,32 +324,31 @@ class TenkiCompute:
     def _install_packages_sync(self, sandbox, packages: Dict[str, list]) -> None:
         pip_pkgs = packages.get("pip", [])
         if pip_pkgs:
+            # Quote each spec so metacharacters are passed as literal pip args
+            # rather than interpreted by the shell.
+            specs = " ".join(shlex.quote(str(p)) for p in pip_pkgs)
             # The default Tenki image ships python3 but not pip; bootstrap it.
             cmd = (
                 "if ! command -v pip3 >/dev/null 2>&1; then "
                 "sudo apt-get update -y && sudo apt-get install -y python3-pip; fi && "
-                f"pip3 install -q --break-system-packages {' '.join(pip_pkgs)}"
+                f"pip3 install -q --break-system-packages {specs}"
             )
             logger.info("[tenki_compute] installing pip: %s", pip_pkgs)
-            try:
-                result = sandbox.exec("bash", "-lc", cmd, timeout=300)
-                if result.exit_code != 0:
-                    logger.warning(
-                        "[tenki_compute] pip install failed: %s",
-                        (result.stderr or b"").decode(errors="replace"),
-                    )
-            except Exception as e:
-                logger.warning("[tenki_compute] pip install error: %s", e)
+            result = sandbox.exec("bash", "-lc", cmd, timeout=300)
+            if result.exit_code != 0:
+                stderr = (result.stderr or b"").decode(errors="replace")
+                raise RuntimeError(f"pip install failed: {stderr}")
 
         npm_pkgs = packages.get("npm", [])
         if npm_pkgs:
+            specs = " ".join(shlex.quote(str(p)) for p in npm_pkgs)
             cmd = (
                 "if ! command -v npm >/dev/null 2>&1; then "
                 "sudo apt-get update -y && sudo apt-get install -y npm; fi && "
-                f"npm install -g {' '.join(npm_pkgs)}"
+                f"npm install -g {specs}"
             )
             logger.info("[tenki_compute] installing npm: %s", npm_pkgs)
-            try:
-                sandbox.exec("bash", "-lc", cmd, timeout=300)
-            except Exception as e:
-                logger.warning("[tenki_compute] npm install error: %s", e)
+            result = sandbox.exec("bash", "-lc", cmd, timeout=300)
+            if result.exit_code != 0:
+                stderr = (result.stderr or b"").decode(errors="replace")
+                raise RuntimeError(f"npm install failed: {stderr}")
