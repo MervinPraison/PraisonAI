@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-sandbox"
-version = "0.0.4"
+version = "0.0.5"
 description = "Isolated agent code execution for PraisonAI — Docker, E2B, Modal, Sandlock, SSH backends extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
