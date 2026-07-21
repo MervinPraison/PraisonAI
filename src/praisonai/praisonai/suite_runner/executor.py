@@ -154,7 +154,32 @@ class SuiteExecutor:
                 if on_item_end:
                     on_item_end(result, idx, total)
                 continue
-            
+
+            # Dry run: report runnable items without executing them.
+            # Runs before env checks so a preview lists what *would* run
+            # even when credentials are absent.
+            if self.dry_run:
+                result = RunResult(
+                    item_id=item.item_id,
+                    suite=item.suite,
+                    group=item.group,
+                    source_path=item.source_path,
+                    block_index=item.block_index,
+                    language=item.language,
+                    line_start=item.line_start,
+                    line_end=item.line_end,
+                    runnable_decision=item.runnable_decision,
+                    status="not_run",
+                    skip_reason="Dry run",
+                    code_hash=item.code_hash,
+                )
+                results.append(result)
+
+                if on_item_end:
+                    on_item_end(result, idx, total)
+
+                continue
+
             # Check required env from item
             if item.require_env:
                 missing = runner.check_required_env(item.require_env)
@@ -179,27 +204,6 @@ class SuiteExecutor:
                     if on_item_end:
                         on_item_end(result, idx, total)
                     continue
-            if self.dry_run:
-                result = RunResult(
-                    item_id=item.item_id,
-                    suite=item.suite,
-                    group=item.group,
-                    source_path=item.source_path,
-                    block_index=item.block_index,
-                    language=item.language,
-                    line_start=item.line_start,
-                    line_end=item.line_end,
-                    runnable_decision=item.runnable_decision,
-                    status="not_run",
-                    skip_reason="Dry run",
-                    code_hash=item.code_hash,
-                )
-                results.append(result)
-
-                if on_item_end:
-                    on_item_end(result, idx, total)
-
-                continue
             # Execute
             result = runner.run(
                 item,
