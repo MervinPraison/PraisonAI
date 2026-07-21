@@ -21,20 +21,20 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 21 | 45 | 14056 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
-| ✅ Approval | 1 | 5 | 2262 |
+| ✅ Approval | 1 | 5 | 2286 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 2868 |
-| ✅ Autonomy | 3 | 7 | 2705 |
-| ✅ Bots | 7 | 28 | 11056 |
+| ✅ Autonomy | 3 | 7 | 2707 |
+| ✅ Bots | 7 | 28 | 11076 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 116 | 31950 |
+| ✅ CLI | 5 | 118 | 32713 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3907 |
 | ✅ Conditions | 1 | 3 | 1179 |
-| ✅ Configuration | 3 | 7 | 2765 |
-| ✅ Context Management | 16 | 34 | 13176 |
-| ✅ Database | 1 | 40 | 6124 |
+| ✅ Configuration | 3 | 7 | 2772 |
+| ✅ Context Management | 16 | 34 | 13204 |
+| ✅ Database | 1 | 40 | 6184 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -44,16 +44,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 51 | 18026 |
+| ✅ Gateway | 7 | 52 | 18697 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 3928 |
+| ✅ Hooks | 2 | 9 | 3981 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4767 |
 | ✅ Loops | 4 | 4 | 1202 |
-| ✅ MCP | 1 | 58 | 13241 |
-| ✅ Memory | 6 | 17 | 6481 |
+| ✅ MCP | 1 | 58 | 13322 |
+| ✅ Memory | 6 | 17 | 6635 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2779 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -62,27 +62,27 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1879 |
 | ✅ Prompts | 2 | 8 | 1726 |
-| ✅ Providers | 1 | 55 | 7455 |
+| ✅ Providers | 1 | 55 | 7459 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
 | ✅ Realtime | 2 | 5 | 668 |
 | ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 6 | 2686 |
+| ✅ Sandbox | 5 | 6 | 2700 |
 | ✅ Security | 1 | 3 | 2903 |
-| ✅ Sessions | 4 | 13 | 5198 |
-| ✅ Skills | 6 | 13 | 4893 |
+| ✅ Sessions | 4 | 13 | 5286 |
+| ✅ Skills | 6 | 13 | 4946 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 131 | 37117 |
+| ✅ Tools | 12 | 132 | 37466 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 8 | 2055 |
-| ✅ Workflows | 5 | 16 | 6522 |
+| ✅ Workflows | 5 | 16 | 6527 |
 
 ## Documentation Without Features
 
