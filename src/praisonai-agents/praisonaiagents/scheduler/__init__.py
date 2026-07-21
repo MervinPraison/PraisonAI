@@ -17,6 +17,7 @@ Usage:
 Default storage: ~/.praisonai/config.yaml (under ``schedules`` key)
 """
 
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -34,6 +35,50 @@ if TYPE_CHECKING:
     )
 
 _module_cache = {}
+
+# ── canonical default store ──────────────────────────────────────────────────
+# Every first-class consumer (agent tools, gateway tick, host bridge) resolves
+# its store through ``get_default_store()`` so the writer and reader can never
+# drift onto different backends (see issue #3264).  ``set_default_store()``
+# overrides the singleton process-wide.
+_default_store = None
+_default_store_lock = threading.Lock()
+
+
+def get_default_store():
+    """Return the process-wide canonical schedule store.
+
+    Lazily constructs a :class:`ConfigYamlScheduleStore` (persisting to
+    ``~/.praisonai/config.yaml``) on first use, migrating any pre-existing
+    ``jobs.json`` data.  All consumers share this single instance so a job
+    authored on any surface is polled by the gateway ticker.
+    """
+    global _default_store
+    with _default_store_lock:
+        if _default_store is None:
+            from .config_store import ConfigYamlScheduleStore
+            store = ConfigYamlScheduleStore()
+            try:
+                store.migrate_from_json()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "jobs.json migration skipped: %s", e,
+                )
+            _default_store = store
+        return _default_store
+
+
+def set_default_store(store):
+    """Override the process-wide canonical schedule store.
+
+    A deployment that deliberately swaps the backend calls this once at
+    startup; the override is then honoured by the agent tools, the gateway
+    tick loop, and the host-integration bridge alike.
+    """
+    global _default_store
+    with _default_store_lock:
+        _default_store = store
 
 
 def __getattr__(name: str):
@@ -131,4 +176,6 @@ __all__ = [
     "Suggestion",
     "SuggestionStore",
     "MAX_PENDING_CAP",
+    "get_default_store",
+    "set_default_store",
 ]

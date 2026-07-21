@@ -33,24 +33,36 @@ def set_store(store):
     When PraisonAIUI is running, it calls this at startup to redirect
     all agent schedule_add/list/remove operations to the unified
     ``config.yaml`` instead of the default ``jobs.json``.
+
+    This also repoints the core canonical default store so the gateway
+    tick loop and host bridge read/write the same backend (issue #3264).
     """
     global _store_instance
     with _store_instance_lock:
         _store_instance = store
+    try:
+        from ..scheduler import set_default_store
+        set_default_store(store)
+    except Exception as e:
+        # Repointing the canonical default is best-effort: the local
+        # ``_store_instance`` above is already authoritative for the tools.
+        # Log (don't silently pass) so any reader/writer drift is diagnosable.
+        logger.warning("Could not repoint canonical schedule store: %s", e)
 
 def _get_store():
     """Return (or create) the global schedule store.
 
-    Uses ``ConfigYamlScheduleStore`` (config.yaml) by default.
-    Automatically migrates any existing ``jobs.json`` data on first use.
+    Resolves the canonical default store shared by the gateway tick loop
+    and host bridge (``scheduler.get_default_store()``) so a job authored
+    by the agent is polled by the ticker.  An explicit ``set_store()``
+    override still takes precedence.
     """
     global _store_instance
     with _store_instance_lock:
-        if _store_instance is None:
-            from ..scheduler.config_store import ConfigYamlScheduleStore
-            _store_instance = ConfigYamlScheduleStore()
-            _store_instance.migrate_from_json()
-        return _store_instance
+        if _store_instance is not None:
+            return _store_instance
+    from ..scheduler import get_default_store
+    return get_default_store()
 
 # ── tools ────────────────────────────────────────────────────────────────────
 
