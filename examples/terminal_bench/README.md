@@ -69,7 +69,7 @@ harbor run -d terminal-bench/terminal-bench-2-1 -a oracle
 # Run PraisonAI external agent (uses direct Agent() class)
 PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
   --agent "examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent" \
-  --model openai/gpt-4o \
+  --model openai/gpt-4o-mini \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY \
   -n 4
 ```
@@ -80,7 +80,7 @@ PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
 # Run PraisonAI wrapper agent (uses `praisonai "TASK"` CLI pattern)
 PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
   --agent "examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent" \
-  --model openai/gpt-4o \
+  --model openai/gpt-4o-mini \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY \
   -n 4
 ```
@@ -90,7 +90,7 @@ PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
 ```bash
 PYTHONPATH=. harbor run -d terminal-bench/terminal-bench-2-1 \
   --agent "examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent" \
-  --model openai/gpt-4o \
+  --model openai/gpt-4o-mini \
   --env daytona -n 32 \
   --ae OPENAI_API_KEY=$OPENAI_API_KEY
 ```

@@ -7,7 +7,7 @@ BaseEnvironment interface. The agent uses Harbor's exec() as a bash tool.
 Usage:
     harbor run -d terminal-bench/terminal-bench-2 \
         --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \
-        --model openai/gpt-4o \
+        --model openai/gpt-4o-mini \
         --ae OPENAI_API_KEY=$OPENAI_API_KEY
 
 Architecture:
@@ -140,7 +140,7 @@ class PraisonAIExternalAgent(BaseAgent):
                     "   Keep calling bash_tool until the test PASSES or you have exhausted all approaches."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o",
+                llm=self.model_name or "openai/gpt-4o-mini",
             )
 
             # Execute the agent with outer loop to handle premature stopping
@@ -214,7 +214,7 @@ if __name__ == "__main__":
     print("PraisonAI External Agent for Terminal-Bench 2.0")
     print("Usage: harbor run -d terminal-bench/terminal-bench-2 \\")
     print("  --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \\")
-    print("  --model openai/gpt-4o")
+    print("  --model openai/gpt-4o-mini")
     print()
     print("Dependencies:")
     print("  pip install harbor praisonaiagents")

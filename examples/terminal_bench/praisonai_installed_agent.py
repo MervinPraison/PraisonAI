@@ -9,7 +9,7 @@ Usage:
     # First, this would need to be integrated into Harbor's codebase as:
     # src/harbor/agents/installed/praisonai.py
     
-    harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o
+    harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o-mini
 
 Architecture:
     Harbor Container → praisonaiagents installed inside → execute_command tool
@@ -115,7 +115,7 @@ def main():
         sys.exit(1)
         
     instruction = sys.argv[1]
-    model = sys.argv[2] if len(sys.argv) > 2 else "openai/gpt-4o"
+    model = sys.argv[2] if len(sys.argv) > 2 else "openai/gpt-4o-mini"
     max_turns = int(sys.argv[3]) if len(sys.argv) > 3 else 30
     try:
         from praisonaiagents import Agent
@@ -189,7 +189,7 @@ if __name__ == "__main__":
         This executes the headless runner script with the instruction,
         similar to how other installed agents work in Harbor.
         """
-        model = self.model_name or "openai/gpt-4o"
+        model = self.model_name or "openai/gpt-4o-mini"
         max_turns = getattr(self, 'max_turns', 30)
         
         # Build command to run PraisonAI
@@ -311,7 +311,7 @@ if __name__ == "__main__":
     print("   - Add PraisonAI to _AGENTS list and _AGENT_MAP")
     print()
     print("3. Run with Harbor:")
-    print("   harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o")
+    print("   harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o-mini")
     print()
     print("Dependencies:")
     print("   pip install harbor praisonaiagents")

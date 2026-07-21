@@ -13,7 +13,7 @@ The multi-agent approach is useful for Terminal-Bench tasks that benefit from:
 Usage:
     harbor run -d terminal-bench/terminal-bench-2 \
         --agent-import-path examples.terminal_bench.multi_agent_example:MultiAgentPraisonAI \
-        --model openai/gpt-4o
+        --model openai/gpt-4o-mini
 """
 
 import asyncio
@@ -101,7 +101,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "Consider potential issues and edge cases. "
                     "Output your plan as a numbered list of specific actions."
                 ),
-                llm=self.model_name or "openai/gpt-4o",
+                llm=self.model_name or "openai/gpt-4o-mini",
             )
             
             executor = Agent(
@@ -114,7 +114,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "If a step fails, try alternative approaches."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o", 
+                llm=self.model_name or "openai/gpt-4o-mini", 
             )
             
             verifier = Agent(
@@ -127,7 +127,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "If issues are found, suggest specific fixes."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o",
+                llm=self.model_name or "openai/gpt-4o-mini",
             )
 
             print(f"🚀 Multi-Agent PraisonAI starting: {instruction[:100]}...")
@@ -194,7 +194,7 @@ class MultiAgentPraisonAI(BaseAgent):
                 "framework": "praisonai-multi",
                 "agent_type": "multi-agent-team", 
                 "agents": [agent.name for agent in agents],
-                "model": self.model_name or "openai/gpt-4o",
+                "model": self.model_name or "openai/gpt-4o-mini",
                 "phases": ["planning", "execution", "verification"],
                 "tools_used": ["bash_tool"],
                 "result_summary": str(result.get("verification", ""))[:200],
@@ -252,14 +252,14 @@ class AgentTeamPraisonAI(BaseAgent):
             planner = Agent(
                 name="planner",
                 instructions="Create detailed execution plans for terminal tasks",
-                llm=self.model_name or "openai/gpt-4o"
+                llm=self.model_name or "openai/gpt-4o-mini"
             )
             
             executor = Agent(
                 name="executor",
                 instructions="Execute terminal commands based on plans",
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o"
+                llm=self.model_name or "openai/gpt-4o-mini"
             )
             
             # Create tasks
@@ -317,12 +317,12 @@ if __name__ == "__main__":
     print("# Multi-agent custom workflow")
     print("harbor run -d terminal-bench/terminal-bench-2 \\")
     print("  --agent-import-path examples.terminal_bench.multi_agent_example:MultiAgentPraisonAI \\")
-    print("  --model openai/gpt-4o")
+    print("  --model openai/gpt-4o-mini")
     print()
     print("# AgentTeam structured workflow")  
     print("harbor run -d terminal-bench/terminal-bench-2 \\")
     print("  --agent-import-path examples.terminal_bench.multi_agent_example:AgentTeamPraisonAI \\")
-    print("  --model openai/gpt-4o")
+    print("  --model openai/gpt-4o-mini")
     print()
     print("Benefits of multi-agent approach:")
     print("- Task decomposition and planning")

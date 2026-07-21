@@ -80,7 +80,7 @@ class TestPraisonAIExternalAgent:
         # cost_summary is a dict property on the real Agent, not a callable.
         mock_agent = Mock()
         mock_agent.name = "test-agent"
-        mock_agent.llm = "gpt-4o"
+        mock_agent.llm = "gpt-4o-mini"
         mock_agent.cost_summary = {"tokens_in": 100, "tokens_out": 50, "cost": 0.01}
 
         context = SimpleNamespace(

@@ -8,7 +8,7 @@ that matches the standard `praisonai "TASK"` CLI usage pattern.
 Usage:
     harbor run -d terminal-bench/terminal-bench-2 \
         --agent-import-path examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent \
-        --model openai/gpt-4o \
+        --model openai/gpt-4o-mini \
         --ae OPENAI_API_KEY=$OPENAI_API_KEY \
         -n 4
 
@@ -95,7 +95,7 @@ class PraisonAIWrapperAgent(BaseAgent):
         
         Uses the `praisonai "TASK"` CLI pattern inside the Harbor container.
         """
-        model = self.model_name or "openai/gpt-4o"
+        model = self.model_name or "openai/gpt-4o-mini"
         
         # Build the `praisonai code` headless command. --dangerously-skip-approval
         # makes the terminal assistant run autonomously (no approval hang in a
@@ -151,7 +151,7 @@ class PraisonAIWrapperAgent(BaseAgent):
             # Store result summary
             context.metadata = {
                 "agent_name": "praisonai-wrapper",
-                "model": self.model_name or "openai/gpt-4o",
+                "model": self.model_name or "openai/gpt-4o-mini",
                 "framework": "praisonai",
                 "wrapper_type": "cli",
                 "instruction_preview": instruction[:200],
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     print("Usage with Harbor:")
     print("  harbor run -d terminal-bench/terminal-bench-2 \\")
     print("    --agent-import-path examples.terminal_bench.praisonai_wrapper_agent:PraisonAIWrapperAgent \\")
-    print("    --model openai/gpt-4o")
+    print("    --model openai/gpt-4o-mini")
     print()
     print("Dependencies:")
     print("  pip install harbor praisonai")
