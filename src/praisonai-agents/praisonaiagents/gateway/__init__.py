@@ -131,6 +131,11 @@ from .protocols import (
     FrameDecodeError,
     ClientFrame,
     decode_client_frame,
+    # Weak / placeholder secret guard (Issue #3259)
+    KNOWN_WEAK_SECRETS,
+    WeakGatewaySecretError,
+    is_weak_secret,
+    assert_gateway_secret_strong,
 )
 from .hooks import (
     HookAction,
@@ -324,6 +329,11 @@ __all__ = [
     "FrameDecodeError",
     "ClientFrame",
     "decode_client_frame",
+    # Weak / placeholder secret guard (Issue #3259)
+    "KNOWN_WEAK_SECRETS",
+    "WeakGatewaySecretError",
+    "is_weak_secret",
+    "assert_gateway_secret_strong",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",

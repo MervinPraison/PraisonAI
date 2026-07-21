@@ -1999,6 +1999,71 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
 
 
 # ---------------------------------------------------------------------------
+# Weak / placeholder secret guard (Issue #3259)
+# ---------------------------------------------------------------------------
+
+KNOWN_WEAK_SECRETS: frozenset = frozenset({
+    "change-me", "changeme", "change-me-now", "changemenow",
+    "your-token-here", "your_token_here", "your-secret-here",
+    "secret", "password", "passwd", "test", "token", "admin",
+    "default", "example", "placeholder", "none", "null", "todo",
+    # Copy-paste footgun: the literal fix-hint command pasted verbatim.
+    "$(openssl rand -hex 16)", "$(openssl rand -hex 32)",
+})
+"""Well-known placeholder/weak shared secrets that must never protect a gateway.
+
+A gateway bound to an external interface and "protected" by one of these
+publicly-known values is effectively unauthenticated. See Issue #3259.
+"""
+
+
+class WeakGatewaySecretError(Exception):
+    """Raised when a gateway secret matches a known-weak/placeholder value."""
+
+    def __init__(self, field: str = "gateway.auth_token"):
+        self.field = field
+        super().__init__(
+            f"Refusing to start: {field} is a known-weak/placeholder value.\n"
+            f"A publicly-known secret provides no real authentication.\n"
+            f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
+            f"Or:   export GATEWAY_AUTH_TOKEN=\"$(openssl rand -hex 16)\"  "
+            f"(run in a shell so the command is expanded, not pasted literally)"
+        )
+
+
+def is_weak_secret(value: Optional[str]) -> bool:
+    """Return True if ``value`` is empty or a known-weak/placeholder secret.
+
+    Comparison is whitespace-stripped and case-insensitive.
+
+    Examples:
+        >>> is_weak_secret("change-me")
+        True
+        >>> is_weak_secret("$(openssl rand -hex 16)")
+        True
+        >>> is_weak_secret("strong-non-placeholder-token")
+        False
+    """
+    if not value:
+        return True
+    return str(value).strip().lower() in KNOWN_WEAK_SECRETS
+
+
+def assert_gateway_secret_strong(value: Optional[str], *, field: str = "gateway.auth_token") -> None:
+    """Fail closed if ``value`` is a known-weak/placeholder gateway secret.
+
+    Args:
+        value: The resolved secret to validate.
+        field: Name of the credential (used in the error message).
+
+    Raises:
+        WeakGatewaySecretError: If ``value`` matches a known-weak value.
+    """
+    if is_weak_secret(value):
+        raise WeakGatewaySecretError(field=field)
+
+
+# ---------------------------------------------------------------------------
 # Auth, Pairing, and Session Binding Protocols (Issue #1588 Gap 3)
 # ---------------------------------------------------------------------------
 

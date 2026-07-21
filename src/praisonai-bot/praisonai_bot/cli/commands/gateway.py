@@ -339,6 +339,68 @@ def gateway_status(
             output.print_error(f"Error checking gateway server status: {str(e)}")
 
 
+def _check_gateway_secret_strength(config_path: str):
+    """Inspect the gateway's own auth_token for known-weak/placeholder values.
+
+    Returns an actionable error string when the gateway is on an EXTERNAL bind
+    and its resolved ``auth_token`` is either missing or a known-weak/
+    placeholder value (caller should fail closed, mirroring startup). On a
+    loopback bind a warning is printed for a weak token and ``None`` is returned
+    (consistent with the permissive-loopback posture). Returns ``None`` when the
+    token is strong, absent on a loopback bind, or the config cannot be read.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return None
+
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return None
+
+    gw = cfg.get("gateway", cfg) or {}
+    raw_token = gw.get("auth_token") or os.environ.get("GATEWAY_AUTH_TOKEN", "")
+    token = _resolve_env_token(raw_token) if raw_token else ""
+
+    from praisonaiagents.gateway.protocols import (
+        is_weak_secret,
+        resolve_auth_mode,
+        WeakGatewaySecretError,
+    )
+
+    # A strong, present token needs no further checks.
+    if token and not is_weak_secret(token):
+        return None
+
+    bind_host = gw.get("bind_host") or gw.get("host") or "127.0.0.1"
+    is_local = resolve_auth_mode(str(bind_host)) == "local"
+
+    # Absent token: only a concern on an external bind, where startup fails
+    # closed for a missing required secret. Doctor must agree (#3259).
+    if not token:
+        if is_local:
+            return None
+        return (
+            f"Refusing to start: gateway.auth_token is required for external "
+            f"bind {bind_host} but is missing.\n"
+            f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
+            f'Or:   export GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"'
+        )
+
+    # Present-but-weak token: warn on loopback, fail closed externally.
+    if is_local:
+        print(
+            f"⚠  gateway.auth_token is a known-weak/placeholder value "
+            f"(loopback bind {bind_host}). Rotate before exposing externally."
+        )
+        return None
+
+    return str(WeakGatewaySecretError(field="gateway.auth_token"))
+
+
 def _resolve_env_token(value):
     """Resolve a credential input to its value for probing.
 
@@ -614,9 +676,29 @@ def gateway_doctor(
     """
     import asyncio
 
+    # Inspect the gateway's OWN auth_token for known-weak/placeholder values
+    # (Issue #3259) — channel probes never cover this. Fail closed on an
+    # external bind, warn on loopback (consistent with runtime posture).
+    gateway_secret_error = _check_gateway_secret_strength(config)
+
     channels = _load_channels(config)
     if not channels:
-        print("No channels configured.")
+        if json_output:
+            # Always emit a single parseable JSON document, even on the
+            # weak/missing gateway-secret failure path, so automation can
+            # distinguish an auth failure from an empty/interrupted run.
+            import json
+
+            payload: dict = {"probes": {}}
+            if gateway_secret_error:
+                payload["gateway_auth_token"] = "weak"
+            print(json.dumps(payload, indent=2))
+        else:
+            print("No channels configured.")
+            if gateway_secret_error:
+                print(gateway_secret_error)
+        if gateway_secret_error:
+            raise typer.Exit(1)
         raise typer.Exit(0)
 
     # Credential source availability, computed WITHOUT printing any value
@@ -636,12 +718,16 @@ def gateway_doctor(
         payload = {"probes": _probe_results_to_dict(results)}
         if availability:
             payload["secrets"] = availability
+        if gateway_secret_error:
+            payload["gateway_auth_token"] = "weak"
         print(json.dumps(payload, indent=2))
     else:
         _print_secret_availability(availability)
         _render_probe_results(results, json_output=False)
+        if gateway_secret_error:
+            print(gateway_secret_error)
 
-    if not all_ok:
+    if not all_ok or gateway_secret_error:
         raise typer.Exit(1)
 
 
