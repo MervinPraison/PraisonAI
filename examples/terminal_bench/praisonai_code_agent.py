@@ -18,8 +18,9 @@ Notes:
     - `--dangerously-skip-approval` sets PRAISON_APPROVAL_MODE=auto +
       PRAISONAI_TOOL_SAFETY=off so the assistant runs fully autonomously in the
       container (no approval hang in a non-TTY session).
-    - `praisonai code` always exits 0; Harbor grades by task verification, so the
-      process exit code is intentionally ignored.
+    - `praisonai code` normally exits 0 and Harbor grades by task verification,
+      so a benchmark miss does not fail the run — but the real exit status is
+      propagated so genuine install/auth/startup failures still surface.
     - The base `praisonai` package is sufficient; heavy `code` extras are not
       required (ACP tools degrade gracefully).
 
@@ -83,11 +84,16 @@ class PraisonAICodeAgent(BaseInstalledAgent):
             f"--dangerously-skip-approval "
             f"--model {shlex.quote(model)} "
             "> /tmp/praisonai_code.log 2>&1; "
-            # Tee the log into logs_dir so populate_context_post_run can read it.
+            # Capture the real exit status so install/auth/startup failures still
+            # surface instead of being silently masked (Harbor otherwise records a
+            # completed attempt for a crashed agent).
+            "status=$?; "
+            # Tee the log into a stable path so populate_context_post_run can read it.
             "cp /tmp/praisonai_code.log /tmp/praisonai_code_run.log 2>/dev/null || true; "
-            # Ignore exit code: `praisonai code` always exits 0 and Harbor grades
-            # by task verification.
-            "true"
+            # `praisonai code` normally exits 0 (Harbor grades by task
+            # verification), so a genuine benchmark miss won't fail here — but a
+            # nonzero status means the assistant itself failed to run.
+            "exit $status"
         )
 
         # `extra_env` is the --ae channel; merge it into the exec env (never host
