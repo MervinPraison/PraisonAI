@@ -4348,7 +4348,7 @@ class WebSocketGateway:
         """Start a background task that polls the scheduler for due jobs.
 
         Creates a ``ScheduledAgentExecutor`` wired to:
-        - a ``ScheduleRunner`` with a ``FileScheduleStore``
+        - a ``ScheduleRunner`` with the canonical default store
         - this gateway's agent registry for resolution
         - ``_deliver_scheduled_result`` for outbound delivery
         """
@@ -4356,7 +4356,7 @@ class WebSocketGateway:
             try:
                 from praisonaiagents.scheduler import (
                     ScheduleRunner,
-                    FileScheduleStore,
+                    get_default_store,
                 )
                 from praisonai_bot.scheduler.executor import ScheduledAgentExecutor
             except ImportError as e:
@@ -4365,7 +4365,7 @@ class WebSocketGateway:
                 )
                 return
 
-            store = FileScheduleStore()
+            store = get_default_store()
             runner = ScheduleRunner(store)
 
             def _resolve_agent(agent_id):

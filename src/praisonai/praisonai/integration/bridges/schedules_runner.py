@@ -10,14 +10,14 @@ _loop = None
 
 
 def ensure_schedule_runner() -> None:
-    """Lazy-init FileScheduleStore-backed runner and optional ScheduleLoop."""
+    """Lazy-init runner (canonical default store) and optional ScheduleLoop."""
     global _runner_started, _loop
     if _runner_started:
         return
     try:
-        from praisonaiagents.scheduler import FileScheduleStore, ScheduleLoop
+        from praisonaiagents.scheduler import get_default_store, ScheduleLoop
 
-        store = FileScheduleStore()
+        store = get_default_store()
 
         def on_trigger(job):
             log.info("Schedule triggered: %s", getattr(job, "name", job))
