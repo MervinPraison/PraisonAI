@@ -530,39 +530,21 @@ class CodeIntelligenceRouter:
             )
         
         try:
-            import subprocess
             workspace = self.runtime.config.workspace
-            
-            cmd = ["grep", "-rn", search_term]
-            if file_path:
-                cmd.append(file_path)
-            else:
-                cmd.append(workspace)
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            results = []
-            if result.stdout:
-                for line in result.stdout.strip().split('\n')[:50]:  # Limit results
-                    if line:
-                        parts = line.split(':', 2)
-                        if len(parts) >= 2:
-                            results.append({
-                                "file": parts[0],
-                                "line": int(parts[1]),
-                                "content": parts[2] if len(parts) > 2 else ""
-                            })
-            
+            search_path = file_path or workspace
+
+            # Prefer the ripgrep-backed core grep (gitignore-aware, result-capped,
+            # truncation-safe). Fall back to a plain ``grep -rn`` only when the
+            # core tool is unavailable or errors.
+            results = self._core_grep(search_term, file_path)
+            if results is None:
+                results = self._fallback_grep(search_term, search_path)
+
             citations = [
                 {"file": r["file"], "line": r["line"], "type": "search_result"}
                 for r in results
             ]
-            
+
             return CodeQueryResult(
                 intent=CodeIntent.SEARCH_CODE,
                 success=True,
@@ -578,6 +560,84 @@ class CodeIntelligenceRouter:
                 lsp_used=False,
                 error=str(e)
             )
+    
+    def _core_grep(self, search_term: str, file_path: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+        """Search using the ripgrep-backed core ``grep`` tool.
+
+        The core tool is workspace-contained (it resolves ``path`` under the
+        current workspace root), so we pass a workspace-relative path — the file
+        when one was given, otherwise ``"."`` for a whole-tree search.
+
+        Core ``grep`` returns a newline-joined ``path:line: matched line``
+        string. We parse it into ``{file, line, content}`` dicts.
+
+        Returns the parsed results, or ``None`` when the core tool is
+        unavailable/errors so the caller can fall back to ``grep -rn``.
+        """
+        try:
+            from praisonaiagents.tools import grep as core_grep
+        except ImportError:
+            return None
+
+        try:
+            output = core_grep(search_term, path=file_path or ".")
+        except Exception as e:
+            logger.debug(f"Core grep failed, will fall back: {e}")
+            return None
+
+        if not isinstance(output, str):
+            return None
+
+        stripped = output.strip()
+        # Core grep signals no matches / errors with a short human message
+        # rather than raising; treat those as "fall back" so a real ``grep``
+        # error surfaces the same way it did before.
+        if not stripped or stripped == "No matches found.":
+            return []
+        if stripped.startswith("Error:"):
+            logger.debug(f"Core grep returned error, will fall back: {stripped}")
+            return None
+
+        results: List[Dict[str, Any]] = []
+        for line in stripped.split('\n'):
+            if not line or line.startswith("... "):  # skip truncation hint
+                continue
+            parts = line.split(':', 2)
+            if len(parts) >= 2:
+                try:
+                    line_no = int(parts[1])
+                except ValueError:
+                    continue
+                results.append({
+                    "file": parts[0],
+                    "line": line_no,
+                    "content": parts[2] if len(parts) > 2 else ""
+                })
+        return results
+
+    def _fallback_grep(self, search_term: str, search_path: str) -> List[Dict[str, Any]]:
+        """Last-resort search using a plain ``grep -rn`` subprocess."""
+        import subprocess
+
+        result = subprocess.run(
+            ["grep", "-rn", search_term, search_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        results: List[Dict[str, Any]] = []
+        if result.stdout:
+            for line in result.stdout.strip().split('\n')[:50]:  # Limit results
+                if line:
+                    parts = line.split(':', 2)
+                    if len(parts) >= 2:
+                        results.append({
+                            "file": parts[0],
+                            "line": int(parts[1]),
+                            "content": parts[2] if len(parts) > 2 else ""
+                        })
+        return results
     
     def _extract_file_from_query(self, query: str) -> Optional[str]:
         """Extract file path from query."""
