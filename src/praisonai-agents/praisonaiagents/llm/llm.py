@@ -1518,7 +1518,7 @@ Respond with ONLY a valid JSON tool call in this format:
         
         return "\n".join(lines).strip()
 
-    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
+    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
         """
         Format tool result message for Ollama provider.
 
