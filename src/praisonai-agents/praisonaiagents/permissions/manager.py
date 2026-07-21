@@ -5,6 +5,7 @@ Manages permission rules, persistent approvals, and integrates
 with doom loop detection.
 """
 
+import fnmatch
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -226,6 +227,62 @@ class PermissionManager:
         "delete_file:",
     )
 
+    # Read-tool prefixes whose ``<prefix>:<path>`` target is gated by the
+    # secret-file default. A default coding agent can otherwise ``read`` a
+    # ``.env``/private key and forward its contents to the model provider — a
+    # silent secret-exfiltration path. Reads of these files default to ``ask``.
+    _READ_PREFIXES = (
+        "read:",
+        "read_file:",
+    )
+
+    # Basename globs that identify a secret file. Matched case-insensitively
+    # against the *basename* so ``config/.env`` and ``.env`` both gate. Safe
+    # example/sample files are excluded via ``_SECRET_ALLOW_PATTERNS`` below.
+    _SECRET_PATTERNS = (
+        ".env",
+        "*.env",
+        ".env.*",
+        "*.env.*",
+        "*.pem",
+        "*.key",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "*.pfx",
+        "*.p12",
+    )
+
+    # Basename globs that are always safe to read even though they match a
+    # secret pattern (documentation templates without real secrets).
+    _SECRET_ALLOW_PATTERNS = (
+        "*.env.example",
+        "*.env.sample",
+        "*.env.template",
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        "*.example",
+        "*.sample",
+        "*.template",
+    )
+
+    def _is_secret_read_path(self, path: str) -> bool:
+        """Return ``True`` if *path* is a secret file that should gate reads.
+
+        Matches the file's basename (case-insensitively) against the built-in
+        secret globs, excluding safe example/sample/template files. Purely
+        pattern-based (no filesystem access) so it is cheap and side-effect
+        free.
+        """
+        basename = os.path.basename(path.rstrip("/\\").strip()).lower()
+        if not basename:
+            return False
+        if any(fnmatch.fnmatch(basename, p) for p in self._SECRET_ALLOW_PATTERNS):
+            return False
+        return any(fnmatch.fnmatch(basename, p) for p in self._SECRET_PATTERNS)
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -264,6 +321,31 @@ class PermissionManager:
                 )
                 if boundary is not None:
                     return boundary
+
+        # Secret-file read gate: reading ``.env``/private keys and forwarding
+        # them to the model provider is a silent secret-leak path. Such reads
+        # default to ``ask`` even when no rule matches. An explicit user
+        # rule/approval (e.g. ``read:*.env=allow``) still overrides, so opting
+        # in for a trusted workflow remains one rule.
+        read_prefix = next(
+            (p for p in self._READ_PREFIXES if target.startswith(p)), None
+        )
+        if read_prefix is not None and self._is_secret_read_path(
+            target[len(read_prefix):]
+        ):
+            flat = self._check_flat(target, agent)
+            # Honour any explicit user rule/approval (allow to opt in, deny to
+            # harden). Only the bare "no matching rule" default is upgraded.
+            if flat.rule is not None or flat.approved is not None:
+                return flat
+            return PermissionResult(
+                action=PermissionAction.ASK,
+                target=target,
+                reason=(
+                    "Reading a secret file requires approval "
+                    "(override with a 'read' allow rule to opt in)"
+                ),
+            )
 
         return self._check_flat(target, agent)
 
