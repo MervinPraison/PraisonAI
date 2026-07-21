@@ -7,7 +7,12 @@ Manages built-in and plugin-provided migration rules.
 import copy
 import warnings
 from typing import Any, Dict, List, Optional
-from .doctor_protocol import DoctorContractProtocol, Finding
+from .doctor_protocol import (
+    DoctorContractProtocol,
+    Finding,
+    ConfigDiff,
+    RepairPlan,
+)
 from .builtin_rules import CliBackendMigrationRule
 
 
@@ -62,18 +67,140 @@ class DoctorRulesRegistry:
         return all_findings
     
     def apply_all_fixes(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply fixes from all rules that have findings."""
+        """
+        Apply fixes from all rules that have findings.
+
+        Backward-compatible convenience wrapper that returns only the repaired
+        config dict. For the safety-rail surface (diff preview, backup, refuse,
+        re-validation) use :meth:`plan_fixes`.
+        """
+        return self.plan_fixes(config).config
+
+    def plan_fixes(
+        self,
+        config: Dict[str, Any],
+        *,
+        dry_run: bool = True,
+        backup: bool = False,
+        backup_path: Optional[str] = None,
+    ) -> RepairPlan:
+        """
+        Produce a :class:`RepairPlan` describing what the doctor repair changes.
+
+        Safety contract:
+        - **Diff preview**: every applied rule records a before/after ``ConfigDiff``.
+        - **Refuse-on-unrecoverable**: a rule that raises is skipped, its blocking
+          finding(s) recorded in ``refused``, and its partial change discarded.
+        - **Backup**: when ``dry_run=False`` and ``backup=True`` the original
+          config is snapshotted to ``backup_path`` before returning.
+        - **Re-validation**: after applying, residual findings are re-collected so
+          callers can report "repair left N finding(s)".
+
+        Args:
+            config: The configuration to repair (never mutated).
+            dry_run: When True (default) nothing is written to disk; the plan's
+                ``config`` holds the proposed result for previewing.
+            backup: When True (and not dry_run), write a timestamped backup of
+                the original config before applying.
+            backup_path: Explicit backup destination. If omitted a timestamped
+                path is derived.
+
+        Returns:
+            A :class:`RepairPlan`.
+        """
         result = copy.deepcopy(config)
-        
+        diffs: List[ConfigDiff] = []
+        refused: List[Finding] = []
+
         for rule in self.get_rules():
             try:
                 findings = rule.collect_findings(result)
-                if findings:
-                    result = rule.apply_fix(result)
             except Exception as e:
-                warnings.warn(f"Error applying fix for rule '{rule.rule_id}': {e}")
-        
-        return result
+                # Refuse-on-unrecoverable: a rule that cannot even verify the
+                # config is a blocking condition, not a silent skip. Record it
+                # so callers see it in ``refused`` instead of an apparently
+                # clean plan.
+                warnings.warn(f"Refusing rule '{rule.rule_id}' (collect failed): {e}")
+                refused.append(Finding(
+                    rule_id=rule.rule_id,
+                    severity="error",
+                    message=f"Refused to collect findings (unrecoverable): {e}",
+                    fix_description=None,
+                    context={"error": str(e)},
+                ))
+                continue
+
+            if not findings:
+                continue
+
+            # Snapshot the prior state, and hand the rule its *own* fresh copy so
+            # that rules which mutate-and-return their argument (allowed by the
+            # protocol) don't alias ``before`` and get their change discarded by
+            # the ``fixed != before`` comparison below.
+            before = copy.deepcopy(result)
+            try:
+                fixed = rule.apply_fix(copy.deepcopy(before))
+            except Exception as e:
+                # Refuse-on-unrecoverable: discard this rule's change, preserve
+                # the prior state, and record the blocking finding(s).
+                warnings.warn(f"Refusing fix for rule '{rule.rule_id}': {e}")
+                refused.append(Finding(
+                    rule_id=rule.rule_id,
+                    severity="error",
+                    message=f"Refused to apply fix (unrecoverable): {e}",
+                    fix_description=None,
+                    context={"error": str(e)},
+                ))
+                continue
+
+            if fixed != before:
+                diffs.append(ConfigDiff(rule_id=rule.rule_id, before=before, after=copy.deepcopy(fixed)))
+                result = fixed
+
+        residual_findings = self.collect_all_findings(result)
+
+        # Only report "applied" when a repair actually changed something; a
+        # no-op run in apply mode must not claim a repair was performed.
+        applied = (not dry_run) and bool(diffs)
+
+        written_backup_path: Optional[str] = None
+        if not dry_run and backup and diffs:
+            written_backup_path = self._write_backup(config, backup_path)
+
+        return RepairPlan(
+            config=result,
+            diffs=diffs,
+            backup_path=written_backup_path,
+            residual_findings=residual_findings,
+            refused=refused,
+            applied=applied,
+        )
+
+    @staticmethod
+    def _write_backup(config: Dict[str, Any], backup_path: Optional[str]) -> str:
+        """Snapshot the original config to a timestamped backup file.
+
+        For an auto-derived path the timestamp includes microseconds and, if a
+        file still collides (concurrent runs / quick retry), a numeric suffix is
+        appended so an earlier snapshot is never overwritten.
+        """
+        import json
+        import os
+        from datetime import datetime
+
+        if backup_path is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            candidate = f"doctor-config.bak-{timestamp}.json"
+            counter = 1
+            while os.path.exists(candidate):
+                candidate = f"doctor-config.bak-{timestamp}-{counter}.json"
+                counter += 1
+            backup_path = candidate
+
+        with open(backup_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, sort_keys=True, default=str)
+
+        return backup_path
     
     def _load_builtin_rules(self) -> None:
         """Load built-in migration rules."""
@@ -145,3 +272,16 @@ def collect_findings(config: Dict[str, Any]) -> List[Finding]:
 def apply_fixes(config: Dict[str, Any]) -> Dict[str, Any]:
     """Apply fixes from all rules in the default registry."""
     return get_default_registry().apply_all_fixes(config)
+
+
+def plan_fixes(
+    config: Dict[str, Any],
+    *,
+    dry_run: bool = True,
+    backup: bool = False,
+    backup_path: Optional[str] = None,
+) -> RepairPlan:
+    """Produce a RepairPlan from all rules in the default registry."""
+    return get_default_registry().plan_fixes(
+        config, dry_run=dry_run, backup=backup, backup_path=backup_path
+    )
