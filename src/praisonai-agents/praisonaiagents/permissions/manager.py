@@ -283,6 +283,36 @@ class PermissionManager:
             return False
         return any(fnmatch.fnmatch(basename, p) for p in self._SECRET_PATTERNS)
 
+    # Non-secret basenames used to probe whether an allow rule is a broad
+    # catch-all (matches everything) rather than a secret-specific opt-in.
+    _NON_SECRET_PROBES = ("main.py", "readme.md", "data.txt")
+
+    def _is_specific_secret_allow(self, rule: "PermissionRule") -> bool:
+        """Return ``True`` if *rule* is a secret-specific read allow (opt-in).
+
+        A rule opts a secret read in only when it targets secrets specifically
+        (e.g. ``read:*.env``, ``read:*.pem``) — not when it is a broad catch-all
+        such as ``read:*`` that also matches ordinary files. We test the rule's
+        glob against a set of clearly non-secret basenames: if it matches any of
+        them it is treated as broad and does *not* silently authorise secrets.
+        Regex rules are conservatively treated as specific (author was explicit).
+        """
+        if rule.action != PermissionAction.ALLOW:
+            return False
+        if getattr(rule, "is_regex", False):
+            return True
+        pattern = rule.pattern
+        for prefix in self._READ_PREFIXES:
+            if pattern.startswith(prefix):
+                pattern = pattern[len(prefix):]
+                break
+        glob = os.path.basename(pattern.rstrip("/\\")) or pattern
+        # A broad glob (``*``) matches ordinary files too → not secret-specific.
+        for probe in self._NON_SECRET_PROBES:
+            if fnmatch.fnmatch(probe, glob.lower()):
+                return False
+        return True
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -334,16 +364,26 @@ class PermissionManager:
             target[len(read_prefix):]
         ):
             flat = self._check_flat(target, agent)
-            # Honour any explicit user rule/approval (allow to opt in, deny to
-            # harden). Only the bare "no matching rule" default is upgraded.
-            if flat.rule is not None or flat.approved is not None:
+            # A persistent approval or an explicit *deny* always wins (opt-in or
+            # hardening). An *allow* only opts in when it comes from a rule that
+            # specifically targets secrets — a broad wildcard (``read:*``) must
+            # not silently authorise credential files, otherwise the gate is
+            # trivially defeated by the catch-all rule most agents ship with.
+            if flat.approved is not None:
                 return flat
+            if flat.rule is not None:
+                if flat.action == PermissionAction.DENY:
+                    return flat
+                if self._is_specific_secret_allow(flat.rule):
+                    return flat
+                # Broad allow/ask rule: fall through to the secret ASK default.
             return PermissionResult(
                 action=PermissionAction.ASK,
                 target=target,
                 reason=(
                     "Reading a secret file requires approval "
-                    "(override with a 'read' allow rule to opt in)"
+                    "(override with a secret-specific 'read' allow rule, "
+                    "e.g. read:*.env, to opt in)"
                 ),
             )
 

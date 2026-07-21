@@ -76,6 +76,9 @@ class TestSecretReadDefaults:
         assert manager.check("read:.env.example").action == PermissionAction.ALLOW
         # ...but the secret gate still upgrades a real .env to ASK because the
         # broad glob rule does not explicitly target the secret path.
+        secret = manager.check("read:.env")
+        assert secret.action == PermissionAction.ASK
+        assert "secret file" in secret.reason
 
 
 class TestUserOverride:
@@ -97,6 +100,32 @@ class TestUserOverride:
         manager.approve("read:.env", approved=True, scope="always")
         result = manager.check("read:.env")
         assert result.action == PermissionAction.ALLOW
+
+    def test_broad_allow_does_not_opt_in(self, manager):
+        # A catch-all ``read:*`` allow must NOT silently authorise secrets,
+        # otherwise the gate is trivially defeated by the default rule most
+        # agents ship with.
+        manager.add_rule(
+            PermissionRule(pattern="read:*", action=PermissionAction.ALLOW)
+        )
+        result = manager.check("read:.env")
+        assert result.action == PermissionAction.ASK
+
+    @pytest.mark.parametrize(
+        "rule_pattern,path",
+        [
+            ("read:*.env", "prod.env"),
+            ("read:.env", ".env"),
+            ("read:*.pem", "server.pem"),
+            ("read:id_rsa", "id_rsa"),
+        ],
+    )
+    def test_specific_allow_opts_in(self, manager, rule_pattern, path):
+        # A secret-specific allow is a deliberate opt-in and overrides the gate.
+        manager.add_rule(
+            PermissionRule(pattern=rule_pattern, action=PermissionAction.ALLOW)
+        )
+        assert manager.check(f"read:{path}").action == PermissionAction.ALLOW
 
 
 class TestNonRegression:
