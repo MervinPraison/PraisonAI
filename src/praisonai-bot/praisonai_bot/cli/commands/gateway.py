@@ -343,10 +343,11 @@ def _check_gateway_secret_strength(config_path: str):
     """Inspect the gateway's own auth_token for known-weak/placeholder values.
 
     Returns an actionable error string when the gateway is on an EXTERNAL bind
-    and its resolved ``auth_token`` is a known-weak/placeholder value (caller
-    should fail closed). On a loopback bind a warning is printed and ``None`` is
-    returned (consistent with the permissive-loopback posture). Returns ``None``
-    when the token is strong, absent, or the config cannot be read.
+    and its resolved ``auth_token`` is either missing or a known-weak/
+    placeholder value (caller should fail closed, mirroring startup). On a
+    loopback bind a warning is printed for a weak token and ``None`` is returned
+    (consistent with the permissive-loopback posture). Returns ``None`` when the
+    token is strong, absent on a loopback bind, or the config cannot be read.
     """
     import os
     import yaml
@@ -370,11 +371,27 @@ def _check_gateway_secret_strength(config_path: str):
         WeakGatewaySecretError,
     )
 
-    if not token or not is_weak_secret(token):
+    # A strong, present token needs no further checks.
+    if token and not is_weak_secret(token):
         return None
 
     bind_host = gw.get("bind_host") or gw.get("host") or "127.0.0.1"
-    if resolve_auth_mode(str(bind_host)) == "local":
+    is_local = resolve_auth_mode(str(bind_host)) == "local"
+
+    # Absent token: only a concern on an external bind, where startup fails
+    # closed for a missing required secret. Doctor must agree (#3259).
+    if not token:
+        if is_local:
+            return None
+        return (
+            f"Refusing to start: gateway.auth_token is required for external "
+            f"bind {bind_host} but is missing.\n"
+            f"Fix:  praisonai onboard         (30 seconds, 3 prompts)\n"
+            f'Or:   export GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"'
+        )
+
+    # Present-but-weak token: warn on loopback, fail closed externally.
+    if is_local:
         print(
             f"⚠  gateway.auth_token is a known-weak/placeholder value "
             f"(loopback bind {bind_host}). Rotate before exposing externally."
@@ -666,11 +683,21 @@ def gateway_doctor(
 
     channels = _load_channels(config)
     if not channels:
-        if not json_output:
+        if json_output:
+            # Always emit a single parseable JSON document, even on the
+            # weak/missing gateway-secret failure path, so automation can
+            # distinguish an auth failure from an empty/interrupted run.
+            import json
+
+            payload: dict = {"probes": {}}
+            if gateway_secret_error:
+                payload["gateway_auth_token"] = "weak"
+            print(json.dumps(payload, indent=2))
+        else:
             print("No channels configured.")
-        if gateway_secret_error:
-            if not json_output:
+            if gateway_secret_error:
                 print(gateway_secret_error)
+        if gateway_secret_error:
             raise typer.Exit(1)
         raise typer.Exit(0)
 

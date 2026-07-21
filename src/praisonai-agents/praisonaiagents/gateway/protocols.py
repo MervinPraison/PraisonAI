@@ -2041,7 +2041,7 @@ def is_weak_secret(value: Optional[str]) -> bool:
         True
         >>> is_weak_secret("$(openssl rand -hex 16)")
         True
-        >>> is_weak_secret("f3a9c1b27d0e4a56")
+        >>> is_weak_secret("strong-non-placeholder-token")
         False
     """
     if not value:

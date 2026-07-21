@@ -131,7 +131,9 @@ class TestGatewayAuthEnforcement:
                 assert_external_bind_safe(config)
             
             # With a strong token - should pass
-            config = GatewayConfig(bind_host=host, auth_token="f3a9c1b27d0e4a56")
+            config = GatewayConfig(
+                bind_host=host, auth_token="strong-non-placeholder-token"
+            )
             assert_external_bind_safe(config)
 
 
@@ -151,7 +153,7 @@ class TestWeakSecretGuard:
     def test_is_weak_secret_allows_strong(self):
         from praisonaiagents.gateway.protocols import is_weak_secret
 
-        assert is_weak_secret("f3a9c1b27d0e4a56d8e1") is False
+        assert is_weak_secret("strong-non-placeholder-token") is False
         assert is_weak_secret("secure-production-token-xyz") is False
 
     def test_is_weak_secret_treats_empty_as_weak(self):
@@ -174,7 +176,9 @@ class TestWeakSecretGuard:
         from praisonaiagents.gateway.protocols import assert_gateway_secret_strong
 
         # Should not raise
-        assert_gateway_secret_strong("f3a9c1b27d0e4a56", field="gateway.auth_token")
+        assert_gateway_secret_strong(
+            "strong-non-placeholder-token", field="gateway.auth_token"
+        )
 
     def test_external_bind_rejects_weak_token(self):
         """External bind with a placeholder token must fail closed."""
@@ -195,7 +199,9 @@ class TestWeakSecretGuard:
             assert_external_bind_safe(config)
 
     def test_external_bind_accepts_strong_token(self):
-        config = GatewayConfig(bind_host="0.0.0.0", auth_token="f3a9c1b27d0e4a56")
+        config = GatewayConfig(
+            bind_host="0.0.0.0", auth_token="strong-non-placeholder-token"
+        )
         assert_external_bind_safe(config)
 
     def test_loopback_bind_warns_but_allows_weak_token(self):
@@ -203,6 +209,57 @@ class TestWeakSecretGuard:
         config = GatewayConfig(bind_host="127.0.0.1", auth_token="change-me")
         # Should not raise
         assert_external_bind_safe(config)
+
+
+class TestDoctorGatewaySecretStrength:
+    """Test `gateway doctor` agrees with startup on the gateway auth_token (#3259)."""
+
+    def _check(self, tmp_path, monkeypatch, cfg_text):
+        from praisonai_bot.cli.commands.gateway import _check_gateway_secret_strength
+
+        monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text(cfg_text)
+        return _check_gateway_secret_strength(str(cfg))
+
+    def test_external_absent_token_fails_closed(self, tmp_path, monkeypatch):
+        """Doctor rejects a missing token on an external bind, matching startup."""
+        err = self._check(
+            tmp_path, monkeypatch,
+            "gateway:\n  bind_host: 0.0.0.0\n",
+        )
+        assert err is not None
+        assert "required" in err and "0.0.0.0" in err
+
+    def test_external_weak_token_fails_closed(self, tmp_path, monkeypatch):
+        err = self._check(
+            tmp_path, monkeypatch,
+            'gateway:\n  bind_host: 0.0.0.0\n  auth_token: "change-me"\n',
+        )
+        assert err is not None
+        assert "known-weak" in err
+
+    def test_external_strong_token_passes(self, tmp_path, monkeypatch):
+        err = self._check(
+            tmp_path, monkeypatch,
+            'gateway:\n  bind_host: 0.0.0.0\n  auth_token: "strong-non-placeholder-token"\n',
+        )
+        assert err is None
+
+    def test_loopback_absent_token_passes(self, tmp_path, monkeypatch):
+        err = self._check(
+            tmp_path, monkeypatch,
+            "gateway:\n  bind_host: 127.0.0.1\n",
+        )
+        assert err is None
+
+    def test_loopback_weak_token_warns_only(self, tmp_path, monkeypatch, capsys):
+        err = self._check(
+            tmp_path, monkeypatch,
+            'gateway:\n  bind_host: 127.0.0.1\n  auth_token: "change-me"\n',
+        )
+        assert err is None
+        assert "known-weak" in capsys.readouterr().out
 
 
 class TestLoopbackAuthBypassDefault:
