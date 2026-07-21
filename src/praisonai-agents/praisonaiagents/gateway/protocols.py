@@ -2046,7 +2046,7 @@ def is_weak_secret(value: Optional[str]) -> bool:
     """
     if not value:
         return True
-    return value.strip().lower() in KNOWN_WEAK_SECRETS
+    return str(value).strip().lower() in KNOWN_WEAK_SECRETS
 
 
 def assert_gateway_secret_strong(value: Optional[str], *, field: str = "gateway.auth_token") -> None:
