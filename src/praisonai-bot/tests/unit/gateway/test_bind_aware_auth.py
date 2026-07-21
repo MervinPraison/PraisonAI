@@ -130,9 +130,79 @@ class TestGatewayAuthEnforcement:
             with pytest.raises(GatewayStartupError):
                 assert_external_bind_safe(config)
             
-            # With token - should pass
-            config = GatewayConfig(bind_host=host, auth_token="token")
+            # With a strong token - should pass
+            config = GatewayConfig(bind_host=host, auth_token="f3a9c1b27d0e4a56")
             assert_external_bind_safe(config)
+
+
+class TestWeakSecretGuard:
+    """Test known-weak/placeholder secret rejection (Issue #3259)."""
+
+    def test_is_weak_secret_detects_placeholders(self):
+        from praisonaiagents.gateway.protocols import is_weak_secret
+
+        for weak in (
+            "change-me", "CHANGE-ME", " changeme ", "your-token-here",
+            "secret", "password", "test", "token", "admin",
+            "$(openssl rand -hex 16)", "$(openssl rand -hex 32)",
+        ):
+            assert is_weak_secret(weak) is True, weak
+
+    def test_is_weak_secret_allows_strong(self):
+        from praisonaiagents.gateway.protocols import is_weak_secret
+
+        assert is_weak_secret("f3a9c1b27d0e4a56d8e1") is False
+        assert is_weak_secret("secure-production-token-xyz") is False
+
+    def test_is_weak_secret_treats_empty_as_weak(self):
+        from praisonaiagents.gateway.protocols import is_weak_secret
+
+        assert is_weak_secret("") is True
+        assert is_weak_secret(None) is True
+
+    def test_assert_gateway_secret_strong_raises_on_weak(self):
+        from praisonaiagents.gateway.protocols import (
+            assert_gateway_secret_strong,
+            WeakGatewaySecretError,
+        )
+
+        with pytest.raises(WeakGatewaySecretError) as exc_info:
+            assert_gateway_secret_strong("change-me", field="gateway.auth_token")
+        assert exc_info.value.field == "gateway.auth_token"
+
+    def test_assert_gateway_secret_strong_passes_strong(self):
+        from praisonaiagents.gateway.protocols import assert_gateway_secret_strong
+
+        # Should not raise
+        assert_gateway_secret_strong("f3a9c1b27d0e4a56", field="gateway.auth_token")
+
+    def test_external_bind_rejects_weak_token(self):
+        """External bind with a placeholder token must fail closed."""
+        config = GatewayConfig(bind_host="0.0.0.0", auth_token="change-me")
+
+        with pytest.raises(GatewayStartupError) as exc_info:
+            assert_external_bind_safe(config)
+
+        assert "known-weak" in str(exc_info.value)
+        assert "gateway.auth_token" in str(exc_info.value)
+
+    def test_external_bind_rejects_literal_openssl_hint(self):
+        """The copy-paste footgun literal must be rejected on external bind."""
+        config = GatewayConfig(
+            bind_host="192.168.1.10", auth_token="$(openssl rand -hex 16)"
+        )
+        with pytest.raises(GatewayStartupError):
+            assert_external_bind_safe(config)
+
+    def test_external_bind_accepts_strong_token(self):
+        config = GatewayConfig(bind_host="0.0.0.0", auth_token="f3a9c1b27d0e4a56")
+        assert_external_bind_safe(config)
+
+    def test_loopback_bind_warns_but_allows_weak_token(self):
+        """Loopback bind downgrades weak-secret to a warning (permissive)."""
+        config = GatewayConfig(bind_host="127.0.0.1", auth_token="change-me")
+        # Should not raise
+        assert_external_bind_safe(config)
 
 
 class TestLoopbackAuthBypassDefault:
