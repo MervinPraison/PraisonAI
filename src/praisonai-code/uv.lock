@@ -1358,7 +1358,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-code"
-version = "0.0.53"
+version = "0.0.54"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1391,7 +1391,7 @@ requires-dist = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.157"
+version = "1.6.158"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
