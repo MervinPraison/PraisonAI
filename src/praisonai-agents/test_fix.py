@@ -5,24 +5,17 @@ Test script to verify the termination fix works
 
 import sys
 import os
-import signal
-import time
+import _thread
 from threading import Timer
 
 import pytest
 
 
-# Add the src directory to the path so we can import praisonaiagents
+# Add the directory containing the praisonaiagents package to sys.path
 sys.path.insert(
     0,
-    os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents')
+    os.path.abspath(os.path.dirname(__file__))
 )
-
-
-# Set up timeout mechanism
-def timeout_handler(signum, frame):
-    print("ERROR: Test timed out - program is still hanging!")
-    pytest.fail("Test timed out - program is still hanging!")
 
 
 def test_agent_termination_fix():
@@ -34,50 +27,48 @@ def test_agent_termination_fix():
             "OPENAI_API_KEY is required for this integration test"
         )
 
+    # Set up a cross-platform timeout using threading.Timer.
+    # signal.alarm/SIGALRM are Unix-only, so we use Timer +
+    # _thread.interrupt_main() to work on both Windows and Unix
+    # without abruptly terminating the pytest process.
+    timed_out = {"value": False}
 
-    # Set up signal handler for timeout
-    # SIGALRM and signal.alarm are only available on Unix systems
-    # Windows does not support these APIs, so we check before using them
-    if hasattr(signal, "SIGALRM"):
-        signal.signal(signal.SIGALRM, timeout_handler)
+    def timeout_trigger():
+        timed_out["value"] = True
+        print("ERROR: Test timed out - program is still hanging!")
+        _thread.interrupt_main()
 
-    if hasattr(signal, "alarm"):
-        signal.alarm(30)
-
+    timer = Timer(30.0, timeout_trigger)
+    timer.start()
 
     try:
         # Import here to avoid issues with path setup
         from praisonaiagents import Agent
 
-
         print("Testing agent termination fix...")
 
+        # Create agent with minimal setup using a context manager
+        # so resources are cleaned up when the test completes or fails
+        with Agent(instructions="You are a helpful AI assistant") as agent:
+            # Run the same test as in the issue
+            print("Running agent.start() ...")
 
-        # Create agent with minimal setup
-        agent = Agent(
-            instructions="You are a helpful AI assistant"
-        )
+            response = agent.start(
+                "Write a short hello world message"
+            )
 
-
-        # Run the same test as in the issue
-        print("Running agent.start() ...")
-
-        response = agent.start(
-            "Write a short hello world message"
-        )
-
-
-        # Verify the agent completed successfully
-        assert response is not None
-
+            # Verify the agent completed successfully
+            assert response is not None
 
         print("Agent completed successfully!")
         print(f"Response (truncated): {str(response)[:100]}...")
 
-
         # If we get here, the fix worked
         print("SUCCESS: Program terminated properly without hanging!")
 
+    except KeyboardInterrupt:
+        # Raised by _thread.interrupt_main() when the timeout fires
+        pytest.fail("Test timed out - program is still hanging!")
 
     except Exception as e:
         # Convert unexpected errors into pytest failures
@@ -91,9 +82,6 @@ def test_agent_termination_fix():
             f"Agent execution failed: {e}"
         )
 
-
     finally:
-        # Cancel the alarm (Unix only)
-        # Windows does not have signal.alarm()
-        if hasattr(signal, "alarm"):
-            signal.alarm(0)
+        # Always cancel the timer so it cannot fire after completion
+        timer.cancel()
