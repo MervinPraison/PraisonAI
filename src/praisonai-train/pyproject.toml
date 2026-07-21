@@ -3,7 +3,7 @@ name = "praisonai-train"
 version = "0.0.10"
 description = "Training for PraisonAI — LLM fine-tuning (Unsloth) and iterative agent training extracted from the praisonai wrapper."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10,<3.15"
 authors = [
     { name = "Mervin Praison" }
@@ -61,7 +61,7 @@ setup-conda-env = "praisonai_train.setup.setup_conda_env:main"
 praisonaiagents = { path = "../praisonai-agents" }
 
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
