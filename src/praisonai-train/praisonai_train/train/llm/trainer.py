@@ -149,7 +149,7 @@ class TrainModel:
 
     # Known config keys — anything else is flagged so typos/unsupported keys are not
     # silently ignored (important for people and agents writing configs by hand).
-    KNOWN_KEYS = {
+    KNOWN_KEYS = frozenset({
         "model", "model_name", "model_parameters", "max_seq_length", "load_in_4bit",
         "chat_template", "lora_r", "lora_alpha", "lora_dropout", "lora_bias",
         "lora_target_modules", "use_gradient_checkpointing", "use_rslora", "loftq_config",
@@ -160,7 +160,7 @@ class TrainModel:
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
-    }
+    })
 
     def validate_config(self):
         required = ["model_name", "max_seq_length", "dataset"]
@@ -730,6 +730,11 @@ class TrainModel:
         if self._flag(self.config.get("train"), default=True):
             self.prepare_model()
             self.train_model()
+        if self.model is None:
+            # Training was disabled (train: false) so no model was loaded. Skip
+            # publishing rather than crashing with an AttributeError on None.
+            print("DEBUG: Training skipped (train: false); no model to publish.")
+            return
         # Publishing defaults OFF and is skipped unless a target is set — so a plain
         # "train locally" config finishes with the LoRA saved to lora_model/ instead
         # of crashing on a missing repo name or pushing to someone else's account.
