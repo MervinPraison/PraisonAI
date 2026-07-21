@@ -53,7 +53,10 @@ def run(agent_file: str,
 
     adapter, config_list = _resolve_run_inputs(framework)
 
-    gen = AgentsGenerator(
+    # Own the generator's lifecycle so its lazily-allocated tool-timeout
+    # executor is released once the single run completes, instead of leaking
+    # daemon threads per call in long-lived server workers.
+    with AgentsGenerator(
         agent_file=agent_file,
         framework=adapter.name,
         config_list=config_list,
@@ -61,8 +64,8 @@ def run(agent_file: str,
         agent_yaml=agent_yaml,
         cli_config=cli_config,
         adapter=adapter,
-    )
-    return gen.generate_crew_and_kickoff()
+    ) as gen:
+        return gen.generate_crew_and_kickoff()
 
 
 async def arun(agent_file: str,
@@ -81,7 +84,10 @@ async def arun(agent_file: str,
     # reason arun exists: a FastAPI handler awaiting arun must not stall the loop.
     adapter, config_list = await asyncio.to_thread(_resolve_run_inputs, framework)
 
-    gen = AgentsGenerator(
+    # Own the generator's lifecycle so its lazily-allocated tool-timeout
+    # executor is released once the single run completes, instead of leaking
+    # daemon threads per call in long-lived async server workers.
+    with AgentsGenerator(
         agent_file=agent_file,
         framework=adapter.name,
         config_list=config_list,
@@ -89,5 +95,5 @@ async def arun(agent_file: str,
         agent_yaml=agent_yaml,
         cli_config=cli_config,
         adapter=adapter,
-    )
-    return await gen.agenerate_crew_and_kickoff()
+    ) as gen:
+        return await gen.agenerate_crew_and_kickoff()

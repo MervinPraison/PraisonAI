@@ -763,8 +763,8 @@ class PraisonAI:
             AgentsGenerator = _get_agents_generator()
             # Extract CLI configuration for YAML CLI parity
             cli_config = self._extract_cli_config_for_yaml()
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
-            result = agents_generator.generate_crew_and_kickoff()
+            with AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config) as agents_generator:
+                result = agents_generator.generate_crew_and_kickoff()
             print(result)
             return result
         elif args.init or self.init:
@@ -804,15 +804,15 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(
+                with AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
                     tools=self.tools,
                     cli_config=cli_config
-                )
-                result = agents_generator.generate_crew_and_kickoff()
+                ) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 print(result)
                 return result
         else:
@@ -878,15 +878,15 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity 
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(
+                with AgentsGenerator(
                     self.agent_file,
                     self.framework,
                     self.config_list,
                     agent_yaml=self.agent_yaml,
                     tools=self.tools,
                     cli_config=cli_config
-                )
-                result = agents_generator.generate_crew_and_kickoff()
+                ) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 print(result)
                 
                 # Close trace writer on success
@@ -2333,8 +2333,8 @@ class PraisonAI:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity
                 cli_config = self._extract_cli_config_for_yaml()
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config)
-                result = agents_generator.generate_crew_and_kickoff()
+                with AgentsGenerator(self.agent_file, self.framework, self.config_list, cli_config=cli_config) as agents_generator:
+                    result = agents_generator.generate_crew_and_kickoff()
                 return result
 
             try:
