@@ -5,7 +5,8 @@ Provides sandbox management commands inspired by moltbot's sandbox CLI.
 Supports listing, explaining, and recreating sandbox containers.
 """
 
-from typing import Literal, Optional
+from enum import Enum
+from typing import Optional
 
 import typer
 
@@ -14,7 +15,13 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_SandboxType = Literal["subprocess", "docker", "daytona"]
+
+class SandboxBackend(str, Enum):
+    """Supported sandbox execution backends."""
+
+    subprocess = "subprocess"
+    docker = "docker"
+    daytona = "daytona"
 
 
 def _sandbox_handler():
@@ -28,8 +35,8 @@ def _sandbox_handler():
 def sandbox_run(
     code: Optional[str] = typer.Option(None, "--code", "-c", help="Code to execute"),
     file: Optional[str] = typer.Option(None, "--file", "-f", help="File to execute"),
-    sandbox_type: _SandboxType = typer.Option(
-        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
+    sandbox_type: SandboxBackend = typer.Option(
+        SandboxBackend.subprocess, "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
     ),
     image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
     timeout: int = typer.Option(60, "--timeout", help="Timeout in seconds"),
@@ -38,7 +45,7 @@ def sandbox_run(
     _sandbox_handler().run(
         code=code,
         file=file,
-        sandbox_type=sandbox_type,
+        sandbox_type=sandbox_type.value,
         image=image,
         timeout=timeout,
     )
@@ -46,13 +53,13 @@ def sandbox_run(
 
 @app.command("shell")
 def sandbox_shell(
-    sandbox_type: _SandboxType = typer.Option(
-        "subprocess", "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
+    sandbox_type: SandboxBackend = typer.Option(
+        SandboxBackend.subprocess, "--type", "-t", help="Sandbox backend (subprocess, docker, or daytona)"
     ),
     image: str = typer.Option("python:3.11-slim", "--image", help="Docker image"),
 ):
     """Start an interactive sandbox REPL."""
-    _sandbox_handler().shell(sandbox_type=sandbox_type, image=image)
+    _sandbox_handler().shell(sandbox_type=sandbox_type.value, image=image)
 
 
 @app.command("backends")

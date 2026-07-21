@@ -44,6 +44,7 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "onboard": CATEGORY_GET_STARTED,
     "doctor": CATEGORY_GET_STARTED,
     "models": CATEGORY_GET_STARTED,
+    "usage": CATEGORY_GET_STARTED,
     "version": CATEGORY_GET_STARTED,
     "upgrade": CATEGORY_GET_STARTED,
     "uninstall": CATEGORY_GET_STARTED,
