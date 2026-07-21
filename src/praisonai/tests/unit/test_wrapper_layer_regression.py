@@ -179,15 +179,35 @@ class TestCliBackendValidation:
             mock_resolve.assert_called_once_with(config)
         
         # Test that protocol instances pass through unchanged. A CliBackendProtocol
-        # instance exposes both execute() and stream() (see cli_backend/protocols.py).
-        mock_instance = MagicMock(spec=["execute", "stream"])
-        mock_instance.execute = MagicMock()
-        mock_instance.stream = MagicMock()
+        # instance is detected via isinstance against the @runtime_checkable
+        # protocol, which requires config + capabilities() as well as
+        # execute()/stream() (see cli_backend/protocols.py). A real class is used
+        # here because @runtime_checkable isinstance does not resolve reliably
+        # against MagicMock's dynamic attributes.
+        class _FakeBackend:
+            config = None
+
+            def capabilities(self):
+                ...
+
+            async def execute(self, prompt, **kwargs):
+                ...
+
+            async def stream(self, prompt, **kwargs):
+                ...
 
         with patch('praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
-            agent = Agent(name="test", cli_backend=mock_instance)
+            agent = Agent(name="test", cli_backend=_FakeBackend())
             # Should not call resolver for already-resolved instances
             mock_resolve.assert_not_called()
+
+        # A look-alike that only exposes execute()/stream() (e.g. a
+        # BaseCLIIntegration coding-CLI tool) must NOT be mistaken for a backend:
+        # it is sent to the resolver, which fails fast.
+        lookalike = MagicMock(spec=["execute", "stream"])
+        with patch('praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
+            Agent(name="test", cli_backend=lookalike)
+            mock_resolve.assert_called_once_with(lookalike)
 
 
 # ===== NEW TESTS FOR PR #1896 BUG FIXES =====
@@ -433,3 +453,110 @@ class TestFrameworkAdapterExceptionPaths:
             assert setup_idx > session_idx, (
                 f"{name} must run _run_adapter_setup inside observability_session"
             )
+
+
+class TestIssue3251WrapperGaps:
+    """Regression tests for issue #3251 (three wrapper gaps)."""
+
+    def test_gap1_entrypoints_close_generator_via_context_manager(self):
+        """run/arun must own the generator lifecycle with a `with` block so its
+        lazily-allocated tool-timeout executor is released per run instead of
+        leaking daemon threads in long-lived server workers."""
+        import inspect
+        from praisonai import _entrypoint
+
+        for name in ("run", "arun"):
+            src = inspect.getsource(getattr(_entrypoint, name))
+            assert "with AgentsGenerator(" in src, (
+                f"{name} must construct AgentsGenerator inside a `with` block"
+            )
+
+    def test_gap1_generator_is_context_manager(self):
+        """AgentsGenerator must support context-manager teardown."""
+        from praisonai.agents_generator import AgentsGenerator
+
+        assert hasattr(AgentsGenerator, "__enter__")
+        assert hasattr(AgentsGenerator, "__exit__")
+        assert hasattr(AgentsGenerator, "close")
+
+    def test_gap2_lookalike_integration_rejected_at_construction(self):
+        """A BaseCLIIntegration-style look-alike (execute()/stream() but no
+        config/capabilities, returns str) must NOT be mistaken for a
+        CliBackendProtocol; it fails fast with TypeError instead of crashing
+        deep in the agent loop."""
+        from praisonai_code.cli_backends import (
+            resolve_cli_backend_config,
+            _is_cli_backend_instance,
+        )
+
+        class _LookAlike:
+            async def execute(self, prompt, **options):
+                return "plain string"
+
+            async def stream(self, prompt, **options):
+                ...
+
+        look = _LookAlike()
+        assert _is_cli_backend_instance(look) is False
+        with pytest.raises(TypeError, match="CliBackendProtocol"):
+            resolve_cli_backend_config(look)
+
+    def test_gap2_real_protocol_instance_passes_through(self):
+        """A real CliBackendProtocol instance (config + capabilities +
+        execute/stream) is detected and returned unchanged."""
+        from praisonai_code.cli_backends import (
+            resolve_cli_backend_config,
+            _is_cli_backend_instance,
+        )
+
+        class _RealBackend:
+            config = None
+
+            def capabilities(self):
+                ...
+
+            async def execute(self, prompt, **kwargs):
+                ...
+
+            async def stream(self, prompt, **kwargs):
+                ...
+
+        backend = _RealBackend()
+        assert _is_cli_backend_instance(backend) is True
+        assert resolve_cli_backend_config(backend) is backend
+
+    def test_gap3_workflow_path_wrapped_in_observability(self):
+        """Both workflow kickoff branches must bracket the workflow run in an
+        observability_session so AgentOps init/finalize fires for workflow YAMLs
+        too, not only for sequential/hierarchical runs."""
+        import inspect
+        from praisonai.agents_generator import AgentsGenerator
+
+        for name, prep in (
+            ("generate_crew_and_kickoff", "self._prepare_for_run"),
+            ("agenerate_crew_and_kickoff", "self._aprepare_for_run"),
+        ):
+            src = inspect.getsource(getattr(AgentsGenerator, name))
+            # The workflow short-circuit and its observability wrap both appear
+            # before the sequential prep call.
+            prep_idx = src.index(prep)
+            assert src.index("observability_session") < prep_idx, (
+                f"{name} must open observability_session before the sequential prep"
+            )
+            assert src.index("_is_workflow_yaml") < prep_idx, (
+                f"{name} workflow branch must run before sequential prep"
+            )
+
+    def test_gap3_build_yaml_workflow_validates_and_warns(self):
+        """_build_yaml_workflow must fold in cli_backend validation and surface
+        an unenforceable tool_timeout instead of silently dropping both."""
+        import inspect
+        from praisonai.agents_generator import AgentsGenerator
+
+        src = inspect.getsource(AgentsGenerator._build_yaml_workflow)
+        assert "_validate_cli_backend_compatibility" in src, (
+            "workflow build must validate cli_backend compatibility"
+        )
+        assert "_resolve_effective_tool_timeout" in src, (
+            "workflow build must resolve tool_timeout to warn when unenforceable"
+        )

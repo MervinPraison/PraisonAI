@@ -9,11 +9,18 @@ Wrapper implementations of CLI backend protocols following AGENTS.md:
 def _is_cli_backend_instance(obj) -> bool:
     """Return True if ``obj`` is a pre-resolved CliBackendProtocol instance.
 
-    A CliBackendProtocol instance exposes both ``execute()`` and ``stream()``.
-    This single predicate is the one place the protocol shape is checked, so any
-    future protocol change touches exactly one function.
+    Uses ``isinstance`` against the ``@runtime_checkable`` ``CliBackendProtocol``
+    so a look-alike that merely exposes ``execute()``/``stream()`` (e.g. a
+    ``BaseCLIIntegration`` coding-CLI tool, which returns ``str`` and lacks
+    ``config``/``capabilities()``) is NOT mistaken for a backend. This single
+    predicate is the one place the protocol shape is checked, so any future
+    protocol change touches exactly one function.
     """
-    return hasattr(obj, "execute") and hasattr(obj, "stream")
+    try:
+        from praisonaiagents.cli_backend.protocols import CliBackendProtocol
+    except ImportError:
+        return False
+    return isinstance(obj, CliBackendProtocol)
 
 
 def resolve_cli_backend_config(value):
@@ -58,6 +65,17 @@ def resolve_cli_backend_config(value):
             raise ValueError("cli_backend.overrides must be a dict")
         return resolve_cli_backend(backend_id, overrides=overrides)
     else:
+        # A look-alike that exposes execute()/stream() but is not a
+        # CliBackendProtocol (e.g. a BaseCLIIntegration coding-CLI tool) reaches
+        # here. Fail fast at construction with a pointed hint instead of letting
+        # it crash deep in the agent loop with an opaque AttributeError.
+        if hasattr(value, "execute") and hasattr(value, "stream"):
+            raise TypeError(
+                f"{type(value).__name__} exposes execute()/stream() but is not a "
+                "CliBackendProtocol (it lacks config/capabilities() and returns a "
+                "plain str). If this is a coding-CLI integration, pass it as a tool "
+                "via tools=[...], not cli_backend=."
+            )
         raise ValueError(
             f"cli_backend must be string, dict, or instance, got: {type(value).__name__}"
         )

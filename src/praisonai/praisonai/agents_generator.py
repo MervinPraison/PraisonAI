@@ -1064,8 +1064,14 @@ class AgentsGenerator:
         config = self._load_config()
         if config is None:
             return
+        from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):
-            return self._run_yaml_workflow(config)
+            # Bracket the workflow run in the same observability session the
+            # sequential/hierarchical path uses so AgentOps init/finalize fires
+            # for workflow YAMLs too. Workflow YAMLs are native-only, so tag
+            # them 'praisonai'.
+            with observability_session("praisonai"):
+                return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
@@ -1073,7 +1079,6 @@ class AgentsGenerator:
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
         # paired for every adapter (the CM finalizes on success and error alike).
-        from .observability.hooks import observability_session
         with observability_session(prep['adapter'].name):
             # Run setup INSIDE the session so setup events and any setup/import
             # failure are recorded and finalized, not dropped outside observability.
@@ -1107,8 +1112,15 @@ class AgentsGenerator:
         config = await self._aload_config()
         if config is None:
             return
+        import asyncio
+        from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):
-            return await self._arun_yaml_workflow(config)
+            # Bracket the async workflow run in the same observability session
+            # the sequential/hierarchical path uses so AgentOps init/finalize
+            # fires for workflow YAMLs too. Workflow YAMLs are native-only, so
+            # tag them 'praisonai'.
+            with observability_session("praisonai"):
+                return await self._arun_yaml_workflow(config)
 
         # Use shared preparation logic (off the event loop to avoid blocking imports)
         prep = await self._aprepare_for_run(config)
@@ -1116,8 +1128,6 @@ class AgentsGenerator:
         self.logger.info(f"Using framework: {prep['adapter'].name}")
         # Own the observability lifecycle here so init and finalize are always
         # paired for every adapter (the CM finalizes on success and error alike).
-        import asyncio
-        from .observability.hooks import observability_session
         with observability_session(prep['adapter'].name):
             # Run setup INSIDE the session (off the event loop, as it may block)
             # so setup events and any setup/import failure are recorded and
@@ -1167,14 +1177,35 @@ class AgentsGenerator:
         # Validate the YAML-declared framework first so a non-native workflow
         # YAML (e.g. framework: crewai) can't slip through just because the
         # generator instance still holds the default 'praisonai'.
+        workflow_framework = framework_from_config(config)
         validate_workflow_framework(
-            framework_from_config(config),
+            workflow_framework,
             source="agents.yaml workflow section",
         )
         if self.framework:
             validate_workflow_framework(
                 self.framework,
                 source="AgentsGenerator framework",
+            )
+
+        # Parity with the sequential/hierarchical path: reject an incompatible
+        # cli_backend in a workflow YAML at build time instead of accepting it
+        # silently. Workflow YAMLs are native-only, so validate against
+        # 'praisonai'.
+        self._validate_cli_backend_compatibility(config, workflow_framework or 'praisonai')
+
+        # tool_timeout is enforced by _wrap_tool_with_timeout on the
+        # sequential/hierarchical path via tools_dict. The native workflow engine
+        # resolves its own tools by name, so that wrapper hook does not apply
+        # here. Surface the gap explicitly rather than dropping the field
+        # silently, so a user who set a timeout knows it is not enforced on this
+        # path.
+        effective_timeout = self._resolve_effective_tool_timeout(config)
+        if effective_timeout and effective_timeout > 0:
+            self.logger.warning(
+                "tool_timeout=%s is not enforced on the workflow (process: workflow) "
+                "path; per-tool timeouts apply to sequential/hierarchical runs only.",
+                effective_timeout,
             )
 
         # Pass model from config_list to workflow as default_llm
