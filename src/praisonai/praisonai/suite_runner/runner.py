@@ -70,7 +70,10 @@ class ScriptRunner:
         
         # Apply overrides
         env.update(self.env_overrides)
-        
+
+        # Ensure child Python processes emit UTF-8 on Windows (avoid cp1252 decode errors)
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+
         return env
     
     def check_required_env(self, require_env: List[str]) -> Optional[str]:
@@ -167,6 +170,8 @@ class ScriptRunner:
                     env=env,
                     cwd=cwd,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1,
                 )
                 
@@ -219,6 +224,8 @@ class ScriptRunner:
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=timeout,
                     env=env,
                     cwd=cwd,
