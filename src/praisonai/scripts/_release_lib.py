@@ -304,7 +304,10 @@ def publish_package(package_dir: Path) -> None:
     if dist.exists():
         import shutil
         shutil.rmtree(dist)
-    run(["uv", "lock", "--frozen"], cwd=package_dir)
+    # Regenerate the lockfile so it matches the current pyproject. `--frozen` fails
+    # when a package has no committed lockfile or when dependencies changed; a plain
+    # `uv lock` creates/updates it, keeping publish resilient to dependency edits.
+    run(["uv", "lock"], cwd=package_dir)
     run(["uv", "build"], cwd=package_dir)
     run(["uv", "publish", "--trusted-publishing", "never"], cwd=package_dir)
 
