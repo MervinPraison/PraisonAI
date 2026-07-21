@@ -60,8 +60,11 @@ def get_default_store():
             store = ConfigYamlScheduleStore()
             try:
                 store.migrate_from_json()
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "jobs.json migration skipped: %s", e,
+                )
             _default_store = store
         return _default_store
 

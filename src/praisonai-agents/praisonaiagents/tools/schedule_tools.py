@@ -43,8 +43,11 @@ def set_store(store):
     try:
         from ..scheduler import set_default_store
         set_default_store(store)
-    except Exception:
-        pass
+    except Exception as e:
+        # Repointing the canonical default is best-effort: the local
+        # ``_store_instance`` above is already authoritative for the tools.
+        # Log (don't silently pass) so any reader/writer drift is diagnosable.
+        logger.warning("Could not repoint canonical schedule store: %s", e)
 
 def _get_store():
     """Return (or create) the global schedule store.
