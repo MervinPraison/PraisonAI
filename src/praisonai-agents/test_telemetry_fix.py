@@ -1,57 +1,68 @@
 #!/usr/bin/env python3
 """
-Test the telemetry cleanup fix
+Regression test for telemetry cleanup at interpreter shutdown.
+
+The hang this guards against happens at *process termination* (via atexit
+handlers / object destructors), not during ``agent.start()``. Asserting on the
+return value alone would not exercise it, so the agent is run inside a bounded
+child process and we require that child to exit cleanly within a deadline.
 """
 
 import os
+import sys
+import subprocess
+import textwrap
+
 import pytest
-from datetime import datetime
 
 
-@pytest.mark.integration
-def test_agent_termination():
+# Child program: run a single agent turn with telemetry disabled, then let the
+# interpreter shut down normally. If telemetry cleanup hangs, the process will
+# not exit and the parent's timeout below will fail the test deterministically.
+_CHILD_PROGRAM = textwrap.dedent(
     """
-    Test that the agent starts, completes, and terminates properly
-    when telemetry cleanup is enabled/disabled.
-    """
-
-    # Set environment variable to disable telemetry (for testing)
+    import os
     os.environ["PRAISONAI_TELEMETRY_DISABLED"] = "true"
-
-    # Skip test if no OpenAI API key is available
-    # This is an integration test and requires a real LLM connection
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip(
-            "OPENAI_API_KEY is required for this integration test"
-        )
 
     from praisonaiagents import Agent
 
-    print(f"[{datetime.now()}] Starting agent termination test...")
+    agent = Agent(instructions="You are a helpful assistant", llm="gpt-4o-mini")
+    response = agent.start("Hello, just say hi back!")
+    assert response is not None, "agent returned no response"
+    print("AGENT_OK")
+    """
+)
 
-    # Create agent with minimal setup
-    agent = Agent(
-        instructions="You are a helpful assistant",
-        llm="gpt-4o-mini"
+
+@pytest.mark.integration
+def test_agent_terminates_without_hanging():
+    """Agent completes and the process exits within a bounded deadline.
+
+    Runs in a child process so that a telemetry-cleanup regression manifests as
+    a timeout (test failure) rather than hanging the pytest worker, and so the
+    ``PRAISONAI_TELEMETRY_DISABLED`` setting cannot leak into other tests.
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY is required for this integration test")
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _CHILD_PROGRAM],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            "Agent process did not terminate within 120s; "
+            "telemetry cleanup likely hangs at shutdown."
+        )
+
+    assert result.returncode == 0, (
+        f"Child process exited with {result.returncode}.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-
-    print(f"[{datetime.now()}] Agent created successfully")
-
-    # Test the start method (which was hanging)
-    print(f"[{datetime.now()}] Running agent.start()...")
-
-    response = agent.start(
-        "Hello, just say hi back!"
-    )
-
-    print(f"[{datetime.now()}] Agent completed successfully!")
-
-    print(f"Response: {response}")
-
-    # If we get here, the fix worked
-    # The agent completed and returned a response without hanging
-    assert response is not None
-
-    print(
-        f"[{datetime.now()}] SUCCESS: Program completed properly!"
+    assert "AGENT_OK" in result.stdout, (
+        f"Agent did not complete successfully.\nstdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
     )
