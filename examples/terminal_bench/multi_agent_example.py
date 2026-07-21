@@ -79,7 +79,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     return "Error: Empty command"
                     
                 try:
-                    result = await environment.exec(command=command, timeout_sec=30)
+                    result = await environment.exec(command=command, timeout_sec=300)
                     output_parts = []
                     if result.stdout:
                         output_parts.append(result.stdout.strip())
@@ -238,7 +238,7 @@ class AgentTeamPraisonAI(BaseAgent):
         try:
             # Create bash tool
             async def bash_tool(command: str) -> str:
-                result = await environment.exec(command=command, timeout_sec=30)
+                result = await environment.exec(command=command, timeout_sec=300)
                 output_parts = []
                 if result.stdout:
                     output_parts.append(result.stdout.strip())

@@ -97,11 +97,14 @@ class PraisonAIWrapperAgent(BaseAgent):
         """
         model = self.model_name or "openai/gpt-4o"
         
-        # Build the praisonai CLI command
-        # Format: praisonai "TASK" --model MODEL
+        # Build the `praisonai code` headless command. --dangerously-skip-approval
+        # makes the terminal assistant run autonomously (no approval hang in a
+        # non-TTY container). Bare `praisonai "TASK"` would run agents-generator
+        # mode with no shell-tool loop, so we use the code assistant instead.
         cmd_parts = [
-            "praisonai",
+            "praisonai", "code",
             shlex.quote(instruction),
+            "--dangerously-skip-approval",
             "--model", shlex.quote(model),
         ]
         
@@ -204,16 +207,16 @@ class PraisonAIWrapperAgent(BaseAgent):
         return env_vars
 
     async def _exec_as_root(self, environment: BaseEnvironment, command: str, env: Optional[Dict] = None) -> Any:
-        """Execute command as root in the container."""
-        if hasattr(environment, 'exec_as_root'):
-            return await environment.exec_as_root(command=command, env=env or {})
-        else:
-            # Fallback: use sudo
-            return await environment.exec(command=f"sudo {command}", env=env or {})
+        """Execute command as root in the container.
 
-    async def _exec_as_agent(self, environment: BaseEnvironment, command: str) -> Any:
+        BaseEnvironment has no `exec_as_root`; use `exec(..., user="root")`.
+        `sudo` is typically absent from TB task containers.
+        """
+        return await environment.exec(command=command, env=env or {}, user="root")
+
+    async def _exec_as_agent(self, environment: BaseEnvironment, command: str, env: Optional[Dict] = None) -> Any:
         """Execute command as the agent user in the container."""
-        return await environment.exec(command=command)
+        return await environment.exec(command=command, env=env or {})
 
 
 # Example usage for testing
