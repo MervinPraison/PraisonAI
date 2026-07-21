@@ -443,13 +443,13 @@ class TestCancelSession:
         assert response["status"] == "stopped"
         assert conn.session_id is None
     
-    def test_cancelled_status_records_ended_at(self):
+    def test_cancelled_status_records_ended_at(self, tmp_path):
         """update_session must stamp ended_at for cancelled sessions too."""
-        import tempfile
         from praisonai_browser.sessions import SessionManager
         
-        with tempfile.NamedTemporaryFile(suffix=".db") as f:
-            manager = SessionManager(f.name)
+        db_path = tmp_path / "sessions.db"
+        manager = SessionManager(str(db_path))
+        try:
             session = manager.create_session("Test goal")
             sid = session["session_id"]
             
@@ -458,13 +458,14 @@ class TestCancelSession:
             fetched = manager.get_session(sid)
             assert fetched["status"] == "cancelled"
             assert fetched["ended_at"] is not None
+        finally:
             manager.close()
 
 
 class TestIntegration:
     """Integration tests for server components."""
     
-    def test_server_session_agent_integration(self):
+    def test_server_session_agent_integration(self, tmp_path):
         """Test server creates session and agent correctly."""
         from praisonai_browser.server import BrowserServer
         from praisonai_browser.sessions import SessionManager
@@ -476,11 +477,12 @@ class TestIntegration:
         assert server.model == "gpt-4o"
         
         # Test session manager
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".db") as f:
-            manager = SessionManager(f.name)
+        db_path = tmp_path / "sessions.db"
+        manager = SessionManager(str(db_path))
+        try:
             session = manager.create_session("Test goal")
             assert session["status"] == "running"
+        finally:
             manager.close()
         
         # Test agent
