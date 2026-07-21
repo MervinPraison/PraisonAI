@@ -405,11 +405,28 @@ class ScheduledAgentExecutor:
         )
         await asyncio.to_thread(self._audit_output, job, job_result)
 
+        # Honour the core intentional-silence contract: a run whose whole
+        # output is an exact silence marker (NO_REPLY / [SILENT] / SILENT) means
+        # "nothing worth sending — stay quiet". The run is still recorded as
+        # succeeded (audited above, history below); only delivery is suppressed
+        # so an unattended monitor does not post the raw control token. Prose
+        # that merely mentions the token is unaffected (exact-match check).
+        silent = False
+        try:
+            from praisonaiagents.bots.silence import is_intentional_silence_response
+            silent = is_intentional_silence_response(result_str)
+        except Exception:  # pragma: no cover - core primitive always present
+            silent = False
+
         # Deliver to channel bot if delivery target exists
         delivered = False
         delivery_error: Optional[str] = None
         delivery = getattr(job, "delivery", None)
-        if delivery and self._deliver:
+        if silent:
+            logger.info(
+                "Job '%s' chose intentional silence; delivery suppressed", job.id,
+            )
+        elif delivery and self._deliver:
             try:
                 coro = self._deliver(delivery, result_str)
                 if inspect.isawaitable(coro):
