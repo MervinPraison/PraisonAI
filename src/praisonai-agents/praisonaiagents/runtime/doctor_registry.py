@@ -116,15 +116,30 @@ class DoctorRulesRegistry:
             try:
                 findings = rule.collect_findings(result)
             except Exception as e:
-                warnings.warn(f"Error collecting findings for rule '{rule.rule_id}': {e}")
+                # Refuse-on-unrecoverable: a rule that cannot even verify the
+                # config is a blocking condition, not a silent skip. Record it
+                # so callers see it in ``refused`` instead of an apparently
+                # clean plan.
+                warnings.warn(f"Refusing rule '{rule.rule_id}' (collect failed): {e}")
+                refused.append(Finding(
+                    rule_id=rule.rule_id,
+                    severity="error",
+                    message=f"Refused to collect findings (unrecoverable): {e}",
+                    fix_description=None,
+                    context={"error": str(e)},
+                ))
                 continue
 
             if not findings:
                 continue
 
+            # Snapshot the prior state, and hand the rule its *own* fresh copy so
+            # that rules which mutate-and-return their argument (allowed by the
+            # protocol) don't alias ``before`` and get their change discarded by
+            # the ``fixed != before`` comparison below.
             before = copy.deepcopy(result)
             try:
-                fixed = rule.apply_fix(before)
+                fixed = rule.apply_fix(copy.deepcopy(before))
             except Exception as e:
                 # Refuse-on-unrecoverable: discard this rule's change, preserve
                 # the prior state, and record the blocking finding(s).
@@ -144,6 +159,10 @@ class DoctorRulesRegistry:
 
         residual_findings = self.collect_all_findings(result)
 
+        # Only report "applied" when a repair actually changed something; a
+        # no-op run in apply mode must not claim a repair was performed.
+        applied = (not dry_run) and bool(diffs)
+
         written_backup_path: Optional[str] = None
         if not dry_run and backup and diffs:
             written_backup_path = self._write_backup(config, backup_path)
@@ -154,18 +173,29 @@ class DoctorRulesRegistry:
             backup_path=written_backup_path,
             residual_findings=residual_findings,
             refused=refused,
-            applied=not dry_run,
+            applied=applied,
         )
 
     @staticmethod
     def _write_backup(config: Dict[str, Any], backup_path: Optional[str]) -> str:
-        """Snapshot the original config to a timestamped backup file."""
+        """Snapshot the original config to a timestamped backup file.
+
+        For an auto-derived path the timestamp includes microseconds and, if a
+        file still collides (concurrent runs / quick retry), a numeric suffix is
+        appended so an earlier snapshot is never overwritten.
+        """
         import json
+        import os
         from datetime import datetime
 
         if backup_path is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"doctor-config.bak-{timestamp}.json"
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            candidate = f"doctor-config.bak-{timestamp}.json"
+            counter = 1
+            while os.path.exists(candidate):
+                candidate = f"doctor-config.bak-{timestamp}-{counter}.json"
+                counter += 1
+            backup_path = candidate
 
         with open(backup_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, sort_keys=True, default=str)

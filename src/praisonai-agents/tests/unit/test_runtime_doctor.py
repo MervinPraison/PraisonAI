@@ -4,6 +4,7 @@ Unit tests for runtime doctor migration.
 Tests the DoctorContractProtocol and built-in cli_backend migration rule.
 """
 
+import tempfile
 import unittest
 from typing import Any, Dict
 
@@ -322,6 +323,37 @@ class _RaisingRule:
         raise ValueError("cannot repair this")
 
 
+class _InPlaceRule:
+    """A rule that mutates-and-returns its argument (in-place repair)."""
+
+    @property
+    def rule_id(self) -> str:
+        return "in_place_rule"
+
+    def collect_findings(self, config: Dict[str, Any]):
+        if config.get("needs_flag") is True:
+            return [Finding(rule_id=self.rule_id, severity="warning", message="needs flag")]
+        return []
+
+    def apply_fix(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        config["needs_flag"] = False
+        return config
+
+
+class _CollectRaisingRule:
+    """A rule whose collect_findings raises, to exercise refuse-on-collect."""
+
+    @property
+    def rule_id(self) -> str:
+        return "collect_raising_rule"
+
+    def collect_findings(self, config: Dict[str, Any]):
+        raise RuntimeError("cannot verify config")
+
+    def apply_fix(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        return config
+
+
 class TestRepairPlanSafetyRails(unittest.TestCase):
     """Test the RepairPlan safety contract on the registry."""
 
@@ -426,6 +458,70 @@ class TestRepairPlanSafetyRails(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertNotIn("cli_backend", result)
         self.assertEqual(result["models"]["default"]["runtime"], "claude-code")
+
+    def test_in_place_rule_change_recorded(self):
+        """A rule that mutates-and-returns its arg still records a diff/change."""
+        registry = DoctorRulesRegistry()
+        registry.register_rule(_InPlaceRule())
+        config = {"needs_flag": True}
+
+        plan = registry.plan_fixes(config)
+
+        self.assertTrue(plan.has_changes)
+        self.assertEqual(len(plan.diffs), 1)
+        self.assertEqual(plan.diffs[0].rule_id, "in_place_rule")
+        self.assertFalse(plan.config["needs_flag"])
+        # Caller's config must remain untouched (dry-run).
+        self.assertTrue(config["needs_flag"])
+
+    def test_refuse_on_collect_failure(self):
+        """A rule whose collect_findings raises is recorded as refused."""
+        registry = DoctorRulesRegistry()
+        registry.register_rule(_CollectRaisingRule())
+        config = {"anything": True}
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            plan = registry.plan_fixes(config)
+
+        self.assertFalse(plan.has_changes)
+        self.assertEqual(len(plan.refused), 1)
+        self.assertEqual(plan.refused[0].rule_id, "collect_raising_rule")
+        self.assertEqual(plan.config, {"anything": True})
+
+    def test_no_op_apply_not_marked_applied(self):
+        """apply mode with no changes must not report applied=True."""
+        config = {"framework": "praisonai"}
+        plan = self.registry.plan_fixes(config, dry_run=False)
+        self.assertFalse(plan.has_changes)
+        self.assertFalse(plan.applied)
+
+    def test_apply_with_changes_marked_applied(self):
+        """apply mode that changes config reports applied=True."""
+        config = {"cli_backend": "claude-code"}
+        plan = self.registry.plan_fixes(config, dry_run=False)
+        self.assertTrue(plan.has_changes)
+        self.assertTrue(plan.applied)
+
+    def test_default_backup_path_no_overwrite(self):
+        """Auto-derived backups never overwrite an earlier snapshot."""
+        import os
+        import glob as _glob
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                config = {"cli_backend": "claude-code"}
+                p1 = self.registry.plan_fixes(config, dry_run=False, backup=True)
+                p2 = self.registry.plan_fixes(config, dry_run=False, backup=True)
+                self.assertIsNotNone(p1.backup_path)
+                self.assertIsNotNone(p2.backup_path)
+                self.assertNotEqual(p1.backup_path, p2.backup_path)
+                self.assertEqual(len(_glob.glob("doctor-config.bak-*.json")), 2)
+            finally:
+                os.chdir(cwd)
 
 
 if __name__ == '__main__':
