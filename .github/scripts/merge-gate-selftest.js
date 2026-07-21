@@ -40,6 +40,39 @@ assert('claude final reply detected', mg.isClaudeFinalReplyComment(withClaudeRep
 
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 
+const coreGreenRuns = [
+  { name: 'test-core', status: 'completed', conclusion: 'success' },
+  { name: 'test-core (cli)', status: 'completed', conclusion: 'success' },
+  { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+  { name: 'test-windows', status: 'completed', conclusion: 'cancelled' },
+];
+assert('core green allows cancelled smoke', mg.isAcceptableCheckConclusion(
+  { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+  coreGreenRuns
+));
+assert('core green allows cancelled test-windows', mg.isAcceptableCheckConclusion(
+  { name: 'test-windows', status: 'completed', conclusion: 'cancelled' },
+  coreGreenRuns
+));
+assert('cancelled smoke blocks when core missing', !mg.isAcceptableCheckConclusion(
+  { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+  [{ name: 'smoke', status: 'completed', conclusion: 'cancelled' }]
+));
+assert('cancelled smoke blocks when core failed', !mg.isAcceptableCheckConclusion(
+  { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+  [
+    { name: 'test-core', status: 'completed', conclusion: 'failure' },
+    { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+  ]
+));
+assert('bestRunsByName prefers success over cancelled', (() => {
+  const best = mg.bestRunsByName([
+    { name: 'smoke', conclusion: 'cancelled' },
+    { name: 'smoke', conclusion: 'success' },
+  ]);
+  return best.length === 1 && best[0].conclusion === 'success';
+})());
+
 // Stale-FINAL recovery guards (PR #2560 push loop)
 const nowMs = Date.now();
 const iso = (ms) => new Date(ms).toISOString();
