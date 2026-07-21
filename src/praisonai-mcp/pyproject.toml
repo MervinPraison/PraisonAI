@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-mcp"
-version = "0.0.6"
+version = "0.0.7"
 description = "MCP server hosting for PraisonAI — expose agents and tools to Cursor, Claude Desktop, and other MCP clients."
 readme = "README.md"
 license = {text = "MIT"}
