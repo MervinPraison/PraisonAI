@@ -185,6 +185,17 @@ class TrainModel:
             self.chat_tokenizer = get_chat_template(original_tokenizer, chat_template=chat_template)
         else:
             self.chat_tokenizer = original_tokenizer
+        # Fail fast if we have no usable chat template. Without one,
+        # apply_chat_template() errors are swallowed downstream and silently
+        # produce empty training text, which corrupts the run rather than
+        # reporting the real cause.
+        if getattr(self.chat_tokenizer, "chat_template", None) is None:
+            raise ValueError(
+                "Tokenizer for model '{}' has no chat template and none was "
+                "provided via config 'chat_template'. Set 'chat_template' (e.g. "
+                "'gemma', 'qwen-2.5', 'llama-3.1') so conversations format "
+                "correctly.".format(self.config["model_name"])
+            )
         self.hf_tokenizer = self.chat_tokenizer
         print("DEBUG: Chat tokenizer ready; HF tokenizer saved.")
         self.model = FastLanguageModel.get_peft_model(
@@ -279,8 +290,12 @@ class TrainModel:
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
-        # Compute loss only on assistant turns when the chat template supports it
-        # (model-agnostic replacement for the old Llama-hardcoded train_on_responses_only).
+        # Compute loss only on assistant turns (model-agnostic replacement for the
+        # old Llama-hardcoded train_on_responses_only). Opt-in via config and
+        # defaults off, so existing runs are unaffected. NOTE: TRL derives the
+        # response mask from the tokenizer's chat template, so this requires a
+        # template that emits assistant-turn markers (i.e. exposes `{% generation %}`
+        # blocks). Templates without them cannot produce the mask.
         if self.config.get("assistant_only_loss", False):
             sft_params["assistant_only_loss"] = True
         if os.getenv("PRAISON_WANDB"):
@@ -530,12 +545,12 @@ class TrainModel:
             },
             "gemma": {
                 # Gemma uses <start_of_turn>/<end_of_turn> and has no system role;
-                # the system prompt is folded into the first user turn.
-                "template": """{{ if .System }}<start_of_turn>user
-    {{ .System }}<end_of_turn>
-    {{ end }}{{ if .Prompt }}<start_of_turn>user
-    {{ .Prompt }}<end_of_turn>
-    {{ end }}<start_of_turn>model
+                # the system prompt is folded into the first user turn (per the
+                # Gemma chat template spec) rather than emitted as a separate turn.
+                "template": """<start_of_turn>user
+    {{ if .System }}{{ .System }}
+    {{ end }}{{ .Prompt }}<end_of_turn>
+    <start_of_turn>model
     {{ .Response }}<end_of_turn>
     """,
                 "stop_tokens": ["<end_of_turn>", "<start_of_turn>"]
