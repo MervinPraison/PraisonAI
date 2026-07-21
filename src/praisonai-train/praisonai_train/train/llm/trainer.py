@@ -22,7 +22,7 @@ def _lazy_import_training_deps():
         from transformers import TextStreamer, TrainingArguments
         from unsloth import FastLanguageModel, is_bfloat16_supported
         from unsloth.chat_templates import standardize_sharegpt, get_chat_template
-        from trl import SFTTrainer
+        from trl import SFTTrainer, SFTConfig
         from datasets import load_dataset, concatenate_datasets
         from psutil import virtual_memory
         # Make available in global scope for the rest of the module
@@ -32,6 +32,7 @@ def _lazy_import_training_deps():
             'FastLanguageModel': FastLanguageModel,
             'is_bfloat16_supported': is_bfloat16_supported,
             'SFTTrainer': SFTTrainer,
+            'SFTConfig': SFTConfig,
             'TrainingArguments': TrainingArguments,
             'load_dataset': load_dataset,
             'concatenate_datasets': concatenate_datasets,
@@ -176,20 +177,29 @@ class TrainModel:
         if original_tokenizer.pad_token is None:
             original_tokenizer.pad_token = original_tokenizer.eos_token
         original_tokenizer.model_max_length = self.config["max_seq_length"]
-        self.chat_tokenizer = get_chat_template(original_tokenizer, chat_template="llama-3.1")
-        self.hf_tokenizer = original_tokenizer
-        print("DEBUG: Chat tokenizer created; HF tokenizer saved.")
+        # Only override the tokenizer's built-in chat template when the config asks
+        # for a specific one. Forcing "llama-3.1" onto every model corrupted the
+        # prompt formatting for Gemma / Qwen / any non-Llama model.
+        chat_template = self.config.get("chat_template")
+        if chat_template:
+            self.chat_tokenizer = get_chat_template(original_tokenizer, chat_template=chat_template)
+        else:
+            self.chat_tokenizer = original_tokenizer
+        self.hf_tokenizer = self.chat_tokenizer
+        print("DEBUG: Chat tokenizer ready; HF tokenizer saved.")
         self.model = FastLanguageModel.get_peft_model(
             self.model,
-            r=16,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_alpha=16,
-            lora_dropout=0,
-            bias="none",
-            use_gradient_checkpointing="unsloth",
-            random_state=3407,
-            use_rslora=False,
-            loftq_config=None,
+            r=self.config.get("lora_r", 16),
+            target_modules=self.config.get("lora_target_modules", [
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj"]),
+            lora_alpha=self.config.get("lora_alpha", 16),
+            lora_dropout=self.config.get("lora_dropout", 0),
+            bias=self.config.get("lora_bias", "none"),
+            use_gradient_checkpointing=self.config.get("use_gradient_checkpointing", "unsloth"),
+            random_state=self.config.get("random_state", 3407),
+            use_rslora=self.config.get("use_rslora", False),
+            loftq_config=self.config.get("loftq_config", None),
         )
         print("DEBUG: LoRA adapters added.")
 
@@ -237,15 +247,17 @@ class TrainModel:
 
     def train_model(self):
         print("DEBUG: Starting training...")
+        # The dataset carries a "text" column (from formatting_prompts_func). Modern
+        # TRL tokenizes internally, so we no longer pre-tokenize + pass a dummy field.
         raw_dataset = self.load_datasets()
-        tokenized_dataset = self.tokenize_dataset(raw_dataset)
-        print("DEBUG: Dataset tokenization complete.")
-        # Build the training arguments parameters dynamically
-        ta_params = {
+        print("DEBUG: Dataset ready with", len(raw_dataset), "examples.")
+
+        # SFT-specific fields (dataset_text_field, max_length, packing, ...) live on
+        # SFTConfig in modern TRL, not on TrainingArguments / the SFTTrainer kwargs.
+        sft_params = {
             "per_device_train_batch_size": self.config.get("per_device_train_batch_size", 2),
             "gradient_accumulation_steps": self.config.get("gradient_accumulation_steps", 2),
             "warmup_steps": self.config.get("warmup_steps", 50),
-            "max_steps": self.config.get("max_steps", 2800),
             "learning_rate": self.config.get("learning_rate", 2e-4),
             "fp16": self.config.get("fp16", not is_bfloat16_supported()),
             "bf16": self.config.get("bf16", is_bfloat16_supported()),
@@ -256,29 +268,31 @@ class TrainModel:
             "seed": self.config.get("seed", 3407),
             "output_dir": self.config.get("output_dir", "outputs"),
             "report_to": "none" if not os.getenv("PRAISON_WANDB") else "wandb",
-            "remove_unused_columns": self.config.get("remove_unused_columns", False)
+            "dataset_text_field": "text",
+            "max_length": self.config["max_seq_length"],
+            "dataset_num_proc": self.config.get("dataset_num_proc", 1),
+            "packing": self.config.get("packing", False),
         }
+        # Prefer max_steps if given; otherwise fall back to epochs (default 2800 steps
+        # preserves the previous behaviour when neither is configured).
+        if self.config.get("num_train_epochs") and not self.config.get("max_steps"):
+            sft_params["num_train_epochs"] = self.config["num_train_epochs"]
+        else:
+            sft_params["max_steps"] = self.config.get("max_steps", 2800)
+        # Compute loss only on assistant turns when the chat template supports it
+        # (model-agnostic replacement for the old Llama-hardcoded train_on_responses_only).
+        if self.config.get("assistant_only_loss", False):
+            sft_params["assistant_only_loss"] = True
         if os.getenv("PRAISON_WANDB"):
-            ta_params["save_steps"] = self.config.get("save_steps", 100)
-            ta_params["run_name"] = os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train")
+            sft_params["save_steps"] = self.config.get("save_steps", 100)
+            sft_params["run_name"] = os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train")
 
-        training_args = TrainingArguments(**ta_params)
-        # Since the dataset is pre-tokenized, we supply a dummy dataset_text_field.
+        training_args = SFTConfig(**sft_params)
         trainer = SFTTrainer(
             model=self.model,
-            tokenizer=self.hf_tokenizer,
-            train_dataset=tokenized_dataset,
-            dataset_text_field="input_ids",  # Dummy field since data is numeric
-            max_seq_length=self.config["max_seq_length"],
-            dataset_num_proc=1,  # Use a single process to avoid pickling issues
-            packing=False,
+            processing_class=self.hf_tokenizer,
+            train_dataset=raw_dataset,
             args=training_args,
-        )
-        from unsloth.chat_templates import train_on_responses_only
-        trainer = train_on_responses_only(
-            trainer,
-            instruction_part="<|start_header_id|>user<|end_header_id|>\n\n",
-            response_part="<|start_header_id|>assistant<|end_header_id|>\n\n",
         )
         print("DEBUG: Beginning trainer.train() ...")
         trainer.train()
@@ -513,6 +527,18 @@ class TrainModel:
     {{ end }}<|im_start|>assistant
     {{ end }}{{ .Response }}{{ if .Response }}<|im_end|>{{ end }}""",
                 "stop_tokens": ["</s>", "USER:", "ASSSISTANT:"]
+            },
+            "gemma": {
+                # Gemma uses <start_of_turn>/<end_of_turn> and has no system role;
+                # the system prompt is folded into the first user turn.
+                "template": """{{ if .System }}<start_of_turn>user
+    {{ .System }}<end_of_turn>
+    {{ end }}{{ if .Prompt }}<start_of_turn>user
+    {{ .Prompt }}<end_of_turn>
+    {{ end }}<start_of_turn>model
+    {{ .Response }}<end_of_turn>
+    """,
+                "stop_tokens": ["<end_of_turn>", "<start_of_turn>"]
             }
         }
         # Select mapping by checking if any key is in the model_name.

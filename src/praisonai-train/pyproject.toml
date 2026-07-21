@@ -27,13 +27,15 @@ llm = [
     # `praisonai-train llm` bridges into the code-tier CLI runner for dataset
     # dispatch, so the LLM extra must pull praisonai-code alongside the ML stack.
     "praisonai-code>=0.0.1",
-    "torch>=2.3.0",
-    "transformers>=4.40.0",
-    "unsloth>=2024.8",
-    "trl<0.9.0",
-    "peft>=0.10.0",
-    "accelerate>=0.30.0",
-    "bitsandbytes>=0.43.0",
+    "torch>=2.6.0",
+    # Latest Unsloth requires modern TRL/Transformers; the old `trl<0.9.0` pin was
+    # incompatible with any recent Unsloth and blocked new-model support.
+    "transformers>=4.51.3",
+    "unsloth>=2025.9.1",
+    "trl>=0.18.2",
+    "peft>=0.13.0",
+    "accelerate>=0.34.0",
+    "bitsandbytes>=0.45.0",
     "datasets>=2.19.0",
     "sentencepiece>=0.2.0",
     "protobuf",
