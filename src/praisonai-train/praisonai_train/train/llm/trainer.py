@@ -172,6 +172,19 @@ class TrainModel:
                 f"  max_seq_length: 2048\n"
                 f"  dataset:\n    - name: yahma/alpaca-cleaned"
             )
+        # Fail fast (before training) when a publish target is requested but its
+        # destination name is missing, instead of silently skipping the upload the
+        # user asked for after a long run.
+        if self._flag(self.config.get("huggingface_save")) or self._flag(
+            self.config.get("huggingface_save_gguf")
+        ):
+            if not self.config.get("hf_model_name"):
+                raise ValueError(
+                    "hf_model_name is required when huggingface_save or "
+                    "huggingface_save_gguf is enabled."
+                )
+        if self._flag(self.config.get("ollama_save")) and not self.config.get("ollama_model"):
+            raise ValueError("ollama_model is required when ollama_save is enabled.")
         for key in self.config:
             if key not in self.KNOWN_KEYS:
                 print(f"WARNING: ignoring unknown config key '{key}' (typo, or not supported).")
@@ -288,9 +301,24 @@ class TrainModel:
         print(f"DEBUG: Loading dataset '{dataset_name}' split '{split_type}'...")
         dataset = load_dataset(dataset_name, split=split_type)
         # Honor num_samples (train on a subset) — previously advertised but ignored.
+        # Validate as a positive integer so 0/negatives/booleans/typos fail fast with
+        # a clear message instead of silently training on the full set or crashing mid-run.
         num_samples = dataset_info.get("num_samples")
-        if num_samples:
-            dataset = dataset.select(range(min(int(num_samples), len(dataset))))
+        if num_samples is not None:
+            if isinstance(num_samples, bool) or not isinstance(num_samples, int):
+                try:
+                    num_samples = int(num_samples)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"dataset[].num_samples must be a positive integer, got "
+                        f"{num_samples!r}."
+                    ) from exc
+            if num_samples < 1:
+                raise ValueError(
+                    f"dataset[].num_samples must be a positive integer, got "
+                    f"{num_samples!r}."
+                )
+            dataset = dataset.select(range(min(num_samples, len(dataset))))
             print(f"DEBUG: Using {len(dataset)} samples (num_samples={num_samples}).")
         print("DEBUG: Dataset columns:", dataset.column_names)
         if "conversations" in dataset.column_names:
