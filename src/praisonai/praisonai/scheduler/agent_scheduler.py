@@ -343,6 +343,22 @@ class AgentScheduler(_BaseAgentScheduler):
         """
         if not self.deliver:
             return
+        text = str(result)
+        # Honour the core intentional-silence contract on the unattended path:
+        # a run whose whole output is an exact silence marker (NO_REPLY /
+        # [SILENT] / SILENT) means "nothing worth sending — stay quiet". The
+        # run still completes and is recorded in history; only delivery is
+        # suppressed. Prose that merely mentions the token is unaffected
+        # (is_intentional_silence_response is exact-match).
+        try:
+            from praisonaiagents.bots.silence import is_intentional_silence_response
+            if is_intentional_silence_response(text):
+                logger.info(
+                    "Scheduled run chose intentional silence; delivery suppressed"
+                )
+                return
+        except Exception:  # pragma: no cover - core primitive always present
+            pass
         try:
             if self._delivery is None:
                 from praisonai.scheduler._delivery import SchedulerDelivery
@@ -354,7 +370,7 @@ class AgentScheduler(_BaseAgentScheduler):
                 self._delivery = SchedulerDelivery(
                     self.deliver, job_id=job_id, origin=origin
                 )
-            self._delivery.deliver(str(result))
+            self._delivery.deliver(text)
         except Exception as e:
             logger.error(f"Scheduler delivery error: {e}")
     
