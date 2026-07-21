@@ -15,7 +15,9 @@ class Calculator:
     def multiply(self, a, b):
         """Multiply two numbers."""
         return a * b
-    
+        
     def divide(self, a, b):
-        """Divide two numbers. INTENTIONAL BUG: No zero check."""
-        return a / b  # This should raise ValueError for division by zero
+        """Divide two numbers."""
+        if b == 0:
+            raise ValueError("Cannot divide by zero")
+        return a / b
