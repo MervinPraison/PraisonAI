@@ -671,10 +671,22 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
     Provisions a fresh worktree via the core ``GitWorktreeAdapter`` and chdirs
     into it for the duration of the run so the agent edits an isolated branch
     instead of the working tree. On exit it reports the branch name and a
-    summary diff, then removes the worktree unless ``keep`` is set. Degrades to
-    a transparent no-op when isolation is disabled or the directory is not a git
-    repository (the adapter reports ``available=False``), so callers can wrap
-    unconditionally.
+    summary of changes (tracked *and* untracked), then tears the worktree down.
+    Degrades to a transparent no-op when isolation is disabled or the directory
+    is not a git repository (the adapter reports ``available=False``), so callers
+    can wrap unconditionally.
+
+    Per-run isolation: a short random token is appended to ``name`` so two
+    concurrent or repeated runs of the same target never resolve to the same
+    worktree/branch and mix each other's uncommitted changes.
+
+    Data-safety on teardown: the agent's output may be entirely *untracked* new
+    files, which ``git diff`` does not see. So before removing the worktree we
+    snapshot any change (tracked or untracked, via ``git status --porcelain``)
+    onto the branch with an automatic commit and *retain that branch* — only the
+    worktree checkout directory is pruned. A run that produced no changes is
+    torn down completely (worktree + branch). ``--keep`` additionally retains the
+    worktree checkout itself for in-place review.
     """
     if not enabled:
         yield None
@@ -682,6 +694,7 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
 
     import os
     import subprocess
+    import uuid
 
     from praisonaiagents.workspace import GitWorktreeAdapter
 
@@ -694,20 +707,41 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
         yield None
         return
 
-    def _branch_of(worktree_path: str) -> str:
+    def _git(*args, cwd):
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=worktree_path,
-                capture_output=True,
-                text=True,
+            return subprocess.run(
+                ["git", *args], cwd=cwd, capture_output=True, text=True
             )
-            return result.stdout.strip() if result.returncode == 0 else "?"
         except (FileNotFoundError, OSError):
-            return "?"
+            return None
+
+    def _branch_of(worktree_path: str) -> str:
+        result = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path)
+        if result is not None and result.returncode == 0:
+            return result.stdout.strip() or "?"
+        return "?"
+
+    def _has_changes(worktree_path: str) -> bool:
+        # ``--porcelain`` reports staged, unstaged *and* untracked entries, so a
+        # run that only creates brand-new files (invisible to ``git diff``) is
+        # still recognised as having produced output.
+        result = _git("status", "--porcelain", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return False
+        return bool((result.stdout or "").strip())
+
+    def _summary(worktree_path: str) -> str:
+        result = _git("status", "--short", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
+
+    # Make the run's worktree/branch unique per invocation so identical targets
+    # (same prompt/YAML) run concurrently without sharing state.
+    unique_name = f"{name}-{uuid.uuid4().hex[:8]}"
 
     original_cwd = os.getcwd()
-    path = adapter.create(name)
+    path = adapter.create(unique_name)
     branch = _branch_of(path)
     if not output.is_json_mode:
         output.print_info(f"Isolated run on branch '{branch}' ({path})")
@@ -716,29 +750,52 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
         yield path
     finally:
         os.chdir(original_cwd)
+
+        summary = _summary(path)
+        changed = _has_changes(path)
         if not output.is_json_mode:
-            try:
-                diff = subprocess.run(
-                    ["git", "diff", "--stat", "HEAD"],
-                    cwd=path,
-                    capture_output=True,
-                    text=True,
-                )
-                summary = (diff.stdout or "").strip()
-            except (FileNotFoundError, OSError):
-                summary = ""
             if summary:
                 output.print_info(f"Changes on '{branch}':\n{summary}")
             else:
                 output.print_info(f"No changes on '{branch}'.")
+
         if keep:
             if not output.is_json_mode:
                 output.print_info(
                     f"Worktree kept at {path} (branch '{branch}'). "
                     "Review/merge then remove with: git worktree remove."
                 )
+            return
+
+        if changed:
+            # Never destroy the agent's output. Persist every change (tracked +
+            # untracked) as a commit on the isolated branch and retain the
+            # branch; only the worktree checkout directory is pruned.
+            _git("add", "-A", cwd=path)
+            committed = _git(
+                "commit", "--no-verify", "-m", f"praisonai run: {name}", cwd=path
+            )
+            if committed is None or committed.returncode != 0:
+                # Couldn't persist the work (e.g. no git identity configured):
+                # keep the worktree checkout in place so output is never lost.
+                if not output.is_json_mode:
+                    output.print_warning(
+                        f"Could not commit isolated changes; worktree kept at "
+                        f"{path} (branch '{branch}') for manual review."
+                    )
+                return
+            # ``worktree remove`` deletes the checkout but leaves the branch
+            # intact for review/merge (unlike ``adapter.remove`` which also
+            # force-deletes the branch and would lose the committed work).
+            _git("worktree", "remove", "--force", path, cwd=original_cwd)
+            if not output.is_json_mode:
+                output.print_info(
+                    f"Committed changes to branch '{branch}'. "
+                    f"Review/merge with: git merge {branch}"
+                )
         else:
-            adapter.remove(name)
+            # No output produced: safe to remove worktree and branch entirely.
+            adapter.remove(unique_name)
 
 
 @app.callback(invoke_without_command=True)
@@ -1136,6 +1193,15 @@ def run_main(
             )
         return
     
+    # Resolve a YAML file target to an absolute path *before* isolation chdirs
+    # away. The config is loaded from the original checkout so an untracked or
+    # git-ignored ``./agents.yaml`` (absent from the fresh worktree) still loads;
+    # the agent then produces its output inside the isolated worktree.
+    run_target = target
+    if worktree and is_file:
+        import os as _os_ff
+        run_target = _os_ff.path.abspath(target)
+
     # Provision a per-run git worktree/branch when --worktree is set and the cwd
     # is a git repo; otherwise this is a transparent no-op. The agent runs with
     # its cwd redirected into the isolated worktree for the duration of the run.
@@ -1143,7 +1209,7 @@ def run_main(
         if is_file:
             # Run from file
             _run_from_file(
-                target,
+                run_target,
                 model=model,
                 framework=framework,
                 interactive=interactive,

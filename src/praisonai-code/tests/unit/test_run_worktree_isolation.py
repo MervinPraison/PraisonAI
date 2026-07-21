@@ -106,3 +106,50 @@ def test_cwd_restored_on_error(git_repo):
         assert not os.path.exists(captured)
     finally:
         os.chdir(start)
+
+
+def test_untracked_output_is_preserved_on_a_branch(git_repo):
+    """A run that only creates new (untracked) files must not lose them.
+
+    ``git diff`` doesn't see untracked files, so the old cleanup force-removed
+    the worktree and silently deleted brand-new output. The changes must now be
+    committed to the isolated branch and that branch retained for review.
+    """
+    start = os.getcwd()
+    try:
+        os.chdir(git_repo)
+        with run_cmd._worktree_isolation(True, "make output") as path:
+            # Agent output is a brand-new, untracked file.
+            (open(os.path.join(path, "generated.txt"), "w")).write("result\n")
+        # Worktree checkout is pruned, but the branch (with the output) survives.
+        assert not os.path.exists(path)
+        branches = _git(git_repo, "branch", "--list", "praisonai/*").stdout
+        assert "praisonai/" in branches
+        # The committed output is retrievable from the retained branch.
+        kept_branch = branches.strip().split()[-1]
+        show = _git(git_repo, "show", f"{kept_branch}:generated.txt")
+        assert show.returncode == 0
+        assert "result" in show.stdout
+    finally:
+        # Clean up any retained praisonai/* branches created by this test.
+        for line in _git(git_repo, "branch", "--list", "praisonai/*").stdout.split("\n"):
+            b = line.strip().lstrip("* ").strip()
+            if b:
+                _git(git_repo, "branch", "-D", b)
+        os.chdir(start)
+
+
+def test_identical_targets_get_independent_worktrees(git_repo):
+    """Two runs of the same target must not resolve to the same worktree."""
+    start = os.getcwd()
+    try:
+        os.chdir(git_repo)
+        with run_cmd._worktree_isolation(True, "same", keep=True) as path_a:
+            with run_cmd._worktree_isolation(True, "same", keep=True) as path_b:
+                assert path_a is not None and path_b is not None
+                assert os.path.realpath(path_a) != os.path.realpath(path_b)
+    finally:
+        for line in _git(git_repo, "worktree", "list", "--porcelain").stdout.split("\n"):
+            if line.startswith("worktree ") and "worktrees" in line:
+                _git(git_repo, "worktree", "remove", "--force", line.split(" ", 1)[1])
+        os.chdir(start)
