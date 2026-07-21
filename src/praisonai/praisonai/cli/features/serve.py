@@ -28,25 +28,11 @@ def _install_api_key_middleware(
     if not api_key:
         return
 
-    import hmac
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+    from praisonai._api_auth import build_api_key_middleware
 
     public = public_paths or {"/health", "/", "/.well-known/agent.json"}
 
-    class APIKeyMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            path = request.url.path
-            if path in public or path.startswith("/__praisonai__/"):
-                return await call_next(request)
-            auth = request.headers.get("Authorization", "")
-            header_key = request.headers.get("X-API-Key", "")
-            token = auth[7:] if auth.startswith("Bearer ") else header_key
-            if not token or not hmac.compare_digest(token, api_key):
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            return await call_next(request)
-
-    app.add_middleware(APIKeyMiddleware)
+    app.add_middleware(build_api_key_middleware(api_key, public))
 
 
 class ServeHandler:
