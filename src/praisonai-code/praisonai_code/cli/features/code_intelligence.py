@@ -536,7 +536,7 @@ class CodeIntelligenceRouter:
             # Prefer the ripgrep-backed core grep (gitignore-aware, result-capped,
             # truncation-safe). Fall back to a plain ``grep -rn`` only when the
             # core tool is unavailable or errors.
-            results = self._core_grep(search_term, file_path)
+            results = self._core_grep(search_term, search_path)
             if results is None:
                 results = self._fallback_grep(search_term, search_path)
 
@@ -561,12 +561,16 @@ class CodeIntelligenceRouter:
                 error=str(e)
             )
     
-    def _core_grep(self, search_term: str, file_path: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+    def _core_grep(self, search_term: str, search_path: Optional[str]) -> Optional[List[Dict[str, Any]]]:
         """Search using the ripgrep-backed core ``grep`` tool.
 
-        The core tool is workspace-contained (it resolves ``path`` under the
-        current workspace root), so we pass a workspace-relative path — the file
-        when one was given, otherwise ``"."`` for a whole-tree search.
+        The core tool contains ``path`` under the process working directory. We
+        pass the caller-resolved ``search_path`` (the target file when one was
+        given, otherwise the configured workspace) so the search targets the
+        same tree as the ``grep -rn`` fallback instead of the process CWD. If
+        that path escapes the core tool's root it returns an ``Error:`` string,
+        which we treat as "fall back" so the subprocess path (which searches the
+        workspace directly) still returns the expected results.
 
         Core ``grep`` returns a newline-joined ``path:line: matched line``
         string. We parse it into ``{file, line, content}`` dicts.
@@ -580,7 +584,7 @@ class CodeIntelligenceRouter:
             return None
 
         try:
-            output = core_grep(search_term, path=file_path or ".")
+            output = core_grep(search_term, path=search_path or ".")
         except Exception as e:
             logger.debug(f"Core grep failed, will fall back: {e}")
             return None

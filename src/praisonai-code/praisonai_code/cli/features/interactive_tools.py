@@ -91,27 +91,39 @@ class ToolConfig:
     approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
-    
+
+    def __post_init__(self) -> None:
+        # Honour PRAISON_TOOLS_DISABLE for *every* ToolConfig, not just the
+        # ``from_env`` path. Callers that construct ToolConfig directly (e.g.
+        # ``InteractiveConfig.to_tool_config`` and ``HeadlessInteractiveCore``)
+        # would otherwise silently keep a group enabled despite the advertised
+        # opt-out. This only turns groups *off* — an explicit ``enable_*=True``
+        # passed by a caller is still overridden by the operator's env opt-out,
+        # matching the "disable" semantics of the flag.
+        self._apply_env_disable()
+
+    def _apply_env_disable(self) -> None:
+        """Disable tool groups listed in ``PRAISON_TOOLS_DISABLE`` (in place)."""
+        disable_str = os.environ.get("PRAISON_TOOLS_DISABLE", "")
+        if not disable_str:
+            return
+        disabled = {g.strip().lower() for g in disable_str.split(",")}
+        if "acp" in disabled:
+            self.enable_acp = False
+        if "edit" in disabled:
+            self.enable_edit = False
+        if "lsp" in disabled:
+            self.enable_lsp = False
+        if "search" in disabled:
+            self.enable_search = False
+        if "basic" in disabled:
+            self.enable_basic = False
+
     @classmethod
     def from_env(cls) -> "ToolConfig":
         """Create config from environment variables."""
-        config = cls()
-        
-        # Check env vars for disabling groups
-        disable_str = os.environ.get("PRAISON_TOOLS_DISABLE", "")
-        if disable_str:
-            disabled = [g.strip().lower() for g in disable_str.split(",")]
-            if "acp" in disabled:
-                config.enable_acp = False
-            if "edit" in disabled:
-                config.enable_edit = False
-            if "lsp" in disabled:
-                config.enable_lsp = False
-            if "search" in disabled:
-                config.enable_search = False
-            if "basic" in disabled:
-                config.enable_basic = False
-        
+        config = cls()  # __post_init__ already applied PRAISON_TOOLS_DISABLE
+
         # Check for workspace
         workspace = os.environ.get("PRAISON_WORKSPACE", "")
         if workspace:
