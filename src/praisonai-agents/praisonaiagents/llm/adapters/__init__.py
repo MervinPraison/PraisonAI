@@ -113,10 +113,38 @@ class OllamaAdapter(DefaultAdapter):
         return 1  # Ollama-specific threshold
     
     def format_tool_result_message(self, function_name: str, tool_result: Any, tool_call_id: Optional[str] = None) -> Dict[str, Any]:
-        # Ollama uses natural language format for tool results
+        # Ollama uses natural language format for tool results.
+        # Error results get a distinct, apology-oriented instruction so the model
+        # explains the failure rather than echoing the raw error.
+        is_error = False
+        error_message = None
+        if isinstance(tool_result, dict) and 'error' in tool_result:
+            is_error = True
+            error_message = tool_result.get('error', 'Unknown error')
+        elif isinstance(tool_result, list) and len(tool_result) > 0:
+            first_item = tool_result[0]
+            if isinstance(first_item, dict) and 'error' in first_item:
+                is_error = True
+                error_message = first_item.get('error', 'Unknown error')
+
+        if is_error:
+            return {
+                "role": "user",
+                "content": f"""The tool "{function_name}" encountered an error:
+{error_message}
+
+Please provide a helpful response to the user explaining that the operation could not be completed. 
+Be apologetic and suggest alternatives if possible. Do NOT repeat the raw error message.
+Give a natural, conversational response."""
+            }
+
         return {
-            "role": "user", 
-            "content": f"Tool '{function_name}' returned: {tool_result}"
+            "role": "user",
+            "content": f"""Tool execution complete.
+Function: {function_name}
+Result: {tool_result}
+
+Now provide your final answer using this result. Summarize the information naturally for the user."""
         }
     
     def handle_empty_response_with_tools(self, state: Dict[str, Any]) -> bool:
