@@ -140,8 +140,89 @@ class TrainModel:
 
     def load_config(self, path):
         with open(path, "r") as file:
-            self.config = yaml.safe_load(file)
+            self.config = yaml.safe_load(file) or {}
+        # `model` is an accepted alias for `model_name` (matches the --model CLI flag).
+        if "model" in self.config and "model_name" not in self.config:
+            self.config["model_name"] = self.config["model"]
+        self.validate_config()
         print("DEBUG: Loaded config:", self.config)
+
+    # Known config keys — anything else is flagged so typos/unsupported keys are not
+    # silently ignored (important for people and agents writing configs by hand).
+    KNOWN_KEYS = frozenset({
+        "model", "model_name", "model_parameters", "max_seq_length", "load_in_4bit",
+        "chat_template", "lora_r", "lora_alpha", "lora_dropout", "lora_bias",
+        "lora_target_modules", "use_gradient_checkpointing", "use_rslora", "loftq_config",
+        "random_state", "dataset", "dataset_text_field", "dataset_num_proc", "packing",
+        "per_device_train_batch_size", "gradient_accumulation_steps", "warmup_steps",
+        "max_steps", "num_train_epochs", "learning_rate", "fp16", "bf16", "logging_steps",
+        "optim", "weight_decay", "lr_scheduler_type", "seed", "output_dir",
+        "assistant_only_loss", "train_on_responses_only", "save_steps",
+        "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
+        "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
+    })
+
+    def validate_config(self):
+        required = ["model_name", "max_seq_length", "dataset"]
+        missing = [k for k in required if not self.config.get(k)]
+        if missing:
+            raise ValueError(
+                f"Config is missing required keys: {missing}. Minimal example:\n"
+                f"  model_name: unsloth/gemma-2-2b-it-bnb-4bit\n"
+                f"  max_seq_length: 2048\n"
+                f"  dataset:\n    - name: yahma/alpaca-cleaned"
+            )
+        # Fail fast (before training) when a publish target is requested but its
+        # destination name is missing, instead of silently skipping the upload the
+        # user asked for after a long run.
+        if self._flag(self.config.get("huggingface_save")) or self._flag(
+            self.config.get("huggingface_save_gguf")
+        ):
+            if not self.config.get("hf_model_name"):
+                raise ValueError(
+                    "hf_model_name is required when huggingface_save or "
+                    "huggingface_save_gguf is enabled."
+                )
+        if self._flag(self.config.get("ollama_save")) and not self.config.get("ollama_model"):
+            raise ValueError("ollama_model is required when ollama_save is enabled.")
+        for key in self.config:
+            if key not in self.KNOWN_KEYS:
+                print(f"WARNING: ignoring unknown config key '{key}' (typo, or not supported).")
+
+    @staticmethod
+    def _flag(value, default=False):
+        """Coerce a config flag to bool. Accepts real YAML booleans and the string
+        forms ('true'/'false') that older configs use, so `train: true` and
+        `train: "true"` both work instead of crashing on `.lower()`."""
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    def _supports_assistant_mask(self):
+        """True iff assistant-only loss will actually produce a usable mask for this
+        tokenizer (mirrors TRL's runtime check), so we can auto-enable it without
+        risking TRL's "no assistant tokens" RuntimeError on templates that lack the
+        `{% generation %}` markers (most stock templates do)."""
+        tok = self.hf_tokenizer
+        if not getattr(tok, "chat_template", None):
+            return False
+        dummy = [{"role": "user", "content": "ping"},
+                 {"role": "assistant", "content": "pong"}]
+        try:
+            out = tok.apply_chat_template(
+                dummy, tokenize=True, return_dict=True,
+                return_assistant_tokens_mask=True, add_generation_prompt=False,
+            )
+        except Exception:
+            return False
+        mask = out.get("assistant_masks")
+        if not mask:
+            return False
+        if isinstance(mask[0], (list, tuple)):
+            return any(1 in row for row in mask)
+        return 1 in mask
 
     def print_system_info(self):
         print("DEBUG: PyTorch version:", torch.__version__)
@@ -219,6 +300,26 @@ class TrainModel:
         split_type = dataset_info.get("split_type", "train")
         print(f"DEBUG: Loading dataset '{dataset_name}' split '{split_type}'...")
         dataset = load_dataset(dataset_name, split=split_type)
+        # Honor num_samples (train on a subset) — previously advertised but ignored.
+        # Validate as a positive integer so 0/negatives/booleans/typos fail fast with
+        # a clear message instead of silently training on the full set or crashing mid-run.
+        num_samples = dataset_info.get("num_samples")
+        if num_samples is not None:
+            if isinstance(num_samples, bool) or not isinstance(num_samples, int):
+                try:
+                    num_samples = int(num_samples)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"dataset[].num_samples must be a positive integer, got "
+                        f"{num_samples!r}."
+                    ) from exc
+            if num_samples < 1:
+                raise ValueError(
+                    f"dataset[].num_samples must be a positive integer, got "
+                    f"{num_samples!r}."
+                )
+            dataset = dataset.select(range(min(num_samples, len(dataset))))
+            print(f"DEBUG: Using {len(dataset)} samples (num_samples={num_samples}).")
         print("DEBUG: Dataset columns:", dataset.column_names)
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
@@ -290,14 +391,28 @@ class TrainModel:
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
-        # Compute loss only on assistant turns (model-agnostic replacement for the
-        # old Llama-hardcoded train_on_responses_only). Opt-in via config and
-        # defaults off, so existing runs are unaffected. NOTE: TRL derives the
-        # response mask from the tokenizer's chat template, so this requires a
-        # template that emits assistant-turn markers (i.e. exposes `{% generation %}`
-        # blocks). Templates without them cannot produce the mask.
-        if self.config.get("assistant_only_loss", False):
+        # Response-only loss: compute loss only on the assistant's replies (better
+        # instruction tuning). Default "auto" enables it only when the model's chat
+        # template actually supports masking, so beginners get the quality win with
+        # zero risk of TRL's "no assistant tokens" crash. true/false force it.
+        # `train_on_responses_only` is accepted as a familiar alias.
+        mask_setting = self.config.get(
+            "assistant_only_loss", self.config.get("train_on_responses_only", "auto"))
+        supports_mask = self._supports_assistant_mask()
+        if isinstance(mask_setting, str) and mask_setting.strip().lower() == "auto":
+            use_mask = supports_mask
+        else:
+            use_mask = self._flag(mask_setting)
+        if use_mask and not supports_mask:
+            raise ValueError(
+                f"assistant_only_loss is enabled but the chat template for "
+                f"'{self.config['model_name']}' has no assistant-turn markers "
+                f"({{% generation %}}). Set assistant_only_loss: auto (recommended) or "
+                f"false, or use a chat_template that supports masking."
+            )
+        if use_mask:
             sft_params["assistant_only_loss"] = True
+        self._masking_on = use_mask
         if os.getenv("PRAISON_WANDB"):
             sft_params["save_steps"] = self.config.get("save_steps", 100)
             sft_params["run_name"] = os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train")
@@ -308,6 +423,19 @@ class TrainModel:
             processing_class=self.hf_tokenizer,
             train_dataset=raw_dataset,
             args=training_args,
+        )
+        # One clear summary of what will run — so people and agents can confirm the
+        # config resolved as intended without reading the DEBUG noise.
+        steps = sft_params.get("max_steps", f"{sft_params.get('num_train_epochs', 1)} epoch(s)")
+        print(
+            "\n──────────── PraisonAI Train ────────────\n"
+            f"  Model:       {self.config['model_name']}\n"
+            f"  Examples:    {len(raw_dataset)}\n"
+            f"  Loss mask:   {'assistant replies only' if self._masking_on else 'full sequence'}\n"
+            f"  Steps:       {steps}  ·  batch {sft_params['per_device_train_batch_size']}"
+            f" × accum {sft_params['gradient_accumulation_steps']}\n"
+            f"  Output:      lora_model/\n"
+            "─────────────────────────────────────────\n"
         )
         print("DEBUG: Beginning trainer.train() ...")
         trainer.train()
@@ -599,14 +727,22 @@ class TrainModel:
         self.print_system_info()
         self.check_gpu()
         self.check_ram()
-        if self.config.get("train", "true").lower() == "true":
+        if self._flag(self.config.get("train"), default=True):
             self.prepare_model()
             self.train_model()
-        if self.config.get("huggingface_save", "true").lower() == "true":
+        if self.model is None:
+            # Training was disabled (train: false) so no model was loaded. Skip
+            # publishing rather than crashing with an AttributeError on None.
+            print("DEBUG: Training skipped (train: false); no model to publish.")
+            return
+        # Publishing defaults OFF and is skipped unless a target is set — so a plain
+        # "train locally" config finishes with the LoRA saved to lora_model/ instead
+        # of crashing on a missing repo name or pushing to someone else's account.
+        if self._flag(self.config.get("huggingface_save")) and self.config.get("hf_model_name"):
             self.save_model_merged()
-        if self.config.get("huggingface_save_gguf", "true").lower() == "true":
+        if self._flag(self.config.get("huggingface_save_gguf")) and self.config.get("hf_model_name"):
             self.push_model_gguf()
-        if self.config.get("ollama_save", "true").lower() == "true":
+        if self._flag(self.config.get("ollama_save")) and self.config.get("ollama_model"):
             self.create_and_push_ollama_model()
 
 def main():

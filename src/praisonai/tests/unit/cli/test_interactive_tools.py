@@ -67,6 +67,7 @@ class TestToolGroups:
             set(TOOL_GROUPS["acp"])
             | set(TOOL_GROUPS["edit"])
             | set(TOOL_GROUPS["lsp"])
+            | set(TOOL_GROUPS["search"])
             | set(TOOL_GROUPS["basic"])
         )
         assert set(TOOL_GROUPS["interactive"]) == expected
