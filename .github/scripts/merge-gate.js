@@ -350,11 +350,26 @@ function checkConclusionRank(conclusion) {
   return 0;
 }
 
+function isPendingRun(run) {
+  return !!(run && run.status && run.status !== 'completed');
+}
+
 function bestRunsByName(runs) {
   const byName = new Map();
   for (const run of runs || []) {
+    if (!run) continue;
     const existing = byName.get(run.name);
-    if (!existing || checkConclusionRank(run.conclusion) > checkConclusionRank(existing.conclusion)) {
+    if (!existing) {
+      byName.set(run.name, run);
+      continue;
+    }
+    const runPending = isPendingRun(run);
+    const existingPending = isPendingRun(existing);
+    if (existingPending) continue;
+    if (
+      runPending ||
+      checkConclusionRank(run.conclusion) > checkConclusionRank(existing.conclusion)
+    ) {
       byName.set(run.name, run);
     }
   }
@@ -911,6 +926,7 @@ module.exports = {
   OPTIONAL_CANCELLED_WHEN_CORE_GREEN,
   isCoreTestRun,
   coreTestsGreenOnRuns,
+  isPendingRun,
   bestRunsByName,
   isAcceptableCheckConclusion,
   listChecksOnSha,

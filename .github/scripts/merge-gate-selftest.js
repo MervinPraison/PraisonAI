@@ -72,6 +72,29 @@ assert('bestRunsByName prefers success over cancelled', (() => {
   ]);
   return best.length === 1 && best[0].conclusion === 'success';
 })());
+assert('bestRunsByName prefers pending over completed cancelled', (() => {
+  const best = mg.bestRunsByName([
+    { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+    { name: 'smoke', status: 'in_progress', conclusion: null },
+  ]);
+  return best.length === 1 && best[0].status === 'in_progress';
+})());
+assert('bestRunsByName keeps pending regardless of order', (() => {
+  const best = mg.bestRunsByName([
+    { name: 'smoke', status: 'in_progress', conclusion: null },
+    { name: 'smoke', status: 'completed', conclusion: 'success' },
+  ]);
+  return best.length === 1 && best[0].status === 'in_progress';
+})());
+assert('allChecksGreenOnSha style: pending re-run blocks despite core green', (() => {
+  const runs = mg.bestRunsByName([
+    { name: 'test-core', status: 'completed', conclusion: 'success' },
+    { name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+    { name: 'smoke', status: 'queued', conclusion: null },
+  ]);
+  const smoke = runs.find((r) => r.name === 'smoke');
+  return smoke.status !== 'completed';
+})());
 
 // Stale-FINAL recovery guards (PR #2560 push loop)
 const nowMs = Date.now();
