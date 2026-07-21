@@ -7,7 +7,12 @@ Tests the DoctorContractProtocol and built-in cli_backend migration rule.
 import unittest
 from typing import Any, Dict
 
-from praisonaiagents.runtime.doctor_protocol import DoctorContractProtocol, Finding
+from praisonaiagents.runtime.doctor_protocol import (
+    DoctorContractProtocol,
+    Finding,
+    ConfigDiff,
+    RepairPlan,
+)
 from praisonaiagents.runtime.builtin_rules import CliBackendMigrationRule
 from praisonaiagents.runtime.doctor_registry import DoctorRulesRegistry
 
@@ -297,6 +302,128 @@ class TestDoctorRulesRegistry(unittest.TestCase):
         result = self.registry.apply_all_fixes(config)
         
         # Should be migrated
+        self.assertNotIn("cli_backend", result)
+        self.assertEqual(result["models"]["default"]["runtime"], "claude-code")
+
+
+class _RaisingRule:
+    """A rule whose apply_fix always raises, to exercise refuse-on-unrecoverable."""
+
+    @property
+    def rule_id(self) -> str:
+        return "raising_rule"
+
+    def collect_findings(self, config: Dict[str, Any]):
+        if "broken" in config:
+            return [Finding(rule_id=self.rule_id, severity="error", message="broken")]
+        return []
+
+    def apply_fix(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        raise ValueError("cannot repair this")
+
+
+class TestRepairPlanSafetyRails(unittest.TestCase):
+    """Test the RepairPlan safety contract on the registry."""
+
+    def setUp(self):
+        self.registry = DoctorRulesRegistry()
+        self.registry.register_rule(CliBackendMigrationRule())
+
+    def test_dry_run_does_not_mutate_input(self):
+        """Dry-run must never mutate the caller's config."""
+        config = {"cli_backend": "claude-code"}
+        original = dict(config)
+
+        plan = self.registry.plan_fixes(config, dry_run=True)
+
+        self.assertEqual(config, original)
+        self.assertIsInstance(plan, RepairPlan)
+        self.assertFalse(plan.applied)
+        self.assertNotIn("cli_backend", plan.config)
+        self.assertEqual(plan.config["models"]["default"]["runtime"], "claude-code")
+
+    def test_plan_records_diffs(self):
+        """Every applied rule records a before/after diff."""
+        config = {"cli_backend": "claude-code"}
+        plan = self.registry.plan_fixes(config)
+
+        self.assertTrue(plan.has_changes)
+        self.assertEqual(len(plan.diffs), 1)
+        diff = plan.diffs[0]
+        self.assertIsInstance(diff, ConfigDiff)
+        self.assertEqual(diff.rule_id, "cli_backend_migration")
+        self.assertIn("cli_backend", diff.before)
+        self.assertNotIn("cli_backend", diff.after)
+
+    def test_unified_diff_renders(self):
+        """Diff preview renders a non-empty unified diff."""
+        config = {"cli_backend": "claude-code"}
+        plan = self.registry.plan_fixes(config)
+        rendered = plan.render_diffs()
+        self.assertIn("cli_backend", rendered)
+        self.assertIn("runtime", rendered)
+
+    def test_no_findings_no_changes(self):
+        """Clean config yields an empty plan with no diffs."""
+        config = {"framework": "praisonai"}
+        plan = self.registry.plan_fixes(config)
+        self.assertFalse(plan.has_changes)
+        self.assertEqual(plan.diffs, [])
+        self.assertEqual(plan.residual_findings, [])
+
+    def test_re_validation_reports_residuals(self):
+        """After applying, residual findings are re-collected."""
+        config = {"cli_backend": "claude-code"}
+        plan = self.registry.plan_fixes(config)
+        # cli_backend migration is idempotent -> no residuals left
+        self.assertEqual(plan.residual_findings, [])
+
+    def test_refuse_on_unrecoverable(self):
+        """A rule that raises is refused, its change discarded, original preserved."""
+        registry = DoctorRulesRegistry()
+        registry.register_rule(_RaisingRule())
+        config = {"broken": True}
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            plan = registry.plan_fixes(config)
+
+        self.assertFalse(plan.has_changes)
+        self.assertEqual(len(plan.refused), 1)
+        self.assertEqual(plan.refused[0].rule_id, "raising_rule")
+        # Original preserved in the plan result
+        self.assertEqual(plan.config, {"broken": True})
+
+    def test_backup_written_only_when_applied(self):
+        """Backup is only written when not dry_run and backup=True."""
+        import os
+        import tempfile
+
+        config = {"cli_backend": "claude-code"}
+        with tempfile.TemporaryDirectory() as tmp:
+            backup_path = os.path.join(tmp, "cfg.bak.json")
+
+            # Dry-run: no backup written even if requested
+            plan = self.registry.plan_fixes(
+                config, dry_run=True, backup=True, backup_path=backup_path
+            )
+            self.assertIsNone(plan.backup_path)
+            self.assertFalse(os.path.exists(backup_path))
+
+            # Apply: backup written
+            plan = self.registry.plan_fixes(
+                config, dry_run=False, backup=True, backup_path=backup_path
+            )
+            self.assertEqual(plan.backup_path, backup_path)
+            self.assertTrue(os.path.exists(backup_path))
+            self.assertTrue(plan.applied)
+
+    def test_apply_all_fixes_backward_compatible(self):
+        """apply_all_fixes still returns a plain dict."""
+        config = {"cli_backend": "claude-code"}
+        result = self.registry.apply_all_fixes(config)
+        self.assertIsInstance(result, dict)
         self.assertNotIn("cli_backend", result)
         self.assertEqual(result["models"]["default"]["runtime"], "claude-code")
 
