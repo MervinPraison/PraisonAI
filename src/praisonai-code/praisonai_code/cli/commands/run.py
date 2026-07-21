@@ -4,6 +4,7 @@ Run command group for PraisonAI CLI.
 Provides agent execution commands.
 """
 
+from contextlib import contextmanager
 from typing import Any, Dict, Optional, List
 
 import typer
@@ -663,6 +664,140 @@ def _try_attach_runtime(
     return True
 
 
+@contextmanager
+def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
+    """Run the enclosed block inside an isolated git worktree/branch.
+
+    Provisions a fresh worktree via the core ``GitWorktreeAdapter`` and chdirs
+    into it for the duration of the run so the agent edits an isolated branch
+    instead of the working tree. On exit it reports the branch name and a
+    summary of changes (tracked *and* untracked), then tears the worktree down.
+    Degrades to a transparent no-op when isolation is disabled or the directory
+    is not a git repository (the adapter reports ``available=False``), so callers
+    can wrap unconditionally.
+
+    Per-run isolation: a short random token is appended to ``name`` so two
+    concurrent or repeated runs of the same target never resolve to the same
+    worktree/branch and mix each other's uncommitted changes.
+
+    Data-safety on teardown: the agent's output may be entirely *untracked* new
+    files, which ``git diff`` does not see. So before removing the worktree we
+    snapshot any change (tracked or untracked, via ``git status --porcelain``)
+    onto the branch with an automatic commit and *retain that branch* — only the
+    worktree checkout directory is pruned. A run that produced no changes is
+    torn down completely (worktree + branch). ``--keep`` additionally retains the
+    worktree checkout itself for in-place review.
+    """
+    if not enabled:
+        yield None
+        return
+
+    import os
+    import subprocess
+    import uuid
+
+    from praisonaiagents.workspace import GitWorktreeAdapter
+
+    output = get_output_controller()
+    adapter = GitWorktreeAdapter()
+    if not adapter.available:
+        output.print_warning(
+            "Not a git repository; running without worktree isolation."
+        )
+        yield None
+        return
+
+    def _git(*args, cwd):
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=cwd, capture_output=True, text=True
+            )
+        except (FileNotFoundError, OSError):
+            return None
+
+    def _branch_of(worktree_path: str) -> str:
+        result = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path)
+        if result is not None and result.returncode == 0:
+            return result.stdout.strip() or "?"
+        return "?"
+
+    def _has_changes(worktree_path: str) -> bool:
+        # ``--porcelain`` reports staged, unstaged *and* untracked entries, so a
+        # run that only creates brand-new files (invisible to ``git diff``) is
+        # still recognised as having produced output.
+        result = _git("status", "--porcelain", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return False
+        return bool((result.stdout or "").strip())
+
+    def _summary(worktree_path: str) -> str:
+        result = _git("status", "--short", cwd=worktree_path)
+        if result is None or result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
+
+    # Make the run's worktree/branch unique per invocation so identical targets
+    # (same prompt/YAML) run concurrently without sharing state.
+    unique_name = f"{name}-{uuid.uuid4().hex[:8]}"
+
+    original_cwd = os.getcwd()
+    path = adapter.create(unique_name)
+    branch = _branch_of(path)
+    if not output.is_json_mode:
+        output.print_info(f"Isolated run on branch '{branch}' ({path})")
+    os.chdir(path)
+    try:
+        yield path
+    finally:
+        os.chdir(original_cwd)
+
+        summary = _summary(path)
+        changed = _has_changes(path)
+        if not output.is_json_mode:
+            if summary:
+                output.print_info(f"Changes on '{branch}':\n{summary}")
+            else:
+                output.print_info(f"No changes on '{branch}'.")
+
+        if keep:
+            if not output.is_json_mode:
+                output.print_info(
+                    f"Worktree kept at {path} (branch '{branch}'). "
+                    "Review/merge then remove with: git worktree remove."
+                )
+            return
+
+        if changed:
+            # Never destroy the agent's output. Persist every change (tracked +
+            # untracked) as a commit on the isolated branch and retain the
+            # branch; only the worktree checkout directory is pruned.
+            _git("add", "-A", cwd=path)
+            committed = _git(
+                "commit", "--no-verify", "-m", f"praisonai run: {name}", cwd=path
+            )
+            if committed is None or committed.returncode != 0:
+                # Couldn't persist the work (e.g. no git identity configured):
+                # keep the worktree checkout in place so output is never lost.
+                if not output.is_json_mode:
+                    output.print_warning(
+                        f"Could not commit isolated changes; worktree kept at "
+                        f"{path} (branch '{branch}') for manual review."
+                    )
+                return
+            # ``worktree remove`` deletes the checkout but leaves the branch
+            # intact for review/merge (unlike ``adapter.remove`` which also
+            # force-deletes the branch and would lose the committed work).
+            _git("worktree", "remove", "--force", path, cwd=original_cwd)
+            if not output.is_json_mode:
+                output.print_info(
+                    f"Committed changes to branch '{branch}'. "
+                    f"Review/merge with: git merge {branch}"
+                )
+        else:
+            # No output produced: safe to remove worktree and branch entirely.
+            adapter.remove(unique_name)
+
+
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -706,6 +841,9 @@ def run_main(
     restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
     # Warm-runtime live session: tag this run so other terminals can `attach`.
     attach: Optional[str] = typer.Option(None, "--attach", help="Run on the warm runtime under this session id so other terminals can observe it via `praisonai attach <id>`"),
+    # Per-run git-worktree isolation: run on a fresh branch/worktree.
+    worktree: bool = typer.Option(False, "--worktree", help="Run on an isolated git worktree/branch (branch-per-task); no-op when not a git repo"),
+    keep: bool = typer.Option(False, "--keep", help="With --worktree, keep the worktree/branch after the run for review instead of tearing it down"),
 ):
     """
     Run agents from a file or prompt.
@@ -846,6 +984,24 @@ def run_main(
     
     if continue_session and session:
         output.print_error("Cannot use both --continue and --session together")
+        raise typer.Exit(1)
+
+    # Worktree isolation runs the agent in a chdir'd worktree in-process; the
+    # warm runtime is a separate process whose cwd we can't redirect, so reject
+    # the combination up front rather than silently ignoring isolation.
+    if worktree and attach:
+        output.print_error("--worktree cannot be combined with --attach")
+        raise typer.Exit(1)
+    if keep and not worktree:
+        output.print_error("--keep requires --worktree")
+        raise typer.Exit(1)
+    # Scope isolation to the primary `run "<task>"` / `run agents.yaml` surfaces.
+    # Custom agent/command and profiling flows have their own execution paths;
+    # keep the feature focused rather than threading a worktree through each.
+    if worktree and (agent or command or profile or profile_deep):
+        output.print_error(
+            "--worktree is only supported for direct prompt and YAML file runs"
+        )
         raise typer.Exit(1)
 
     # --attach tags a warm-runtime run so other terminals can observe it, but
@@ -1037,58 +1193,72 @@ def run_main(
             )
         return
     
-    if is_file:
-        # Run from file
-        _run_from_file(
-            target,
-            model=model,
-            framework=framework,
-            interactive=interactive,
-            verbose=verbose,
-            stream=stream,
-            trace=trace,
-            memory=memory,
-            tools=tools,
-            max_tokens=max_tokens,
-            output_mode=output_mode,
-            continue_session=continue_session,
-            session=session,
-            fork=fork,
-            no_save=no_save,
-        )
-    else:
-        # Run as prompt
-        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
-        mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
-            None, None, permissions_config
-        )
-        _run_prompt(
-            target,
-            model=model,
-            verbose=verbose,
-            stream=stream,
-            trace=trace,
-            memory=memory,
-            tools=tools,
-            toolset=toolset,
-            max_tokens=max_tokens,
-            output_mode=output_mode,
-            approval=approval,
-            approve_all_tools=approve_all_tools,
-            approval_timeout=approval_timeout,
-            no_rules=no_rules,
-            permissions_config=permissions_config,
-            mcp=mcp_command,
-            mcp_env=mcp_env,
-            mcp_servers=mcp_servers,
-            continue_session=continue_session,
-            session=session,
-            fork=fork,
-            no_save=no_save,
-            attach_session=attach,
-            thinking_budget=thinking_budget,
-            allow_local_tools=allow_local_tools,
-        )
+    # Resolve a YAML file target to an absolute path *before* isolation chdirs
+    # away. The config is loaded from the original checkout so an untracked or
+    # git-ignored ``./agents.yaml`` (absent from the fresh worktree) still loads;
+    # the agent then produces its output inside the isolated worktree.
+    run_target = target
+    if worktree and is_file:
+        import os as _os_ff
+        run_target = _os_ff.path.abspath(target)
+
+    # Provision a per-run git worktree/branch when --worktree is set and the cwd
+    # is a git repo; otherwise this is a transparent no-op. The agent runs with
+    # its cwd redirected into the isolated worktree for the duration of the run.
+    with _worktree_isolation(worktree, target, keep=keep):
+        if is_file:
+            # Run from file
+            _run_from_file(
+                run_target,
+                model=model,
+                framework=framework,
+                interactive=interactive,
+                verbose=verbose,
+                stream=stream,
+                trace=trace,
+                memory=memory,
+                tools=tools,
+                max_tokens=max_tokens,
+                output_mode=output_mode,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
+            )
+        else:
+            # Run as prompt
+            permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
+            mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
+                None, None, permissions_config
+            )
+            _run_prompt(
+                target,
+                model=model,
+                verbose=verbose,
+                stream=stream,
+                trace=trace,
+                memory=memory,
+                tools=tools,
+                toolset=toolset,
+                max_tokens=max_tokens,
+                output_mode=output_mode,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                no_rules=no_rules,
+                permissions_config=permissions_config,
+                mcp=mcp_command,
+                mcp_env=mcp_env,
+                mcp_servers=mcp_servers,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
+                attach_session=attach,
+                thinking_budget=thinking_budget,
+                allow_local_tools=allow_local_tools,
+                isolated=worktree,
+            )
 
 
 def _run_from_file(
@@ -1223,6 +1393,7 @@ def _run_prompt(
     attach_session: Optional[str] = None,
     thinking_budget: Optional[int] = None,
     allow_local_tools: bool = False,
+    isolated: bool = False,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1300,7 +1471,10 @@ def _run_prompt(
         # approval/memory), so it stays in-process: the warm runtime reuses a
         # cached agent and does not carry a per-call thinking budget, so attaching
         # would silently drop the requested setting.
-        runtime_eligible = no_save and thinking_budget is None and not any([
+        # Isolated (--worktree) runs must stay in-process: the warm runtime is a
+        # separate process whose cwd we can't redirect into the worktree, so
+        # attaching would run the task outside the isolated branch.
+        runtime_eligible = no_save and thinking_budget is None and not isolated and not any([
             mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
             memory, permissions_config, continue_session, session, fork,
         ])
