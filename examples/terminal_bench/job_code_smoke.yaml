@@ -1,0 +1,28 @@
+# Harbor Job Configuration — `praisonai code` smoke test on Terminal-Bench 2.1
+#
+# Run from the repo root with PYTHONPATH set so the adapter import path resolves:
+#   PYTHONPATH=. harbor run -c examples/terminal_bench/job_code_smoke.yaml
+#
+# Schema note: this uses the REAL Harbor JobConfig schema
+# (datasets/agents/n_concurrent_trials/n_attempts). Unknown keys are silently
+# ignored by pydantic, so the older dataset:/agent:/n_concurrent: form runs the
+# default oracle agent on zero tasks — do not use it.
+
+datasets:
+  - name: terminal-bench
+    version: "2.1"
+    # A small verified subset for a cheap smoke run. Verify against the registry
+    # with `harbor datasets list` before editing.
+    task_names:
+      - hello-world
+      - fix-permissions
+      - csv-to-parquet
+
+agents:
+  - import_path: examples.terminal_bench.praisonai_code_agent:PraisonAICodeAgent
+    model_name: openai/gpt-4o-mini
+    env:
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+
+n_concurrent_trials: 2
+n_attempts: 1

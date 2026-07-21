@@ -7,7 +7,7 @@ BaseEnvironment interface. The agent uses Harbor's exec() as a bash tool.
 Usage:
     harbor run -d terminal-bench/terminal-bench-2 \
         --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \
-        --model openai/gpt-4o \
+        --model openai/gpt-4o-mini \
         --ae OPENAI_API_KEY=$OPENAI_API_KEY
 
 Architecture:
@@ -75,8 +75,9 @@ class PraisonAIExternalAgent(BaseAgent):
         """
         
         # Inject API keys from Harbor's --ae env vars into host os.environ
-        # so litellm can pick them up (--ae only sets them inside Docker, not the host)
-        agent_env = getattr(context, 'env', {}) or {}
+        # so litellm can pick them up. The --ae channel arrives via the
+        # BaseAgent.extra_env property (AgentContext has no `env` field).
+        agent_env = getattr(self, 'extra_env', {}) or {}
         for key, val in agent_env.items():
             if key not in os.environ and val:
                 os.environ[key] = val
@@ -139,7 +140,7 @@ class PraisonAIExternalAgent(BaseAgent):
                     "   Keep calling bash_tool until the test PASSES or you have exhausted all approaches."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o",
+                llm=self.model_name or "openai/gpt-4o-mini",
             )
 
             # Execute the agent with outer loop to handle premature stopping
@@ -182,17 +183,14 @@ class PraisonAIExternalAgent(BaseAgent):
         Harbor tracks: n_input_tokens, n_output_tokens, cost_usd, metadata
         """
         try:
-            # Extract token usage and cost from agent
+            # Extract token usage and cost from agent. `cost_summary` is a
+            # property returning a dict (not callable) on praisonaiagents.Agent.
             try:
-                summary = agent.cost_summary() if callable(getattr(agent, 'cost_summary', None)) else None
+                summary = getattr(agent, 'cost_summary', None)
                 if isinstance(summary, dict):
                     context.n_input_tokens = summary.get('tokens_in')
                     context.n_output_tokens = summary.get('tokens_out')
                     context.cost_usd = summary.get('cost')
-                else:
-                    context.n_input_tokens = getattr(agent, '_total_tokens_in', 0)
-                    context.n_output_tokens = getattr(agent, '_total_tokens_out', 0)
-                    context.cost_usd = getattr(agent, 'total_cost', None)
             except Exception:
                 pass
                 
@@ -216,7 +214,7 @@ if __name__ == "__main__":
     print("PraisonAI External Agent for Terminal-Bench 2.0")
     print("Usage: harbor run -d terminal-bench/terminal-bench-2 \\")
     print("  --agent-import-path examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent \\")
-    print("  --model openai/gpt-4o")
+    print("  --model openai/gpt-4o-mini")
     print()
     print("Dependencies:")
     print("  pip install harbor praisonaiagents")

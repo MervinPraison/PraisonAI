@@ -9,7 +9,7 @@ Usage:
     # First, this would need to be integrated into Harbor's codebase as:
     # src/harbor/agents/installed/praisonai.py
     
-    harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o
+    harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o-mini
 
 Architecture:
     Harbor Container → praisonaiagents installed inside → execute_command tool
@@ -25,34 +25,9 @@ import asyncio
 from pathlib import Path
 from typing import Dict, Optional
 
-try:
-    # These imports would work if this file was in Harbor's codebase
-    from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template, CliFlag
-    from harbor.environments.base import BaseEnvironment
-    from harbor.models.agent.context import AgentContext
-    from harbor.models.trial.paths import EnvironmentPaths
-except ImportError:
-    # Fallback for development/testing outside Harbor
-    print("Note: This is a reference implementation for Harbor integration")
-    print("To actually use this, it needs to be integrated into Harbor's codebase")
-    
-    # Mock classes for development
-    class BaseInstalledAgent:
-        pass
-    
-    def with_prompt_template(func):
-        return func
-    
-    class CliFlag:
-        def __init__(self, name, cli, type, default):
-            pass
-    
-    class BaseEnvironment:
-        async def exec(self, **kwargs):
-            pass
-    
-    class AgentContext:
-        pass
+from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template, CliFlag
+from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 
 
 class PraisonAIInstalledAgent(BaseInstalledAgent):
@@ -66,12 +41,10 @@ class PraisonAIInstalledAgent(BaseInstalledAgent):
     # ATIF trajectory support - would be implemented once PraisonAI has trajectory format
     SUPPORTS_ATIF: bool = False
 
-    # Command-line configuration flags
+    # Command-line configuration flags. The real Harbor CliFlag dataclass keys
+    # the value by `kwarg` (not `name`).
     CLI_FLAGS = [
-        CliFlag("max_turns", cli="--max-turns", type="int", default=30),
-        CliFlag("verbose", cli="--verbose", type="bool", default=False),
-        CliFlag("memory", cli="--memory", type="bool", default=False),
-        CliFlag("auto_approval", cli="--auto-approval", type="bool", default=True),
+        CliFlag(kwarg="max_turns", cli="--max-turns", type="int", default=30),
     ]
 
     @staticmethod
@@ -142,7 +115,7 @@ def main():
         sys.exit(1)
         
     instruction = sys.argv[1]
-    model = sys.argv[2] if len(sys.argv) > 2 else "openai/gpt-4o"
+    model = sys.argv[2] if len(sys.argv) > 2 else "openai/gpt-4o-mini"
     max_turns = int(sys.argv[3]) if len(sys.argv) > 3 else 30
     try:
         from praisonaiagents import Agent
@@ -176,19 +149,19 @@ def main():
             "tools_used": ["execute_command"],
         }
         
-        # Add token usage if available
-        if hasattr(agent, '_usage'):
-            usage = agent._usage
-            if usage:
-                metrics.update({
-                    "input_tokens": getattr(usage, 'input_tokens', None),
-                    "output_tokens": getattr(usage, 'output_tokens', None),
-                })
-                
-        # Add cost if available
-        if hasattr(agent, '_cost'):
-            metrics["cost_usd"] = agent._cost
-            
+        # Token usage + cost come from the `cost_summary` property (a dict).
+        try:
+            summary = getattr(agent, "cost_summary", None)
+            if isinstance(summary, dict):
+                metrics["input_tokens"] = summary.get("tokens_in")
+                metrics["output_tokens"] = summary.get("tokens_out")
+                metrics["cost_usd"] = summary.get("cost")
+        except Exception:
+            pass
+
+        # Write metrics to a stable path so the host adapter can read them back.
+        with open("/tmp/praisonai_metrics.json", "w") as fh:
+            json.dump(metrics, fh)
         print(json.dumps(metrics))
         
     except Exception as e:
@@ -216,7 +189,7 @@ if __name__ == "__main__":
         This executes the headless runner script with the instruction,
         similar to how other installed agents work in Harbor.
         """
-        model = self.model_name or "openai/gpt-4o"
+        model = self.model_name or "openai/gpt-4o-mini"
         max_turns = getattr(self, 'max_turns', 30)
         
         # Build command to run PraisonAI
@@ -227,15 +200,18 @@ if __name__ == "__main__":
             str(max_turns),
         ]
         
-        command = " ".join(cmd_args)
+        # Tee the metrics file back so populate_context_post_run can read it via
+        # the container. Also print it so it lands in Harbor's captured stdout.
+        command = " ".join(cmd_args) + "; cat /tmp/praisonai_metrics.json 2>/dev/null || true"
         
         try:
-            # Execute the agent
-            await self.exec_as_agent(
+            # Execute the agent and keep the ExecResult stdout for metric parsing.
+            result = await self.exec_as_agent(
                 environment,
                 command=command,
-                env=self._get_environment_vars(),
+                env=self.env,
             )
+            self._last_stdout = getattr(result, "stdout", "") or ""
         except Exception as e:
             # Store error in context for Harbor's reporting
             context.metadata = {"execution_error": str(e)}
@@ -270,37 +246,38 @@ if __name__ == "__main__":
         JSON output of the headless runner script.
         """
         try:
-            # Parse the last stdout output for JSON metrics
-            # In Harbor's model, the last execution output should contain our JSON
-            last_output = getattr(context, '_last_stdout', None)
-            
+            # Parse the JSON metrics captured from the runner's stdout (teed via
+            # `cat /tmp/praisonai_metrics.json` in run()). AgentContext has no
+            # `_last_stdout`; we stash it on the agent instead.
+            last_output = getattr(self, '_last_stdout', None)
+            metrics = None
             if last_output:
-                try:
-                    metrics = json.loads(last_output.strip())
-                    
-                    # Extract metrics with safe defaults
-                    context.n_input_tokens = metrics.get('input_tokens') 
-                    context.n_output_tokens = metrics.get('output_tokens')
-                    context.cost_usd = metrics.get('cost_usd')
-                    
-                    # Store additional metadata
-                    context.metadata = {
-                        "framework": "praisonai",
-                        "agent_type": "installed",
-                        "agent_name": metrics.get('agent_name', 'terminal-agent'),
-                        "model": metrics.get('model'),
-                        "tools_used": metrics.get('tools_used', []),
-                        "version": self.get_version() if hasattr(self, 'get_version') else None,
-                    }
-                    
-                except (json.JSONDecodeError, ValueError) as e:
-                    # If JSON parsing fails, store basic metadata
-                    context.metadata = {
-                        "framework": "praisonai", 
-                        "agent_type": "installed",
-                        "parse_error": str(e),
-                        "raw_output": str(last_output)[:200] if last_output else None,
-                    }
+                # The output may contain CLI noise before the JSON line; grab the
+                # last line that parses as a JSON object.
+                for line in reversed(last_output.strip().splitlines()):
+                    line = line.strip()
+                    if line.startswith("{"):
+                        try:
+                            metrics = json.loads(line)
+                            break
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+
+            if metrics is not None:
+                # Extract metrics with safe defaults
+                context.n_input_tokens = metrics.get('input_tokens')
+                context.n_output_tokens = metrics.get('output_tokens')
+                context.cost_usd = metrics.get('cost_usd')
+
+                # Store additional metadata
+                context.metadata = {
+                    "framework": "praisonai",
+                    "agent_type": "installed",
+                    "agent_name": metrics.get('agent_name', 'terminal-agent'),
+                    "model": metrics.get('model'),
+                    "tools_used": metrics.get('tools_used', []),
+                    "version": self.get_version() if hasattr(self, 'get_version') else None,
+                }
             else:
                 # No output to parse
                 context.metadata = {
@@ -334,7 +311,7 @@ if __name__ == "__main__":
     print("   - Add PraisonAI to _AGENTS list and _AGENT_MAP")
     print()
     print("3. Run with Harbor:")
-    print("   harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o")
+    print("   harbor run -d terminal-bench/terminal-bench-2 -a praisonai --model openai/gpt-4o-mini")
     print()
     print("Dependencies:")
     print("   pip install harbor praisonaiagents")
