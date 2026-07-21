@@ -1518,47 +1518,21 @@ Respond with ONLY a valid JSON tool call in this format:
         
         return "\n".join(lines).strip()
 
-    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
+    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, Any]:
         """
         Format tool result message for Ollama provider.
-        Enhanced to instruct model to use the result for final answer.
-        Handles error results with specific instructions to provide user-friendly responses.
+
+        Delegates to the protocol-driven ``OllamaAdapter.format_tool_result_message``
+        so this provider-specific formatting lives in the adapter layer (single
+        source of truth). Reuses the already-constructed ``_provider_adapter`` when
+        it is the Ollama adapter, otherwise instantiates one (these call sites are
+        guarded by ``_is_ollama_provider()``, so Ollama formatting is always used).
         """
-        # Check if the result is an error
-        is_error = False
-        error_message = None
-        
-        if isinstance(tool_result, dict) and 'error' in tool_result:
-            is_error = True
-            error_message = tool_result.get('error', 'Unknown error')
-        elif isinstance(tool_result, list) and len(tool_result) > 0:
-            first_item = tool_result[0]
-            if isinstance(first_item, dict) and 'error' in first_item:
-                is_error = True
-                error_message = first_item.get('error', 'Unknown error')
-        
-        if is_error:
-            # For errors, provide clear instructions to give a helpful response
-            return {
-                "role": "user",
-                "content": f"""The tool "{function_name}" encountered an error:
-{error_message}
-
-Please provide a helpful response to the user explaining that the operation could not be completed. 
-Be apologetic and suggest alternatives if possible. Do NOT repeat the raw error message.
-Give a natural, conversational response."""
-            }
-        else:
-            # For successful results, format normally
-            tool_result_str = str(tool_result)
-            return {
-                "role": "user",
-                "content": f"""Tool execution complete.
-Function: {function_name}
-Result: {tool_result_str}
-
-Now provide your final answer using this result. Summarize the information naturally for the user."""
-            }
+        from .adapters import OllamaAdapter
+        adapter = getattr(self, '_provider_adapter', None)
+        if not isinstance(adapter, OllamaAdapter):
+            adapter = OllamaAdapter()
+        return adapter.format_tool_result_message(function_name, tool_result)
 
     def _try_append_multimodal_tool_result(
         self,
