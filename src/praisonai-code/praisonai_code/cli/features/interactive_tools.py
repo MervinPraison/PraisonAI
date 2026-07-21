@@ -8,6 +8,7 @@ Tool Groups:
 - `acp`: ACP-powered file operations (create, edit, delete, execute)
 - `edit`: Targeted/fuzzy atomic edits (edit_file, apply_patch) from core
 - `lsp`: LSP-powered code intelligence (symbols, definitions, references)
+- `search`: Fast codebase search (ripgrep-backed grep/glob, structural ast_grep)
 - `basic`: Basic file tools (read, list, search)
 - `interactive`: Union of all groups (default)
 
@@ -53,6 +54,11 @@ TOOL_GROUPS = {
         "lsp_find_references",
         "lsp_get_diagnostics",
     ],
+    "search": [
+        "grep",
+        "glob",
+        "ast_grep_search",
+    ],
     "basic": [
         "read_file",
         "write_file",
@@ -68,6 +74,7 @@ TOOL_GROUPS["interactive"] = (
     TOOL_GROUPS["acp"] + 
     TOOL_GROUPS["edit"] + 
     TOOL_GROUPS["lsp"] + 
+    TOOL_GROUPS["search"] + 
     TOOL_GROUPS["basic"]
 )
 
@@ -79,29 +86,44 @@ class ToolConfig:
     enable_acp: bool = True
     enable_edit: bool = True
     enable_lsp: bool = True
+    enable_search: bool = True
     enable_basic: bool = True
     approval_mode: str = "auto"  # auto (full privileges), manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
-    
+
+    def __post_init__(self) -> None:
+        # Honour PRAISON_TOOLS_DISABLE for *every* ToolConfig, not just the
+        # ``from_env`` path. Callers that construct ToolConfig directly (e.g.
+        # ``InteractiveConfig.to_tool_config`` and ``HeadlessInteractiveCore``)
+        # would otherwise silently keep a group enabled despite the advertised
+        # opt-out. This only turns groups *off* — an explicit ``enable_*=True``
+        # passed by a caller is still overridden by the operator's env opt-out,
+        # matching the "disable" semantics of the flag.
+        self._apply_env_disable()
+
+    def _apply_env_disable(self) -> None:
+        """Disable tool groups listed in ``PRAISON_TOOLS_DISABLE`` (in place)."""
+        disable_str = os.environ.get("PRAISON_TOOLS_DISABLE", "")
+        if not disable_str:
+            return
+        disabled = {g.strip().lower() for g in disable_str.split(",")}
+        if "acp" in disabled:
+            self.enable_acp = False
+        if "edit" in disabled:
+            self.enable_edit = False
+        if "lsp" in disabled:
+            self.enable_lsp = False
+        if "search" in disabled:
+            self.enable_search = False
+        if "basic" in disabled:
+            self.enable_basic = False
+
     @classmethod
     def from_env(cls) -> "ToolConfig":
         """Create config from environment variables."""
-        config = cls()
-        
-        # Check env vars for disabling groups
-        disable_str = os.environ.get("PRAISON_TOOLS_DISABLE", "")
-        if disable_str:
-            disabled = [g.strip().lower() for g in disable_str.split(",")]
-            if "acp" in disabled:
-                config.enable_acp = False
-            if "edit" in disabled:
-                config.enable_edit = False
-            if "lsp" in disabled:
-                config.enable_lsp = False
-            if "basic" in disabled:
-                config.enable_basic = False
-        
+        config = cls()  # __post_init__ already applied PRAISON_TOOLS_DISABLE
+
         # Check for workspace
         workspace = os.environ.get("PRAISON_WORKSPACE", "")
         if workspace:
@@ -150,6 +172,8 @@ def resolve_tool_groups(
             tool_names.update(TOOL_GROUPS["edit"])
         if config.enable_lsp:
             tool_names.update(TOOL_GROUPS["lsp"])
+        if config.enable_search:
+            tool_names.update(TOOL_GROUPS["search"])
         if config.enable_basic:
             tool_names.update(TOOL_GROUPS["basic"])
     
@@ -201,6 +225,37 @@ def _load_basic_tools() -> Dict[str, Callable]:
     except ImportError:
         logger.debug("web_crawl not available")
     
+    return tools
+
+
+def _load_search_tools() -> Dict[str, Callable]:
+    """Lazy load fast codebase-search tools from praisonaiagents.
+
+    Wires the existing core search builtins into the default interactive
+    toolset so the coding agent no longer has to shell out to a raw
+    ``grep -rn``: ripgrep-backed ``grep`` and ``glob`` (gitignore-aware,
+    result-capped, truncation-safe) and structural ``ast_grep_search``.
+    """
+    tools = {}
+
+    try:
+        from praisonaiagents.tools import grep
+        tools["grep"] = grep
+    except ImportError:
+        logger.debug("grep not available")
+
+    try:
+        from praisonaiagents.tools import glob
+        tools["glob"] = glob
+    except ImportError:
+        logger.debug("glob not available")
+
+    try:
+        from praisonaiagents.tools import ast_grep_search
+        tools["ast_grep_search"] = ast_grep_search
+    except ImportError:
+        logger.debug("ast_grep_search not available")
+
     return tools
 
 
@@ -496,6 +551,11 @@ def get_interactive_tools(
         basic_tools = _load_basic_tools()
         all_tools.update(basic_tools)
     
+    # Load fast search tools (always available, no runtime needed)
+    if config.enable_search and not (disable and "search" in disable):
+        search_tools = _load_search_tools()
+        all_tools.update(search_tools)
+    
     # Load targeted/fuzzy edit tools (no runtime needed)
     if config.enable_edit and not (disable and "edit" in disable):
         edit_tools = _load_edit_tools(config)
@@ -565,10 +625,13 @@ def print_tool_summary(tools: List[Callable]) -> None:
     lsp_count = sum(1 for t in tools if t.__name__.startswith("lsp_"))
     edit_names = set(TOOL_GROUPS["edit"])
     edit_count = sum(1 for t in tools if t.__name__ in edit_names)
-    basic_count = len(tools) - acp_count - lsp_count - edit_count
+    search_names = set(TOOL_GROUPS["search"])
+    search_count = sum(1 for t in tools if t.__name__ in search_names)
+    basic_count = len(tools) - acp_count - lsp_count - edit_count - search_count
     
     print(f"Interactive tools loaded: {len(tools)} total")
     print(f"  - ACP tools: {acp_count}")
     print(f"  - Edit tools: {edit_count}")
     print(f"  - LSP tools: {lsp_count}")
+    print(f"  - Search tools: {search_count}")
     print(f"  - Basic tools: {basic_count}")
