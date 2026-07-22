@@ -92,6 +92,34 @@ def test_guard_resolved_from_subscription_id(monkeypatch):
     assert len(rows) < 20                   # halted before completing
 
 
+def test_guard_emits_trigger_row_before_halt(monkeypatch):
+    # The completed request that triggers the halt must still be emitted — it is a
+    # paid, finished row and must not be silently dropped by the shutdown path.
+    monkeypatch.setattr(gen_mod, "_call", _fake_call)
+
+    def should_continue():
+        return False                       # halt at the first check
+
+    rows = list(generate_dataset(_cfg(20, sponsor_check_rows=1),
+                                 should_continue=should_continue))
+
+    assert len(rows) == 1                  # the trigger row is emitted, not dropped
+
+
+def test_guard_invalid_interval_does_not_crash(monkeypatch):
+    # A misconfigured interval (0 or negative) must not divide-by-zero or silently
+    # disable the guard; it is coerced to a safe minimum of 1.
+    monkeypatch.setattr(gen_mod, "_call", _fake_call)
+
+    def should_continue():
+        return False                       # halt at the first check
+
+    for bad in (0, -5):
+        rows = list(generate_dataset(_cfg(20, sponsor_check_rows=bad),
+                                     should_continue=should_continue))
+        assert len(rows) == 1              # coerced to 1 -> halts after first row
+
+
 def test_azure_sponsorship_guard_fails_open(monkeypatch):
     # The built-in guard must return True (fail-OPEN) when the az CLI is missing /
     # errors, so a flaky check never halts a healthy run.

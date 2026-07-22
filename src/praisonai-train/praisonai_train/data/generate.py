@@ -203,7 +203,10 @@ def generate_dataset(
 
     stop_file = cfg.get("stop_file") or os.path.expanduser("~/.praisonai_train_stop")
     guard = _resolve_guard(cfg, should_continue)
-    check_every = cfg.get("sponsor_check_rows", 5000)
+    # Guard against a misconfigured interval: 0 would divide-by-zero and a
+    # negative value would silently never poll (disabling the safety check).
+    _interval = cfg.get("sponsor_check_rows")
+    check_every = max(1, int(_interval)) if _interval is not None else 5000
     specs = recipe.prompts(cfg["num_examples"], start=cfg.get("start_offset", 0))
     total = len(specs)
     done = kept = 0
@@ -220,16 +223,8 @@ def generate_dataset(
             except Exception:
                 row = None
             done += 1
-            # In-loop continuation guard (billing/sponsorship self-check): every
-            # ``check_every`` completions, if the predicate says stop, halt cleanly
-            # via the same shutdown path as the stop-file breaker.
-            if guard is not None and done % check_every == 0 and not guard():
-                try:
-                    open(stop_file, "w").close()
-                except Exception:
-                    pass
-                pool.shutdown(wait=False, cancel_futures=True)
-                break
+            # Emit the just-completed row first so a paid, already-finished request
+            # is never dropped by the guard/shutdown that may follow this iteration.
             emit = False
             if row:
                 key = _norm_row(row)
@@ -243,3 +238,13 @@ def generate_dataset(
                 yield row
             if progress_callback:
                 progress_callback(done, total, kept)
+            # In-loop continuation guard (billing/sponsorship self-check): every
+            # ``check_every`` completions, if the predicate says stop, halt cleanly
+            # via the same shutdown path as the stop-file breaker.
+            if guard is not None and done % check_every == 0 and not guard():
+                try:
+                    open(stop_file, "w").close()
+                except Exception:
+                    pass
+                pool.shutdown(wait=False, cancel_futures=True)
+                break
