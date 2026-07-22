@@ -12,7 +12,7 @@ Prerequisites:
      --port 6060
 """
 
-from praisonaiagents import Agent, Workflow
+from praisonaiagents import Agent, AgentFlow, Workflow
 
 ROUTELLM_URL = "http://localhost:6060/v1"
 

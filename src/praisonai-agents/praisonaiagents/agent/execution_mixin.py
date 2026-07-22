@@ -20,9 +20,13 @@ from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
 
-
-
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
+
+# Shared HTTP launch state (Agent.launch() multi-endpoint registration)
+_server_lock = threading.Lock()
+_server_started: Dict[int, bool] = {}
+_registered_agents: Dict[int, Dict[str, str]] = {}
+_shared_apps: Dict[int, Any] = {}
 
 if TYPE_CHECKING:
     pass

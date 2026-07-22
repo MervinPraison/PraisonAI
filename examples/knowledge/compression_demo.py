@@ -149,21 +149,28 @@ def main():
             
             print(f"\nOriginal document length: {len(content)} characters")
             
+            chunks = [{"text": content, "metadata": {"source": doc_path}}]
+            target_tokens = 2000
+
             # Compress with different ratios
             for ratio in [0.3, 0.5, 0.7]:
-                compressor = ContextCompressor(
-                    max_tokens=2000,
-                    target_ratio=ratio,
+                compressor = ContextCompressor(verbose=False)
+                result = compressor.compress(
+                    chunks,
+                    query="security verification code",
+                    target_tokens=target_tokens,
+                    compression_ratio=ratio,
                 )
-                result = compressor.compress([content], query="security verification code")
                 
                 print(f"\nCompression ratio {ratio}:")
                 print(f"  Original tokens: {result.original_tokens}")
                 print(f"  Compressed tokens: {result.compressed_tokens}")
-                print(f"  Actual ratio: {result.compressed_tokens / max(result.original_tokens, 1):.2f}")
+                print(f"  Actual ratio: {result.compression_ratio:.2f}")
                 
                 # Check if secret code is preserved
-                compressed_text = " ".join(result.chunks) if result.chunks else ""
+                compressed_text = " ".join(
+                    c.get("text", "") for c in result.chunks
+                ) if result.chunks else ""
                 if SECRET_CODE in compressed_text:
                     print(f"  ✅ Secret code preserved in compressed output")
                 else:
