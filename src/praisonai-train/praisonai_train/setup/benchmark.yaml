@@ -18,6 +18,8 @@ azure: true                        # true for Azure OpenAI; false for OpenAI-com
 api_version: "2024-10-21"          # Azure OpenAI api-version (ignored when azure: false)
 max_tokens: 2048                   # max_completion_tokens cap per request
 request_timeout: 180               # per-request timeout (seconds)
+json_mode: true                    # send response_format json_object; set false for
+                                   # OpenAI-compatible endpoints that don't support JSON mode
 
 recipe: tamil                      # the fixed prompt reuses this recipe's first prompt...
 # prompt:                          # ...or set an explicit identical prompt for every request

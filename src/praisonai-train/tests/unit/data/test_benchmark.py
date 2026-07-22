@@ -6,6 +6,8 @@ deterministic timings for ranking/success tests, and one test monkeypatches the
 low-level ``_timed_call`` to prove the real threaded path counts successes and
 failures correctly. Nothing here touches a socket.
 """
+import io
+import json
 import math
 
 import pytest
@@ -64,7 +66,7 @@ def test_aggregate_zero_wall_does_not_divide_by_zero():
 
 def _fake_measure_factory(table):
     """Return a _measure_target stub driven by a {deployment: (lat, ctoks, ok, wall)} table."""
-    def _fake(cfg, messages, n, concurrency, timeout):
+    def _fake(cfg, messages, n, concurrency, timeout, json_mode=True):
         return table[cfg["deployment"]]
     return _fake
 
@@ -117,7 +119,7 @@ def test_real_thread_pool_counts_success_and_failure(monkeypatch):
     # Every odd call "fails" (ok=False, 0 tokens); even calls succeed with 50 tok.
     state = {"i": 0}
 
-    def _fake_timed(cfg, messages, timeout):
+    def _fake_timed(cfg, messages, timeout, json_mode=True):
         i = state["i"]
         state["i"] += 1
         if i % 2 == 0:
@@ -137,7 +139,7 @@ def test_per_target_endpoint_override(monkeypatch):
     # A dict target may override the endpoint; benchmark must resolve per-target.
     captured = {}
 
-    def _fake(cfg, messages, n, concurrency, timeout):
+    def _fake(cfg, messages, n, concurrency, timeout, json_mode=True):
         captured[cfg["deployment"]] = cfg["endpoint"]
         return ([1.0], 100, 1, 1.0)
 
@@ -160,3 +162,54 @@ def test_explicit_prompt_forms():
     assert d[0]["content"] == "s" and d[1]["content"] == "u"
     s = bm._messages_for("just user", "tamil")
     assert s[0]["content"] == "" and s[1]["content"] == "just user"
+
+
+# --------------------------------------------------------------------------- #
+# Input validation + provider-compat edge cases (reviewer feedback)             #
+# --------------------------------------------------------------------------- #
+
+def test_malformed_prompt_dict_raises_valueerror():
+    # A dict without 'user' must be a clear config error, not a KeyError mid-run.
+    with pytest.raises(ValueError):
+        bm._messages_for({"system": "You are helpful"}, "tamil")
+    with pytest.raises(ValueError):
+        bm._messages_for({"user": ""}, "tamil")
+
+
+def test_invalid_counts_raise_valueerror():
+    with pytest.raises(ValueError):
+        benchmark_deployments(["d"], n=0, concurrency=8, base=_cfg())
+    with pytest.raises(ValueError):
+        benchmark_deployments(["d"], n=8, concurrency=0, base=_cfg())
+
+
+def test_failed_response_does_not_add_tokens(monkeypatch):
+    # A completion that reports tokens but has empty content is ok=False AND
+    # contributes 0 tokens, so token throughput stays consistent with success.
+    payload = {"usage": {"completion_tokens": 99},
+               "choices": [{"message": {"content": ""}}]}
+
+    def _fake_urlopen(req, timeout=None):
+        return io.BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(bm.urllib.request, "urlopen", _fake_urlopen)
+    dt, ctok, ok = bm._timed_call({**_cfg(), "deployment": "d"}, [], 5)
+    assert ok is False and ctok == 0
+
+
+def test_json_mode_flag_reaches_request_builder(monkeypatch):
+    # The json_mode flag must be threaded through to build_chat_request so an
+    # endpoint without JSON mode can be benchmarked (--no-json-mode).
+    captured = {}
+
+    def _fake_build(cfg, messages, json_mode=True):
+        captured["json_mode"] = json_mode
+        return object()
+
+    def _fake_urlopen(req, timeout=None):
+        raise OSError("no network in test")
+
+    monkeypatch.setattr(bm, "build_chat_request", _fake_build)
+    monkeypatch.setattr(bm.urllib.request, "urlopen", _fake_urlopen)
+    bm._timed_call({**_cfg(), "deployment": "d"}, [], 5, json_mode=False)
+    assert captured["json_mode"] is False

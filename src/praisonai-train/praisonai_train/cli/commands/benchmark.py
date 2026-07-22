@@ -38,6 +38,9 @@ def benchmark(
     api_version: Optional[str] = typer.Option(None, "--api-version", help="Azure OpenAI api-version"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="max_completion_tokens per request"),
     recipe: Optional[str] = typer.Option(None, "--recipe", "-r", help="Recipe for the default prompt"),
+    json_mode: Optional[bool] = typer.Option(
+        None, "--json-mode/--no-json-mode",
+        help="Send response_format json_object (disable for endpoints without JSON mode)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Write results JSON here"),
 ):
     """Measure and rank generation speed across LLM deployments.
@@ -54,7 +57,8 @@ def benchmark(
     from praisonai_train.data.benchmark import (
         DEFAULT_API_VERSION, DEFAULT_CONCURRENCY, DEFAULT_MAX_TOKENS, DEFAULT_N)
 
-    cfg = _load_cfg(config, api_version=api_version, max_tokens=max_tokens, recipe=recipe)
+    cfg = _load_cfg(config, api_version=api_version, max_tokens=max_tokens, recipe=recipe,
+                    json_mode=json_mode)
     # CLI --deployment overrides config; config accepts "deployments" or "targets".
     targets = deployment or cfg.get("deployments") or cfg.get("targets")
     if not targets:
@@ -80,6 +84,7 @@ def benchmark(
         max_tokens=cfg.get("max_tokens", DEFAULT_MAX_TOKENS),
         api_version=cfg.get("api_version", DEFAULT_API_VERSION),
         request_timeout=cfg.get("request_timeout", 180),
+        json_mode=cfg.get("json_mode", True),
         on_result=_live,
     )
 

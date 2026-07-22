@@ -94,29 +94,34 @@ def aggregate(deployment: str, n: int, latencies: Sequence[float], ctoks: int,
     )
 
 
-def _timed_call(cfg: dict, messages: list[dict], timeout: int) -> tuple[float, int, bool]:
+def _timed_call(cfg: dict, messages: list[dict], timeout: int,
+                json_mode: bool = True) -> tuple[float, int, bool]:
     """One timed chat request via the shared call path.
 
     Returns ``(latency_s, completion_tokens, ok)``. Never raises: a failed call
     still contributes its latency but counts as ``ok=False`` with 0 tokens, so
     error rates show up as a lower success count rather than crashing the run.
-    This is the single network seam — tests monkeypatch it.
+    Tokens are only reported for successful (``ok=True``) responses so token
+    throughput and average-output-tokens stay consistent with the success count.
+    ``json_mode`` toggles the ``response_format`` hint; disable it for endpoints
+    that don't support JSON mode. This is the single network seam — tests
+    monkeypatch it.
     """
-    req = build_chat_request(cfg, messages)
+    req = build_chat_request(cfg, messages, json_mode=json_mode)
     t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.load(resp)
         dt = time.perf_counter() - t0
-        ctok = int(data.get("usage", {}).get("completion_tokens", 0) or 0)
         ok = bool(data.get("choices", [{}])[0].get("message", {}).get("content"))
+        ctok = int(data.get("usage", {}).get("completion_tokens", 0) or 0) if ok else 0
         return dt, ctok, ok
     except Exception:
         return time.perf_counter() - t0, 0, False
 
 
 def _measure_target(cfg: dict, messages: list[dict], n: int, concurrency: int,
-                    timeout: int) -> tuple[list[float], int, int, float]:
+                    timeout: int, json_mode: bool = True) -> tuple[list[float], int, int, float]:
     """Fire ``n`` identical requests at ``concurrency`` and collect raw numbers.
 
     Returns ``(latencies, total_completion_tokens, ok_count, wall_s)``. Tests
@@ -128,7 +133,7 @@ def _measure_target(cfg: dict, messages: list[dict], n: int, concurrency: int,
     ok = 0
     wall0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futs = [pool.submit(_timed_call, cfg, messages, timeout) for _ in range(n)]
+        futs = [pool.submit(_timed_call, cfg, messages, timeout, json_mode) for _ in range(n)]
         for fut in as_completed(futs):
             dt, ct, is_ok = fut.result()
             latencies.append(dt)
@@ -147,6 +152,8 @@ def _messages_for(prompt, recipe) -> list[dict]:
     real generation run.
     """
     if isinstance(prompt, dict):
+        if not prompt.get("user"):
+            raise ValueError("prompt dict must include a non-empty 'user' field")
         spec = {"system": prompt.get("system", ""), "user": prompt["user"]}
     elif isinstance(prompt, str):
         spec = {"system": "", "user": prompt}
@@ -167,6 +174,7 @@ def benchmark_deployments(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     api_version: str = DEFAULT_API_VERSION,
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+    json_mode: bool = True,
     on_result: Callable[[BenchResult], None] | None = None,
 ) -> list[BenchResult]:
     """Benchmark generation speed across one or more deployments; ranked fastest first.
@@ -188,12 +196,22 @@ def benchmark_deployments(
         max_tokens: ``max_completion_tokens`` cap per request.
         api_version: Azure OpenAI api-version (ignored for plain OpenAI).
         request_timeout: per-request timeout in seconds.
+        json_mode: send the ``response_format={"type":"json_object"}`` hint.
+            Set ``False`` for OpenAI-compatible endpoints that don't support
+            JSON mode so the benchmark measures speed, not JSON-mode support.
         on_result: optional callback invoked with each :class:`BenchResult` as
             soon as that target finishes (for live CLI/notebook output).
 
     Returns:
         ``list[BenchResult]`` sorted by ``rows_per_min`` descending.
+
+    Raises:
+        ValueError: if ``n`` or ``concurrency`` is not a positive integer.
     """
+    if n < 1:
+        raise ValueError(f"n must be a positive integer, got {n}")
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be a positive integer, got {concurrency}")
     messages = _messages_for(prompt, recipe)
     base = dict(base or {})
     base.setdefault("api_version", api_version)
@@ -209,7 +227,7 @@ def benchmark_deployments(
         cfg = resolve_cfg(merged)
         name = cfg["deployment"]
         latencies, ctoks, ok, wall = _measure_target(
-            cfg, messages, n, concurrency, request_timeout)
+            cfg, messages, n, concurrency, request_timeout, json_mode)
         res = aggregate(name, n, latencies, ctoks, ok, wall)
         results.append(res)
         if on_result:
