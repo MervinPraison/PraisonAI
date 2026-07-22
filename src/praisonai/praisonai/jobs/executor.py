@@ -312,33 +312,34 @@ class JobExecutor:
         return result
     
     async def _run_praisonai_agents(self, job: Job, agent_file: str) -> Any:
-        """Run using praisonaiagents framework."""
-        try:
-            from praisonaiagents import Agent
-        except ImportError:
-            raise RuntimeError("praisonaiagents not installed")
+        """Run using the native praisonai workflow (honours YAML / config).
+
+        Delegates to ``praisonai.arun``, which resolves the framework, builds
+        the config list off the event loop, honours ``cli_config`` and owns the
+        ``AgentsGenerator`` lifecycle. This ensures the caller-supplied
+        ``agent_file`` / ``agent_yaml`` (staged to ``agent_file``), ``framework``
+        and per-run ``config`` are all respected instead of silently dropped.
+        """
+        from praisonai import arun
         
         # Update progress
-        job.update_progress(percentage=20.0, step="Creating agent")
+        job.update_progress(percentage=20.0, step="Preparing agent workflow")
         await self.store.save(job)
         await self._notify_progress(job)
         
-        # Create agent
-        agent = Agent(
-            instructions="You are a helpful AI assistant.", output="minimal"
+        job.agent_id = job.agent_id or f"yaml:{os.path.basename(agent_file)}"
+        
+        # Update progress
+        job.update_progress(percentage=30.0, step="Running agent workflow")
+        await self.store.save(job)
+        await self._notify_progress(job)
+        
+        # Run the native workflow, honouring the caller-supplied YAML / config
+        result = await arun(
+            agent_file=agent_file,
+            framework=job.framework or "praisonai",
+            cli_config=job.config or None,
         )
-        
-        # Update job with agent info
-        job.agent_id = getattr(agent, 'name', 'agent')
-        job.run_id = getattr(agent, 'run_id', None)
-        
-        # Update progress
-        job.update_progress(percentage=30.0, step="Running agent")
-        await self.store.save(job)
-        await self._notify_progress(job)
-        
-        # Run the agent
-        result = await asyncio.to_thread(agent.start, job.prompt)
         
         # Update progress
         job.update_progress(percentage=90.0, step="Finalizing")
