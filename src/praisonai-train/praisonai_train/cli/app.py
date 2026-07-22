@@ -11,5 +11,6 @@ Inside the full stack the same app is mounted as ``praisonai train`` via the
 from __future__ import annotations
 
 from praisonai_train.cli.commands.train import app
+from praisonai_train.cli.commands import data as _data  # noqa: F401  registers generate/validate
 
 __all__ = ["app"]
