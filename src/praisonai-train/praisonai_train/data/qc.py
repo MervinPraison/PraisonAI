@@ -15,7 +15,8 @@ from typing import Any, Iterable
 
 from praisonai_train.data import checks as _checks_mod  # noqa: F401  (registers checks)
 from praisonai_train.data.checks import _script_ratio
-from praisonai_train.data._util import fields, jaccard, ngrams, norm
+from praisonai_train.data._util import fields, norm
+from praisonai_train.data.dedup import near_dedup
 from praisonai_train.data.intent import translation_intent
 from praisonai_train.data.registry import checks
 
@@ -26,7 +27,6 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
     drop_checks = [c for c in checks.all() if c.kind == "drop"]
     flag_checks = [c for c in checks.all() if c.kind == "flag"]
     do_near = cfg.get("near_dup", True)
-    near_j = cfg.get("near_dup_jaccard", 0.7)
 
     seen: set[str] = set()
     kept: list[dict] = []
@@ -58,16 +58,12 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
         kept.append(r)
 
     if do_near:
-        sigs: list[set] = []
-        deduped: list[dict] = []
-        for r in kept:
-            g = ngrams(fields(r)[0])
-            if any(jaccard(g, g2) > near_j for g2 in sigs[-3000:]):
-                drops["near_dup"] += 1
-                continue
-            sigs.append(g)
-            deduped.append(r)
-        kept = deduped
+        # Near-dup removal is delegated to the dedup engine (DRY). Method is
+        # YAML-tunable: 'sliding' (default, unchanged) or scalable 'minhash'
+        # (MinHash+LSH — no bounded look-back window, catches near-dups anywhere).
+        kept, near_dropped = near_dedup(kept, cfg)
+        if near_dropped:
+            drops["near_dup"] += near_dropped
 
     lens = [len((fields(r)[2] or "").split()) for r in kept]
     cv = st.pstdev(lens) / max(st.mean(lens), 1) if lens else 0.0
