@@ -52,7 +52,10 @@ class TestPraisonAICodeAgent:
 
         env.exec.assert_awaited()
         command = env.exec.await_args.kwargs.get("command", "")
-        assert command.startswith(f"praisonai code {shlex.quote(instruction)}")
+        # Harbor's BaseInstalledAgent._exec always prefixes commands with
+        # "set -o pipefail; ", so match the adapter command as a substring
+        # rather than requiring it at position 0.
+        assert f"praisonai code {shlex.quote(instruction)}" in command
         assert "--dangerously-skip-approval" in command
         assert "--model openai/gpt-4o-mini" in command
 
