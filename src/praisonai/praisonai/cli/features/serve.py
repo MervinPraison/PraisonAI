@@ -339,10 +339,14 @@ Launch PraisonAI servers with unified discovery support.
                 # Fall back to the native async wrapper entrypoint, which owns
                 # the generator's lifecycle (tool-timeout executor is closed) and
                 # runs off the event loop so concurrent requests are not blocked.
+                # Thread the request ``query`` through as the workflow input so
+                # the caller's prompt drives the run instead of being dropped;
+                # the YAML's static ``input`` is only used when no query is sent.
                 import praisonai
                 result = await praisonai.arun(
                     agent_file=config["file"],
                     framework="praisonai",
+                    cli_config={"topic": query} if query else None,
                 )
                 
                 return {"response": result}

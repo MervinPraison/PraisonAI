@@ -317,8 +317,9 @@ class JobExecutor:
         Delegates to ``praisonai.arun``, which resolves the framework, builds
         the config list off the event loop, honours ``cli_config`` and owns the
         ``AgentsGenerator`` lifecycle. This ensures the caller-supplied
-        ``agent_file`` / ``agent_yaml`` (staged to ``agent_file``), ``framework``
-        and per-run ``config`` are all respected instead of silently dropped.
+        ``agent_file`` / ``agent_yaml`` (staged to ``agent_file``), ``framework``,
+        ``prompt`` and per-run ``config`` are all respected instead of silently
+        dropped.
         """
         from praisonai import arun
         
@@ -334,11 +335,21 @@ class JobExecutor:
         await self.store.save(job)
         await self._notify_progress(job)
         
-        # Run the native workflow, honouring the caller-supplied YAML / config
+        # Run the native workflow, honouring the caller-supplied YAML / config.
+        # Thread the required ``job.prompt`` through as the workflow input/topic
+        # so the caller's requested input drives the run instead of being
+        # dropped (the YAML's static ``input`` is only used when no prompt was
+        # supplied). Per-run ``config`` still takes precedence over this default.
+        cli_config: Dict[str, Any] = {}
+        if job.prompt:
+            cli_config["topic"] = job.prompt
+        if job.config:
+            cli_config.update(job.config)
+
         result = await arun(
             agent_file=agent_file,
             framework=job.framework or "praisonai",
-            cli_config=job.config or None,
+            cli_config=cli_config or None,
         )
         
         # Update progress

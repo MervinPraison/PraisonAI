@@ -630,7 +630,20 @@ class AgentsGenerator:
             if 'lsp' in cli_config:
                 config['config']['lsp'] = cli_config['lsp'] 
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
-        
+
+        # Handle workflow input/topic override. A caller-supplied prompt (e.g.
+        # the Jobs API ``job.prompt`` or the serve HTTP ``query``) is the input
+        # for this run and must drive the workflow topic instead of being
+        # dropped. Only override when a non-empty value is provided so a static
+        # YAML ``input``/``topic`` is preserved when no per-run prompt is given.
+        for _key in ('input', 'topic'):
+            _val = cli_config.get(_key)
+            if _val:
+                config['input'] = _val
+                config.pop('topic', None)
+                self.logger.debug(f"CLI override: {_key} = {_val}")
+                break
+
         # Handle agent-level overrides using unified approach
         agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
