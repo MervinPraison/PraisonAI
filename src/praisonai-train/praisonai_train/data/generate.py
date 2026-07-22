@@ -74,13 +74,27 @@ def _norm_row(row: dict) -> str:
     return _norm_text(row.get("instruction") or "")
 
 
-def generate_dataset(config: dict, on_row: Callable[[dict], None] | None = None) -> Iterator[dict]:
+def generate_dataset(
+    config: dict,
+    on_row: Callable[[dict], None] | None = None,
+    progress_callback: Callable[[int, int, int], None] | None = None,
+) -> Iterator[dict]:
     """Yield unique synthetic rows.
 
     Required config: deployment, num_examples (+ endpoint/api_key or env).
     Optional: recipe (name|dict, default 'tamil'), concurrency, start_offset,
     dedup_from (rows or JSONL paths), stop_file, azure (bool), api_version,
     max_completion_tokens.
+
+    ``progress_callback`` is an optional ``fn(done, total, kept)`` invoked as work
+    completes so a CLI/monitor/notebook can show completion + remaining. ``done``
+    counts teacher requests finished (monotonic, up to ``total`` = number of prompt
+    specs); ``kept`` counts unique rows emitted so far — it is reported *after* the
+    row is yielded, so ``kept`` never runs ahead of the rows the consumer has
+    received. It fires once up-front with ``(0, total, 0)`` and again after each
+    completed request. Default ``None`` keeps the original behaviour (no callback).
+    Keep it cheap — it runs on the hot path; throttle any printing inside the
+    callback.
     """
     cfg = dict(config)
     cfg.setdefault("endpoint", os.environ.get("AZURE_OPENAI_ENDPOINT",
@@ -103,6 +117,10 @@ def generate_dataset(config: dict, on_row: Callable[[dict], None] | None = None)
 
     stop_file = cfg.get("stop_file") or os.path.expanduser("~/.praisonai_train_stop")
     specs = recipe.prompts(cfg["num_examples"], start=cfg.get("start_offset", 0))
+    total = len(specs)
+    done = kept = 0
+    if progress_callback:
+        progress_callback(done, total, kept)
     with ThreadPoolExecutor(max_workers=cfg.get("concurrency", 32)) as pool:
         futures = {pool.submit(_call, cfg, s): s for s in specs}
         for fut in as_completed(futures):
@@ -113,12 +131,17 @@ def generate_dataset(config: dict, on_row: Callable[[dict], None] | None = None)
                 row = fut.result()
             except Exception:
                 row = None
-            if not row:
-                continue
-            key = _norm_row(row)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            if on_row:
-                on_row(row)
-            yield row
+            done += 1
+            emit = False
+            if row:
+                key = _norm_row(row)
+                if key and key not in seen:
+                    seen.add(key)
+                    kept += 1
+                    emit = True
+                    if on_row:
+                        on_row(row)
+            if emit:
+                yield row
+            if progress_callback:
+                progress_callback(done, total, kept)

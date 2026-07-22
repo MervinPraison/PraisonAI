@@ -26,6 +26,41 @@ def _load_cfg(config: Optional[str], **overrides) -> dict:
     return cfg
 
 
+class _Progress:
+    """Default progress reporter for the ``generate`` command.
+
+    Uses a ``tqdm`` bar when tqdm is importable (it's already an optional dep of
+    the training path — never added as a hard requirement here), otherwise falls
+    back to printing ``done/total`` every ``every`` requests. Pass ``self.update``
+    as ``generate_dataset(..., progress_callback=...)``.
+    """
+
+    def __init__(self, total: Optional[int], every: int = 500) -> None:
+        self.total = total
+        self.every = max(1, every)
+        self._bar = None
+        self._last = 0
+        try:
+            from tqdm import tqdm  # optional; guarded so it's never a hard dep
+            self._bar = tqdm(total=total, unit="req", desc="generating")
+        except Exception:
+            self._bar = None
+
+    def update(self, done: int, total: int, kept: int) -> None:
+        if self._bar is not None:
+            self._bar.update(done - self._last)
+            self._last = done
+            self._bar.set_postfix(kept=kept)
+            return
+        # Plain fallback: throttle so large runs don't flood stdout.
+        if done and (done % self.every == 0 or done == total):
+            typer.echo(f"  ...{done}/{total} requests ({kept} kept)")
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+
+
 @app.command("generate")
 def generate_data(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="YAML config"),
@@ -60,28 +95,32 @@ def generate_data(
     # Consume the first row *before* truncating the destination, so a run that
     # fails on credentials/recipe/first-request never destroys an existing file
     # (and a self-referential dedup_from is read before it would be emptied).
-    gen = generate_dataset(cfg)
+    progress = _Progress(cfg.get("num_examples"))
+    gen = generate_dataset(cfg, progress_callback=progress.update)
     try:
-        first = next(gen)
-    except StopIteration:
-        first = None
+        try:
+            first = next(gen)
+        except StopIteration:
+            first = None
 
-    kept = 0
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", buffering=1) as fh:
-        for row in ([first] if first is not None else []):
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            fh.flush()
-            kept += 1
-        for row in gen:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            fh.flush()
-            kept += 1
-            if snap_every and kept % snap_every == 0:
-                Path(snap_dir).mkdir(parents=True, exist_ok=True)
-                snap = Path(snap_dir) / f"{Path(out_path).stem}_{kept}.jsonl"
-                snap.write_text(Path(out_path).read_text())
-                typer.echo(f"  snapshot: {snap} ({kept} rows)")
+        kept = 0
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", buffering=1) as fh:
+            for row in ([first] if first is not None else []):
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()
+                kept += 1
+            for row in gen:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()
+                kept += 1
+                if snap_every and kept % snap_every == 0:
+                    Path(snap_dir).mkdir(parents=True, exist_ok=True)
+                    snap = Path(snap_dir) / f"{Path(out_path).stem}_{kept}.jsonl"
+                    snap.write_text(Path(out_path).read_text())
+                    typer.echo(f"  snapshot: {snap} ({kept} rows)")
+    finally:
+        progress.close()
     typer.echo(f"generated {kept} unique examples -> {out_path}")
     if kept == 0:
         typer.echo("error: no rows generated — check endpoint/api_key/deployment "
