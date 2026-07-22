@@ -52,7 +52,7 @@ jobs:
             // Kind labels (bug before "how to" — bug reports often include "## How to fix")
             if (content.includes('feature request') || content.includes('[feature')) {
               labels.push('enhancement');
-            } else if (content.includes('bug') || content.includes('error') || content.includes('crash') || content.includes('traceback')) {
+            } else if (!title.includes('[question]') && (content.includes('bug') || content.includes('error') || content.includes('crash') || content.includes('traceback'))) {
               labels.push('bug');
             } else if (title.includes('[question]') || content.includes('how do i') || (content.includes('how to') && !content.includes('how to fix'))) {
               labels.push('question');
