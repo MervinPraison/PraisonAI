@@ -56,5 +56,50 @@ lr_scheduler_type: "linear"
 seed: 3407
 output_dir: "outputs"
 
-quantization_method: 
+quantization_method:
   - "q4_k_m"
+
+# =====================================================================
+# Optional flexibility (all safe to omit — sensible defaults apply).
+# =====================================================================
+
+# ---- Checkpointing & resume ----
+# save_strategy: "steps"          # no | steps | epoch
+# save_steps: 100
+# save_total_limit: 3             # keep only the N most recent checkpoints
+# resume_from_checkpoint: false   # true = latest in output_dir, or a path
+# final_model_dir: "lora_model"   # where the final adapter is saved
+
+# ---- Evaluation / best-checkpoint (carve an eval set from training data) ----
+# val_split_ratio: 0.05
+# eval_strategy: "steps"          # no | steps | epoch
+# eval_steps: 100
+# load_best_model_at_end: true
+# metric_for_best_model: "eval_loss"
+
+# ---- Early stopping (needs val_split_ratio) ----
+# early_stopping_patience: 3
+
+# ---- Multi-GPU (launch with: torchrun --nproc_per_node=N -m praisonai_train.train.llm.trainer train --config config.yaml) ----
+# ddp_find_unused_parameters: false   # auto-set under DDP
+
+# ---- Extra knobs ----
+# max_grad_norm: 1.0
+# warmup_ratio: 0.03              # use instead of warmup_steps
+# neftune_noise_alpha: 5
+# report_to: "none"               # none | tensorboard | wandb
+# run_name: "praisonai-train"
+# push_to_hub: false              # push checkpoints to hub_model_id during training
+
+# ---- Quantization / precision ----
+# dtype: "bfloat16"               # float16 | bfloat16
+# load_in_8bit: false
+# full_finetuning: false
+
+# ---- Advanced LoRA ----
+# use_dora: false
+# modules_to_save: ["embed_tokens", "lm_head"]
+
+# ---- Advanced escape hatch: any raw SFTConfig field ----
+# training_arguments:
+#   torch_compile: true
