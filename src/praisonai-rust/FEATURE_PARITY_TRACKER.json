@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 409,
+    "pythonCoreFeatures": 408,
     "rustFeatures": 667,
-    "gapCount": 127,
-    "parityPercentage": 163.1
+    "gapCount": 126,
+    "parityPercentage": 163.5
   },
   "pythonCoreSDK": {
     "exports": [
@@ -318,7 +318,6 @@
       "config",
       "configure_structured_logging",
       "create_context_agent",
-      "db",
       "detect_url_scheme",
       "disable_performance_mode",
       "disable_telemetry",
@@ -2504,15 +2503,6 @@
         "effort": "high",
         "status": "TODO",
         "category": "workflows"
-      },
-      {
-        "feature": "db",
-        "python": true,
-        "rust": false,
-        "priority": "P1",
-        "effort": "low",
-        "status": "TODO",
-        "category": "db"
       },
       {
         "feature": "if_",

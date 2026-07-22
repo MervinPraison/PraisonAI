@@ -4,7 +4,7 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 409,
+    "pythonCoreFeatures": 408,
     "pythonWrapperFeatures": 21,
     "typescriptFeatures": 1190,
     "gapCount": 115,
@@ -322,7 +322,6 @@
       "config",
       "configure_structured_logging",
       "create_context_agent",
-      "db",
       "detect_url_scheme",
       "disable_performance_mode",
       "disable_telemetry",
@@ -594,9 +593,6 @@
         "LineRange",
         "ManagerConfig",
         "OptimizerStrategy"
-      ],
-      "db": [
-        "db"
       ],
       "embedding": [
         "EmbeddingResult",
@@ -3587,15 +3583,6 @@
         "effort": "high",
         "status": "TODO",
         "category": "workflows"
-      },
-      {
-        "feature": "db",
-        "python": true,
-        "typescript": true,
-        "priority": "P1",
-        "effort": "low",
-        "status": "DONE",
-        "category": "db"
       },
       {
         "feature": "if_",

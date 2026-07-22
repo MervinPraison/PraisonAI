@@ -7,7 +7,7 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 409 |
+| Python Core Features | 408 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
 | **Gap Count** | **115** |
@@ -77,7 +77,7 @@
 | `tool` | ✅ | ✅ | low | ✅ DONE |
 | `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 
-### P1_Persistence (21 done, 5 todo)
+### P1_Persistence (20 done, 5 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -101,7 +101,6 @@
 | `Workflow` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowContext` | ✅ | ✅ | high | ✅ DONE |
 | `WorkflowHooksConfig` | ✅ | ✅ | low | ✅ DONE |
-| `db` | ✅ | ✅ | low | ✅ DONE |
 | `loop` | ✅ | ✅ | low | ✅ DONE |
 | `parallel` | ✅ | ✅ | low | ✅ DONE |
 | `repeat` | ✅ | ✅ | low | ✅ DONE |
@@ -510,15 +509,6 @@ from praisonaiagents import AUTONOMY_PRESETS, ArrayMode, AutonomyLevel, CACHING_
 
 ```python
 from praisonaiagents import ContextConfig, ContextManager, FastContext, FastContextResult, FileMatch, LineRange, ManagerConfig, OptimizerStrategy
-```
-
-</details>
-
-<details>
-<summary><strong>db</strong> (1 exports)</summary>
-
-```python
-from praisonaiagents import db
 ```
 
 </details>
