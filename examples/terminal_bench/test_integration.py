@@ -52,6 +52,12 @@ class TestPraisonAICodeAgent:
 
         env.exec.assert_awaited()
         command = env.exec.await_args.kwargs.get("command", "")
+        # Harbor's BaseInstalledAgent._exec always prefixes commands with
+        # "set -o pipefail; ". Strip that fixed wrapper before the position-0
+        # check so the assertion still detects malformed command construction.
+        harbor_prefix = "set -o pipefail; "
+        if command.startswith(harbor_prefix):
+            command = command[len(harbor_prefix):]
         assert command.startswith(f"praisonai code {shlex.quote(instruction)}")
         assert "--dangerously-skip-approval" in command
         assert "--model openai/gpt-4o-mini" in command
