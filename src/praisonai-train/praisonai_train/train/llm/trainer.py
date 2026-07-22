@@ -540,10 +540,14 @@ class TrainModel:
             sft_params["group_by_length"] = self._flag(self.config["group_by_length"])
         if self.config.get("lr_scheduler_kwargs") is not None:
             sft_params["lr_scheduler_kwargs"] = self.config["lr_scheduler_kwargs"]
-        # DDP: LoRA freezes the base weights, so tell DDP there are no unused grads.
+        # DDP unused-parameter detection. Default True so multimodal / MoE / elastic
+        # models (e.g. Gemma 4 E4B, whose vision/audio adapters don't fire in text-only
+        # training) don't crash with "Expected to have finished reduction...". Set
+        # false for a small speedup on pure dense-text models where all LoRA params
+        # are used every step.
         if getattr(self, "_distributed", False):
             sft_params["ddp_find_unused_parameters"] = self._flag(
-                self.config.get("ddp_find_unused_parameters"), default=False)
+                self.config.get("ddp_find_unused_parameters"), default=True)
         # Push checkpoints to the Hub during training (optional).
         if self._flag(self.config.get("push_to_hub"), default=False):
             sft_params["push_to_hub"] = True
