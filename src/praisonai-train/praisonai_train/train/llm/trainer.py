@@ -55,7 +55,11 @@ def formatting_prompts_func(examples, tokenizer):
     If the example has a "conversations" field, process it as ShareGPT-style.
     Otherwise, assume Alpaca-style data with "instruction", "input", and "output" fields.
     """
-    print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
+    # Per-batch prints fire on every mapped batch and drown the log; gate them behind
+    # PRAISON_DEBUG so normal runs stay readable (the run summary still prints).
+    _dbg = os.environ.get("PRAISON_DEBUG")
+    if _dbg:
+        print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
     texts = []
     # Check if the example has a "conversations" field.
     if "conversations" in examples:
@@ -97,34 +101,9 @@ def formatting_prompts_func(examples, tokenizer):
             if isinstance(formatted, list):
                 formatted = formatted[0] if len(formatted) == 1 else "\n".join(formatted)
             texts.append(formatted)
-    if texts:
+    if texts and _dbg:
         print("DEBUG: Raw texts sample (first 200 chars):", texts[0][:200])
     return {"text": texts}
-
-#####################################
-# Step 2: Tokenizing the Prompts
-#####################################
-def tokenize_function(examples, hf_tokenizer, max_length):
-    """
-    Tokenizes a batch of text prompts with padding and truncation enabled.
-    """
-    flat_texts = []
-    for t in examples["text"]:
-        if isinstance(t, list):
-            t = t[0] if len(t) == 1 else " ".join(t)
-        flat_texts.append(t)
-    print("DEBUG: Tokenizing a batch of size:", len(flat_texts))
-    tokenized = hf_tokenizer(
-        flat_texts,
-        padding="max_length",
-        truncation=True,
-        max_length=max_length,
-        return_tensors="pt",
-    )
-    tokenized = {key: value.tolist() for key, value in tokenized.items()}
-    sample_key = list(tokenized.keys())[0]
-    print("DEBUG: Tokenized sample (first 10 tokens of", sample_key, "):", tokenized[sample_key][0][:10])
-    return tokenized
 
 #####################################
 # Main Training Class
@@ -422,16 +401,6 @@ class TrainModel:
             raise ValueError(
                 "All examples formatted to empty text — check dataset schema / chat_template.")
         return dataset
-
-    def tokenize_dataset(self, dataset):
-        print("DEBUG: Tokenizing the entire dataset...")
-        tokenized_dataset = dataset.map(
-            lambda examples: tokenize_function(examples, self.hf_tokenizer, self.config["max_seq_length"]),
-            batched=True
-        )
-        tokenized_dataset = tokenized_dataset.remove_columns(["text"])
-        print("DEBUG: Tokenized dataset sample keys:", tokenized_dataset[0].keys())
-        return tokenized_dataset
 
     def load_datasets(self):
         datasets = []
@@ -750,7 +719,7 @@ class TrainModel:
         self.model.save_pretrained_gguf(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            quantization_method="q4_k_m"
+            quantization_method=self.config.get("quantization_method", "q4_k_m"),
         )
 
     def prepare_modelfile_content(self):
