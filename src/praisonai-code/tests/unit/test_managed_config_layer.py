@@ -206,3 +206,30 @@ def test_offline_no_cache_skips_layer(tmp_path, monkeypatch):
     config = resolver.resolve()
     # No cache and offline: managed layer is skipped, behaviour unchanged.
     assert config.sources == ["defaults"]
+
+
+def test_project_walkup_never_loads_profile_legacy_toml(tmp_path, monkeypatch):
+    """Follow-up #3244: a legacy ``.praison/config.toml`` in an ancestor of
+    ``cwd`` must never be discovered by the project walk-up and mislabelled as
+    a ``project:`` source. It is owned exclusively by the global loader.
+    """
+    monkeypatch.delenv("PRAISONAI_MANAGED_CONFIG_URL", raising=False)
+    monkeypatch.delenv("PRAISONAI_MANAGED_CONFIG_DIR", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+
+    # Simulate a legacy global config sitting in a real ancestor of cwd
+    # (the scenario that broke on Windows where tmp_path lives under the
+    # user profile that also holds ~/.praison/config.toml).
+    ancestor = tmp_path / "profile"
+    (ancestor / ".praison").mkdir(parents=True)
+    (ancestor / ".praison" / "config.toml").write_text('[rag]\nmodel = "legacy"\n')
+    cwd = ancestor / "work" / "repo"
+    cwd.mkdir(parents=True)
+
+    config = ConfigResolver(cwd=cwd).resolve()
+
+    assert not any(
+        s.startswith("project:") and s.replace("\\", "/").endswith(".praison/config.toml")
+        for s in config.sources
+    )
+    assert config.sources == ["defaults"]

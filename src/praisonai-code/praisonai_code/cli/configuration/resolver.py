@@ -394,7 +394,6 @@ class ConfigResolver:
         ".praisonai/config.yml",
         "praison.yaml",
         "praison.yml",
-        ".praison/config.toml",  # Legacy, backward compat
     ]
     
     def __init__(self, cwd: Optional[Path] = None, strict: Optional[bool] = None):
@@ -533,13 +532,15 @@ class ConfigResolver:
         """Load project configuration with walk-up discovery.
 
         Walk-up stops at (and does not walk past) the user's home directory.
-        Home itself is still searched for project configs, but the legacy
-        ``.praison/config.toml`` name is skipped there because that file is
-        loaded separately by ``_load_global_config()`` with a ``global:``
-        label; searching it here too would mislabel it as a ``project:``
-        source. Non-legacy project configs placed directly at ``$HOME`` (e.g.
-        ``~/praison.yaml``) remain discoverable. A discovered git root still
-        short-circuits the walk earlier when present.
+        Home itself is still searched for project configs (e.g.
+        ``~/praison.yaml``). The legacy ``.praison/config.toml`` is
+        intentionally NOT a project config name — it is a global user config
+        loaded exclusively by ``_load_global_config()`` with a ``global:``
+        label. Keeping it out of ``PROJECT_CONFIG_NAMES`` prevents the walk-up
+        from ever discovering a profile-level legacy file (which may be a real
+        ancestor of ``cwd`` on some platforms) and mislabelling it as a
+        ``project:`` source. A discovered git root still short-circuits the
+        walk earlier when present.
         """
         # Build search paths from current directory up to git root (or filesystem root)
         git_root = get_git_root(str(self.cwd))
@@ -564,24 +565,12 @@ class ConfigResolver:
         # Search for config files
         for search_dir in search_paths:
             for config_name in self.PROJECT_CONFIG_NAMES:
-                # The legacy global config is owned by _load_global_config();
-                # skipping it at $HOME avoids duplicating it as a project source.
-                if (
-                    home is not None
-                    and search_dir == home
-                    and config_name == ".praison/config.toml"
-                ):
-                    continue
                 config_path = search_dir / config_name
                 if config_path.exists():
                     data = self._read_config_file(config_path)
                     if data:
                         data["_source"] = str(config_path)
-                        # Validate before any migration (TOML legacy is skipped).
-                        if not config_name.endswith(".toml"):
-                            self._validate(data, str(config_path))
-                        else:
-                            data = self._migrate_legacy_config(data)
+                        self._validate(data, str(config_path))
                         return data
         
         return None
