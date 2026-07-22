@@ -14,7 +14,9 @@ from collections import Counter
 from typing import Any, Iterable
 
 from praisonai_train.data import checks as _checks_mod  # noqa: F401  (registers checks)
+from praisonai_train.data.checks import _script_ratio
 from praisonai_train.data._util import fields, jaccard, ngrams, norm
+from praisonai_train.data.intent import translation_intent
 from praisonai_train.data.registry import checks
 
 
@@ -38,16 +40,20 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
             drops["exact_dup"] += 1
             continue
         seen.add(key)
+        # Per-row context: expose the generator's ground-truth ``task_type`` (when
+        # the row carries one) so task-aware checks can prefer metadata over text
+        # detection. Existing checks ignore the extra key.
+        rcfg = {**cfg, "task_type": r.get("task_type")} if isinstance(r, dict) else cfg
         dropped = False
         for c in drop_checks:
-            if c.triggered(ins, inp, out, cfg):
+            if c.triggered(ins, inp, out, rcfg):
                 drops[c.name] += 1
                 dropped = True
                 break
         if dropped:
             continue
         for c in flag_checks:
-            if c.triggered(ins, inp, out, cfg):
+            if c.triggered(ins, inp, out, rcfg):
                 flags[c.name] += 1
         kept.append(r)
 
@@ -71,6 +77,36 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
     prefixes = Counter(" ".join(norm(fields(r)[0]).split()[:5]) for r in kept)
     top_prefix = prefixes.most_common(1)[0][1] / max(len(kept), 1) if kept else 0.0
 
+    # Translation composition of the clean corpus. Computed with the SAME detector
+    # the task-aware purity checks use (praisonai_train.data.intent), so the share,
+    # the by-direction counts, and the exempted count always reconcile with the
+    # per-row exemptions. Denominator is the kept (post-dedup) content rows.
+    intents = [translation_intent(fields(r)[0], r.get("task_type") if isinstance(r, dict) else None)
+               for r in kept]
+    by_dir = Counter(i["direction"] or "unknown" for i in intents if i["is_translation"])
+    trans_n = sum(1 for i in intents if i["is_translation"])
+    # ``exempted`` = rows the English-target exemption *actually* rescued from the
+    # LowScriptPurity drop, so it reconciles with the check's behaviour: it counts
+    # an English-target row ONLY when task-awareness is on AND the output would
+    # otherwise have failed the purity floor (a failed translation whose Tamil
+    # output passes strict purity is caught by ``wrong_target_script``, not here).
+    task_aware = cfg.get("task_aware_purity", True)
+    drop_floor = cfg.get("script_drop", 0.50)
+    exempted = 0
+    if task_aware:
+        for r, i in zip(kept, intents):
+            if i["expected_script"] != "english":
+                continue
+            ratio = _script_ratio(fields(r)[2], cfg)
+            if ratio is not None and ratio < drop_floor:
+                exempted += 1
+    translation = {
+        "share": round(trans_n / max(len(kept), 1), 3),
+        "by_direction": {"en_ta": by_dir["en_ta"], "ta_en": by_dir["ta_en"],
+                         "unknown": by_dir["unknown"]},
+        "exempted": exempted,
+    }
+
     warnings = []
     if distinct2 < 0.5:
         warnings.append(f"low instruction diversity (distinct-2={distinct2:.2f} < 0.5)")
@@ -89,6 +125,7 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
             "distinct_2": round(distinct2, 3),
             "length_cv": round(cv, 2),
             "top_prefix_share": round(top_prefix, 3),
+            "translation": translation,
         },
         "warnings": warnings,
     }
