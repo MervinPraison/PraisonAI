@@ -89,10 +89,12 @@ def generate_dataset(
     ``progress_callback`` is an optional ``fn(done, total, kept)`` invoked as work
     completes so a CLI/monitor/notebook can show completion + remaining. ``done``
     counts teacher requests finished (monotonic, up to ``total`` = number of prompt
-    specs); ``kept`` counts unique rows emitted so far. It fires once up-front with
-    ``(0, total, 0)`` and again after each completed request. Default ``None`` keeps
-    the original behaviour (no callback). Keep it cheap — it runs on the hot path;
-    throttle any printing inside the callback.
+    specs); ``kept`` counts unique rows emitted so far — it is reported *after* the
+    row is yielded, so ``kept`` never runs ahead of the rows the consumer has
+    received. It fires once up-front with ``(0, total, 0)`` and again after each
+    completed request. Default ``None`` keeps the original behaviour (no callback).
+    Keep it cheap — it runs on the hot path; throttle any printing inside the
+    callback.
     """
     cfg = dict(config)
     cfg.setdefault("endpoint", os.environ.get("AZURE_OPENAI_ENDPOINT",
@@ -139,7 +141,7 @@ def generate_dataset(
                     emit = True
                     if on_row:
                         on_row(row)
-            if progress_callback:
-                progress_callback(done, total, kept)
             if emit:
                 yield row
+            if progress_callback:
+                progress_callback(done, total, kept)
