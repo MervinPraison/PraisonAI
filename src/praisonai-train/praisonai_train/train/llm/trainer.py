@@ -131,6 +131,13 @@ def tokenize_function(examples, hf_tokenizer, max_length):
 #####################################
 class TrainModel:
     def __init__(self, config_path="config.yaml"):
+        # Under DDP the flag that routes Unsloth through its non-reentrant
+        # (DDP-safe) checkpointing path must be set BEFORE `unsloth` is imported —
+        # the legacy path is selected at import/load time, so setting it later
+        # (after from_pretrained) leaves a torchrun launch on the reentrant path
+        # and it still crashes in backward with "parameter marked as ready twice".
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            os.environ.setdefault("UNSLOTH_USE_NEW_MODEL", "1")
         _lazy_import_training_deps()
         self.load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -160,6 +167,23 @@ class TrainModel:
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
         "hf_model_name", "ollama_model", "quantization_method", "remove_unused_columns",
+        # quantization / precision
+        "dtype", "load_in_8bit", "full_finetuning",
+        # advanced LoRA
+        "modules_to_save", "rank_pattern", "alpha_pattern", "use_dora",
+        # checkpointing / resume
+        "save_strategy", "save_total_limit", "save_safetensors",
+        "resume_from_checkpoint", "final_model_dir",
+        # evaluation / best-checkpoint / early stopping
+        "val_split_ratio", "eval_strategy", "eval_steps", "per_device_eval_batch_size",
+        "load_best_model_at_end", "metric_for_best_model", "greater_is_better",
+        "early_stopping_patience", "early_stopping_threshold",
+        # extra training knobs
+        "max_grad_norm", "warmup_ratio", "lr_scheduler_kwargs", "adam_beta1",
+        "adam_beta2", "adam_epsilon", "group_by_length", "neftune_noise_alpha",
+        "dataloader_num_workers", "logging_first_step", "data_seed",
+        "ddp_find_unused_parameters", "push_to_hub", "hub_model_id", "hub_strategy",
+        "report_to", "run_name", "training_arguments",
     })
 
     def validate_config(self):
@@ -248,12 +272,31 @@ class TrainModel:
 
     def prepare_model(self):
         print("DEBUG: Preparing model and tokenizer...")
-        self.model, original_tokenizer = FastLanguageModel.from_pretrained(
+        # --- Multi-GPU / DDP detection (torchrun sets LOCAL_RANK/WORLD_SIZE) ---
+        local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", 0)))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        self._distributed = world_size > 1
+        # --- Quantization / precision flexibility ---
+        dtype_cfg = self.config.get("dtype")  # None | "float16" | "bfloat16"
+        dtype = getattr(torch, dtype_cfg) if isinstance(dtype_cfg, str) else None
+        load_kwargs = dict(
             model_name=self.config["model_name"],
             max_seq_length=self.config["max_seq_length"],
-            dtype=None,
-            load_in_4bit=self.config["load_in_4bit"],
+            dtype=dtype,
+            load_in_4bit=self._flag(self.config.get("load_in_4bit"), default=True),
         )
+        if self.config.get("load_in_8bit") is not None:
+            load_kwargs["load_in_8bit"] = self._flag(self.config["load_in_8bit"])
+        if self.config.get("full_finetuning") is not None:
+            load_kwargs["full_finetuning"] = self._flag(self.config["full_finetuning"])
+        if load_kwargs.get("load_in_4bit") and load_kwargs.get("load_in_8bit"):
+            raise ValueError("Set only one of load_in_4bit / load_in_8bit, not both.")
+        if self._distributed:
+            # Under DDP each rank loads the FULL model on its own GPU. Do NOT use
+            # "auto"/"balanced" (that is single-process model-parallel and conflicts).
+            load_kwargs["device_map"] = {"": local_rank}
+            print(f"DEBUG: DDP rank {local_rank}/{world_size} -> device_map {{'':{local_rank}}}")
+        self.model, original_tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
         print("DEBUG: Model and original tokenizer loaded.")
         if original_tokenizer.pad_token is None:
             original_tokenizer.pad_token = original_tokenizer.eos_token
@@ -279,8 +322,16 @@ class TrainModel:
             )
         self.hf_tokenizer = self.chat_tokenizer
         print("DEBUG: Chat tokenizer ready; HF tokenizer saved.")
-        self.model = FastLanguageModel.get_peft_model(
-            self.model,
+        # NOTE: UNSLOTH_USE_NEW_MODEL is set in __init__ BEFORE unsloth is imported
+        # (the DDP-safe non-reentrant checkpointing path is chosen at import/load
+        # time). We re-assert it here as a harmless safety net.
+        if self._distributed:
+            os.environ.setdefault("UNSLOTH_USE_NEW_MODEL", "1")
+        # --- Full fine-tuning: train the base weights directly, skip LoRA ---
+        if self._flag(self.config.get("full_finetuning"), default=False):
+            print("DEBUG: full_finetuning enabled — training base model, skipping LoRA adapters.")
+            return
+        peft_kwargs = dict(
             r=self.config.get("lora_r", 16),
             target_modules=self.config.get("lora_target_modules", [
                 "q_proj", "k_proj", "v_proj", "o_proj",
@@ -290,16 +341,44 @@ class TrainModel:
             bias=self.config.get("lora_bias", "none"),
             use_gradient_checkpointing=self.config.get("use_gradient_checkpointing", "unsloth"),
             random_state=self.config.get("random_state", 3407),
-            use_rslora=self.config.get("use_rslora", False),
+            use_rslora=self._flag(self.config.get("use_rslora"), default=False),
             loftq_config=self.config.get("loftq_config", None),
         )
+        # Optional advanced LoRA knobs (only passed when set).
+        for opt in ("modules_to_save", "rank_pattern", "alpha_pattern", "use_dora"):
+            if self.config.get(opt) is not None:
+                peft_kwargs[opt] = self.config[opt]
+        self.model = FastLanguageModel.get_peft_model(self.model, **peft_kwargs)
         print("DEBUG: LoRA adapters added.")
 
     def process_dataset(self, dataset_info):
         dataset_name = dataset_info["name"]
         split_type = dataset_info.get("split_type", "train")
         print(f"DEBUG: Loading dataset '{dataset_name}' split '{split_type}'...")
-        dataset = load_dataset(dataset_name, split=split_type)
+        # Support HF hub datasets, explicit data_files, or a local file path.
+        data_files = dataset_info.get("data_files")
+        if data_files:
+            fmt = dataset_info.get("format", "json")
+            dataset = load_dataset(fmt, data_files=data_files, split=split_type)
+        elif os.path.exists(dataset_name):
+            ext = dataset_name.rsplit(".", 1)[-1]
+            fmt = dataset_info.get("format", {"jsonl": "json"}.get(ext, ext))
+            dataset = load_dataset(fmt, data_files=dataset_name, split=split_type)
+        else:
+            dataset = load_dataset(dataset_name, split=split_type)
+        # Column rename (advertised in the default config; previously ignored).
+        rename = dataset_info.get("rename")
+        if isinstance(rename, dict):
+            rename = {s: d for s, d in rename.items()
+                      if s in dataset.column_names and s != d}
+            if rename:
+                dataset = dataset.rename_columns(rename)
+        # Row filter (advertised in the default config; previously ignored).
+        if self._flag(dataset_info.get("filter_data"), default=False):
+            col = dataset_info.get("filter_column_value")
+            val = dataset_info.get("filter_value")
+            if col:
+                dataset = dataset.filter(lambda ex: ex.get(col) == val)
         # Honor num_samples (train on a subset) — previously advertised but ignored.
         # Validate as a positive integer so 0/negatives/booleans/typos fail fast with
         # a clear message instead of silently training on the full set or crashing mid-run.
@@ -326,16 +405,22 @@ class TrainModel:
             dataset = standardize_sharegpt(dataset)
         else:
             print("DEBUG: Dataset does not have 'conversations'; assuming Alpaca format.")
+        if self._flag(dataset_info.get("shuffle"), default=False):
+            dataset = dataset.shuffle(
+                seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
         print("DEBUG: Applying formatting function to dataset...")
         format_func = partial(formatting_prompts_func, tokenizer=self.chat_tokenizer)
         dataset = dataset.map(format_func, batched=True, remove_columns=dataset.column_names)
-        sample = dataset[0]
-        print("DEBUG: Sample processed example keys:", list(sample.keys()))
-        if "text" in sample:
-            print("DEBUG: Sample processed 'text' type:", type(sample["text"]))
-            print("DEBUG: Sample processed 'text' content (first 200 chars):", sample["text"][:200])
-        else:
-            print("DEBUG: Processed sample does not contain 'text'.")
+        # Drop rows that formatted to empty text (chat-template failure / empty convo)
+        # instead of silently training on blank examples.
+        before = len(dataset)
+        dataset = dataset.filter(lambda ex: bool((ex.get("text") or "").strip()))
+        if before - len(dataset):
+            print(f"WARNING: dropped {before - len(dataset)}/{before} examples that "
+                  f"formatted to empty text.")
+        if len(dataset) == 0:
+            raise ValueError(
+                "All examples formatted to empty text — check dataset schema / chat_template.")
         return dataset
 
     def tokenize_dataset(self, dataset):
@@ -364,6 +449,17 @@ class TrainModel:
         raw_dataset = self.load_datasets()
         print("DEBUG: Dataset ready with", len(raw_dataset), "examples.")
 
+        # Optional held-out eval split so overfitting can be monitored and the best
+        # checkpoint kept (val_split_ratio carves it from the training data).
+        eval_dataset = None
+        val_ratio = self.config.get("val_split_ratio")
+        if val_ratio:
+            split = raw_dataset.train_test_split(
+                test_size=float(val_ratio), seed=int(self.config.get("seed", 3407)))
+            raw_dataset, eval_dataset = split["train"], split["test"]
+            print(f"DEBUG: eval split -> train={len(raw_dataset)} eval={len(eval_dataset)}")
+
+        default_report = "wandb" if os.getenv("PRAISON_WANDB") else "none"
         # SFT-specific fields (dataset_text_field, max_length, packing, ...) live on
         # SFTConfig in modern TRL, not on TrainingArguments / the SFTTrainer kwargs.
         sft_params = {
@@ -374,23 +470,92 @@ class TrainModel:
             "fp16": self.config.get("fp16", not is_bfloat16_supported()),
             "bf16": self.config.get("bf16", is_bfloat16_supported()),
             "logging_steps": self.config.get("logging_steps", 15),
+            "logging_first_step": self._flag(self.config.get("logging_first_step"), default=True),
             "optim": self.config.get("optim", "adamw_8bit"),
             "weight_decay": self.config.get("weight_decay", 0.01),
             "lr_scheduler_type": self.config.get("lr_scheduler_type", "linear"),
             "seed": self.config.get("seed", 3407),
             "output_dir": self.config.get("output_dir", "outputs"),
-            "report_to": "none" if not os.getenv("PRAISON_WANDB") else "wandb",
-            "dataset_text_field": "text",
+            "report_to": self.config.get("report_to", default_report),
+            "dataset_text_field": self.config.get("dataset_text_field", "text"),
             "max_length": self.config["max_seq_length"],
             "dataset_num_proc": self.config.get("dataset_num_proc", 1),
-            "packing": self.config.get("packing", False),
+            "packing": self._flag(self.config.get("packing"), default=False),
         }
+        if self.config.get("run_name") or os.getenv("PRAISON_WANDB_RUN_NAME"):
+            sft_params["run_name"] = self.config.get(
+                "run_name", os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train"))
         # Prefer max_steps if given; otherwise fall back to epochs (default 2800 steps
         # preserves the previous behaviour when neither is configured).
         if self.config.get("num_train_epochs") and not self.config.get("max_steps"):
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
+
+        # --- Checkpointing (mid-run saves so a long/interrupted run isn't lost) ---
+        save_strategy = self.config.get(
+            "save_strategy", "steps" if self.config.get("save_steps") else "no")
+        sft_params["save_strategy"] = save_strategy
+        if save_strategy == "steps":
+            sft_params["save_steps"] = int(self.config.get("save_steps", 100))
+        if self.config.get("save_total_limit") is not None:
+            sft_params["save_total_limit"] = int(self.config["save_total_limit"])
+        sft_params["save_safetensors"] = self._flag(
+            self.config.get("save_safetensors"), default=True)
+
+        # --- Evaluation + best-checkpoint selection (only when an eval set exists) ---
+        if eval_dataset is not None:
+            eval_strategy = self.config.get(
+                "eval_strategy", "steps" if self.config.get("eval_steps") else "epoch")
+            sft_params["eval_strategy"] = eval_strategy
+            if eval_strategy == "steps":
+                sft_params["eval_steps"] = int(self.config.get("eval_steps", 100))
+            sft_params["per_device_eval_batch_size"] = int(self.config.get(
+                "per_device_eval_batch_size",
+                self.config.get("per_device_train_batch_size", 2)))
+            if self._flag(self.config.get("load_best_model_at_end"), default=False):
+                sft_params["load_best_model_at_end"] = True
+                sft_params["metric_for_best_model"] = self.config.get(
+                    "metric_for_best_model", "eval_loss")
+                sft_params["greater_is_better"] = self._flag(
+                    self.config.get("greater_is_better"), default=False)
+                # load_best_model_at_end requires save/eval strategies to match.
+                if sft_params.get("save_strategy", "no") != eval_strategy:
+                    sft_params["save_strategy"] = eval_strategy
+                    if eval_strategy == "steps":
+                        sft_params["save_steps"] = sft_params["eval_steps"]
+
+        # --- Extra optimization / DDP / hub knobs (only when set) ---
+        if self.config.get("max_grad_norm") is not None:
+            sft_params["max_grad_norm"] = float(self.config["max_grad_norm"])
+        if self.config.get("warmup_ratio") is not None:
+            sft_params["warmup_ratio"] = float(self.config["warmup_ratio"])
+            sft_params.pop("warmup_steps", None)  # mutually exclusive with warmup_steps
+        for k, cast in [("adam_beta1", float), ("adam_beta2", float),
+                        ("adam_epsilon", float), ("neftune_noise_alpha", float),
+                        ("dataloader_num_workers", int), ("data_seed", int)]:
+            if self.config.get(k) is not None:
+                sft_params[k] = cast(self.config[k])
+        if self.config.get("group_by_length") is not None:
+            sft_params["group_by_length"] = self._flag(self.config["group_by_length"])
+        if self.config.get("lr_scheduler_kwargs") is not None:
+            sft_params["lr_scheduler_kwargs"] = self.config["lr_scheduler_kwargs"]
+        # DDP unused-parameter detection. Default True so multimodal / MoE / elastic
+        # models (e.g. Gemma 4 E4B, whose vision/audio adapters don't fire in text-only
+        # training) don't crash with "Expected to have finished reduction...". Set
+        # false for a small speedup on pure dense-text models where all LoRA params
+        # are used every step.
+        if getattr(self, "_distributed", False):
+            sft_params["ddp_find_unused_parameters"] = self._flag(
+                self.config.get("ddp_find_unused_parameters"), default=True)
+        # Push checkpoints to the Hub during training (optional).
+        if self._flag(self.config.get("push_to_hub"), default=False):
+            sft_params["push_to_hub"] = True
+            sft_params["hub_model_id"] = self.config.get(
+                "hub_model_id", self.config.get("hf_model_name"))
+            sft_params["hub_strategy"] = self.config.get("hub_strategy", "every_save")
+            if os.getenv("HF_TOKEN"):
+                sft_params["hub_token"] = os.getenv("HF_TOKEN")
         # Response-only loss: compute loss only on the assistant's replies (better
         # instruction tuning). Default "auto" enables it only when the model's chat
         # template actually supports masking, so beginners get the quality win with
@@ -413,36 +578,90 @@ class TrainModel:
         if use_mask:
             sft_params["assistant_only_loss"] = True
         self._masking_on = use_mask
-        if os.getenv("PRAISON_WANDB"):
-            sft_params["save_steps"] = self.config.get("save_steps", 100)
-            sft_params["run_name"] = os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train")
+
+        # --- Early stopping (optional; needs an eval set) ---
+        callbacks = []
+        patience = self.config.get("early_stopping_patience")
+        if patience:
+            if eval_dataset is None:
+                raise ValueError(
+                    "early_stopping_patience requires an eval set — set val_split_ratio.")
+            from transformers import EarlyStoppingCallback
+            callbacks.append(EarlyStoppingCallback(
+                early_stopping_patience=int(patience),
+                early_stopping_threshold=float(self.config.get("early_stopping_threshold", 0.0))))
+            sft_params.setdefault("load_best_model_at_end", True)
+            sft_params.setdefault("metric_for_best_model", "eval_loss")
+            # Early stopping turns on load_best_model_at_end AFTER the eval block above
+            # ran, so the save/eval-strategy alignment may not have happened yet. The
+            # Trainer requires save_strategy == eval_strategy when loading the best
+            # model, so re-align here (default eval "epoch"; force matching saves).
+            if sft_params.get("load_best_model_at_end"):
+                eval_strategy = sft_params.get("eval_strategy", "epoch")
+                sft_params["eval_strategy"] = eval_strategy
+                if sft_params.get("save_strategy", "no") != eval_strategy:
+                    sft_params["save_strategy"] = eval_strategy
+                    if eval_strategy == "steps":
+                        sft_params["save_steps"] = sft_params.get(
+                            "eval_steps", int(self.config.get("eval_steps", 100)))
+
+        # --- Advanced escape hatch: pass any raw SFTConfig field through verbatim ---
+        passthrough = self.config.get("training_arguments") or {}
+        if not isinstance(passthrough, dict):
+            raise ValueError("config 'training_arguments' must be a mapping of SFTConfig fields.")
+        sft_params.update(passthrough)  # user-supplied wins
+
+        # Drop any field the installed TRL/Transformers SFTConfig doesn't accept, so
+        # version differences (e.g. save_safetensors/group_by_length come and go) warn
+        # instead of crashing the run.
+        import dataclasses
+        valid_fields = {f.name for f in dataclasses.fields(SFTConfig)}
+        dropped = sorted(k for k in sft_params if k not in valid_fields)
+        if dropped:
+            print(f"WARNING: SFTConfig (this TRL version) does not accept {dropped}; ignoring.")
+            sft_params = {k: v for k, v in sft_params.items() if k in valid_fields}
 
         training_args = SFTConfig(**sft_params)
         trainer = SFTTrainer(
             model=self.model,
             processing_class=self.hf_tokenizer,
             train_dataset=raw_dataset,
+            eval_dataset=eval_dataset,
             args=training_args,
+            callbacks=callbacks or None,
         )
+        final_dir = self.config.get("final_model_dir", "lora_model")
         # One clear summary of what will run — so people and agents can confirm the
         # config resolved as intended without reading the DEBUG noise.
         steps = sft_params.get("max_steps", f"{sft_params.get('num_train_epochs', 1)} epoch(s)")
+        gpus = int(os.environ.get("WORLD_SIZE", 1))
+        gpu_str = f" × {gpus} GPUs" if gpus > 1 else ""
+        eval_str = f"  (+{len(eval_dataset)} eval)" if eval_dataset is not None else ""
+        ckpt_str = sft_params["save_strategy"]
+        if sft_params["save_strategy"] == "steps":
+            ckpt_str += f" @ {sft_params.get('save_steps')} steps"
         print(
             "\n──────────── PraisonAI Train ────────────\n"
             f"  Model:       {self.config['model_name']}\n"
-            f"  Examples:    {len(raw_dataset)}\n"
+            f"  Examples:    {len(raw_dataset)}{eval_str}\n"
             f"  Loss mask:   {'assistant replies only' if self._masking_on else 'full sequence'}\n"
             f"  Steps:       {steps}  ·  batch {sft_params['per_device_train_batch_size']}"
-            f" × accum {sft_params['gradient_accumulation_steps']}\n"
-            f"  Output:      lora_model/\n"
+            f" × accum {sft_params['gradient_accumulation_steps']}{gpu_str}\n"
+            f"  Checkpoints: {ckpt_str}  ·  Output: {final_dir}/\n"
             "─────────────────────────────────────────\n"
         )
+        # Resume from a checkpoint (True = latest in output_dir, or an explicit path).
+        resume = self.config.get("resume_from_checkpoint", False)
+        if isinstance(resume, str) and resume.strip().lower() in ("true", "false"):
+            resume = self._flag(resume)
         print("DEBUG: Beginning trainer.train() ...")
-        trainer.train()
-        print("DEBUG: Training complete. Saving model and tokenizer locally...")
-        self.model.save_pretrained("lora_model")
-        self.hf_tokenizer.save_pretrained("lora_model")
-        print("DEBUG: Saved model and tokenizer to 'lora_model'.")
+        trainer.train(resume_from_checkpoint=resume if resume else None)
+        # Under DDP only rank 0 writes the final adapter (avoid a write race).
+        if int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0))) == 0:
+            print("DEBUG: Training complete. Saving model and tokenizer locally...")
+            self.model.save_pretrained(final_dir)
+            self.hf_tokenizer.save_pretrained(final_dir)
+            print(f"DEBUG: Saved model and tokenizer to '{final_dir}'.")
 
     def inference(self, instruction, input_text):
         FastLanguageModel.for_inference(self.model)
@@ -452,7 +671,7 @@ class TrainModel:
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt"
-        ).to("cuda")
+        ).to(self.device)
         outputs = self.model.generate(
             input_ids=inputs,
             max_new_tokens=64,
@@ -464,12 +683,23 @@ class TrainModel:
 
     def load_model(self):
         from unsloth import FastLanguageModel
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=self.config["output_dir"],
-            max_seq_length=2048,
-            dtype=None,
-            load_in_4bit=self.config["load_in_4bit"],
+        # Reload with the SAME precision/quantization the model was trained under,
+        # otherwise an 8-bit (or full-precision) model gets reloaded in 4-bit — a
+        # different memory footprint that can OOM or silently change behaviour.
+        dtype_cfg = self.config.get("dtype")
+        load_kwargs = dict(
+            model_name=self.config.get("final_model_dir", "lora_model"),
+            max_seq_length=self.config.get("max_seq_length", 2048),
+            dtype=getattr(torch, dtype_cfg) if isinstance(dtype_cfg, str) else None,
+            load_in_4bit=self._flag(self.config.get("load_in_4bit"), default=True),
         )
+        if self.config.get("load_in_8bit") is not None:
+            load_kwargs["load_in_8bit"] = self._flag(self.config["load_in_8bit"])
+            if load_kwargs["load_in_8bit"]:
+                load_kwargs["load_in_4bit"] = False
+        if self.config.get("full_finetuning") is not None:
+            load_kwargs["full_finetuning"] = self._flag(self.config["full_finetuning"])
+        model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
         return model, tokenizer
 
     def save_model_merged(self):
@@ -734,6 +964,11 @@ class TrainModel:
             # Training was disabled (train: false) so no model was loaded. Skip
             # publishing rather than crashing with an AttributeError on None.
             print("DEBUG: Training skipped (train: false); no model to publish.")
+            return
+        # Under DDP only the main process (rank 0) should merge/push — otherwise every
+        # rank races to write the same HF/Ollama repo.
+        if int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0))) != 0:
+            print("DEBUG: non-main rank; skipping publish.")
             return
         # Publishing defaults OFF and is skipped unless a target is set — so a plain
         # "train locally" config finishes with the LoRA saved to lora_model/ instead
