@@ -49,13 +49,13 @@ jobs:
             // --- Label triage ---
             const labels = [];
 
-            // Kind labels
+            // Kind labels (bug before "how to" — bug reports often include "## How to fix")
             if (content.includes('feature request') || content.includes('[feature')) {
               labels.push('enhancement');
-            } else if (title.includes('[question]') || content.includes('how do i') || content.includes('how to')) {
-              labels.push('question');
             } else if (content.includes('bug') || content.includes('error') || content.includes('crash') || content.includes('traceback')) {
               labels.push('bug');
+            } else if (title.includes('[question]') || content.includes('how do i') || (content.includes('how to') && !content.includes('how to fix'))) {
+              labels.push('question');
             } else if (content.includes('question')) {
               labels.push('question');
             }
@@ -108,7 +108,10 @@ jobs:
             // --- Auto-trigger Claude for owner issues and actionable external bug/enhancement reports ---
             const titleLower = (issue.title || '').toLowerCase();
             const hasActionableTitle = /^(\[[^\]]+\]|bug:|fix[:(]|feat:|ux:|enhancement:)/i.test(titleLower);
-            const autoClaude = isOwner || (hasActionableTitle && (labels.includes('bug') || labels.includes('enhancement')) && !labels.includes('question'));
+            const autoClaude = isOwner || (hasActionableTitle && (
+              labels.includes('bug') ||
+              (labels.includes('enhancement') && !labels.includes('question'))
+            ));
             if (autoClaude) {
               await github.rest.issues.addLabels({
                 issue_number: issue.number,
