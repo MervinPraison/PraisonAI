@@ -49,6 +49,19 @@ def test_intent_language_topic_without_translate_intent():
     assert i["is_translation"] is False
 
 
+def test_intent_unknown_metadata_falls_back_to_text():
+    # An external row with an UNRECOGNISED task_type must still honour a clear
+    # "translate into English" instruction via the text fallback — an unknown
+    # label is not evidence the row is native.
+    i = translation_intent("Translate this sentence into English.", task_type="translation")
+    assert i["is_translation"] is True and i["expected_script"] == "english"
+
+
+def test_intent_unknown_metadata_non_translation_text_stays_native():
+    i = translation_intent("Write a short story.", task_type="some_external_label")
+    assert i["is_translation"] is False and i["expected_script"] is None
+
+
 # ---- feature #1: task-aware purity via registered RowChecks ----------------
 
 def test_ta_en_english_output_recovered_via_metadata():
@@ -128,6 +141,26 @@ def test_translation_share_reconciles_with_exempted():
              "task_type": TA_EN_TASK} for n in range(3)]
     t = score(rows, {"near_dup": False})["metrics"]["translation"]
     assert t["by_direction"]["ta_en"] == t["exempted"] == 3
+
+
+def test_exempted_excludes_passing_purity_rows():
+    # A failed ta->en translation whose output is still pure Tamil passes strict
+    # purity on its own, so it was never *exempted* — it must NOT inflate the
+    # exempted count (it is surfaced via wrong_target_script instead).
+    rows = [{"instruction": "ஆங்கிலத்துக்கு மொழிபெயர்க்கவும்.", "input": "",
+             "output": TAMIL_OUT, "task_type": TA_EN_TASK}]
+    res = score(rows, {"near_dup": False})
+    assert res["metrics"]["translation"]["exempted"] == 0
+    assert res["flags"].get("wrong_target_script") == 1
+
+
+def test_exempted_zero_when_task_aware_disabled():
+    # With task-awareness off the row is dropped, not exempted; the metric must
+    # agree with the check behaviour it claims to measure.
+    rows = [{"instruction": "மொழிபெயர்க்க", "input": "", "output": ENGLISH_OUT,
+             "task_type": TA_EN_TASK}]
+    res = score(rows, {"near_dup": False, "task_aware_purity": False})
+    assert res["metrics"]["translation"]["exempted"] == 0
 
 
 def test_empty_corpus_guard():

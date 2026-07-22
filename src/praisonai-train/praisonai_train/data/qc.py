@@ -14,6 +14,7 @@ from collections import Counter
 from typing import Any, Iterable
 
 from praisonai_train.data import checks as _checks_mod  # noqa: F401  (registers checks)
+from praisonai_train.data.checks import _script_ratio
 from praisonai_train.data._util import fields, jaccard, ngrams, norm
 from praisonai_train.data.intent import translation_intent
 from praisonai_train.data.registry import checks
@@ -84,7 +85,21 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
                for r in kept]
     by_dir = Counter(i["direction"] or "unknown" for i in intents if i["is_translation"])
     trans_n = sum(1 for i in intents if i["is_translation"])
-    exempted = sum(1 for i in intents if i["expected_script"] == "english")
+    # ``exempted`` = rows the English-target exemption *actually* rescued from the
+    # LowScriptPurity drop, so it reconciles with the check's behaviour: it counts
+    # an English-target row ONLY when task-awareness is on AND the output would
+    # otherwise have failed the purity floor (a failed translation whose Tamil
+    # output passes strict purity is caught by ``wrong_target_script``, not here).
+    task_aware = cfg.get("task_aware_purity", True)
+    drop_floor = cfg.get("script_drop", 0.50)
+    exempted = 0
+    if task_aware:
+        for r, i in zip(kept, intents):
+            if i["expected_script"] != "english":
+                continue
+            ratio = _script_ratio(fields(r)[2], cfg)
+            if ratio is not None and ratio < drop_floor:
+                exempted += 1
     translation = {
         "share": round(trans_n / max(len(kept), 1), 3),
         "by_direction": {"en_ta": by_dir["en_ta"], "ta_en": by_dir["ta_en"],

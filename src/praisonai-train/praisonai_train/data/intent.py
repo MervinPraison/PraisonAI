@@ -52,12 +52,14 @@ def translation_intent(instruction: str, task_type: str | None = None) -> dict:
     default rather than exempt the row).
     """
     # 1) Ground-truth metadata path (authoritative for generator-made rows).
-    if task_type:
-        if task_type == TA_EN_TASK:
-            return {"is_translation": True, "direction": "ta_en", "expected_script": "english"}
-        if task_type == EN_TA_TASK:
-            return {"is_translation": True, "direction": "en_ta", "expected_script": "tamil"}
-        return {"is_translation": False, "direction": None, "expected_script": None}
+    # Only the two labels the recipe stamps are authoritative; an *unrecognised*
+    # non-empty label (e.g. an external row tagged ``"translation"``) is NOT
+    # evidence the row is native, so we fall through to text detection rather than
+    # declaring it non-translation and losing a legitimate English output.
+    if task_type == TA_EN_TASK:
+        return {"is_translation": True, "direction": "ta_en", "expected_script": "english"}
+    if task_type == EN_TA_TASK:
+        return {"is_translation": True, "direction": "en_ta", "expected_script": "tamil"}
 
     # 2) Text-detection fallback (external rows without metadata).
     text = instruction or ""
