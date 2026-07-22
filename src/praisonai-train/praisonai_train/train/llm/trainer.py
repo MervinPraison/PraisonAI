@@ -57,7 +57,8 @@ def formatting_prompts_func(examples, tokenizer):
     """
     # Per-batch prints fire on every mapped batch and drown the log; gate them behind
     # PRAISON_DEBUG so normal runs stay readable (the run summary still prints).
-    _dbg = os.environ.get("PRAISON_DEBUG")
+    # Parse as a boolean so PRAISON_DEBUG=0/false/no disable it (not just "unset").
+    _dbg = os.environ.get("PRAISON_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
     if _dbg:
         print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
     texts = []
@@ -618,6 +619,28 @@ class TrainModel:
             raise ValueError("config 'training_arguments' must be a mapping of SFTConfig fields.")
         sft_params.update(passthrough)  # user-supplied wins
 
+        # Final safety net: the passthrough escape hatch can enable/override
+        # load_best_model_at_end (or the step cadence) after the blocks above ran, so
+        # re-check the Trainer's invariant here — save_strategy must equal eval_strategy
+        # and (for steps) save_steps must be a multiple of eval_steps — no matter which
+        # path turned load_best_model_at_end on.
+        if sft_params.get("load_best_model_at_end"):
+            eval_strategy = sft_params.get("eval_strategy", "epoch")
+            sft_params["eval_strategy"] = eval_strategy
+            if sft_params.get("save_strategy", "no") != eval_strategy:
+                sft_params["save_strategy"] = eval_strategy
+            if eval_strategy == "steps":
+                es = int(sft_params.get("eval_steps", 100))
+                ss = int(sft_params.get("save_steps", es))
+                if ss % es != 0:
+                    # Align eval to the checkpoint cadence (preserves the user's
+                    # checkpoint frequency, which matters most for crash recovery).
+                    print(f"WARNING: load_best_model_at_end needs save_steps a multiple "
+                          f"of eval_steps; setting eval_steps={ss} to match save_steps.")
+                    es = ss
+                sft_params["save_steps"] = ss
+                sft_params["eval_steps"] = es
+
         # Drop any field the installed TRL/Transformers SFTConfig doesn't accept, so
         # version differences (e.g. save_safetensors/group_by_length come and go) warn
         # instead of crashing the run.
@@ -665,14 +688,27 @@ class TrainModel:
         # This makes recovery trivial: after any crash (OOM, GPU reclaim), just relaunch
         # the SAME command and training continues from the last saved step.
         resume = self.config.get("resume_from_checkpoint", False)
-        if isinstance(resume, str) and resume.strip().lower() in ("true", "false"):
+        # Normalize every boolean spelling _flag accepts (true/false/1/0/yes/no/on/off)
+        # BEFORE treating a string as an explicit checkpoint path — so "1"/"yes" mean
+        # "auto-resume", not a literal directory named "1".
+        if isinstance(resume, str) and resume.strip().lower() in (
+            "true", "false", "1", "0", "yes", "no", "on", "off"
+        ):
             resume = self._flag(resume)
         if resume is True:
             import glob
-            ckpts = glob.glob(os.path.join(sft_params["output_dir"], "checkpoint-*"))
+            # Only real checkpoint dirs with a numeric suffix qualify — stray files or
+            # dirs like "checkpoint-backup"/"checkpoint-incomplete" must not make the
+            # auto-resume path fire (or crash the int() parse below).
+            ckpts = [
+                p for p in glob.glob(os.path.join(sft_params["output_dir"], "checkpoint-*"))
+                if os.path.isdir(p) and p.rsplit("-", 1)[-1].isdigit()
+            ]
             if ckpts:
-                latest = max(ckpts, key=lambda p: int(p.rsplit("-", 1)[-1])
-                             if p.rsplit("-", 1)[-1].isdigit() else -1)
+                latest = max(ckpts, key=lambda p: int(p.rsplit("-", 1)[-1]))
+                # Pass the validated path directly rather than leaving resume=True and
+                # letting the trainer redo (and possibly mis-parse) its own discovery.
+                resume = latest
                 print(f"DEBUG: auto-resume from latest checkpoint: {latest}")
             else:
                 print("DEBUG: resume_from_checkpoint=true but no checkpoint yet; starting fresh.")
@@ -739,7 +775,7 @@ class TrainModel:
         self.model.push_to_hub_gguf(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            quantization_method=self.config["quantization_method"],
+            quantization_method=self.config.get("quantization_method", "q4_k_m"),
             token=os.getenv("HF_TOKEN")
         )
 
