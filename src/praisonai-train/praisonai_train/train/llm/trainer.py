@@ -460,6 +460,10 @@ class TrainModel:
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
+        # When both epochs and max_steps are set, max_steps silently wins — say so.
+        if self.config.get("num_train_epochs") and self.config.get("max_steps"):
+            print(f"DEBUG: both num_train_epochs and max_steps set; using "
+                  f"max_steps={sft_params['max_steps']} (num_train_epochs ignored).")
 
         # --- Checkpointing (mid-run saves so a long/interrupted run isn't lost) ---
         save_strategy = self.config.get(
