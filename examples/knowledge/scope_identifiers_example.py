@@ -65,7 +65,6 @@ def main():
             name="Policy_Expert",
             instructions="You are a policy expert.",
             knowledge=[temp_dir],
-            agent_id="policy_agent_v1",  # Knowledge scoped to this agent
         )
         
         response = shared_agent.chat("What are the expense report rules?")
@@ -81,7 +80,6 @@ def main():
             instructions="You are a personal HR assistant.",
             knowledge=[temp_dir],
             memory={"user_id": "user_bob"},
-            agent_id="hr_bot_v2",
         )
         
         response = combined_agent.chat("What training is required?")

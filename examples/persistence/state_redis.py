@@ -13,7 +13,8 @@ Expected Output:
     Agent responds with state persisted to Redis
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 print("=== Redis State Store (Agent-First) ===")
 

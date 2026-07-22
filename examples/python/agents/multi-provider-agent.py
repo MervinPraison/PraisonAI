@@ -135,7 +135,7 @@ def example_auto_agents_multi_provider():
     from praisonaiagents.agents import AutoAgents
     
     # Create AutoAgents that will automatically assign appropriate models
-    auto_agents = AutoAgentTeam(
+    auto_agents = AutoAgents(
         instructions="Create a market research report on electric vehicles. Include data analysis, competitor analysis, and future projections.",
         max_agents=3,
         llm="gpt-4o-mini",  # Default model for agent generation
