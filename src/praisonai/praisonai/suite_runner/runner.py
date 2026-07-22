@@ -75,6 +75,26 @@ class ScriptRunner:
         env.setdefault("PYTHONIOENCODING", "utf-8")
 
         return env
+
+    def _kill_process_tree(self, pid: int) -> None:
+        """Kill a process and its children (needed for uvicorn --reload on Windows)."""
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+            )
+            return
+
+        import signal
+
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
     
     def check_required_env(self, require_env: List[str]) -> Optional[str]:
         """
@@ -159,7 +179,14 @@ class ScriptRunner:
         status = "passed"
         error_type = None
         error_message = None
-        
+
+        # On POSIX, put the child in its own process group so that killing it on
+        # timeout (os.killpg in _kill_process_tree) only reaps the child and its
+        # descendants — never the suite runner itself or sibling scripts.
+        popen_kwargs = {}
+        if os.name != "nt":
+            popen_kwargs["start_new_session"] = True
+
         try:
             if self.stream_output and on_output:
                 # Stream output in real-time
@@ -173,6 +200,7 @@ class ScriptRunner:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    **popen_kwargs,
                 )
                 
                 import selectors
@@ -185,9 +213,9 @@ class ScriptRunner:
                 while process.poll() is None:
                     remaining = deadline - time.time()
                     if remaining <= 0:
-                        process.terminate()
+                        self._kill_process_tree(process.pid)
                         try:
-                            process.wait(timeout=2)
+                            process.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             process.kill()
                         status = "timeout"
@@ -219,20 +247,37 @@ class ScriptRunner:
                 exit_code = process.returncode or 0
                 
             else:
-                # Capture output without streaming
-                result = subprocess.run(
+                # Capture output without streaming (Popen + communicate so we
+                # can kill child processes on timeout — uvicorn --reload hangs on Windows).
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=timeout,
                     env=env,
                     cwd=cwd,
+                    **popen_kwargs,
                 )
-                exit_code = result.returncode
-                stdout_data = [result.stdout] if result.stdout else []
-                stderr_data = [result.stderr] if result.stderr else []
+                try:
+                    stdout, stderr = process.communicate(timeout=timeout)
+                    exit_code = process.returncode or 0
+                    stdout_data = [stdout] if stdout else []
+                    stderr_data = [stderr] if stderr else []
+                except subprocess.TimeoutExpired as exc:
+                    self._kill_process_tree(process.pid)
+                    try:
+                        stdout, stderr = process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        stdout, stderr = process.communicate()
+                    stdout_data = [stdout or exc.stdout or ""]
+                    stderr_data = [stderr or exc.stderr or ""]
+                    status = "timeout"
+                    error_type = "TimeoutError"
+                    error_message = f"Exceeded {timeout}s timeout"
+                    exit_code = -1
                 
         except subprocess.TimeoutExpired:
             status = "timeout"
