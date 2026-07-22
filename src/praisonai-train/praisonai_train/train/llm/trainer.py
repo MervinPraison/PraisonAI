@@ -131,6 +131,13 @@ def tokenize_function(examples, hf_tokenizer, max_length):
 #####################################
 class TrainModel:
     def __init__(self, config_path="config.yaml"):
+        # Under DDP the flag that routes Unsloth through its non-reentrant
+        # (DDP-safe) checkpointing path must be set BEFORE `unsloth` is imported —
+        # the legacy path is selected at import/load time, so setting it later
+        # (after from_pretrained) leaves a torchrun launch on the reentrant path
+        # and it still crashes in backward with "parameter marked as ready twice".
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            os.environ.setdefault("UNSLOTH_USE_NEW_MODEL", "1")
         _lazy_import_training_deps()
         self.load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -315,12 +322,15 @@ class TrainModel:
             )
         self.hf_tokenizer = self.chat_tokenizer
         print("DEBUG: Chat tokenizer ready; HF tokenizer saved.")
-        # Under DDP, route PEFT + gradient checkpointing through Unsloth's DDP-aware
-        # path, which forces NON-reentrant checkpointing. The legacy path hard-codes
-        # reentrant checkpointing, which double-fires autograd hooks and crashes DDP
-        # with "parameter marked as ready twice".
+        # NOTE: UNSLOTH_USE_NEW_MODEL is set in __init__ BEFORE unsloth is imported
+        # (the DDP-safe non-reentrant checkpointing path is chosen at import/load
+        # time). We re-assert it here as a harmless safety net.
         if self._distributed:
-            os.environ["UNSLOTH_USE_NEW_MODEL"] = "1"
+            os.environ.setdefault("UNSLOTH_USE_NEW_MODEL", "1")
+        # --- Full fine-tuning: train the base weights directly, skip LoRA ---
+        if self._flag(self.config.get("full_finetuning"), default=False):
+            print("DEBUG: full_finetuning enabled — training base model, skipping LoRA adapters.")
+            return
         peft_kwargs = dict(
             r=self.config.get("lora_r", 16),
             target_modules=self.config.get("lora_target_modules", [
@@ -578,6 +588,18 @@ class TrainModel:
                 early_stopping_threshold=float(self.config.get("early_stopping_threshold", 0.0))))
             sft_params.setdefault("load_best_model_at_end", True)
             sft_params.setdefault("metric_for_best_model", "eval_loss")
+            # Early stopping turns on load_best_model_at_end AFTER the eval block above
+            # ran, so the save/eval-strategy alignment may not have happened yet. The
+            # Trainer requires save_strategy == eval_strategy when loading the best
+            # model, so re-align here (default eval "epoch"; force matching saves).
+            if sft_params.get("load_best_model_at_end"):
+                eval_strategy = sft_params.get("eval_strategy", "epoch")
+                sft_params["eval_strategy"] = eval_strategy
+                if sft_params.get("save_strategy", "no") != eval_strategy:
+                    sft_params["save_strategy"] = eval_strategy
+                    if eval_strategy == "steps":
+                        sft_params["save_steps"] = sft_params.get(
+                            "eval_steps", int(self.config.get("eval_steps", 100)))
 
         # --- Advanced escape hatch: pass any raw SFTConfig field through verbatim ---
         passthrough = self.config.get("training_arguments") or {}
@@ -657,12 +679,23 @@ class TrainModel:
 
     def load_model(self):
         from unsloth import FastLanguageModel
-        model, tokenizer = FastLanguageModel.from_pretrained(
+        # Reload with the SAME precision/quantization the model was trained under,
+        # otherwise an 8-bit (or full-precision) model gets reloaded in 4-bit — a
+        # different memory footprint that can OOM or silently change behaviour.
+        dtype_cfg = self.config.get("dtype")
+        load_kwargs = dict(
             model_name=self.config.get("final_model_dir", "lora_model"),
             max_seq_length=self.config.get("max_seq_length", 2048),
-            dtype=None,
+            dtype=getattr(torch, dtype_cfg) if isinstance(dtype_cfg, str) else None,
             load_in_4bit=self._flag(self.config.get("load_in_4bit"), default=True),
         )
+        if self.config.get("load_in_8bit") is not None:
+            load_kwargs["load_in_8bit"] = self._flag(self.config["load_in_8bit"])
+            if load_kwargs["load_in_8bit"]:
+                load_kwargs["load_in_4bit"] = False
+        if self.config.get("full_finetuning") is not None:
+            load_kwargs["full_finetuning"] = self._flag(self.config["full_finetuning"])
+        model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
         return model, tokenizer
 
     def save_model_merged(self):
