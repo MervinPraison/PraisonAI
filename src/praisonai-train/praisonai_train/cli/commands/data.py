@@ -45,7 +45,8 @@ def generate_data(
     from praisonai_train.data import generate_dataset
 
     cfg = _load_cfg(config, output=output, recipe=recipe, deployment=deployment,
-                    concurrency=concurrency, start_offset=start_offset)
+                    concurrency=concurrency, start_offset=start_offset,
+                    snapshot_every=snapshot_every)
     if num is not None:
         cfg["num_examples"] = num
     out_path = cfg.get("output")
@@ -56,10 +57,23 @@ def generate_data(
     snap_every = cfg.get("snapshot_every")
     snap_dir = cfg.get("snapshot_dir", "snapshots")
 
+    # Consume the first row *before* truncating the destination, so a run that
+    # fails on credentials/recipe/first-request never destroys an existing file
+    # (and a self-referential dedup_from is read before it would be emptied).
+    gen = generate_dataset(cfg)
+    try:
+        first = next(gen)
+    except StopIteration:
+        first = None
+
     kept = 0
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", buffering=1) as fh:
-        for row in generate_dataset(cfg):
+        for row in ([first] if first is not None else []):
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fh.flush()
+            kept += 1
+        for row in gen:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             fh.flush()
             kept += 1
@@ -69,6 +83,10 @@ def generate_data(
                 snap.write_text(Path(out_path).read_text())
                 typer.echo(f"  snapshot: {snap} ({kept} rows)")
     typer.echo(f"generated {kept} unique examples -> {out_path}")
+    if kept == 0:
+        typer.echo("error: no rows generated — check endpoint/api_key/deployment "
+                   "and provider JSON-mode support", err=True)
+        raise typer.Exit(1)
 
 
 @app.command("validate")
@@ -92,7 +110,18 @@ def validate_data(
         raise typer.Exit(1)
     if no_near_dup:
         cfg["near_dup"] = False
-    rows = [json.loads(l) for l in open(path) if l.strip()]
+    rows, bad = [], 0
+    with open(path) as fh:
+        for lineno, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                bad += 1
+                typer.echo(f"  ⚠ skipping malformed JSON on line {lineno}", err=True)
+    if bad:
+        typer.echo(f"  ⚠ skipped {bad} malformed line(s)", err=True)
     result = score(rows, cfg)
 
     typer.echo(f"\n─── QC: {path} ───")

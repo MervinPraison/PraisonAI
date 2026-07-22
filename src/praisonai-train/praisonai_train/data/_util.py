@@ -28,10 +28,20 @@ def script_ratio(s: str, lo: int, hi: int) -> float:
 
 
 def fields(row: dict) -> tuple[str, str, str]:
-    """(instruction, input, output) from {instruction,input,output} or {messages}."""
+    """(instruction, input, output) from {instruction,input,output} or {messages}.
+
+    For a chat transcript, take the last assistant turn and the user turn that
+    *precedes* it, so we never pair a trailing unanswered user turn with an
+    earlier assistant reply that answered a different question.
+    """
     if "messages" in row:
         msgs = row["messages"]
-        user = next((m["content"] for m in reversed(msgs) if m.get("role") == "user"), "")
-        asst = next((m["content"] for m in reversed(msgs) if m.get("role") == "assistant"), "")
+        asst_idx = next((i for i in range(len(msgs) - 1, -1, -1)
+                         if msgs[i].get("role") == "assistant"), None)
+        if asst_idx is None:
+            return "", "", ""
+        asst = msgs[asst_idx].get("content", "")
+        user = next((msgs[i].get("content", "") for i in range(asst_idx - 1, -1, -1)
+                     if msgs[i].get("role") == "user"), "")
         return user, "", asst
     return row.get("instruction", ""), row.get("input", ""), row.get("output", "")

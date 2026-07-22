@@ -33,7 +33,7 @@ def score(rows: Iterable[dict], cfg: dict | None = None) -> dict[str, Any]:
 
     for r in rows:
         ins, inp, out = fields(r)
-        key = hashlib.sha1(norm(ins + "\x00" + inp).encode()).hexdigest()
+        key = hashlib.sha1(norm(ins + "\x00" + inp + "\x00" + out).encode()).hexdigest()
         if key in seen:
             drops["exact_dup"] += 1
             continue

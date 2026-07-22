@@ -41,3 +41,25 @@ def test_messages_schema_supported():
     rows = [{"messages": [{"role": "user", "content": "hi"},
                           {"role": "assistant", "content": "ஒரு முழுமையான தமிழ் பதில் இங்கே உள்ளது."}]}]
     assert score(rows)["kept_n"] == 1
+
+
+def test_messages_pairs_user_before_final_assistant():
+    from praisonai_train.data._util import fields
+    row = {"messages": [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "answer to first"},
+        {"role": "user", "content": "unanswered follow-up"},
+    ]}
+    ins, _, out = fields(row)
+    assert ins == "first question"
+    assert out == "answer to first"
+
+
+def test_exact_dedup_keeps_distinct_answers():
+    rows = [
+        {"instruction": "ஒரு கேள்வி", "input": "", "output": "முதல் முழுமையான தமிழ் பதில் ஒன்று."},
+        {"instruction": "ஒரு கேள்வி", "input": "", "output": "இரண்டாவது வேறுபட்ட தமிழ் பதில் ஒன்று."},
+    ]
+    r = score(rows, {"near_dup": False})
+    assert r["drops"].get("exact_dup", 0) == 0
+    assert r["kept_n"] == 2

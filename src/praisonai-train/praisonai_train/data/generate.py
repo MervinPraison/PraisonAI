@@ -4,7 +4,9 @@ Calls any OpenAI-compatible chat endpoint (Azure OpenAI or OpenAI) to synthesize
 {instruction,input,output} rows from a registered (or inline) *recipe*. Built for
 scale + safety: JSON mode for high parse yield, prompt-diversity axes so large
 runs don't collapse, ``start_offset`` for disjoint parallel slices, dedup-on-write,
-and a stop-file circuit-breaker (a billing guard can halt it instantly). Stdlib HTTP.
+and a stop-file circuit-breaker (a billing guard can halt it): queued work is
+cancelled at once, and already-running requests drain (bounded by the per-request
+timeout) rather than starting new ones. Stdlib HTTP.
 """
 from __future__ import annotations
 
@@ -39,9 +41,10 @@ def _call(cfg: dict, spec: dict) -> dict | None:
         body["model"] = cfg["deployment"]
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
     content = None
+    timeout = cfg.get("request_timeout", 120)
     for attempt in range(2):
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 content = json.load(resp)["choices"][0]["message"]["content"].strip()
             break
         except Exception:
