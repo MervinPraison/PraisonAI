@@ -519,11 +519,21 @@ class TrainModel:
                     "metric_for_best_model", "eval_loss")
                 sft_params["greater_is_better"] = self._flag(
                     self.config.get("greater_is_better"), default=False)
-                # load_best_model_at_end requires save/eval strategies to match.
+                # load_best_model_at_end requires save_strategy == eval_strategy AND
+                # (for steps) save_steps to be a multiple of eval_steps. Reconcile
+                # both so a valid-looking config can't crash the trainer.
                 if sft_params.get("save_strategy", "no") != eval_strategy:
                     sft_params["save_strategy"] = eval_strategy
                     if eval_strategy == "steps":
                         sft_params["save_steps"] = sft_params["eval_steps"]
+                if eval_strategy == "steps" and sft_params.get("save_steps"):
+                    ss, es = int(sft_params["save_steps"]), int(sft_params["eval_steps"])
+                    if ss % es != 0:
+                        # Align eval to the checkpoint cadence (preserves the user's
+                        # checkpoint frequency, which matters most for crash recovery).
+                        print(f"WARNING: load_best_model_at_end needs save_steps a multiple "
+                              f"of eval_steps; setting eval_steps={ss} to match save_steps.")
+                        sft_params["eval_steps"] = ss
 
         # --- Extra optimization / DDP / hub knobs (only when set) ---
         if self.config.get("max_grad_norm") is not None:
