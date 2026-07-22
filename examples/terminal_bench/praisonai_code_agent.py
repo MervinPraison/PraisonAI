@@ -96,12 +96,12 @@ class PraisonAICodeAgent(BaseInstalledAgent):
             "exit $status"
         )
 
-        # `extra_env` is the --ae channel; merge it into the exec env (never host
-        # os.environ). `env` on BaseInstalledAgent already includes extra_env.
+        # `--ae` / job YAML env vars arrive via BaseAgent.extra_env and are wired
+        # into the container exec context by Harbor Trial, so no per-exec `env=`
+        # is needed here.
         await self.exec_as_agent(
             environment,
             command=command,
-            env=self.env,
         )
 
     def populate_context_post_run(self, context: AgentContext) -> None:
