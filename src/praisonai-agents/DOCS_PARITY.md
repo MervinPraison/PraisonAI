@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (Python)
 
-> **Categories:** 66 | **Documented:** 66 | **Parity:** 100.0%
+> **Categories:** 65 | **Documented:** 65 | **Parity:** 100.0%
 
 This report compares **Python SDK feature categories** against **Python documentation** (docs/concepts, docs/features, etc.).
 
@@ -8,8 +8,8 @@ This report compares **Python SDK feature categories** against **Python document
 
 | Metric | Count |
 |--------|-------|
-| Feature Categories | 66 |
-| **Documented Categories** | **66** |
+| Feature Categories | 65 |
+| **Documented Categories** | **65** |
 | **Undocumented Categories** | **0** |
 | **Parity** | **100.0%** |
 
@@ -25,16 +25,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 2868 |
 | ✅ Autonomy | 3 | 7 | 2707 |
-| ✅ Bots | 7 | 28 | 11076 |
+| ✅ Bots | 7 | 28 | 11165 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 118 | 32713 |
+| ✅ CLI | 5 | 119 | 33595 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3907 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 7 | 2772 |
 | ✅ Context Management | 16 | 34 | 13204 |
-| ✅ Database | 1 | 40 | 6184 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -44,10 +43,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 52 | 18697 |
+| ✅ Gateway | 7 | 52 | 18862 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 3981 |
+| ✅ Hooks | 2 | 9 | 3985 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4767 |
@@ -70,24 +69,25 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2700 |
-| ✅ Security | 1 | 3 | 2903 |
+| ✅ Security | 1 | 3 | 2908 |
 | ✅ Sessions | 4 | 13 | 5286 |
 | ✅ Skills | 6 | 13 | 4946 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 132 | 37466 |
+| ✅ Tools | 12 | 132 | 37592 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 8 | 2055 |
-| ✅ Workflows | 5 | 16 | 6527 |
+| ✅ Workflows | 5 | 16 | 6546 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
+- ℹ️ Database (40 docs, 6184 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
