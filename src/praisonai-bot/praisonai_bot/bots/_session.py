@@ -121,6 +121,7 @@ class BotSessionManager:
         timestamp_template: str = "[%a %Y-%m-%d %H:%M %Z] ",
         admission_gate: Optional[Any] = None,
         turn_lock_map: Optional["LockMap"] = None,
+        surface_completion_reason: bool = False,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         # Issue #3232: the per-turn lock map is keyed on the *resolved* storage
@@ -162,6 +163,12 @@ class BotSessionManager:
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
+        # Issue #3296: opt-in surfacing of *why* a turn ended. When True, a turn
+        # that stops early (max_steps / cancelled / error) appends a concise,
+        # user-safe note to the reply so a truncated or empty answer is no longer
+        # silent. Off by default so clean completions and existing deployments
+        # are byte-for-byte unchanged.
+        self._surface_completion_reason = surface_completion_reason
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
@@ -1214,9 +1221,27 @@ class BotSessionManager:
                     # adapters can render interactive UI; the text is returned as
                     # before so the str contract and text fallback are preserved.
                     try:
-                        from praisonaiagents.bots.agent_reply import extract_presentation
+                        from praisonaiagents.bots.agent_reply import (
+                            extract_presentation,
+                            extract_completion,
+                            append_completion_note,
+                        )
                         storage_key = self._storage_key(user_id)
                         text, presentation = extract_presentation(response)
+                        # Issue #3296: optionally surface *why* the turn ended.
+                        # The completion is read from the agent-emitted result
+                        # first (AgentReply/dict), falling back to the agent's
+                        # own ``last_stop_reason`` so a plain-text turn that
+                        # stopped early (max_steps / cancelled / error) still
+                        # explains itself. Off by default → no change to clean
+                        # completions or existing deployments.
+                        if self._surface_completion_reason:
+                            completion = extract_completion(response)
+                            if completion is None:
+                                completion = extract_completion(agent)
+                            text = append_completion_note(
+                                text, completion, enabled=True
+                            )
                         # Always normalise to plain text so chat() never leaks a
                         # non-str (e.g. AgentReply) past its str contract.
                         response = text

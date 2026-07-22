@@ -64,7 +64,10 @@ from .interactive import (
 )
 from .agent_reply import (
     AgentReply,
+    TurnCompletion,
     extract_presentation,
+    extract_completion,
+    append_completion_note,
 )
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
 from .silence import (
@@ -130,7 +133,10 @@ __all__ = [
     "make_reply_handler",
     "REPLY_NAMESPACE",
     "AgentReply",
+    "TurnCompletion",
     "extract_presentation",
+    "extract_completion",
+    "append_completion_note",
     "SILENT_REPLY_TOKEN",
     "is_intentional_silence_response",
     "BotLoopPolicy",
