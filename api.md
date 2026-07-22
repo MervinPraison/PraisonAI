@@ -232,13 +232,6 @@ Methods:
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">repeat</a>(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None, max_iterations: int = 10) -> Repeat</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">route</a>(routes: Dict[str, List], default: Optional[List] = None) -> Route</code>
 
-# DB
-
-Types:
-```python
-from praisonaiagents import db
-```
-
 # Memory
 
 Types:
