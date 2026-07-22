@@ -52,6 +52,11 @@ from ._commands import (
 from . import _automations
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
+from ._album import (
+    AlbumCoalescer,
+    resolve_album_window_ms,
+    resolve_album_max_items,
+)
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
@@ -159,6 +164,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
+        )
+        # Coalesce inbound media albums (Issue #3298): a burst of updates
+        # sharing one ``media_group_id`` is merged into a single multimodal
+        # turn. Disabled by default (window 0) so behaviour is unchanged
+        # unless the operator opts in via config metadata.
+        self._album: AlbumCoalescer = AlbumCoalescer(
+            window_ms=resolve_album_window_ms(self.config),
+            max_items=resolve_album_max_items(self.config),
         )
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
@@ -648,6 +661,26 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 # Download/validate any inbound photo or document so the agent's
                 # vision capability can act on it (Issue #2350).
                 attachments = await self._cache_inbound_telegram_media(update)
+
+                # Coalesce media albums (Issue #3298): several photos/files sent
+                # together arrive as N updates sharing one ``media_group_id``.
+                # Buffer their parts and merge into one multimodal turn so the
+                # agent reasons over the whole set. Sibling updates return None
+                # here (their media folds into the owning update's turn).
+                media_group_id = getattr(update.message, "media_group_id", None)
+                if media_group_id:
+                    merged = await self._album.collect(
+                        str(media_group_id), attachments, message.content
+                    )
+                    if merged is None:
+                        # This update's media was buffered into a sibling's
+                        # turn; nothing more to do (and nothing to clean up —
+                        # the owning turn owns those temp files).
+                        return
+                    attachments = merged.attachments
+                    if merged.caption:
+                        message.content = merged.caption
+
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
                     
@@ -1331,6 +1364,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         # Cancel pending debounce timers
         self._debouncer.cancel_all()
+
+        # Flush any pending media-album buffers (Issue #3298)
+        self._album.cancel_all()
         
         # Signal the stop event so the start() loop exits cleanly
         if hasattr(self, '_stop_event') and self._stop_event:
