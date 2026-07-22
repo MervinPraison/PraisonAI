@@ -34,6 +34,12 @@ class _AxisRecipe:
                     audience=auds[(i // max(len(styles), 1)) % len(auds)],
                     variant=i // len(grid),
                 ),
+                # Ground-truth labels carried through to the emitted row so QC and
+                # the translation-share metric key off metadata, not brittle text
+                # (see ``intent.translation_intent`` / ``qc.score``). The generator
+                # stamps these onto each row as provenance.
+                "task_type": task,
+                "topic": topic,
             })
         return specs
 
