@@ -209,7 +209,6 @@ if __name__ == "__main__":
             result = await self.exec_as_agent(
                 environment,
                 command=command,
-                env=self.env,
             )
             self._last_stdout = getattr(result, "stdout", "") or ""
         except Exception as e:
