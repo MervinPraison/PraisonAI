@@ -106,6 +106,30 @@ def formatting_prompts_func(examples, tokenizer):
     return {"text": texts}
 
 #####################################
+# Step 2: Tokenizing the Prompts
+#####################################
+def tokenize_function(examples, hf_tokenizer, max_length):
+    """
+    Tokenizes a batch of text prompts with padding and truncation enabled.
+
+    Kept as a public helper (re-exported by ``praisonai.train``) even though the
+    training path no longer calls it (modern TRL tokenizes internally).
+    """
+    flat_texts = []
+    for t in examples["text"]:
+        if isinstance(t, list):
+            t = t[0] if len(t) == 1 else " ".join(t)
+        flat_texts.append(t)
+    tokenized = hf_tokenizer(
+        flat_texts,
+        padding="max_length",
+        truncation=True,
+        max_length=max_length,
+        return_tensors="pt",
+    )
+    return {key: value.tolist() for key, value in tokenized.items()}
+
+#####################################
 # Main Training Class
 #####################################
 class TrainModel:
