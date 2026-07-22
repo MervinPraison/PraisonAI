@@ -650,10 +650,26 @@ class TrainModel:
             f"  Checkpoints: {ckpt_str}  ·  Output: {final_dir}/\n"
             "─────────────────────────────────────────\n"
         )
-        # Resume from a checkpoint (True = latest in output_dir, or an explicit path).
+        # Resume from a checkpoint. Accepts:
+        #   true  -> auto-resume from the latest checkpoint in output_dir (crash-safe:
+        #            if none exists yet, start fresh instead of erroring)
+        #   a path -> resume from that specific checkpoint
+        #   false -> fresh run
+        # This makes recovery trivial: after any crash (OOM, GPU reclaim), just relaunch
+        # the SAME command and training continues from the last saved step.
         resume = self.config.get("resume_from_checkpoint", False)
         if isinstance(resume, str) and resume.strip().lower() in ("true", "false"):
             resume = self._flag(resume)
+        if resume is True:
+            import glob
+            ckpts = glob.glob(os.path.join(sft_params["output_dir"], "checkpoint-*"))
+            if ckpts:
+                latest = max(ckpts, key=lambda p: int(p.rsplit("-", 1)[-1])
+                             if p.rsplit("-", 1)[-1].isdigit() else -1)
+                print(f"DEBUG: auto-resume from latest checkpoint: {latest}")
+            else:
+                print("DEBUG: resume_from_checkpoint=true but no checkpoint yet; starting fresh.")
+                resume = False
         print("DEBUG: Beginning trainer.train() ...")
         trainer.train(resume_from_checkpoint=resume if resume else None)
         # Under DDP only rank 0 writes the final adapter (avoid a write race).
