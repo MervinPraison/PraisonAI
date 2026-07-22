@@ -82,6 +82,58 @@ class TestAlbumCoalescer:
         assert rb.attachments == ["/tmp/b.jpg"]
 
 
+    @pytest.mark.asyncio
+    async def test_cancelled_owner_reclaims_album_on_window_flush(self):
+        """Owner cancelled mid-wait -> the window flush reclaims buffered files."""
+        reclaimed = []
+        from praisonai_bot.bots._album import AlbumCoalescer
+
+        coalescer = AlbumCoalescer(
+            window_ms=80, max_items=10, on_orphan=reclaimed.extend
+        )
+
+        owner = asyncio.create_task(
+            coalescer.collect("grp1", ["/tmp/1.jpg"], "x")
+        )
+        await asyncio.sleep(0.01)
+        sibling = asyncio.create_task(coalescer.collect("grp1", ["/tmp/2.jpg"], ""))
+        await asyncio.sleep(0.01)
+
+        # Sibling folds in and returns None.
+        assert await sibling is None
+
+        # Cancel the owner while it is still awaiting the window flush.
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+
+        # The silence-window flush fires next; with no live owner it reclaims
+        # the whole merged album so no temp files leak.
+        await asyncio.sleep(0.1)
+        assert reclaimed == ["/tmp/1.jpg", "/tmp/2.jpg"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_reclaims_orphan_when_no_owner(self):
+        """Shutdown flush of an abandoned group reclaims its temp files."""
+        reclaimed = []
+        from praisonai_bot.bots._album import AlbumCoalescer
+
+        coalescer = AlbumCoalescer(
+            window_ms=10_000, max_items=10, on_orphan=reclaimed.extend
+        )
+
+        owner = asyncio.create_task(coalescer.collect("grp1", ["/tmp/1.jpg"], "x"))
+        await asyncio.sleep(0.01)
+        # Owner abandons its await before any flush.
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+
+        # Shutdown flush: no live owner is awaiting -> files are reclaimed.
+        coalescer.cancel_all()
+        assert reclaimed == ["/tmp/1.jpg"]
+
+
 class TestResolvers:
     def test_window_and_max_from_metadata(self):
         from praisonai_bot.bots._album import (

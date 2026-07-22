@@ -172,6 +172,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._album: AlbumCoalescer = AlbumCoalescer(
             window_ms=resolve_album_window_ms(self.config),
             max_items=resolve_album_max_items(self.config),
+            on_orphan=self._remove_inbound_media,
         )
         self._ack: AckReactor = AckReactor(
             ack_emoji=self.config.ack_emoji,
@@ -864,11 +865,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 finally:
                     # Inbound media is cached to temp files for this turn only;
                     # remove them so media-heavy bots don't fill the temp volume.
-                    for _path in attachments:
-                        try:
-                            os.remove(_path)
-                        except OSError:
-                            pass
+                    self._remove_inbound_media(attachments)
         
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle voice messages."""
@@ -1483,6 +1480,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     }
                 )
     
+    @staticmethod
+    def _remove_inbound_media(paths: List[str]) -> None:
+        """Remove per-turn cached inbound media temp files (best effort).
+
+        Shared by the post-turn ``finally`` cleanup and the album coalescer's
+        orphan hook (Issue #3298) so a cancelled owning turn never leaks the
+        merged album's temp files.
+        """
+        for _path in paths or []:
+            try:
+                os.remove(_path)
+            except OSError:
+                pass
+
     async def _cache_inbound_telegram_media(self, update) -> List[str]:
         """Download and validate inbound photo/document for the agent (Issue #2350).
 

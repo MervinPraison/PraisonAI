@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from .._lockmap import LockMap
 
 logger = logging.getLogger(__name__)
@@ -65,14 +65,27 @@ class AlbumCoalescer:
         window_ms: Debounce window in milliseconds. ``0`` disables
             coalescing (every update returns its own parts immediately).
         max_items: Upper bound on attachments buffered per group; flush is
-            forced once reached to bound latency and memory.
+            forced once reached to bound latency and memory. This is a
+            deliberate safety cap: if a single album exceeds ``max_items``,
+            it is delivered as more than one merged turn rather than growing
+            unbounded. The default (10) covers a full Telegram album, so
+            splitting only happens when an operator lowers the cap on purpose.
     """
 
-    def __init__(self, window_ms: int = 0, max_items: int = 10) -> None:
+    def __init__(
+        self,
+        window_ms: int = 0,
+        max_items: int = 10,
+        on_orphan: Optional[Callable[[List[str]], None]] = None,
+    ) -> None:
         self._window_s = max(0, window_ms) / 1000.0
         self._max_items = max(1, max_items)
         self._groups: Dict[str, _Group] = {}
         self._locks = LockMap()
+        # Called with a merged album's attachments when its flushed result is
+        # never consumed (the owning turn was cancelled/abandoned) so buffered
+        # temp files are cleaned up instead of leaking.
+        self._on_orphan = on_orphan
 
     async def collect(
         self,
@@ -121,7 +134,20 @@ class AlbumCoalescer:
         if owner_future is None:
             # A sibling update: its media is buffered into the owner's turn.
             return None
+        # If the owning update is cancelled while awaiting, the future is
+        # cancelled too; a subsequent flush / ``cancel_all`` then sees a
+        # ``done()`` future and reclaims the buffered temp files via the
+        # orphan hook (see ``_flush``), so the album is never leaked.
         return await owner_future
+
+    def _reclaim(self, attachments: List[str]) -> None:
+        """Hand orphaned album temp files to the cleanup hook, if any."""
+        if not attachments or self._on_orphan is None:
+            return
+        try:
+            self._on_orphan(list(attachments))
+        except Exception:  # pragma: no cover - cleanup must never raise
+            logger.debug("album orphan cleanup failed", exc_info=True)
 
     def _flush(self, group_key: str) -> None:
         """Resolve the owning future with the merged album for *group_key*."""
@@ -135,6 +161,11 @@ class AlbumCoalescer:
         )
         if group.future is not None and not group.future.done():
             group.future.set_result(merged)
+        else:
+            # No live owner is awaiting this album (its update was already
+            # cancelled/abandoned), so its buffered temp files would leak —
+            # reclaim them via the cleanup hook.
+            self._reclaim(merged.attachments)
 
     @property
     def pending_count(self) -> int:
