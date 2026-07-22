@@ -1,0 +1,9 @@
+# praisonai-train validate --config validate.yaml
+input: data/tamil.jsonl
+output: data/tamil.clean.jsonl     # filtered dataset (kept rows) written here
+min_output_chars: 20
+near_dup: true
+near_dup_jaccard: 0.7              # Self-Instruct ROUGE-L 0.7 equivalent
+script_range: [2944, 3071]         # Tamil block U+0B80-U+0BFF; change per language
+script_drop: 0.50                  # drop outputs below this script purity
+script_flag: 0.70                  # flag (keep) between drop and this

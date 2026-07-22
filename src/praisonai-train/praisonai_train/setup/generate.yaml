@@ -1,0 +1,14 @@
+# praisonai-train generate --config generate.yaml
+# Synthesize an instruction dataset from a teacher LLM (OpenAI-compatible).
+recipe: tamil                      # registered recipe name, or an inline recipe: {system, template, axes}
+deployment: gpt-4o                 # teacher model / Azure deployment name
+azure: true                        # true for Azure OpenAI; false for OpenAI-compatible
+# endpoint / api_key come from AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_KEY (or OPENAI_*) if omitted
+num_examples: 5000
+concurrency: 50
+start_offset: 0                    # use disjoint offsets for parallel workers (no overlap)
+output: data/tamil.jsonl
+snapshot_every: 1000               # optional: write an incremental snapshot every N rows
+dedup_from:                        # optional: existing JSONL files whose instructions to skip
+  - data/existing.jsonl
+# stop_file: ~/.praisonai_train_stop   # touch this file to halt immediately (circuit-breaker)

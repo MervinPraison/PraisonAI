@@ -101,3 +101,19 @@ bash ../../scripts/check_c10_train_imports.sh
 ```
 
 Boundary details: `src/praisonai/tests/PRAISONAI_TRAIN_MANIFEST.md`.
+
+## Dataset tooling (generate + validate)
+
+Build and quality-check instruction datasets — protocol-driven and YAML-configurable.
+
+```bash
+# Synthesize from a teacher LLM (recipe + diversity axes, JSON mode, dedup, resumable offsets)
+praisonai-train generate --config generate.yaml
+praisonai-train generate -r tamil -d gpt-4o -n 1000 -o data/tamil.jsonl
+
+# Quality-check / filter (dedup, boilerplate & refusal, script purity, diversity metrics)
+praisonai-train validate data/tamil.jsonl --out data/clean.jsonl
+```
+
+Add a language/domain by registering a `Recipe`, or a new QC rule by registering a
+`RowCheck` (see `praisonai_train/data/`), and they show up automatically.
