@@ -49,10 +49,10 @@ def _sanitize_filepath(filepath: str, workspace: Optional[str] = None) -> str:
         ws_resolved = Path(os.path.realpath(workspace))
         try:
             resolved.relative_to(ws_resolved)
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
                 f"Path {filepath!r} resolves outside workspace {workspace!r}"
-            )
+            ) from exc
     
     return normalized
 
@@ -88,8 +88,8 @@ def _sanitize_command(command: str) -> str:
 
 def create_agent_centric_tools(
     runtime: "InteractiveRuntime",
-    router: "CodeIntelligenceRouter" = None,
-    orchestrator: "ActionOrchestrator" = None
+    router: "Optional[CodeIntelligenceRouter]" = None,
+    orchestrator: "Optional[ActionOrchestrator]" = None
 ) -> List[Callable]:
     """
     Create tools that route through LSP/ACP for agent-centric architecture.
@@ -115,7 +115,6 @@ def create_agent_centric_tools(
     # fail with a clear install hint instead of an ImportError, and so the C7
     # import-direction gate stays satisfied (no direct wrapper import here).
     from praisonai_code._wrapper_bridge import import_wrapper_module
-
     run_sync = import_wrapper_module("praisonai._async_bridge").run_sync
     
     # =========================================================================
@@ -296,7 +295,15 @@ def create_agent_centric_tools(
                     "requires_approval": True
                 })
             
-            result = await orchestrator.apply_plan(plan)
+            apply_result = await orchestrator.apply_plan(plan)
+            if not apply_result.success:
+                return json.dumps({
+                    "success": False,
+                    "file_deleted": filepath,
+                    "verified": False,
+                    "error": apply_result.error
+                })
+
             result = await orchestrator.verify_plan(plan)
             
             return json.dumps({
@@ -307,14 +314,16 @@ def create_agent_centric_tools(
         
         return run_sync(_delete())
     
-    def acp_execute_command(command: str, cwd: str = None) -> str:
+    def acp_execute_command(command: str) -> str:
         """
         Execute a shell command through ACP with tracking.
-        
+
+        Commands run in the configured workspace directory. Per-call working
+        directories are not currently supported.
+
         Args:
             command: The command to execute
-            cwd: Working directory (optional)
-            
+
         Returns:
             JSON string with command output
         """
@@ -398,7 +407,7 @@ def create_agent_centric_tools(
         
         return run_sync(_list())
     
-    def lsp_find_definition(symbol: str, file_path: str = None) -> str:
+    def lsp_find_definition(symbol: str, file_path: Optional[str] = None) -> str:
         """
         Find where a symbol is defined using LSP.
         
@@ -426,7 +435,7 @@ def create_agent_centric_tools(
         
         return run_sync(_find())
     
-    def lsp_find_references(symbol: str, file_path: str = None) -> str:
+    def lsp_find_references(symbol: str, file_path: Optional[str] = None) -> str:
         """
         Find all references to a symbol using LSP.
         
@@ -454,7 +463,7 @@ def create_agent_centric_tools(
         
         return run_sync(_find())
     
-    def lsp_get_diagnostics(file_path: str = None) -> str:
+    def lsp_get_diagnostics(file_path: Optional[str] = None) -> str:
         """
         Get diagnostics (errors, warnings) for a file using LSP.
         

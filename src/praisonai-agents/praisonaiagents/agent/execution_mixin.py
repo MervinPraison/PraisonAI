@@ -1573,6 +1573,11 @@ Write the complete compiled report:"""
                     except Exception as e:
                         logging.error(f"Error starting server: {str(e)}", exc_info=True)
                         print(f"❌ Error starting server: {str(e)}")
+                    finally:
+                        # Clear the started marker so a later launch() on this port
+                        # can retry after a bind/startup failure or server exit.
+                        with _server_lock:
+                            _server_started[port] = False
 
                 # Run server in a background thread
                 server_thread = threading.Thread(target=run_server, daemon=True)

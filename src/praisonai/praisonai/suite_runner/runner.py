@@ -193,6 +193,7 @@ class ScriptRunner:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    start_new_session=(os.name != "nt"),
                 )
                 
                 import selectors
@@ -211,6 +212,9 @@ class ScriptRunner:
                         except subprocess.TimeoutExpired:
                             process.kill()
                         status = "timeout"
+                        error_type = "TimeoutError"
+                        error_message = f"Exceeded {timeout}s timeout"
+                        exit_code = -1
                         break
                     
                     events = sel.select(timeout=min(0.1, remaining))
@@ -236,7 +240,8 @@ class ScriptRunner:
                     if remaining_stderr:
                         stderr_data.append(remaining_stderr)
                 
-                exit_code = process.returncode or 0
+                if status != "timeout":
+                    exit_code = process.returncode or 0
                 
             else:
                 # Capture output without streaming (Popen + communicate so we
@@ -250,6 +255,7 @@ class ScriptRunner:
                     errors="replace",
                     env=env,
                     cwd=cwd,
+                    start_new_session=(os.name != "nt"),
                 )
                 try:
                     stdout, stderr = process.communicate(timeout=timeout)

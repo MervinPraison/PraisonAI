@@ -710,8 +710,14 @@ def _custom_handler(name, cache):
         return mod.obs
     if name == 'db':
         import importlib
+        import sys
         mod = importlib.import_module('.db', 'praisonaiagents')
+        # importlib registers the submodule as praisonaiagents.db in the package
+        # namespace, so plain attribute lookup would bypass __getattr__ and return
+        # the raw module on repeat access. Rebind the package global to the callable
+        # _LazyDbModule proxy so `praisonaiagents.db(...)` keeps working every time.
         cache['db'] = mod.db  # Return the _LazyDbModule instance, not the module
+        setattr(sys.modules['praisonaiagents'], 'db', mod.db)
         return mod.db
     if name == 'toolsets':
         import importlib

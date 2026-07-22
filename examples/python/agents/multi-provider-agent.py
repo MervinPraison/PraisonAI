@@ -144,6 +144,7 @@ def example_auto_agents_multi_provider():
     
     # After agents are created, upgrade them to multi-model agents
     multi_model_agents = []
+    wrapper_by_original = {}
     for agent in auto_agents.agents:
         # Convert regular agents to multi-model agents
         multi_agent = RouterAgent(
@@ -155,9 +156,18 @@ def example_auto_agents_multi_provider():
             models=["gpt-4o-mini", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o-mini"],
             routing_strategy="auto")
         multi_model_agents.append(multi_agent)
+        wrapper_by_original[id(agent)] = multi_agent
     
     # Update the agents in the AutoAgents instance
     auto_agents.agents = multi_model_agents
+
+    # Rebind each task's agent to its wrapper — AutoAgents stores a direct agent
+    # reference on every Task and execution reads task.agent, so replacing only
+    # auto_agents.agents would leave the workflow bound to the original agents.
+    for task in getattr(auto_agents, "tasks", []) or []:
+        wrapper = wrapper_by_original.get(id(task.agent))
+        if wrapper is not None:
+            task.agent = wrapper
     
     # Run the auto-generated workflow
     results = auto_agents.start()

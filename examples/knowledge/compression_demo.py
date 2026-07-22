@@ -150,10 +150,14 @@ def main():
             print(f"\nOriginal document length: {len(content)} characters")
             
             chunks = [{"text": content, "metadata": {"source": doc_path}}]
-            target_tokens = 2000
+
+            # Estimate original tokens (~4 chars/token) so each ratio maps to a
+            # distinct token budget — compress() truncates to target_tokens.
+            original_tokens = max(1, len(content) // 4)
 
             # Compress with different ratios
             for ratio in [0.3, 0.5, 0.7]:
+                target_tokens = max(1, int(original_tokens * ratio))
                 compressor = ContextCompressor(verbose=False)
                 result = compressor.compress(
                     chunks,
