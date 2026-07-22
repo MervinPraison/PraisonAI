@@ -300,6 +300,35 @@ class MessageSentInput(HookInput):
 
 
 @dataclass
+class MessageUndeliveredInput(HookInput):
+    """Input for MESSAGE_UNDELIVERED hooks (a reply could not be delivered).
+
+    Fired by the gateway when an outbound reply fails *permanently* (the target
+    was confirmed dead, or delivery exhausted its retries) so operators can
+    route the failure — mirror it to a home channel, alert, or re-queue —
+    without patching adapters. It is a notification only: the reply has already
+    been parked in the DLQ (when configured) and, best-effort, a short plain-text
+    notice may have been attempted on the same channel.
+    """
+    platform: str = ""
+    content: str = ""
+    channel_id: str = ""
+    error: str = ""
+    notice_delivered: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platform": self.platform,
+            "content": self.content[:500] if self.content else "",
+            "channel_id": self.channel_id,
+            "error": self.error,
+            "notice_delivered": self.notice_delivered,
+        })
+        return base
+
+
+@dataclass
 class GatewayStartInput(HookInput):
     """Input for GATEWAY_START hooks (gateway/BotOS started)."""
     platforms: List[str] = field(default_factory=list)

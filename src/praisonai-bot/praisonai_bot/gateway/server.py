@@ -3602,7 +3602,20 @@ class WebSocketGateway:
             logger.debug("DeadTargetRegistry unavailable: %s", e)
             self._dead_targets = None
         botos = _ChannelBotOS(self._channel_bots)
-        self._delivery_router = DeliveryRouter(botos, dead_targets=self._dead_targets)
+        # Close-the-loop on permanent delivery failure (issue #3297): opt-in via
+        # ``gateway.notify_on_undelivered``. Default OFF so behaviour is
+        # unchanged; when enabled, a permanent failure fires MESSAGE_UNDELIVERED
+        # and best-effort sends a short plain-text notice on the same channel.
+        notify_on_undelivered = bool(
+            getattr(self.config, "notify_on_undelivered", False)
+        )
+        undelivered_template = getattr(self.config, "undelivered_template", None)
+        self._delivery_router = DeliveryRouter(
+            botos,
+            dead_targets=self._dead_targets,
+            notify_on_undelivered=notify_on_undelivered,
+            undelivered_template=undelivered_template,
+        )
         return self._delivery_router
 
     @property

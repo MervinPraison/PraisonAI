@@ -449,9 +449,31 @@ class DeliveryRouter:
     - "<alias>" - friendly name from the channel directory
     """
     
-    def __init__(self, botos: BotOS, dead_targets: Optional[Any] = None):
+    #: Default plain-text notice used when a permanent failure is surfaced to
+    #: the user. Kept short so it can slip through where the original (possibly
+    #: large/rich) reply could not.
+    DEFAULT_UNDELIVERED_TEMPLATE = (
+        "\u26a0\ufe0f Your request was processed but the reply couldn't be delivered."
+    )
+
+    def __init__(
+        self,
+        botos: BotOS,
+        dead_targets: Optional[Any] = None,
+        *,
+        notify_on_undelivered: bool = False,
+        undelivered_template: Optional[str] = None,
+    ):
         self._botos = botos
         self.directory = ChannelDirectory()
+        # Close-the-loop on permanent delivery failure (issue #3297). Default
+        # OFF so behaviour is unchanged unless an operator opts in: when a send
+        # fails permanently, fire a MESSAGE_UNDELIVERED hook (operator routing)
+        # and best-effort deliver a short plain-text notice on the same channel.
+        self._notify_on_undelivered = notify_on_undelivered
+        self._undelivered_template = (
+            undelivered_template or self.DEFAULT_UNDELIVERED_TEMPLATE
+        )
         # Optional self-healing dead-target registry (issue #2486). Default OFF:
         # when None, delivery behaves exactly as before (no suppression).
         self._dead_targets = dead_targets
@@ -740,22 +762,38 @@ class DeliveryRouter:
                             "DeliveryRouter: rate-limit penalise failed",
                             exc_info=True,
                         )
-                # On a *confirmed permanent* failure, mark the whole target dead
-                # so future cycles short-circuit. Transient errors and
+                # Classify once: a *confirmed permanent* failure marks the whole
+                # target dead so future cycles short-circuit, and (when opted in)
+                # surfaces an undelivered notice. Transient errors and
                 # message-scoped 404s stay on the existing retry path.
-                if self._dead_targets is not None:
-                    try:
-                        from ._resilience import is_permanent_target_failure
+                permanent = False
+                try:
+                    from ._resilience import is_permanent_target_failure
 
-                        if is_permanent_target_failure(send_err, platform):
-                            self._dead_targets.mark_dead(
-                                platform, channel_id, reason=str(send_err)
-                            )
+                    permanent = is_permanent_target_failure(send_err, platform)
+                except Exception:
+                    logger.debug(
+                        "DeliveryRouter: permanent-failure classification failed",
+                        exc_info=True,
+                    )
+                if permanent and self._dead_targets is not None:
+                    try:
+                        self._dead_targets.mark_dead(
+                            platform, channel_id, reason=str(send_err)
+                        )
                     except Exception:
                         logger.debug(
-                            "DeliveryRouter: dead-target classification failed",
+                            "DeliveryRouter: dead-target mark failed",
                             exc_info=True,
                         )
+                # Close the loop (issue #3297): on a *confirmed permanent*
+                # failure the reply is otherwise lost silently. Best-effort a
+                # short plain-text notice on the same channel and fire the
+                # MESSAGE_UNDELIVERED hook so operators can route the failure.
+                if permanent and self._notify_on_undelivered:
+                    await self._notify_undelivered(
+                        platform, channel_id, text, send_err
+                    )
                 raise
 
             # Success self-heals: any earlier dead flag is cleared so a recovered
@@ -781,7 +819,71 @@ class DeliveryRouter:
         except Exception as e:
             logger.error(f"DeliveryRouter: delivery failed for '{target}': {e}")
             return False
-    
+
+    async def _notify_undelivered(
+        self,
+        platform: str,
+        channel_id: str,
+        original_text: str,
+        error: BaseException,
+    ) -> None:
+        """Close the loop on a permanently-undeliverable reply (issue #3297).
+
+        Best-effort and fully guarded so it can never mask the original send
+        failure: attempt a short plain-text notice on the same channel (a large
+        or rich reply may fail while a one-line note still lands) and fire the
+        ``MESSAGE_UNDELIVERED`` hook so operators can route the failure without
+        patching adapters. Any error here is swallowed — the caller re-raises the
+        original exception regardless.
+        """
+        notice_delivered = False
+        template = self._undelivered_template
+        if template:
+            try:
+                bot = self._botos.get_bot(platform)
+                if bot is not None:
+                    result = await bot.send_message(channel_id, template)
+                    notice_delivered = result is not False
+            except Exception:
+                logger.debug(
+                    "DeliveryRouter: undelivered notice failed for %s:%s",
+                    platform,
+                    channel_id,
+                    exc_info=True,
+                )
+
+        try:
+            runner = None
+            get_runner = getattr(self._botos, "_get_hook_runner", None)
+            if callable(get_runner):
+                runner = get_runner()
+            if runner is not None:
+                import os
+                import time
+
+                from praisonaiagents.hooks.types import HookEvent
+                from praisonaiagents.hooks.events import MessageUndeliveredInput
+
+                event_input = MessageUndeliveredInput(
+                    session_id="",
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.MESSAGE_UNDELIVERED,
+                    timestamp=str(time.time()),
+                    agent_name="bot",
+                    platform=platform,
+                    content=original_text,
+                    channel_id=channel_id,
+                    error=f"{type(error).__name__}: {error}",
+                    notice_delivered=notice_delivered,
+                )
+                # We are inside the router's running event loop, so await the
+                # async runner directly (execute_sync raises inside a live loop).
+                await runner.execute(HookEvent.MESSAGE_UNDELIVERED, event_input)
+        except Exception:
+            logger.debug(
+                "DeliveryRouter: MESSAGE_UNDELIVERED hook failed", exc_info=True
+            )
+
     async def send_media(
         self,
         target: str,
