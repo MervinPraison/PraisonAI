@@ -515,8 +515,7 @@ _LAZY_IMPORTS = {
     'ManagerConfig': ('praisonaiagents.context.manager', 'ManagerConfig'),
     'ContextManager': ('praisonaiagents.context.manager', 'ContextManager'),
     
-    # db module
-    'db': ('praisonaiagents.db', 'db'),
+    # db shortcut (handled by custom_handler to return _LazyDbModule instance)
     # Note: 'obs' is handled by custom_handler to return _LazyObsModule instance
     
     # Gateway protocols and config (implementations in praisonai wrapper)
@@ -712,8 +711,8 @@ def _custom_handler(name, cache):
     if name == 'db':
         import importlib
         mod = importlib.import_module('.db', 'praisonaiagents')
-        cache['db'] = mod
-        return mod
+        cache['db'] = mod.db  # Return the _LazyDbModule instance, not the module
+        return mod.db
     if name == 'toolsets':
         import importlib
         mod = importlib.import_module('.toolsets', 'praisonaiagents')

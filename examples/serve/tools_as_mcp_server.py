@@ -78,7 +78,7 @@ def main():
   }''')
     print("\nPress Ctrl+C to stop")
     
-    server.run(transport="sse", host="0.0.0.0", port=8081)
+    server.run_sse(port=8081)
 
 
 def run_manual_server():

@@ -61,7 +61,7 @@ def demonstrate_collision_problem():
     _reset_default_registry()
     
     # Agent 1 registers "custom" provider
-    register_llm_provider("custom", Agent1Provider)
+    register_llm_provider("custom", Agent1Provider, override=True)
     print("Agent 1 registered 'custom' provider")
     
     # Agent 2 tries to register same name - ERROR!

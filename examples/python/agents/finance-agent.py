@@ -1,3 +1,5 @@
+# praisonai: skip=true
+# Uses removed praisonaiagents.tools exports; pending example refresh
 from praisonaiagents import Agent, Tools
 from praisonaiagents.tools import get_stock_price, get_stock_info, get_historical_data
 
