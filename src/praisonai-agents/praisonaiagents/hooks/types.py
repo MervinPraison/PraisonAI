@@ -47,6 +47,7 @@ class HookEvent(str, Enum):
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_SENDING = "message_sending"
     MESSAGE_SENT = "message_sent"
+    MESSAGE_UNDELIVERED = "message_undelivered"  # Reply permanently undeliverable
     
     # Gateway lifecycle
     GATEWAY_START = "gateway_start"

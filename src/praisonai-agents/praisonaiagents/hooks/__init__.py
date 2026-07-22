@@ -76,6 +76,7 @@ __all__ = [
     "MessageReceivedInput",
     "MessageSendingInput",
     "MessageSentInput",
+    "MessageUndeliveredInput",
     # Gateway & schedule lifecycle event inputs
     "GatewayStartInput",
     "GatewayStopInput",
@@ -144,6 +145,7 @@ _LAZY_GROUPS = {
         'MessageReceivedInput': ('praisonaiagents.hooks.events', 'MessageReceivedInput'),
         'MessageSendingInput': ('praisonaiagents.hooks.events', 'MessageSendingInput'),
         'MessageSentInput': ('praisonaiagents.hooks.events', 'MessageSentInput'),
+        'MessageUndeliveredInput': ('praisonaiagents.hooks.events', 'MessageUndeliveredInput'),
         'GatewayStartInput': ('praisonaiagents.hooks.events', 'GatewayStartInput'),
         'GatewayStopInput': ('praisonaiagents.hooks.events', 'GatewayStopInput'),
         'ScheduleTriggerInput': ('praisonaiagents.hooks.events', 'ScheduleTriggerInput'),

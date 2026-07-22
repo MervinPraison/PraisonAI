@@ -691,7 +691,22 @@ class WebSocketGateway:
             ),
             session_config=session_config,
         )
-        
+
+        # Close-the-loop opt-in (#3297): the core ``GatewayConfig`` dataclass
+        # deliberately does not carry these knobs (kept lightweight), and the
+        # server reads them via ``getattr``. Stamp them onto the built config
+        # from the validated YAML so the documented ``gateway.notify_on_undelivered``
+        # / ``gateway.undelivered_template`` opt-in actually reaches the router
+        # instead of silently defaulting to OFF.
+        notify_on_undelivered = gateway_config.get("notify_on_undelivered")
+        if notify_on_undelivered is not None:
+            config.notify_on_undelivered = bool(notify_on_undelivered)
+        undelivered_template = _substitute(
+            gateway_config.get("undelivered_template")
+        )
+        if undelivered_template is not None:
+            config.undelivered_template = undelivered_template
+
         logger.info(f"Gateway config loaded from {config_path}")
         return cls(config=config)
     
@@ -3602,7 +3617,20 @@ class WebSocketGateway:
             logger.debug("DeadTargetRegistry unavailable: %s", e)
             self._dead_targets = None
         botos = _ChannelBotOS(self._channel_bots)
-        self._delivery_router = DeliveryRouter(botos, dead_targets=self._dead_targets)
+        # Close-the-loop on permanent delivery failure (issue #3297): opt-in via
+        # ``gateway.notify_on_undelivered``. Default OFF so behaviour is
+        # unchanged; when enabled, a permanent failure fires MESSAGE_UNDELIVERED
+        # and best-effort sends a short plain-text notice on the same channel.
+        notify_on_undelivered = bool(
+            getattr(self.config, "notify_on_undelivered", False)
+        )
+        undelivered_template = getattr(self.config, "undelivered_template", None)
+        self._delivery_router = DeliveryRouter(
+            botos,
+            dead_targets=self._dead_targets,
+            notify_on_undelivered=notify_on_undelivered,
+            undelivered_template=undelivered_template,
+        )
         return self._delivery_router
 
     @property
@@ -6639,6 +6667,19 @@ class WebSocketGateway:
             self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
         if "max_queued_frames" in gw_cfg:
             self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
+        # Issue #3297: close-the-loop opt-in. Core ``GatewayConfig`` deliberately
+        # does not carry these knobs (kept lightweight); the delivery router
+        # reads them off ``self.config`` via ``getattr``. Stamp them from the
+        # validated ``gateway:`` block so the documented opt-in actually reaches
+        # the router instead of silently defaulting to OFF.
+        if "notify_on_undelivered" in gw_cfg:
+            self.config.notify_on_undelivered = bool(
+                gw_cfg["notify_on_undelivered"]
+            )
+        if gw_cfg.get("undelivered_template") is not None:
+            self.config.undelivered_template = str(
+                gw_cfg["undelivered_template"]
+            )
         # Issue #2715: additive OpenAI-compatible / MCP protocol surfaces.
         # YAML ``gateway.api: { openai: true, mcp: true }`` enables them; a
         # CLI ``--openai-api`` / ``--mcp`` override (stamped on the instance)
