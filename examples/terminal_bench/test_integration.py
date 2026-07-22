@@ -60,22 +60,22 @@ class TestPraisonAICodeAgent:
 class TestPraisonAIExternalAgent:
     """The external (SDK-level) adapter."""
 
-    def test_metadata(self):
+    def test_metadata(self, tmp_path):
         from examples.terminal_bench.praisonai_external_agent import (
             PraisonAIExternalAgent,
         )
 
-        agent = PraisonAIExternalAgent()
+        agent = PraisonAIExternalAgent(logs_dir=str(tmp_path))
         assert agent.name() == "praisonai"
         version = agent.version()
         assert version is None or isinstance(version, str)
 
-    def test_context_population_uses_cost_summary(self):
+    def test_context_population_uses_cost_summary(self, tmp_path):
         from examples.terminal_bench.praisonai_external_agent import (
             PraisonAIExternalAgent,
         )
 
-        agent_impl = PraisonAIExternalAgent()
+        agent_impl = PraisonAIExternalAgent(logs_dir=str(tmp_path))
 
         # cost_summary is a dict property on the real Agent, not a callable.
         mock_agent = Mock()
