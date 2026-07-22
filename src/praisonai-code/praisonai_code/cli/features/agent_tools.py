@@ -110,8 +110,13 @@ def create_agent_centric_tools(
     if orchestrator is None:
         orchestrator = ActionOrchestrator(runtime)
     
-    # Helper to run async functions synchronously using the shared bridge
-    from praisonai._async_bridge import run_sync
+    # Helper to run async functions synchronously using the shared bridge.
+    # Loaded via the wrapper bridge so standalone ``praisonai-code`` installs
+    # fail with a clear install hint instead of an ImportError, and so the C7
+    # import-direction gate stays satisfied (no direct wrapper import here).
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+
+    run_sync = import_wrapper_module("praisonai._async_bridge").run_sync
     
     # =========================================================================
     # ACP-Powered File Tools
