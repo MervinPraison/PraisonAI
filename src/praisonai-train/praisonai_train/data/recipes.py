@@ -6,6 +6,7 @@ another class, or define one inline in YAML via ``CustomRecipe``.
 """
 from __future__ import annotations
 
+from praisonai_train.data.intent import EN_TA_TASK
 from praisonai_train.data.registry import recipes
 
 
@@ -54,7 +55,7 @@ class Tamil(_AxisRecipe):
     )
     axes = {
         "task": ["ஒரு பொதுவான கேள்வி-பதில்", "ஒரு விளக்கம்", "ஒரு சுருக்கம்",
-                 "ஆங்கிலத்திலிருந்து தமிழுக்கு மொழிபெயர்ப்பு", "படைப்பாக்க எழுத்து",
+                 EN_TA_TASK, "படைப்பாக்க எழுத்து",
                  "நடைமுறை அறிவுரை", "பகுத்தறிவு/கணிதப் problem", "குறியீட்டு கேள்வி",
                  "கருத்து பகுப்பாய்வு", "படிப்படியான வழிகாட்டி"],
         "topic": ["தமிழ் இலக்கியம்", "வரலாறு", "அறிவியல்", "உடல்நலம்", "விவசாயம்",
