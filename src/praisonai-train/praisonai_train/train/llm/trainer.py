@@ -630,10 +630,12 @@ class TrainModel:
             resume = self._flag(resume)
         print("DEBUG: Beginning trainer.train() ...")
         trainer.train(resume_from_checkpoint=resume if resume else None)
-        print("DEBUG: Training complete. Saving model and tokenizer locally...")
-        self.model.save_pretrained(final_dir)
-        self.hf_tokenizer.save_pretrained(final_dir)
-        print(f"DEBUG: Saved model and tokenizer to '{final_dir}'.")
+        # Under DDP only rank 0 writes the final adapter (avoid a write race).
+        if int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0))) == 0:
+            print("DEBUG: Training complete. Saving model and tokenizer locally...")
+            self.model.save_pretrained(final_dir)
+            self.hf_tokenizer.save_pretrained(final_dir)
+            print(f"DEBUG: Saved model and tokenizer to '{final_dir}'.")
 
     def inference(self, instruction, input_text):
         FastLanguageModel.for_inference(self.model)
@@ -925,6 +927,11 @@ class TrainModel:
             # Training was disabled (train: false) so no model was loaded. Skip
             # publishing rather than crashing with an AttributeError on None.
             print("DEBUG: Training skipped (train: false); no model to publish.")
+            return
+        # Under DDP only the main process (rank 0) should merge/push — otherwise every
+        # rank races to write the same HF/Ollama repo.
+        if int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0))) != 0:
+            print("DEBUG: non-main rank; skipping publish.")
             return
         # Publishing defaults OFF and is skipped unless a target is set — so a plain
         # "train locally" config finishes with the LoRA saved to lora_model/ instead
