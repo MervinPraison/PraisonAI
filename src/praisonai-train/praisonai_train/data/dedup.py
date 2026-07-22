@@ -67,6 +67,10 @@ class MinHasher:
     """
 
     def __init__(self, num_perm: int = 128, seed: int = 1, n: int = 4) -> None:
+        if num_perm < 1:
+            raise ValueError(f"minhash_perm must be >= 1, got {num_perm}")
+        if n < 1:
+            raise ValueError(f"ngram_n must be >= 1, got {n}")
         self.num_perm = num_perm
         self.n = n
         rnd = random.Random(seed)
@@ -83,9 +87,14 @@ class MinHasher:
 
 
 def signature_similarity(a: tuple[int, ...], b: tuple[int, ...]) -> float:
-    """Estimated Jaccard = fraction of agreeing MinHash positions."""
-    if not a:
-        return 1.0
+    """Estimated Jaccard = fraction of agreeing MinHash positions.
+
+    Empty signatures carry no information, so they are treated as *non*-similar
+    (0.0) rather than identical — otherwise a degenerate ``num_perm``/``ngram_n``
+    would make every row collapse into the first one.
+    """
+    if not a or not b or len(a) != len(b):
+        return 0.0
     return sum(1 for x, y in zip(a, b) if x == y) / len(a)
 
 
@@ -147,13 +156,28 @@ class MinHashLSH:
         return True
 
 
+def _make_lsh(cfg: dict) -> "MinHashLSH":
+    """Build a MinHashLSH from the shared cfg keys (one place — DRY)."""
+    return MinHashLSH(
+        threshold=cfg.get("near_dup_jaccard", 0.7),
+        num_perm=cfg.get("minhash_perm", 128),
+        n=cfg.get("ngram_n", 4),
+        seed=cfg.get("minhash_seed", 1),
+    )
+
+
 def _sliding_dedup(rows: list[dict], threshold: float, window: int) -> tuple[list[dict], int]:
+    # A non-positive window has no meaningful "last N" semantics; treat it as an
+    # unbounded look-back (compare against every kept row) rather than silently
+    # letting ``sigs[-0:]`` mean the whole list only when window == 0.
+    unbounded = window <= 0
     sigs: list[set] = []
     kept: list[dict] = []
     dropped = 0
     for r in rows:
         g = ngrams(fields(r)[0])
-        if any(jaccard(g, g2) > threshold for g2 in sigs[-window:]):
+        recent = sigs if unbounded else sigs[-window:]
+        if any(jaccard(g, g2) > threshold for g2 in recent):
             dropped += 1
             continue
         sigs.append(g)
@@ -162,12 +186,10 @@ def _sliding_dedup(rows: list[dict], threshold: float, window: int) -> tuple[lis
 
 
 def _minhash_dedup(rows: list[dict], cfg: dict, index: "MinHashLSH | None") -> tuple[list[dict], int]:
-    lsh = index or MinHashLSH(
-        threshold=cfg.get("near_dup_jaccard", 0.7),
-        num_perm=cfg.get("minhash_perm", 128),
-        n=cfg.get("ngram_n", 4),
-        seed=cfg.get("minhash_seed", 1),
-    )
+    # ``index is not None`` (not ``index or ...``): a freshly-created shared index
+    # is empty and therefore falsy, so ``or`` would discard it and break the
+    # documented cross-batch dedup on the very first call.
+    lsh = index if index is not None else _make_lsh(cfg)
     kept: list[dict] = []
     dropped = 0
     for r in rows:
@@ -212,25 +234,41 @@ def global_dedup(sources: Iterable, cfg: dict | None = None) -> Iterator[dict]:
     import os
 
     cfg = dict(cfg or {})
-    cfg.setdefault("near_dup_method", "minhash")
+    method = cfg.setdefault("near_dup_method", "minhash")
+    if method not in ("minhash", "sliding"):
+        raise ValueError(f"unknown near_dup_method {method!r}; use 'sliding' or 'minhash'")
     do_near = cfg.get("near_dup", True)
-    lsh = MinHashLSH(
-        threshold=cfg.get("near_dup_jaccard", 0.7),
-        num_perm=cfg.get("minhash_perm", 128),
-        n=cfg.get("ngram_n", 4),
-        seed=cfg.get("minhash_seed", 1),
-    ) if do_near else None
+    # Honour the requested engine. ``minhash`` uses one shared LSH index across
+    # every file (the whole point of global dedup); ``sliding`` keeps a growing
+    # shingle list so it still spans files, but with the classic window semantics.
+    use_minhash = do_near and method == "minhash"
+    lsh = _make_lsh(cfg) if use_minhash else None
+    slide_sigs: list[set] = []
+    slide_window = cfg.get("near_dup_window", 3000)
+    slide_thresh = cfg.get("near_dup_jaccard", 0.7)
     seen_exact: set[str] = set()
 
     for src in sources:
-        rows = ([json.loads(ln) for ln in open(src, encoding="utf-8") if ln.strip()]
-                if isinstance(src, str) and os.path.exists(src) else src)
+        if isinstance(src, str):
+            if not os.path.exists(src):
+                raise FileNotFoundError(f"dedup source not found: {src}")
+            with open(src, encoding="utf-8") as fh:
+                rows = [json.loads(ln) for ln in fh if ln.strip()]
+        else:
+            rows = src
         for r in rows:
             ins, inp, out = fields(r)
             key = hashlib.sha1(norm(ins + "\x00" + inp + "\x00" + out).encode()).hexdigest()
             if key in seen_exact:
                 continue
             seen_exact.add(key)
-            if lsh is not None and not lsh.add_if_new(ins):
-                continue
+            if lsh is not None:
+                if not lsh.add_if_new(ins):
+                    continue
+            elif do_near:  # sliding near-dup across files
+                g = ngrams(ins)
+                recent = slide_sigs if slide_window <= 0 else slide_sigs[-slide_window:]
+                if any(jaccard(g, g2) > slide_thresh for g2 in recent):
+                    continue
+                slide_sigs.append(g)
             yield r

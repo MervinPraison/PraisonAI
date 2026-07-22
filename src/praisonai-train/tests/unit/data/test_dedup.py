@@ -154,6 +154,65 @@ def test_global_dedup_accepts_inmemory_rows():
     assert len(kept) == 1
 
 
+# ── Regression: reviewer-reported edge cases ──────────────────────────────────
+
+def test_shared_empty_index_is_reused_across_batches():
+    # A freshly-created shared index is empty (falsy); it must still be reused so
+    # cross-batch near-dups are caught on the first call, not silently discarded.
+    shared = MinHashLSH(threshold=0.7, num_perm=128, seed=1)
+    b1 = _rows("translate this tamil line into fluent english please")
+    b2 = _rows("translate this tamil line into fluent english now")  # near-dup
+    k1, d1 = near_dedup(b1, {"near_dup_method": "minhash"}, index=shared)
+    assert d1 == 0 and len(shared) == 1
+    k2, d2 = near_dedup(b2, {"near_dup_method": "minhash"}, index=shared)
+    assert d2 == 1 and k2 == []
+
+
+def test_empty_signatures_are_not_similar():
+    # Degenerate/empty signatures must not be treated as identical (== 1.0),
+    # which would collapse every row into the first.
+    assert signature_similarity((), ()) == 0.0
+    assert signature_similarity((1, 2), ()) == 0.0
+    assert signature_similarity((1, 2), (1,)) == 0.0
+
+
+def test_zero_perm_is_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        MinHasher(num_perm=0)
+    with pytest.raises(ValueError):
+        near_dedup(_rows("x y z"), {"near_dup_method": "minhash", "minhash_perm": 0})
+
+
+def test_global_dedup_missing_path_raises_clear_error():
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        list(global_dedup(["/no/such/file_xyz.jsonl"]))
+
+
+def test_global_dedup_honours_sliding_method(tmp_path):
+    f1 = tmp_path / "a.jsonl"
+    f1.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in _rows(
+        "please write a short poem about the rain and the sea",
+        "please write a short poem about the rain and the sea today",  # near
+    )) + "\n", encoding="utf-8")
+    kept = list(global_dedup([str(f1)], {"near_dup_method": "sliding"}))
+    assert len(kept) == 1
+
+
+def test_dedup_cli_does_not_truncate_aliased_input(tmp_path):
+    from praisonai_train.cli.commands.data import dedup_data
+    f1 = tmp_path / "in.jsonl"
+    f1.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in _rows(
+        "unique alpha row", "unique beta row", "unique alpha row")) + "\n",
+        encoding="utf-8")
+    # --out aliases the input; the exact dup collapses to 2 and the file survives.
+    dedup_data(inputs=[str(f1)], config=None, out=str(f1),
+               method=None, threshold=None, exact_only=False)
+    kept = [json.loads(ln) for ln in f1.read_text().splitlines() if ln.strip()]
+    assert len(kept) == 2
+
+
 # ── Backward compatibility: default path is unchanged ─────────────────────────
 
 def test_default_method_is_sliding_and_matches_legacy():

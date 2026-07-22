@@ -168,12 +168,29 @@ def dedup_data(
         with open(src) as fh:
             total_in += sum(1 for ln in fh if ln.strip())
 
+    # Write to a sibling temp file and atomically replace the destination only on
+    # success. This means (a) an --out that aliases an input is never truncated
+    # before its rows are read, and (b) a malformed line mid-stream aborts without
+    # leaving a partial file that a downstream job could mistake for a result.
+    import os
+    import tempfile
+
     kept = 0
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as fh:
-        for row in global_dedup(sources, cfg):
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            kept += 1
+    out_dir = Path(out_path).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(out_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            for row in global_dedup(sources, cfg):
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                kept += 1
+        os.replace(tmp_name, out_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     removed = total_in - kept
     typer.echo(f"\n─── cross-file dedup: {len(sources)} file(s) ───")
     typer.echo(f"  in={total_in}  kept={kept}  removed={removed} "
