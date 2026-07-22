@@ -179,7 +179,14 @@ class ScriptRunner:
         status = "passed"
         error_type = None
         error_message = None
-        
+
+        # On POSIX, put the child in its own process group so that killing it on
+        # timeout (os.killpg in _kill_process_tree) only reaps the child and its
+        # descendants — never the suite runner itself or sibling scripts.
+        popen_kwargs = {}
+        if os.name != "nt":
+            popen_kwargs["start_new_session"] = True
+
         try:
             if self.stream_output and on_output:
                 # Stream output in real-time
@@ -193,6 +200,7 @@ class ScriptRunner:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    **popen_kwargs,
                 )
                 
                 import selectors
@@ -250,6 +258,7 @@ class ScriptRunner:
                     errors="replace",
                     env=env,
                     cwd=cwd,
+                    **popen_kwargs,
                 )
                 try:
                     stdout, stderr = process.communicate(timeout=timeout)

@@ -21,6 +21,26 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _run_sync(coro):
+    """Run a coroutine to completion from sync code without a wrapper dependency.
+
+    ``praisonai-code`` is a Tier-2 package and must not import the ``praisonai``
+    wrapper at the hot path (C7 gate / ARCHITECTURE §2). When no event loop is
+    running we use ``asyncio.run``; when one is already running (e.g. called from
+    within async agent execution) we offload to a worker thread so we never try
+    to nest ``asyncio.run`` on a live loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 def _sanitize_filepath(filepath: str, workspace: Optional[str] = None) -> str:
     """Validate and sanitize a filepath against injection attacks.
     
@@ -110,9 +130,9 @@ def create_agent_centric_tools(
     if orchestrator is None:
         orchestrator = ActionOrchestrator(runtime)
     
-    # Helper to run async functions synchronously using the shared bridge
-    from praisonai._async_bridge import run_sync
-    
+    # Async→sync bridge (module-local; no wrapper dependency — see C7 gate).
+    run_sync = _run_sync
+
     # =========================================================================
     # ACP-Powered File Tools
     # =========================================================================
@@ -329,6 +349,12 @@ def create_agent_centric_tools(
                 })
             
             plan = result.plan
+            
+            # Forward the requested working directory into the command step so
+            # the orchestrator runs it there (relative to the workspace) instead
+            # of always at the workspace root.
+            if cwd and plan.steps:
+                plan.steps[0].params["cwd"] = cwd
             
             # Commands require approval
             auto_approve = runtime.config.approval_mode == "auto"
