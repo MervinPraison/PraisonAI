@@ -128,6 +128,59 @@ def generate_data(
         raise typer.Exit(1)
 
 
+@app.command("dedup")
+def dedup_data(
+    inputs: list[str] = typer.Argument(None, help="Input JSONL file(s) to dedup across"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="YAML config"),
+    out: Optional[str] = typer.Option(None, "--out", "-o", help="Write deduped JSONL here"),
+    method: Optional[str] = typer.Option(None, "--method", help="near-dup engine: minhash|sliding"),
+    threshold: Optional[float] = typer.Option(None, "--threshold", help="near-dup Jaccard (0-1)"),
+    exact_only: bool = typer.Option(False, "--exact-only", help="Skip near-dup, exact only"),
+):
+    """Deduplicate rows ACROSS many batch files with one shared MinHash+LSH index.
+
+    Unlike ``validate`` (per-file), this removes duplicates that span files — the
+    common case when merging parallel/incremental generation batches.
+
+    Example: praisonai-train dedup batch_*.jsonl --out merged.jsonl
+             praisonai-train dedup --config dedup.yaml
+    """
+    from praisonai_train.data import global_dedup
+
+    cfg = _load_cfg(config)
+    if method is not None:
+        cfg["near_dup_method"] = method
+    if threshold is not None:
+        cfg["near_dup_jaccard"] = threshold
+    if exact_only:
+        cfg["near_dup"] = False
+    sources = list(inputs) if inputs else (cfg.get("inputs") or ([cfg["input"]] if cfg.get("input") else []))
+    if not sources:
+        typer.echo("error: provide input JSONL path(s) or 'inputs'/'input' in config", err=True)
+        raise typer.Exit(1)
+    out_path = out or cfg.get("output")
+    if not out_path:
+        typer.echo("error: provide --out or 'output' in config", err=True)
+        raise typer.Exit(1)
+
+    total_in = 0
+    for src in sources:
+        with open(src) as fh:
+            total_in += sum(1 for ln in fh if ln.strip())
+
+    kept = 0
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as fh:
+        for row in global_dedup(sources, cfg):
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            kept += 1
+    removed = total_in - kept
+    typer.echo(f"\n─── cross-file dedup: {len(sources)} file(s) ───")
+    typer.echo(f"  in={total_in}  kept={kept}  removed={removed} "
+               f"({100 * removed / max(total_in, 1):.1f}% dup)")
+    typer.echo(f"  wrote {kept} unique rows -> {out_path}")
+
+
 @app.command("validate")
 def validate_data(
     dataset: Optional[str] = typer.Argument(None, help="Dataset JSONL to validate"),
