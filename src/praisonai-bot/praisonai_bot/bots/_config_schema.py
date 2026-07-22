@@ -559,6 +559,11 @@ class GatewayServerSchema(BaseModel):
     reload_drain_timeout: Optional[float] = Field(None, ge=0)
     # Single-switch reliability preset (#2531)
     reliability: Optional[str] = None
+    # Close-the-loop on permanently-undelivered replies (#3297). Opt-in; when
+    # enabled a permanent delivery failure fires MESSAGE_UNDELIVERED and
+    # best-effort sends a short plain-text notice on the same channel.
+    notify_on_undelivered: Optional[bool] = None
+    undelivered_template: Optional[str] = None
     # Additive protocol surfaces (#2715), liveness (#2798), health monitor
     api: Optional[Dict[str, Any]] = None
     liveness: Optional[Dict[str, Any]] = None

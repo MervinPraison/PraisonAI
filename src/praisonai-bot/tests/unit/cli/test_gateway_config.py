@@ -219,6 +219,71 @@ def test_gateway_server_block_accepts_full_valid_config():
     print("✓ Full valid gateway block validates and stays dict-accessible")
 
 
+def test_gateway_block_accepts_and_propagates_undelivered_opt_in():
+    """``gateway.notify_on_undelivered``/``undelivered_template`` load end-to-end (#3297).
+
+    Regression: the schema forbids unknown keys, and the core ``GatewayConfig``
+    dataclass deliberately does not carry these knobs, so an operator enabling
+    the documented opt-in previously hit a validation error (or a silent no-op)
+    and the delivery router never saw the setting. This guards both seams:
+      1. ``GatewayConfigSchema`` accepts the two keys.
+      2. ``WebSocketGateway.start_with_config`` stamps them onto ``self.config``
+         so the router (which reads them via ``getattr``) actually turns on.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return
+
+    import pytest
+
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    # 1. Schema accepts the opt-in keys instead of rejecting them.
+    cfg = GatewayConfigSchema(
+        agents={"assistant": {"name": "assistant", "instructions": "Help"}},
+        channels={"telegram": {"token": "fake-token"}},
+        gateway={
+            "notify_on_undelivered": True,
+            "undelivered_template": "Sorry, that reply could not be delivered.",
+        },
+    )
+    assert cfg.gateway["notify_on_undelivered"] is True
+    assert cfg.gateway["undelivered_template"].startswith("Sorry")
+
+    # 2. start_with_config propagates the block onto self.config so the router
+    #    (which reads them via getattr) actually turns on. Drive only the
+    #    config-application prologue by aborting once start_channels is reached.
+    import asyncio
+
+    from praisonai_bot.gateway.server import WebSocketGateway
+
+    class _StopEarly(Exception):
+        pass
+
+    gw = WebSocketGateway()
+    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
+        "channels": {"telegram": {"token": "fake-token"}},
+        "gateway": {
+            "notify_on_undelivered": True,
+            "undelivered_template": "Reply undelivered.",
+        },
+    }
+
+    async def _stop(*_a, **_k):
+        raise _StopEarly
+
+    gw.start_channels = _stop  # type: ignore[assignment]
+    gw.start = _stop  # type: ignore[assignment]
+
+    with pytest.raises(_StopEarly):
+        asyncio.run(gw.start_with_config("ignored.yaml"))
+
+    assert getattr(gw.config, "notify_on_undelivered", None) is True
+    assert getattr(gw.config, "undelivered_template", None) == "Reply undelivered."
+    print("✓ Undelivered opt-in loads via schema and reaches gateway config")
+
+
 def test_gateway_health_block_matches_runtime_consumer():
     """``gateway.health`` schema keys must match ``HealthMonitorConfig.from_dict``.
 
