@@ -325,8 +325,7 @@ Launch PraisonAI servers with unified discovery support.
                                 result = await agent.astart(query)
                             elif hasattr(agent, 'start'):
                                 import asyncio
-                                loop = asyncio.get_event_loop()
-                                result = await loop.run_in_executor(None, agent.start, query)
+                                result = await asyncio.to_thread(agent.start, query)
                             else:
                                 raise AttributeError(f"Agent {agent_name} has no start/astart method")
                             return {"response": str(result)}
@@ -337,19 +336,18 @@ Launch PraisonAI servers with unified discovery support.
                         # Fall back to crew-based approach if individual agent fails
                         pass
                 
-                # Fall back to crew-based approach for compatibility
-                from praisonai.agents_generator import AgentsGenerator
-                from praisonai.inc import LLMConfig
-                
-                # Create a minimal config_list for AgentsGenerator
-                config_list = [LLMConfig().to_dict()]
-                
-                generator = AgentsGenerator(
+                # Fall back to the native async wrapper entrypoint, which owns
+                # the generator's lifecycle (tool-timeout executor is closed) and
+                # runs off the event loop so concurrent requests are not blocked.
+                # Thread the request ``query`` through as the workflow input so
+                # the caller's prompt drives the run instead of being dropped;
+                # the YAML's static ``input`` is only used when no query is sent.
+                import praisonai
+                result = await praisonai.arun(
                     agent_file=config["file"],
                     framework="praisonai",
-                    config_list=config_list
+                    cli_config={"topic": query} if query else None,
                 )
-                result = generator.generate_crew_and_kickoff()
                 
                 return {"response": result}
             except Exception as e:
@@ -379,8 +377,7 @@ Launch PraisonAI servers with unified discovery support.
                                 result = await agent.astart(query)
                             elif hasattr(agent, 'start'):
                                 import asyncio
-                                loop = asyncio.get_event_loop()
-                                result = await loop.run_in_executor(None, agent.start, query)
+                                result = await asyncio.to_thread(agent.start, query)
                             else:
                                 raise AttributeError(f"Agent {agent_name} has no start/astart method")
                             return {"response": str(result)}

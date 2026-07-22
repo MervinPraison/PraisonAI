@@ -103,6 +103,43 @@ class AgentScheduler(_BaseAgentScheduler):
         self._total_cost = 0.0
         self._start_time = None
         self._stats_lock = threading.Lock()
+        # Instance-owned timeout pool with leak accounting, mirroring the
+        # AgentsGenerator tool-timeout pattern. A single pool is reused across
+        # retries/runs instead of allocating a fresh one per attempt; workers
+        # stuck on a timed-out task are counted, and the pool is recycled once
+        # half its workers have leaked so new runs aren't starved forever.
+        self._timeout_executor: Optional[ThreadPoolExecutor] = None
+        self._timeout_executor_lock = threading.Lock()
+        self._leaked_workers = 0
+        self._max_leaked_workers = 4
+
+    def _get_timeout_executor(self) -> ThreadPoolExecutor:
+        """Lazily create/reuse this scheduler's bounded timeout pool.
+
+        Recycles the pool once half its workers have leaked to stuck tasks so
+        subsequent runs get fresh workers instead of queuing behind dead ones.
+        """
+        with self._timeout_executor_lock:
+            if (
+                self._leaked_workers >= self._max_leaked_workers
+                and self._timeout_executor is not None
+            ):
+                self._timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._timeout_executor = None
+                self._leaked_workers = 0
+            if self._timeout_executor is None:
+                self._timeout_executor = ThreadPoolExecutor(
+                    max_workers=self._max_leaked_workers,
+                    thread_name_prefix=f"praisonai-scheduler-{id(self):x}",
+                )
+            return self._timeout_executor
+
+    def close(self) -> None:
+        """Release the owned timeout pool; safe to call repeatedly."""
+        with self._timeout_executor_lock:
+            if self._timeout_executor is not None:
+                self._timeout_executor.shutdown(wait=False, cancel_futures=True)
+                self._timeout_executor = None
         
     def start(
         self,
@@ -179,6 +216,8 @@ class AgentScheduler(_BaseAgentScheduler):
             self._thread.join(timeout=10)
             
         self.is_running = False
+        # Release the owned timeout pool so idle daemons don't retain workers.
+        self.close()
         logger.debug("Agent scheduler stopped")
         logger.debug(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
@@ -230,18 +269,26 @@ class AgentScheduler(_BaseAgentScheduler):
             try:
                 logger.debug(f"Attempt {attempt + 1}/{max_retries}")
                 
-                # Execute with timeout if specified
+                # Execute with timeout if specified, reusing the instance-owned
+                # pool. A worker stuck past the timeout cannot be cancelled once
+                # running, so it is accounted as leaked and the pool recycles
+                # once enough workers are stuck (see _get_timeout_executor).
                 if self.timeout:
-                    executor = ThreadPoolExecutor(max_workers=1)
+                    executor = self._get_timeout_executor()
                     future = executor.submit(self._executor.execute, self.task)
                     try:
                         result = future.result(timeout=self.timeout)
                     except FuturesTimeout as e:
-                        future.cancel()
-                        executor.shutdown(wait=False, cancel_futures=True)
+                        cancelled = future.cancel()
+                        if not cancelled:
+                            with self._timeout_executor_lock:
+                                self._leaked_workers += 1
+                            logger.warning(
+                                "Scheduler task exceeded %.1fs; worker may "
+                                "continue running in the background.",
+                                float(self.timeout),
+                            )
                         raise TimeoutError(f"Execution exceeded {self.timeout}s timeout") from e
-                    else:
-                        executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     result = self._executor.execute(self.task)
                 
@@ -280,10 +327,9 @@ class AgentScheduler(_BaseAgentScheduler):
                     
                 break
             
-            except TimeoutError as e:
-                logger.error(f"Execution timeout on attempt {attempt + 1}: {e}")
-                
             except Exception as e:
+                # Timeouts and generic failures share the same backoff path so a
+                # retry storm always honours a cooldown and stop() can preempt it.
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
