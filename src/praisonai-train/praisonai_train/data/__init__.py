@@ -6,12 +6,19 @@ Protocol-driven and extendable: recipes and QC checks self-register (see
 """
 from praisonai_train.data import checks as _checks  # noqa: F401  registers checks
 from praisonai_train.data import recipes as _recipes  # noqa: F401  registers recipes
+from praisonai_train.data.benchmark import BenchResult, benchmark_deployments
 from praisonai_train.data.generate import generate_dataset
 from praisonai_train.data.intent import translation_intent
 from praisonai_train.data.qc import filter_rows, score
 from praisonai_train.data.registry import checks, recipes
 
 __all__ = [
-    "generate_dataset", "score", "filter_rows", "recipes", "checks",
+    "BenchResult",
+    "benchmark_deployments",
+    "checks",
+    "filter_rows",
+    "generate_dataset",
+    "recipes",
+    "score",
     "translation_intent",
 ]

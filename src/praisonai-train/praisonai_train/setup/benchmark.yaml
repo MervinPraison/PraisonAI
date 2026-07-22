@@ -1,0 +1,27 @@
+# praisonai-train benchmark --config benchmark.yaml
+# Compare generation speed across OpenAI-compatible deployments.
+# Sends N identical requests to each at a fixed concurrency and ranks them by
+# throughput (rows/min). Endpoint/api_key default to the AZURE_OPENAI_* / OPENAI_*
+# environment if omitted here.
+
+deployments:                       # deployment/model names to compare (ranked fastest first)
+  - gpt-4o
+  - gpt-4o-mini
+# Cross-endpoint form: each target may override endpoint/api_key/azure/api_version
+# deployments:
+#   - {deployment: gpt-4o, azure: true}
+#   - {deployment: llama-3.1-70b, endpoint: https://my-host/v1, azure: false}
+
+n: 24                              # identical requests per deployment
+concurrency: 8                     # in-flight requests per deployment
+azure: true                        # true for Azure OpenAI; false for OpenAI-compatible
+api_version: "2024-10-21"          # Azure OpenAI api-version (ignored when azure: false)
+max_tokens: 2048                   # max_completion_tokens cap per request
+request_timeout: 180               # per-request timeout (seconds)
+
+recipe: tamil                      # the fixed prompt reuses this recipe's first prompt...
+# prompt:                          # ...or set an explicit identical prompt for every request
+#   system: "You generate concise answers."
+#   user: "Write one short factual paragraph about photosynthesis."
+
+output: bench_results.json         # optional: write the ranked results as JSON

@@ -21,25 +21,58 @@ from praisonai_train.data._util import norm as _norm_text
 from praisonai_train.data.recipes import resolve
 
 
-def _call(cfg: dict, spec: dict) -> dict | None:
+def resolve_cfg(config: dict) -> dict:
+    """Fill endpoint/api_key/azure defaults from the environment and validate.
+
+    Shared by generation and benchmarking so every call path resolves
+    credentials and the Azure-vs-OpenAI flag the same way. Returns a *copy*;
+    the input dict is never mutated. Raises ``ValueError`` if the endpoint,
+    api_key or deployment cannot be determined.
+    """
+    cfg = dict(config)
+    cfg.setdefault("endpoint", os.environ.get("AZURE_OPENAI_ENDPOINT",
+                                              os.environ.get("OPENAI_BASE_URL", "")))
+    cfg.setdefault("api_key", os.environ.get("AZURE_OPENAI_KEY",
+                                             os.environ.get("OPENAI_API_KEY", "")))
+    if "azure" not in cfg:
+        cfg["azure"] = bool(os.environ.get("AZURE_OPENAI_ENDPOINT")) or "openai.azure.com" in cfg["endpoint"]
+    if not (cfg["endpoint"] and cfg["api_key"] and cfg.get("deployment")):
+        raise ValueError("endpoint, api_key and deployment are required")
+    return cfg
+
+
+def build_chat_request(cfg: dict, messages: list[dict],
+                       json_mode: bool = True) -> "urllib.request.Request":
+    """Build a urllib chat-completion ``Request`` for any OpenAI-compatible endpoint.
+
+    Encapsulates the only vendor-specific bits — the Azure deployment URL +
+    ``api-key`` header vs the plain OpenAI ``/chat/completions`` URL + bearer
+    token + ``model`` field — so generation and benchmarking share one call
+    path and both work against Azure OpenAI or any OpenAI-compatible server.
+    """
     if cfg.get("azure"):
         url = (f"{cfg['endpoint'].rstrip('/')}/openai/deployments/{cfg['deployment']}"
                f"/chat/completions?api-version={cfg.get('api_version', '2024-10-21')}")
     else:
         url = f"{cfg['endpoint'].rstrip('/')}/chat/completions"
     body = {
-        "messages": [{"role": "system", "content": spec["system"]},
-                     {"role": "user", "content": spec["user"]}],
+        "messages": messages,
         "max_completion_tokens": cfg.get("max_completion_tokens", 2048),
-        "response_format": {"type": "json_object"},
     }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json"}
     if cfg.get("azure"):
         headers["api-key"] = cfg["api_key"]
     else:
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
         body["model"] = cfg["deployment"]
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+    return urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+
+
+def _call(cfg: dict, spec: dict) -> dict | None:
+    req = build_chat_request(cfg, [{"role": "system", "content": spec["system"]},
+                                   {"role": "user", "content": spec["user"]}])
     content = None
     timeout = cfg.get("request_timeout", 120)
     for attempt in range(2):
@@ -96,15 +129,7 @@ def generate_dataset(
     Keep it cheap — it runs on the hot path; throttle any printing inside the
     callback.
     """
-    cfg = dict(config)
-    cfg.setdefault("endpoint", os.environ.get("AZURE_OPENAI_ENDPOINT",
-                                              os.environ.get("OPENAI_BASE_URL", "")))
-    cfg.setdefault("api_key", os.environ.get("AZURE_OPENAI_KEY",
-                                             os.environ.get("OPENAI_API_KEY", "")))
-    if "azure" not in cfg:
-        cfg["azure"] = bool(os.environ.get("AZURE_OPENAI_ENDPOINT")) or "openai.azure.com" in cfg["endpoint"]
-    if not (cfg["endpoint"] and cfg["api_key"] and cfg.get("deployment")):
-        raise ValueError("endpoint, api_key and deployment are required")
+    cfg = resolve_cfg(config)
 
     recipe = resolve(cfg.get("recipe", "tamil"))
 
