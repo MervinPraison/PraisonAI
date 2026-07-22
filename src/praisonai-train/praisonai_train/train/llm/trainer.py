@@ -55,7 +55,12 @@ def formatting_prompts_func(examples, tokenizer):
     If the example has a "conversations" field, process it as ShareGPT-style.
     Otherwise, assume Alpaca-style data with "instruction", "input", and "output" fields.
     """
-    print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
+    # Per-batch prints fire on every mapped batch and drown the log; gate them behind
+    # PRAISON_DEBUG so normal runs stay readable (the run summary still prints).
+    # Parse as a boolean so PRAISON_DEBUG=0/false/no disable it (not just "unset").
+    _dbg = os.environ.get("PRAISON_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+    if _dbg:
+        print("DEBUG: formatting_prompts_func() received batch with keys:", list(examples.keys()))
     texts = []
     # Check if the example has a "conversations" field.
     if "conversations" in examples:
@@ -97,7 +102,7 @@ def formatting_prompts_func(examples, tokenizer):
             if isinstance(formatted, list):
                 formatted = formatted[0] if len(formatted) == 1 else "\n".join(formatted)
             texts.append(formatted)
-    if texts:
+    if texts and _dbg:
         print("DEBUG: Raw texts sample (first 200 chars):", texts[0][:200])
     return {"text": texts}
 
@@ -107,13 +112,15 @@ def formatting_prompts_func(examples, tokenizer):
 def tokenize_function(examples, hf_tokenizer, max_length):
     """
     Tokenizes a batch of text prompts with padding and truncation enabled.
+
+    Kept as a public helper (re-exported by ``praisonai.train``) even though the
+    training path no longer calls it (modern TRL tokenizes internally).
     """
     flat_texts = []
     for t in examples["text"]:
         if isinstance(t, list):
             t = t[0] if len(t) == 1 else " ".join(t)
         flat_texts.append(t)
-    print("DEBUG: Tokenizing a batch of size:", len(flat_texts))
     tokenized = hf_tokenizer(
         flat_texts,
         padding="max_length",
@@ -121,10 +128,7 @@ def tokenize_function(examples, hf_tokenizer, max_length):
         max_length=max_length,
         return_tensors="pt",
     )
-    tokenized = {key: value.tolist() for key, value in tokenized.items()}
-    sample_key = list(tokenized.keys())[0]
-    print("DEBUG: Tokenized sample (first 10 tokens of", sample_key, "):", tokenized[sample_key][0][:10])
-    return tokenized
+    return {key: value.tolist() for key, value in tokenized.items()}
 
 #####################################
 # Main Training Class
@@ -423,16 +427,6 @@ class TrainModel:
                 "All examples formatted to empty text — check dataset schema / chat_template.")
         return dataset
 
-    def tokenize_dataset(self, dataset):
-        print("DEBUG: Tokenizing the entire dataset...")
-        tokenized_dataset = dataset.map(
-            lambda examples: tokenize_function(examples, self.hf_tokenizer, self.config["max_seq_length"]),
-            batched=True
-        )
-        tokenized_dataset = tokenized_dataset.remove_columns(["text"])
-        print("DEBUG: Tokenized dataset sample keys:", tokenized_dataset[0].keys())
-        return tokenized_dataset
-
     def load_datasets(self):
         datasets = []
         for dataset_info in self.config["dataset"]:
@@ -491,6 +485,10 @@ class TrainModel:
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
+        # When both epochs and max_steps are set, max_steps silently wins — say so.
+        if self.config.get("num_train_epochs") and self.config.get("max_steps"):
+            print(f"DEBUG: both num_train_epochs and max_steps set; using "
+                  f"max_steps={sft_params['max_steps']} (num_train_epochs ignored).")
 
         # --- Checkpointing (mid-run saves so a long/interrupted run isn't lost) ---
         save_strategy = self.config.get(
@@ -519,11 +517,21 @@ class TrainModel:
                     "metric_for_best_model", "eval_loss")
                 sft_params["greater_is_better"] = self._flag(
                     self.config.get("greater_is_better"), default=False)
-                # load_best_model_at_end requires save/eval strategies to match.
+                # load_best_model_at_end requires save_strategy == eval_strategy AND
+                # (for steps) save_steps to be a multiple of eval_steps. Reconcile
+                # both so a valid-looking config can't crash the trainer.
                 if sft_params.get("save_strategy", "no") != eval_strategy:
                     sft_params["save_strategy"] = eval_strategy
                     if eval_strategy == "steps":
                         sft_params["save_steps"] = sft_params["eval_steps"]
+                if eval_strategy == "steps" and sft_params.get("save_steps"):
+                    ss, es = int(sft_params["save_steps"]), int(sft_params["eval_steps"])
+                    if ss % es != 0:
+                        # Align eval to the checkpoint cadence (preserves the user's
+                        # checkpoint frequency, which matters most for crash recovery).
+                        print(f"WARNING: load_best_model_at_end needs save_steps a multiple "
+                              f"of eval_steps; setting eval_steps={ss} to match save_steps.")
+                        sft_params["eval_steps"] = ss
 
         # --- Extra optimization / DDP / hub knobs (only when set) ---
         if self.config.get("max_grad_norm") is not None:
@@ -611,6 +619,28 @@ class TrainModel:
             raise ValueError("config 'training_arguments' must be a mapping of SFTConfig fields.")
         sft_params.update(passthrough)  # user-supplied wins
 
+        # Final safety net: the passthrough escape hatch can enable/override
+        # load_best_model_at_end (or the step cadence) after the blocks above ran, so
+        # re-check the Trainer's invariant here — save_strategy must equal eval_strategy
+        # and (for steps) save_steps must be a multiple of eval_steps — no matter which
+        # path turned load_best_model_at_end on.
+        if sft_params.get("load_best_model_at_end"):
+            eval_strategy = sft_params.get("eval_strategy", "epoch")
+            sft_params["eval_strategy"] = eval_strategy
+            if sft_params.get("save_strategy", "no") != eval_strategy:
+                sft_params["save_strategy"] = eval_strategy
+            if eval_strategy == "steps":
+                es = int(sft_params.get("eval_steps", 100))
+                ss = int(sft_params.get("save_steps", es))
+                if ss % es != 0:
+                    # Align eval to the checkpoint cadence (preserves the user's
+                    # checkpoint frequency, which matters most for crash recovery).
+                    print(f"WARNING: load_best_model_at_end needs save_steps a multiple "
+                          f"of eval_steps; setting eval_steps={ss} to match save_steps.")
+                    es = ss
+                sft_params["save_steps"] = ss
+                sft_params["eval_steps"] = es
+
         # Drop any field the installed TRL/Transformers SFTConfig doesn't accept, so
         # version differences (e.g. save_safetensors/group_by_length come and go) warn
         # instead of crashing the run.
@@ -650,10 +680,39 @@ class TrainModel:
             f"  Checkpoints: {ckpt_str}  ·  Output: {final_dir}/\n"
             "─────────────────────────────────────────\n"
         )
-        # Resume from a checkpoint (True = latest in output_dir, or an explicit path).
+        # Resume from a checkpoint. Accepts:
+        #   true  -> auto-resume from the latest checkpoint in output_dir (crash-safe:
+        #            if none exists yet, start fresh instead of erroring)
+        #   a path -> resume from that specific checkpoint
+        #   false -> fresh run
+        # This makes recovery trivial: after any crash (OOM, GPU reclaim), just relaunch
+        # the SAME command and training continues from the last saved step.
         resume = self.config.get("resume_from_checkpoint", False)
-        if isinstance(resume, str) and resume.strip().lower() in ("true", "false"):
+        # Normalize every boolean spelling _flag accepts (true/false/1/0/yes/no/on/off)
+        # BEFORE treating a string as an explicit checkpoint path — so "1"/"yes" mean
+        # "auto-resume", not a literal directory named "1".
+        if isinstance(resume, str) and resume.strip().lower() in (
+            "true", "false", "1", "0", "yes", "no", "on", "off"
+        ):
             resume = self._flag(resume)
+        if resume is True:
+            import glob
+            # Only real checkpoint dirs with a numeric suffix qualify — stray files or
+            # dirs like "checkpoint-backup"/"checkpoint-incomplete" must not make the
+            # auto-resume path fire (or crash the int() parse below).
+            ckpts = [
+                p for p in glob.glob(os.path.join(sft_params["output_dir"], "checkpoint-*"))
+                if os.path.isdir(p) and p.rsplit("-", 1)[-1].isdigit()
+            ]
+            if ckpts:
+                latest = max(ckpts, key=lambda p: int(p.rsplit("-", 1)[-1]))
+                # Pass the validated path directly rather than leaving resume=True and
+                # letting the trainer redo (and possibly mis-parse) its own discovery.
+                resume = latest
+                print(f"DEBUG: auto-resume from latest checkpoint: {latest}")
+            else:
+                print("DEBUG: resume_from_checkpoint=true but no checkpoint yet; starting fresh.")
+                resume = False
         print("DEBUG: Beginning trainer.train() ...")
         trainer.train(resume_from_checkpoint=resume if resume else None)
         # Under DDP only rank 0 writes the final adapter (avoid a write race).
@@ -716,7 +775,7 @@ class TrainModel:
         self.model.push_to_hub_gguf(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            quantization_method=self.config["quantization_method"],
+            quantization_method=self.config.get("quantization_method", "q4_k_m"),
             token=os.getenv("HF_TOKEN")
         )
 
@@ -724,7 +783,7 @@ class TrainModel:
         self.model.save_pretrained_gguf(
             self.config["hf_model_name"],
             self.hf_tokenizer,
-            quantization_method="q4_k_m"
+            quantization_method=self.config.get("quantization_method", "q4_k_m"),
         )
 
     def prepare_modelfile_content(self):
