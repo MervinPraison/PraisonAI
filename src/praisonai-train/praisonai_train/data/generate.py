@@ -99,8 +99,58 @@ def _call(cfg: dict, spec: dict) -> dict | None:
                 return None
     if not isinstance(row, dict) or not (row.get("instruction") and row.get("output")):
         return None
-    return {"instruction": row["instruction"], "input": row.get("input", ""),
-            "output": row["output"]}
+    out = {"instruction": row["instruction"], "input": row.get("input", ""),
+           "output": row["output"]}
+    # Per-row provenance: which model + category produced this row, so the dataset
+    # is self-describing (downstream splits/QC key off metadata, not text). Additive
+    # and backward-compatible — a key is added only when its value is available.
+    if cfg.get("deployment"):
+        out["model"] = cfg["deployment"]
+    if spec.get("task_type"):
+        out["task_type"] = spec["task_type"]
+    if spec.get("topic"):
+        out["topic"] = spec["topic"]
+    return out
+
+
+def azure_sponsorship_guard(
+    subscription_id: str, quota_id: str = "Sponsored_2016-01-01"
+) -> Callable[[], bool]:
+    """Build a ``should_continue`` predicate that is True while an Azure subscription
+    still reads as sponsored (``subscriptionPolicies.quotaId == quota_id``).
+
+    Fail-OPEN: any transient error (CLI missing, network blip, unparseable output)
+    returns True. This is a belt-and-suspenders guard against runaway spend once a
+    sponsorship converts to pay-as-you-go — an external watchdog is the hard,
+    fail-closed guard; this one must never halt a healthy run on a flaky check.
+    """
+    def _check() -> bool:
+        import subprocess
+        try:
+            out = subprocess.run(
+                ["az", "rest", "--method", "GET", "--url",
+                 f"https://management.azure.com/subscriptions/{subscription_id}"
+                 "?api-version=2022-12-01"],
+                capture_output=True, text=True, timeout=10).stdout
+            return json.loads(out)["subscriptionPolicies"]["quotaId"] == quota_id
+        except Exception:
+            return True
+
+    return _check
+
+
+def _resolve_guard(cfg: dict,
+                   should_continue: Callable[[], bool] | None) -> Callable[[], bool] | None:
+    """Pick the continuation guard: an explicit ``should_continue`` callback wins;
+    otherwise fall back to the built-in Azure sponsorship check when a subscription
+    id is supplied (``cfg['subscription_id']`` or env ``AZ_SUBSCRIPTION``). Returns
+    ``None`` when neither is configured (no guard)."""
+    if should_continue is not None:
+        return should_continue
+    sub = cfg.get("subscription_id") or os.environ.get("AZ_SUBSCRIPTION")
+    if sub:
+        return azure_sponsorship_guard(sub)
+    return None
 
 
 def _norm_row(row: dict) -> str:
@@ -111,13 +161,24 @@ def generate_dataset(
     config: dict,
     on_row: Callable[[dict], None] | None = None,
     progress_callback: Callable[[int, int, int], None] | None = None,
+    should_continue: Callable[[], bool] | None = None,
 ) -> Iterator[dict]:
     """Yield unique synthetic rows.
 
     Required config: deployment, num_examples (+ endpoint/api_key or env).
     Optional: recipe (name|dict, default 'tamil'), concurrency, start_offset,
     dedup_from (rows or JSONL paths), stop_file, azure (bool), api_version,
-    max_completion_tokens.
+    max_completion_tokens, subscription_id, sponsor_check_rows.
+
+    ``should_continue`` is an optional guard ``fn() -> bool`` re-checked every
+    ``config['sponsor_check_rows']`` completed requests (default 5000). When it
+    returns False the run halts cleanly — the stop-file is touched, pending futures
+    are cancelled and the loop breaks — the same shutdown path as the stop-file
+    circuit-breaker. If omitted but ``config['subscription_id']`` (or env
+    ``AZ_SUBSCRIPTION``) is set, the built-in Azure sponsorship guard is used
+    (see ``azure_sponsorship_guard``); with neither, generation is unguarded. The
+    guard should fail-OPEN (return True on transient errors) — an external watchdog
+    is the hard fail-closed guard; this in-loop check is belt-and-suspenders.
 
     ``progress_callback`` is an optional ``fn(done, total, kept)`` invoked as work
     completes so a CLI/monitor/notebook can show completion + remaining. ``done``
@@ -141,6 +202,11 @@ def generate_dataset(
             seen.add(_norm_row(r))
 
     stop_file = cfg.get("stop_file") or os.path.expanduser("~/.praisonai_train_stop")
+    guard = _resolve_guard(cfg, should_continue)
+    # Guard against a misconfigured interval: 0 would divide-by-zero and a
+    # negative value would silently never poll (disabling the safety check).
+    _interval = cfg.get("sponsor_check_rows")
+    check_every = max(1, int(_interval)) if _interval is not None else 5000
     specs = recipe.prompts(cfg["num_examples"], start=cfg.get("start_offset", 0))
     total = len(specs)
     done = kept = 0
@@ -157,6 +223,8 @@ def generate_dataset(
             except Exception:
                 row = None
             done += 1
+            # Emit the just-completed row first so a paid, already-finished request
+            # is never dropped by the guard/shutdown that may follow this iteration.
             emit = False
             if row:
                 key = _norm_row(row)
@@ -170,3 +238,13 @@ def generate_dataset(
                 yield row
             if progress_callback:
                 progress_callback(done, total, kept)
+            # In-loop continuation guard (billing/sponsorship self-check): every
+            # ``check_every`` completions, if the predicate says stop, halt cleanly
+            # via the same shutdown path as the stop-file breaker.
+            if guard is not None and done % check_every == 0 and not guard():
+                try:
+                    open(stop_file, "w").close()
+                except Exception:
+                    pass
+                pool.shutdown(wait=False, cancel_futures=True)
+                break
