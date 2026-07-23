@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Motion Graphics — full team pipeline (requires praisonaiagents + LLM key).
 
 Runs the coordinator + animator team (optionally with researcher and

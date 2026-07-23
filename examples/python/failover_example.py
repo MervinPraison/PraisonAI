@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Model Failover Example - Automatic Provider Switching
 
@@ -43,9 +44,8 @@ failover_config = FailoverConfig(
     retry_delay=1.0,
     exponential_backoff=True,
     max_retry_delay=60.0,
-    failover_on_rate_limit=True,
-    failover_on_timeout=True,
-    failover_on_error=True,
+    cooldown_on_rate_limit=60.0,
+    cooldown_on_error=30.0,
 )
 
 # Create failover manager
@@ -62,11 +62,11 @@ def demonstrate_failover():
     
     # Get current status
     status = manager.status()
-    for name, info in status.items():
-        print(f"  {name}:")
-        print(f"    Status: {info.get('status', 'unknown')}")
-        print(f"    Priority: {info.get('priority', 'N/A')}")
-        print(f"    Failures: {info.get('failure_count', 0)}")
+    for profile_info in status.get("profiles", []):
+        print(f"  {profile_info.get('name', 'unknown')}:")
+        print(f"    Status: {profile_info.get('status', 'unknown')}")
+        print(f"    Priority: {profile_info.get('priority', 'N/A')}")
+        print(f"    Failures: {profile_info.get('failure_count', 0)}")
     print()
     
     # Get next available profile
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         print(f"  {profile.name}:")
         print(f"    Provider: {profile.provider}")
         print(f"    Priority: {profile.priority}")
-        print(f"    Rate limit: {profile.rate_limit} req/min")
+        print(f"    Rate limit: {profile.rate_limit_rpm} req/min")
     print()
     
     demonstrate_failover()

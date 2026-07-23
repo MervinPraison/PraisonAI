@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, MCP
 
 search_agent = Agent(

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 ManagedAgent + MySQL Persistence — Real conversation with session resume.

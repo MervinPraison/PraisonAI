@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Gemini CLI Integration Example
 

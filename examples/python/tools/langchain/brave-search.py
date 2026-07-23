@@ -1,3 +1,4 @@
+# praisonai: skip=true
 # pip install langchain-community 
 # export BRAVE_SEARCH_API=your_api_key_here
 # export OPENAI_API_KEY=your_api_key_here

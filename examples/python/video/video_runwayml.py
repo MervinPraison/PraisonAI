@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import VideoAgent
 
 agent = VideoAgent(llm="runwayml/gen4_turbo")

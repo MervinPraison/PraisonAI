@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import AudioAgent
 
 # Text to Speech

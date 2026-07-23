@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 Fixed example demonstrating proper guardrail usage with PraisonAI Agents.

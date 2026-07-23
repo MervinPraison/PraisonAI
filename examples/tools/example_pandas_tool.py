@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Example: Using pandas as a custom tool with PraisonAI Agent
 

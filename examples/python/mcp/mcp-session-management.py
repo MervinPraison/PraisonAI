@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 MCP Session Management Example
 

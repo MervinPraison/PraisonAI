@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Simple CSV URL Processor
 

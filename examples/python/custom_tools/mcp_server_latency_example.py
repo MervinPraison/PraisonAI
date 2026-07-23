@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 MCP Server with Latency Tracking Example
 

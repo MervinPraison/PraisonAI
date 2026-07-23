@@ -80,7 +80,7 @@ def collect_live_metrics():
         current_time = time.time()
         
         # Collect current performance data
-        current_stats = performance_monitor.get_function_performance()
+        current_stats = get_function_stats()
         api_stats = performance_monitor.get_api_call_performance()
         
         # Calculate streaming metrics
@@ -232,7 +232,7 @@ def main():
     
     # Performance trend analysis
     print("\n📈 Performance Trends:")
-    recent_performance = performance_monitor.get_function_performance()
+    recent_performance = get_function_stats()
     total_functions = len(recent_performance)
     total_calls = sum(data['call_count'] for data in recent_performance.values())
     

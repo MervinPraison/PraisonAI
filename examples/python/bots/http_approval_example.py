@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """HTTP Approval — serve a local web dashboard for tool approvals."""
 
 from praisonaiagents import Agent

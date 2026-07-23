@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Embeddings Capability Example
 

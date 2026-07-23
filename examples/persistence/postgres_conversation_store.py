@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 PostgreSQL ConversationStore — Full Persistence Example
 

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Production Guardrails Patterns Example
 

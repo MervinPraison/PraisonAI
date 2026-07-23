@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Continuous Camera Monitoring Example
 

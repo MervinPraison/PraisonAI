@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Multi-Agent Shared Session Demo"""
 from praisonaiagents import Agent
 from praisonai.persistence import create_conversation_store

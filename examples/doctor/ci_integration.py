@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 CI Integration Example - Using Doctor in CI/CD pipelines

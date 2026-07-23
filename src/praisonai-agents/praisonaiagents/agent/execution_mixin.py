@@ -1472,6 +1472,7 @@ Write the complete compiled report:"""
             print("pip install 'praisonaiagents[api]'")
             return None
                 
+        should_start = False
         with _server_lock:
             # Initialize port-specific collections if needed
             if port not in _registered_agents:
@@ -1667,9 +1668,10 @@ Write the complete compiled report:"""
                     return f"Error executing task: {str(e)}"
 
             # Create and run MCP server
-            transport = SseServerTransport(f"{path}/sse")
+            base_path = (path or "/mcp").rstrip("/") or "/mcp"
+            transport = SseServerTransport(f"{base_path}/sse")
             starlette_app = Starlette(
-                routes=[Mount(f"{path}", mcp.create_app())]
+                routes=[Mount(base_path, mcp.create_app())]
             )
 
             def run_mcp_server():

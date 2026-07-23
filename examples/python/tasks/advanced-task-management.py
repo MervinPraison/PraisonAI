@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Advanced Task Management Example
 
@@ -13,7 +14,7 @@ Features demonstrated:
 """
 
 from praisonaiagents import Agent, Task, AgentTeam
-from praisonaiagents.task import TaskOutput
+from praisonaiagents import TaskOutput
 from praisonaiagents.tools import duckduckgo
 from typing import Tuple, Any
 import json

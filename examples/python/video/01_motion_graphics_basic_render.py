@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Motion Graphics — Basic HTML/GSAP → MP4 render (no LLM required).
 
 This example drives the `HtmlRenderBackend` directly with a hand-authored

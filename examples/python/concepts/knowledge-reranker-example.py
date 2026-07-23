@@ -10,6 +10,18 @@ import os
 from praisonaiagents import Agent
 from praisonaiagents.knowledge import Knowledge
 
+
+def _result_items(results):
+    items = results.results if hasattr(results, "results") else results
+    return list(items)[:3]
+
+
+def _result_text(result):
+    if isinstance(result, dict):
+        return result.get("memory", result.get("text", str(result)))
+    return getattr(result, "text", None) or getattr(result, "memory", None) or str(result)
+
+
 def main():
     """
     Demonstrates knowledge search with and without reranking.
@@ -82,9 +94,9 @@ def main():
     basic_results = basic_knowledge.search(query, rerank=False)
     print(f"Query: {query}")
     print(f"Results (limit=3):")
-    for i, result in enumerate(basic_results[:3]):
-        text = result.get('memory', result.get('text', str(result)))
-        score = result.get('score', 'N/A')
+    for i, result in enumerate(_result_items(basic_results)):
+        text = _result_text(result)
+        score = result.get('score', 'N/A') if isinstance(result, dict) else getattr(result, 'score', 'N/A')
         print(f"  {i+1}. Score: {score}")
         print(f"     Text: {text[:100]}...")
         print()
@@ -94,9 +106,9 @@ def main():
     rerank_results = basic_knowledge.search(query, rerank=True)
     print(f"Query: {query}")
     print(f"Results (limit=3):")
-    for i, result in enumerate(rerank_results[:3]):
-        text = result.get('memory', result.get('text', str(result)))
-        score = result.get('score', 'N/A')
+    for i, result in enumerate(_result_items(rerank_results)):
+        text = _result_text(result)
+        score = result.get('score', 'N/A') if isinstance(result, dict) else getattr(result, 'score', 'N/A')
         print(f"  {i+1}. Score: {score}")
         print(f"     Text: {text[:100]}...")
         print()
@@ -106,9 +118,9 @@ def main():
     default_results = rerank_knowledge.search(query)  # Will use default_rerank=True
     print(f"Query: {query}")
     print(f"Results (limit=3):")
-    for i, result in enumerate(default_results[:3]):
-        text = result.get('memory', result.get('text', str(result)))
-        score = result.get('score', 'N/A')
+    for i, result in enumerate(_result_items(default_results)):
+        text = _result_text(result)
+        score = result.get('score', 'N/A') if isinstance(result, dict) else getattr(result, 'score', 'N/A')
         print(f"  {i+1}. Score: {score}")
         print(f"     Text: {text[:100]}...")
         print()
@@ -125,9 +137,9 @@ def main():
     )
     print(f"Query: {query}")
     print(f"Advanced results with keyword_search=True, filter_memories=True:")
-    for i, result in enumerate(advanced_results[:3]):
-        text = result.get('memory', result.get('text', str(result)))
-        score = result.get('score', 'N/A')
+    for i, result in enumerate(_result_items(advanced_results)):
+        text = _result_text(result)
+        score = result.get('score', 'N/A') if isinstance(result, dict) else getattr(result, 'score', 'N/A')
         print(f"  {i+1}. Score: {score}")
         print(f"     Text: {text[:100]}...")
         print()

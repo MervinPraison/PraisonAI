@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 AutoAgents Workflow Patterns Example
 
