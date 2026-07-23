@@ -62,7 +62,13 @@ def neutralize_untrusted_text(value: object, *, max_chars: int = 240) -> str:
     A well-behaved value (``"Bob"``, ``"Alice \U0001F642"``) renders
     byte-identically, so normal UX is unchanged.
     """
-    text = str(value).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+    text = str(value)
+    # Collapse every newline-like separator to a space, including the Unicode
+    # ones (U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, U+0085 NEL) that
+    # render as line breaks in many markdown/terminal/UI contexts but sit above
+    # the ``ch >= " "`` control-char filter below.
+    for sep in ("\r\n", "\r", "\n", "\u2028", "\u2029", "\u0085"):
+        text = text.replace(sep, " ")
     text = "".join(ch if ch >= " " or ch == "\t" else " " for ch in text)
     text = " ".join(text.split())
     if max_chars and len(text) > max_chars:
@@ -293,10 +299,10 @@ def clear_gateway_loop() -> None:
 
 
 __all__ = [
+    "neutralize_untrusted_text",
     "SessionContext",
     "Origin",
     "ReachableTarget",
-    "neutralize_untrusted_text",
     "set_session_context",
     "get_session_context",
     "clear_session_context",

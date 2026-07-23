@@ -36,7 +36,7 @@ class TestNeutralizeUntrustedText:
     def test_carriage_returns_collapsed(self):
         assert neutralize_untrusted_text("a\r\nb\rc") == "a b c"
 
-    def test_control_characters_stripped(self):
+    def test_control_chars_stripped(self):
         assert neutralize_untrusted_text("a\x00\x07b") == "a b"
 
     def test_repeated_whitespace_collapsed(self):
@@ -56,6 +56,9 @@ class TestNeutralizeUntrustedText:
     def test_non_string_input(self):
         assert neutralize_untrusted_text(None) == "None"
         assert neutralize_untrusted_text(123) == "123"
+
+    def test_empty_value(self):
+        assert neutralize_untrusted_text("") == ""
 
 
 class TestSetGet:

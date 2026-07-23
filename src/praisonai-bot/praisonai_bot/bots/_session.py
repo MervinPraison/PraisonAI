@@ -341,6 +341,12 @@ class BotSessionManager:
         ``{time}`` placeholders; an empty template or missing sender leaves
         the prompt unchanged. Best-effort — any formatting error falls back
         to the original prompt so a malformed template never breaks chat.
+
+        The ``sender`` is a third-party-controlled platform display name /
+        title, so it is neutralised (newlines collapsed, control chars
+        stripped, length-bounded) before interpolation so a hostile name
+        cannot masquerade as a fake system directive in the prompt the model
+        re-reads every turn (Issue #3313). A well-behaved name is unchanged.
         """
         if not self._attribution or not sender:
             return prompt
@@ -360,6 +366,11 @@ class BotSessionManager:
             _t = "".join(c if c >= " " or c == "\t" else " " for c in _t)
             _t = " ".join(_t.split())
             safe_sender = _t[:237] + "..." if len(_t) > 240 else _t
+        try:
+            from praisonaiagents.session.context import neutralize_untrusted_text
+            safe_sender = neutralize_untrusted_text(sender)
+        except Exception:  # pragma: no cover — never break chat over sanitising
+            safe_sender = str(sender).replace("\n", " ").replace("\r", " ")
         try:
             prefix = self._attribution.format(
                 sender=safe_sender,
