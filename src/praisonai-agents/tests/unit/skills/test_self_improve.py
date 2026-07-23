@@ -416,3 +416,33 @@ def test_schedule_self_improvement_uses_unique_job_ids(monkeypatch):
     # Both scoped to the session but distinct so neither replaces the other.
     assert all(jid.startswith("self-improve:sess:") for jid in job_ids)
     assert job_ids[0] != job_ids[1]
+
+
+def test_turn_tools_helpers_are_thread_safe():
+    """Issue #3307 Gap 2: concurrent record/drain must not lose tool names."""
+    import threading
+
+    agent = Agent(instructions="x", self_improve=True)
+    agent._reset_turn_tools()
+
+    errors = []
+
+    def worker():
+        try:
+            for _ in range(200):
+                agent._record_turn_tool("t")
+        except Exception as e:  # pragma: no cover - defensive
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    drained = agent._drain_turn_tools()
+    # 8 threads * 200 appends, none lost to unlocked list mutation.
+    assert len(drained) == 8 * 200
+    # Buffer is empty after draining.
+    assert agent._drain_turn_tools() == []

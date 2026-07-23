@@ -489,11 +489,7 @@ class ToolExecutionMixin:
         # can see what ran (issue #3037). Skipped during a guarded review turn
         # to avoid tracking the review's own tool calls or recursing.
         if not getattr(self, "_in_skill_review", False):
-            turn_tools = getattr(self, "_turn_tools_used", None)
-            if turn_tools is None:
-                self._turn_tools_used = []
-                turn_tools = self._turn_tools_used
-            turn_tools.append(function_name)
+            self._record_turn_tool(function_name)
 
         # Emit tool call start event (zero overhead when not set)
         _trace_emitter = get_context_emitter()
@@ -1132,8 +1128,9 @@ class ToolExecutionMixin:
         # tools_used, so without this the review policy always sees an empty
         # list and never runs. Consume the buffer so the next turn starts clean.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._reset_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
@@ -1189,8 +1186,9 @@ class ToolExecutionMixin:
         # Default tools_used from the per-turn buffer when the caller did not
         # pass it explicitly (issue #3037); mirrors the sync path.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._reset_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):

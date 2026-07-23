@@ -282,7 +282,20 @@ class MCP:
         agent.start("What is the stock price of Tesla?")
         ```
     """
-    
+
+    # Process-level registry of sanitized MCP server names that have been
+    # namespaced via with_tool_prefix(), mirroring how tools/registry.py tracks
+    # tool names. Lets skills' CapabilityValidator discover connected servers
+    # instead of always failing closed (issue #3307).
+    _active_server_names: set = set()
+    _active_server_names_lock = threading.Lock()
+
+    @classmethod
+    def list_active_server_names(cls) -> set:
+        """Return the set of sanitized names of MCP servers namespaced this run."""
+        with cls._active_server_names_lock:
+            return set(cls._active_server_names)
+
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
@@ -833,6 +846,14 @@ class MCP:
             )
 
         self._tool_prefix = sanitized
+
+        # Record this server in the process-level registry so skills'
+        # CapabilityValidator can discover it (issue #3307). Store both the
+        # original name and its sanitized form so a skill requirement matches
+        # regardless of which spelling it declares.
+        with type(self)._active_server_names_lock:
+            type(self)._active_server_names.add(prefix)
+            type(self)._active_server_names.add(sanitized)
 
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public
