@@ -217,6 +217,10 @@ class Plugin(ABC):
     def after_llm(self, response: str, usage: Dict[str, Any]) -> str:
         """Called after LLM call. Can modify response."""
         return response
+
+    def cli_backend_execute(self, context: Dict[str, Any]) -> None:
+        """Called after a CLI backend delegates a turn. Observe-only."""
+        pass
     
     def on_permission_ask(self, target: str, reason: str) -> Optional[bool]:
         """Called when permission is requested. Return True/False to auto-approve/deny."""

@@ -361,6 +361,30 @@ class GatewayStopInput(HookInput):
 
 
 @dataclass
+class CliBackendExecuteInput(HookInput):
+    """Input for CLI_BACKEND_EXECUTE hooks (agent delegated a turn to a CLI backend)."""
+    backend: str = ""
+    command: Optional[List[Any]] = None
+    content: Optional[str] = None
+    error: Optional[str] = None
+    transport: str = "subprocess"
+    praisonai_llm_http: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        from ..cli_backend.debug import redact_command
+        base = super().to_dict()
+        base.update({
+            "backend": self.backend,
+            "command": redact_command(self.command),
+            "content": self.content[:500] if self.content else None,
+            "error": self.error,
+            "transport": self.transport,
+            "praisonai_llm_http": self.praisonai_llm_http,
+        })
+        return base
+
+
+@dataclass
 class ScheduleTriggerInput(HookInput):
     """Input for SCHEDULE_TRIGGER hooks (a scheduled job fired)."""
     job_name: str = ""

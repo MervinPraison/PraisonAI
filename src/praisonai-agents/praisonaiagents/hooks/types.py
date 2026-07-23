@@ -70,6 +70,9 @@ class HookEvent(str, Enum):
     SCHEDULE_REMOVE = "schedule_remove"
     SCHEDULE_TRIGGER = "schedule_trigger"
 
+    # CLI backend delegation (subprocess, not LiteLLM HTTP)
+    CLI_BACKEND_EXECUTE = "cli_backend_execute"
+
     # Background job lifecycle
     JOB_COMPLETED = "job_completed"  # A background job finished (ok or error)
 
