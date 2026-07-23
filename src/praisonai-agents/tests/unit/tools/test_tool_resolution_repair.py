@@ -83,6 +83,23 @@ def test_argument_bind_failure_echoes_schema():
     assert "limit" in result["expected_parameters"]["optional"]
 
 
+def test_runtime_valueerror_omits_parameter_hint():
+    # A ValueError raised *inside* a successfully-bound tool (domain validation)
+    # must not be mislabelled as a parameter-binding problem, so no schema hint
+    # is echoed — the model should fix the value, not the argument names.
+    def web_search(query: str) -> str:
+        """Search the web."""
+        raise ValueError("query must not be empty")
+
+    agent = _make_agent([web_search])
+
+    result = agent._execute_tool_impl("web_search", {"query": ""})
+    assert isinstance(result, dict)
+    assert "query must not be empty" in result["error"]
+    assert "expected_parameters" not in result
+    assert "Expected parameters" not in result["error"]
+
+
 def test_unknown_tool_message_reaches_model_via_public_path():
     def web_search(query: str) -> str:
         """Search the web."""
@@ -156,3 +173,19 @@ def test_mcp_tool_name_repairs_case_and_separator():
 
     result = agent._execute_tool_impl("Read-File", {"path": "x"})
     assert result == "read_file:{'path': 'x'}"
+
+
+def test_available_active_tool_names():
+    def web_search(query: str) -> str:
+        """Search the web."""
+        return query
+
+    def calculate(a: int, b: int) -> int:
+        """Add numbers."""
+        return a + b
+
+    agent = _make_agent([web_search, calculate])
+
+    names = agent._available_active_tool_names()
+    assert "web_search" in names
+    assert "calculate" in names
