@@ -246,22 +246,11 @@ Launch PraisonAI servers with unified discovery support.
     
     def _create_agents_app(self, config: Dict[str, Any]) -> Any:
         """Create FastAPI app for agents."""
+        from contextlib import asynccontextmanager
+
         from fastapi import FastAPI, HTTPException, Request
         from fastapi.responses import JSONResponse
         from pydantic import BaseModel
-
-        # Refuse a non-localhost bind without an API key. POST /agents can drive
-        # YAML-defined tools (e.g. execute_command), so an unauthenticated public
-        # bind is an arbitrary-execution surface. Mirrors jobs/server.py policy.
-        host = config.get("host", self.DEFAULT_HOST)
-        api_key = config.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
-        config["api_key"] = api_key
-        if host not in _LOCALHOST_HOSTS and not api_key:
-            raise SystemExit(
-                "praisonai serve agents: --api-key (or PRAISONAI_SERVE_API_KEY) is "
-                "required when binding to a non-localhost host; POST /agents can "
-                "execute YAML-defined tools."
-            )
         
         from praisonai.endpoints.discovery import (
             create_discovery_document,
@@ -270,11 +259,28 @@ Launch PraisonAI servers with unified discovery support.
         )
         from praisonai.endpoints.server import add_discovery_routes
         
-        # Load agents from YAML
+        # Validate the agents YAML parses (file existence already checked in
+        # cmd_agents); the cached generator re-reads it at startup. Capture the
+        # YAML-declared framework so the cached generator honours it (crewai,
+        # autogen, ...) instead of being pinned to praisonai; None -> registry
+        # default, matching praisonai.run/arun.
         import yaml
         with open(config["file"]) as f:
-            agents_config = yaml.safe_load(f)
-        
+            _yaml_config = yaml.safe_load(f) or {}
+        yaml_framework = _yaml_config.get("framework")
+
+        # Security: POST /agents can drive YAML-defined tools (execute_command,
+        # write_file, ...) through the LLM tool-calling loop. Refuse to bind a
+        # non-localhost host without an API key, mirroring jobs/server.py.
+        host = config.get("host", self.DEFAULT_HOST)
+        api_key = config.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
+        if host not in _LOCALHOST_HOSTS and not api_key:
+            raise SystemExit(
+                "praisonai serve agents: --api-key (or PRAISONAI_SERVE_API_KEY) is "
+                "required when binding to a non-localhost host; POST /agents can "
+                "execute YAML-defined tools."
+            )
+
         # Create discovery document
         discovery = create_discovery_document(server_name="praisonai-agents")
         discovery.add_provider(ProviderInfo(
@@ -283,19 +289,12 @@ Launch PraisonAI servers with unified discovery support.
             description="Agent HTTP API endpoints",
             capabilities=["invoke", "health"],
         ))
-        
-        # Cache the *expensive* shared pieces once for the app's lifetime — the
-        # resolved framework adapter, the config list, the tool-timeout thread
-        # pool and the tool resolver — instead of rebuilding them (re-parsing
-        # YAML, re-resolving the framework registry and spawning a fresh
-        # 32-worker pool) on every request. Each request then builds a cheap
-        # per-request AgentsGenerator that *borrows* those shared resources and
-        # owns its own ``cli_config``, so requests never mutate shared instance
-        # state and can run concurrently without a run-length lock.
-        import asyncio as _asyncio
-        from contextlib import asynccontextmanager
 
-        agent_file = config["file"]
+        # Cache a single AgentsGenerator for the app's lifetime so every request
+        # reuses one YAML parse + framework resolution + tool-timeout pool instead
+        # of rebuilding them (and a fresh 32-worker pool) per call. A lock
+        # serialises the shared per-request cli_config mutation.
+        import asyncio
 
         @asynccontextmanager
         async def _agents_lifespan(app):
@@ -303,46 +302,27 @@ Launch PraisonAI servers with unified discovery support.
             try:
                 from praisonai._entrypoint import _resolve_run_inputs
                 from praisonai.agents_generator import AgentsGenerator
-                adapter, config_list = await _asyncio.to_thread(
-                    _resolve_run_inputs, "praisonai"
+                adapter, config_list = await asyncio.to_thread(
+                    _resolve_run_inputs, yaml_framework
                 )
                 gen = AgentsGenerator(
-                    agent_file=agent_file,
+                    agent_file=config["file"],
                     framework=adapter.name,
                     config_list=config_list,
                     adapter=adapter,
                 )
             except Exception as e:
                 logging.getLogger(__name__).warning(
-                    f"Could not pre-build cached AgentsGenerator, "
-                    f"falling back to per-request build: {e}"
+                    f"Could not cache AgentsGenerator, falling back to per-request "
+                    f"runs: {e}"
                 )
             app.state.generator = gen
+            app.state.generator_lock = asyncio.Lock()
             try:
                 yield
             finally:
                 if gen is not None:
                     gen.close()
-
-        def _build_request_generator(base, query):
-            """Build a lightweight per-request generator that borrows the cached
-            generator's shared adapter, config list, tool-timeout executor and
-            resolver. It owns its ``cli_config`` so concurrent requests never
-            mutate shared state — no lock needed. Returns None if no cached
-            generator was built at startup so callers fall back to ``arun``."""
-            if base is None:
-                return None
-            from praisonai.agents_generator import AgentsGenerator
-            return AgentsGenerator(
-                agent_file=base.agent_file,
-                framework=base.framework,
-                config_list=base.config_list,
-                adapter=getattr(base, "_adapter", None),
-                adapter_registry=getattr(base, "_adapter_registry", None),
-                tool_timeout_executor=base._get_tool_timeout_executor(),
-                tool_resolver=getattr(base, "tool_resolver", None),
-                cli_config={"topic": query} if query else {},
-            )
 
         # Create app
         app = FastAPI(
@@ -354,29 +334,52 @@ Launch PraisonAI servers with unified discovery support.
         # Add discovery routes
         add_discovery_routes(app, discovery)
         
-        # Mount agent_invoke router for n8n integration
+        # Mount agent_invoke router for n8n integration. We intentionally do NOT
+        # seed the registry with hand-rolled PraisonAgent instances built from raw
+        # YAML: that path silently dropped tool_timeout/approval/guardrails/retry.
+        # Both /agents routes now run the cached AgentsGenerator instead, so a
+        # single YAML -> agent lowering applies uniformly.
         try:
             from praisonai.api import agent_invoke
             # Only mount router if FastAPI is available and router exists
             if getattr(agent_invoke, 'FASTAPI_AVAILABLE', False) and hasattr(agent_invoke, 'router'):
                 app.include_router(agent_invoke.router)
-                
-                # Register agents from YAML
-                self._register_agents_from_yaml(agents_config, agent_invoke.register_agent)
             else:
                 logging.getLogger(__name__).warning("FastAPI not available, agent_invoke router not mounted")
             
         except ImportError as e:
             logging.getLogger(__name__).warning(f"Could not load agent invoke router: {e}")
         
-        # Request model
+        # Request model. ``agent`` is accepted for backward/n8n compatibility but
+        # is not used to select a single role: POST /agents runs the full YAML
+        # workflow through the cached generator (see invoke_agents).
         class AgentQuery(BaseModel):
             query: str
-            agent: Optional[str] = None  # For specifying which agent to use
+            agent: Optional[str] = None  # Accepted for compatibility; ignored
         
         # Create endpoint for agents
         path = config["path"]
         
+        async def _run_query(request: Request, query: str) -> str:
+            """Run a query through the cached generator so every route shares the
+            same YAML -> agent lowering (ToolResolver, tool_timeout, approval,
+            guardrails, retry). Falls back to praisonai.arun if caching failed."""
+            gen = getattr(request.app.state, "generator", None)
+            lock = getattr(request.app.state, "generator_lock", None)
+            if gen is not None and lock is not None:
+                async with lock:
+                    gen.cli_config = {"topic": query} if query else {}
+                    return await gen.agenerate_crew_and_kickoff()
+            # Fallback: build a one-shot generator via the native async entrypoint.
+            # framework=None lets arun honour the YAML-declared framework (or the
+            # registry default), matching the cached generator above.
+            import praisonai
+            return await praisonai.arun(
+                agent_file=config["file"],
+                framework=yaml_framework,
+                cli_config={"topic": query} if query else None,
+            )
+
         @app.post(path)
         async def invoke_agents(request: Request, query_data: AgentQuery = None):
             """Invoke agents with a query."""
@@ -384,172 +387,87 @@ Launch PraisonAI servers with unified discovery support.
                 try:
                     body = await request.json()
                     query = body.get("query", "") or body.get("message", "")
-                    agent_name = body.get("agent")
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
             else:
                 query = query_data.query
-                agent_name = query_data.agent
-            
+
             try:
-                # A named ``agent`` in the POST /agents body runs the same YAML
-                # workflow (this endpoint has always driven the whole workflow);
-                # per-agent selection is served by POST /agents/{agent_name}.
-                _ = agent_name
-
-                # Build a lightweight per-request generator that borrows the
-                # cached generator's shared adapter, tool-timeout pool and
-                # resolver, so we skip the expensive rebuild yet keep its own
-                # ``cli_config``. Because nothing shared is mutated, concurrent
-                # requests overlap without any lock. Thread the request ``query``
-                # through as the workflow input; the YAML's static ``input`` is
-                # only used when no query is sent. Fall back to the per-request
-                # entrypoint if no cached generator was built at startup.
-                base = getattr(request.app.state, "generator", None)
-                gen = _build_request_generator(base, query)
-                if gen is not None:
-                    try:
-                        result = await gen.agenerate_crew_and_kickoff()
-                    finally:
-                        gen.close()
-                    return {"response": result}
-
-                import praisonai
-                result = await praisonai.arun(
-                    agent_file=config["file"],
-                    framework="praisonai",
-                    cli_config={"topic": query} if query else None,
-                )
-                
+                result = await _run_query(request, query)
                 return {"response": result}
             except Exception as e:
                 return JSONResponse(
                     {"error": str(e)},
                     status_code=500,
                 )
-        
-        # Add simple /agents/{agent_name} endpoint for n8n compatibility
+
+        # Add simple /agents/{agent_name} endpoint for n8n compatibility. The
+        # path segment is accepted as a compatibility alias only: it runs the
+        # same cached generator (full YAML workflow) as POST /agents, so identical
+        # YAML produces identical behaviour instead of silently dropping
+        # tool_timeout/approval/guardrails via a hand-rolled per-agent path. It
+        # does NOT select a single role; use the workflow's own routing for that.
         @app.post("/agents/{agent_name}")
         async def invoke_single_agent(agent_name: str, request: Request):
-            """Invoke a specific agent by name (n8n compatibility endpoint)."""
+            """Invoke the agents workflow (n8n compatibility alias).
+
+            ``agent_name`` is accepted for URL compatibility but the full YAML
+            workflow is executed; it does not select an individual role.
+            """
             try:
                 body = await request.json()
                 query = body.get("query", "") or body.get("message", "")
-                
-                if not query:
-                    raise HTTPException(status_code=400, detail="No query or message provided")
-                
-                # Honour the requested agent: dispatch to the named agent from
-                # the registry (populated from the YAML roles at startup) and
-                # return 404 for an unknown name, instead of silently running the
-                # whole workflow. This preserves per-agent selection for n8n.
-                try:
-                    from praisonai.api import agent_invoke
-                    get_agent = getattr(agent_invoke, "get_agent", None)
-                except ImportError:
-                    get_agent = None
-
-                if get_agent is not None:
-                    agent = get_agent(agent_name)
-                    if agent is not None:
-                        if hasattr(agent, "astart"):
-                            result = await agent.astart(query)
-                        elif hasattr(agent, "start"):
-                            import asyncio as _aio
-                            result = await _aio.to_thread(agent.start, query)
-                        else:
-                            raise HTTPException(
-                                status_code=500,
-                                detail=f"Agent '{agent_name}' has no start/astart method",
-                            )
-                        return {"response": str(result)}
-                    raise HTTPException(
-                        status_code=404, detail=f"Agent '{agent_name}' not found"
-                    )
-
-                # No agent registry available: fall back to running the workflow
-                # through a per-request generator (borrows the cached generator's
-                # shared resources, no shared-state mutation, no lock) so tool
-                # timeouts, approval gating and guardrails still apply.
-                base = getattr(request.app.state, "generator", None)
-                gen = _build_request_generator(base, query)
-                if gen is not None:
-                    try:
-                        result = await gen.agenerate_crew_and_kickoff()
-                    finally:
-                        gen.close()
-                    return {"response": str(result)}
-
-                import praisonai
-                result = await praisonai.arun(
-                    agent_file=config["file"],
-                    framework="praisonai",
-                    cli_config={"topic": query},
-                )
-                return {"response": str(result)}
-            except HTTPException:
-                raise
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+
+            if not query:
+                raise HTTPException(status_code=400, detail="No query or message provided")
+
+            try:
+                result = await _run_query(request, query)
+                return {"response": str(result)}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
         
         # Add endpoint to discovery
         discovery.add_endpoint(EndpointInfo(
             name=path.lstrip("/"),
             description="Invoke agents workflow",
             provider_type="agents-api",
-            input_schema={"type": "object", "properties": {"query": {"type": "string"}, "agent": {"type": "string", "description": "Optional agent name"}}},
+            input_schema={"type": "object", "properties": {"query": {"type": "string"}, "agent": {"type": "string", "description": "Accepted for compatibility; ignored"}}},
             streaming=["none"],
         ))
         
         discovery.add_endpoint(EndpointInfo(
             name="agents/{agent_name}",
-            description="Invoke specific agent by name",
+            description=(
+                "n8n compatibility alias — runs the full agents workflow; "
+                "agent_name does not select an individual role"
+            ),
             provider_type="agents-api",
             input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
             streaming=["none"],
         ))
         
-        # Root endpoint
+        # Root endpoint. The YAML-backed workflow is served on ``path`` and its
+        # ``/{agent_name}`` alias. The mounted n8n router
+        # (/api/v1/agents/{agent_id}/invoke) resolves only agents added via
+        # register_agent(); it is not seeded from the served YAML, so it is
+        # advertised separately to avoid implying YAML roles are invokable there.
         @app.get("/")
         async def root():
             return {
                 "message": "PraisonAI Agents API",
-                "endpoints": [path, "/agents/{agent_name}", "/api/v1/agents/{agent_id}/invoke"],
+                "endpoints": [path, "/agents/{agent_name}"],
+                "registry_api": "/api/v1/agents/{agent_id}/invoke",
                 "discovery": "/__praisonai__/discovery",
             }
 
-        _install_api_key_middleware(app, config.get("api_key"))
+        # Enforce the resolved key (flag or PRAISONAI_SERVE_API_KEY). No-ops only
+        # for a keyless localhost bind; non-localhost keyless binds already raised.
+        _install_api_key_middleware(app, api_key)
         
         return app
-    
-    def _register_agents_from_yaml(self, agents_config: Dict[str, Any], register_agent_func) -> None:
-        """Register agents from YAML configuration."""
-        try:
-            # Try to import praisonaiagents to create Agent instances
-            from praisonaiagents import Agent as PraisonAgent
-            
-            roles = agents_config.get('roles', {})
-            
-            for agent_name, agent_data in roles.items():
-                try:
-                    # Create a simple PraisonAgent instance
-                    agent = PraisonAgent(
-                        name=agent_data.get('role', agent_name),
-                        instructions=f"{agent_data.get('goal', '')}. {agent_data.get('backstory', '')}".strip(),
-                        # Add tools if they exist in the YAML
-                        tools=agent_data.get('tools', [])
-                    )
-                    
-                    # Register the agent
-                    register_agent_func(agent_name, agent)
-                    
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"Failed to create agent {agent_name}: {e}")
-                    
-        except ImportError:
-            logging.getLogger(__name__).warning("praisonaiagents not available, skipping agent registration")
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Failed to register agents from YAML: {e}")
     
     def cmd_recipe(self, args: List[str]) -> int:
         """Launch recipe runner server via WebSocketGateway."""
