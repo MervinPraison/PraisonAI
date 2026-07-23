@@ -91,6 +91,12 @@ def __getattr__(name: str):
     elif name == "ClaudeCodeBackend":
         from .claude import ClaudeCodeBackend
         return ClaudeCodeBackend
+    elif name == "CodexBackend":
+        from .codex import CodexBackend
+        return CodexBackend
+    elif name == "GrokBackend":
+        from .grok import GrokBackend
+        return GrokBackend
     elif name == "list_cli_backends":
         from .registry import list_cli_backends
         return list_cli_backends
@@ -103,5 +109,7 @@ __all__ = [
     "resolve_cli_backend_config",
     "_is_cli_backend_instance",
     "ClaudeCodeBackend",
+    "CodexBackend",
+    "GrokBackend",
     "list_cli_backends"
 ]

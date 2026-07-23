@@ -17,8 +17,18 @@ def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:
         from .claude import ClaudeCodeBackend
         return ClaudeCodeBackend
 
+    def codex_loader():
+        from .codex import CodexBackend
+        return CodexBackend
+
+    def grok_loader():
+        from .grok import GrokBackend
+        return GrokBackend
+
     return {
-        "claude-code": claude_loader
+        "claude-code": claude_loader,
+        "codex-cli": codex_loader,
+        "grok-cli": grok_loader,
     }
 
 # Global CLI backend registry instance
