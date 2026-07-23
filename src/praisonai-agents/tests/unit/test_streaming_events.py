@@ -360,14 +360,85 @@ class TestRetryStreamEvent:
                 "attempt": 2,
                 "max_attempts": 4,
                 "delay": 8.0,
-                "reason": "rate limit",
+                "reason": "rate limited",
             },
         ))
 
         assert len(received) == 1
-        ev = received[0]
-        assert ev.type == StreamEventType.RETRY
-        assert ev.metadata["attempt"] == 2
-        assert ev.metadata["max_attempts"] == 4
-        assert ev.metadata["delay"] == 8.0
-        assert ev.metadata["reason"] == "rate limit"
+        evt = received[0]
+        assert evt.type == StreamEventType.RETRY
+        assert evt.metadata["attempt"] == 2
+        assert evt.metadata["max_attempts"] == 4
+        assert evt.metadata["delay"] == 8.0
+        assert evt.metadata["reason"] == "rate limited"
+
+    def test_emit_retry_stream_event_helper_zero_overhead_without_callbacks(self):
+        """The agent helper must be a no-op when no callbacks are attached."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="retry-agent")
+        # No callbacks attached -> helper should not raise and emit nothing.
+        received = []
+        agent.stream_emitter.add_callback(lambda e: received.append(e))
+        agent.stream_emitter.remove_callback  # sanity: emitter present
+        # Remove the callback to simulate the no-consumer case.
+        agent.stream_emitter._callbacks.clear()
+        assert agent.stream_emitter.has_callbacks is False
+        agent._emit_retry_stream_event(attempt=1, max_attempts=3, delay=1.0, reason="x")
+        assert received == []
+
+    def test_emit_retry_stream_event_helper_emits_when_listening(self):
+        """The agent helper should emit a RETRY event when a consumer listens."""
+        from praisonaiagents import Agent
+        from praisonaiagents.streaming.events import StreamEventType
+
+        agent = Agent(name="retry-agent")
+        received = []
+        agent.stream_emitter.add_callback(lambda e: received.append(e))
+        agent._emit_retry_stream_event(attempt=2, max_attempts=4, delay=5.0, reason="rate limited")
+
+        assert len(received) == 1
+        evt = received[0]
+        assert evt.type == StreamEventType.RETRY
+        assert evt.metadata == {
+            "attempt": 2,
+            "max_attempts": 4,
+            "delay": 5.0,
+            "reason": "rate limited",
+        }
+
+    def test_aemit_retry_reaches_async_only_callbacks(self):
+        """The async helper must reach consumers registered via add_async_callback()."""
+        import asyncio
+        from praisonaiagents import Agent
+        from praisonaiagents.streaming.events import StreamEventType
+
+        agent = Agent(name="retry-agent")
+        received = []
+
+        async def async_cb(event):
+            received.append(event)
+
+        # Async-only consumer: has_callbacks is True but sync emit() would miss it.
+        agent.stream_emitter.add_async_callback(async_cb)
+
+        asyncio.run(agent._aemit_retry_stream_event(
+            attempt=1, max_attempts=3, delay=2.0, reason="rate limited",
+        ))
+
+        assert len(received) == 1
+        assert received[0].type == StreamEventType.RETRY
+        assert received[0].metadata["attempt"] == 1
+        assert received[0].metadata["max_attempts"] == 3
+
+    def test_aemit_retry_zero_overhead_without_callbacks(self):
+        """The async helper must be a no-op when no callbacks are attached."""
+        import asyncio
+        from praisonaiagents import Agent
+
+        agent = Agent(name="retry-agent")
+        assert agent.stream_emitter.has_callbacks is False
+        # Should not raise and should emit nothing.
+        asyncio.run(agent._aemit_retry_stream_event(
+            attempt=1, max_attempts=3, delay=1.0, reason="x",
+        ))
