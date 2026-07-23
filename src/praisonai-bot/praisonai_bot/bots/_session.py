@@ -341,6 +341,12 @@ class BotSessionManager:
         ``{time}`` placeholders; an empty template or missing sender leaves
         the prompt unchanged. Best-effort — any formatting error falls back
         to the original prompt so a malformed template never breaks chat.
+
+        The ``sender`` is a third-party-controlled platform display name /
+        title, so it is neutralised (newlines collapsed, control chars
+        stripped, length-bounded) before interpolation so a hostile name
+        cannot masquerade as a fake system directive in the prompt the model
+        re-reads every turn (Issue #3313). A well-behaved name is unchanged.
         """
         if not self._attribution or not sender:
             return prompt
@@ -350,16 +356,17 @@ class BotSessionManager:
         # the per-turn prompt prefix (prompt-injection defence, on by default).
         try:
             from praisonaiagents.session.context import neutralize_untrusted_text
-
             safe_sender = neutralize_untrusted_text(sender)
-        except Exception:  # pragma: no cover — older core / import error
-            # Local, dependency-free equivalent so the injection defence holds
-            # even when the core helper is unavailable: collapse newlines, strip
-            # control chars, collapse whitespace and length-bound the result.
-            _t = str(sender).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
-            _t = "".join(c if c >= " " or c == "\t" else " " for c in _t)
-            _t = " ".join(_t.split())
-            safe_sender = _t[:237] + "..." if len(_t) > 240 else _t
+        except Exception:  # pragma: no cover — never break chat over sanitising
+            # If the core helper is unavailable (older ``praisonaiagents``), the
+            # fallback must still mirror its guarantees so a platform-controlled
+            # name can't recreate the injected prompt structure: collapse every
+            # newline-like separator, strip control chars, bound length.
+            raw = str(sender)
+            for _sep in ("\r\n", "\r", "\n", "\u2028", "\u2029", "\u0085"):
+                raw = raw.replace(_sep, " ")
+            raw = "".join(c if c >= " " or c == "\t" else " " for c in raw)
+            safe_sender = " ".join(raw.split())[:240]
         try:
             prefix = self._attribution.format(
                 sender=safe_sender,
