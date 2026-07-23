@@ -269,6 +269,25 @@ class TestCapabilityValidator:
             servers = validator._get_available_servers()
         assert "filesystem" in servers
 
+    def test_available_servers_read_live_not_cached(self):
+        """Issue #3307 Gap 3: server availability must not be cached stale.
+
+        The MCP registry fills in as servers connect during a run, so a server
+        registered after the first validation must become visible without an
+        explicit clear_cache() call.
+        """
+        validator = CapabilityValidator(EnforcementLevel.STRICT)
+        with patch(
+            "praisonaiagents.mcp.mcp.MCP.list_active_server_names",
+            return_value=set(),
+        ):
+            assert validator._get_available_servers() == set()
+        with patch(
+            "praisonaiagents.mcp.mcp.MCP.list_active_server_names",
+            return_value={"filesystem"},
+        ):
+            assert "filesystem" in validator._get_available_servers()
+
     def test_mcp_gated_skill_passes_strict_when_server_active(self):
         """Issue #3307 Gap 3: an MCP-server-gated skill can now pass STRICT."""
         requirements = SkillRequirements(servers=["filesystem"])

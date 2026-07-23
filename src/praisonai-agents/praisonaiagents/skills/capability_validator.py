@@ -204,15 +204,19 @@ class CapabilityValidator:
         return self._tool_cache
     
     def _get_available_servers(self) -> Set[str]:
-        """Get set of available MCP server names from the active MCP registry."""
-        if self._server_cache is None:
-            try:
-                from ..mcp.mcp import MCP
-                self._server_cache = set(MCP.list_active_server_names())
-            except ImportError:
-                logger.debug("MCP not available")
-                self._server_cache = set()
-        return self._server_cache
+        """Get set of available MCP server names from the active MCP registry.
+
+        The MCP registry is populated dynamically as servers connect during a
+        run, so this is read live (not cached) to avoid a stale snapshot that
+        would keep rejecting servers registered after the first validation
+        (issue #3307). The read is a cheap set copy under a lock.
+        """
+        try:
+            from ..mcp.mcp import MCP
+            return set(MCP.list_active_server_names())
+        except ImportError:
+            logger.debug("MCP not available")
+            return set()
     
     def _log_validation_result(self, result: ValidationResult) -> None:
         """Log validation result based on enforcement level."""
