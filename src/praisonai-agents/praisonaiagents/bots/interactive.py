@@ -400,16 +400,27 @@ class InteractiveRegistry:
 _global_registry = InteractiveRegistry()
 
 
-def create_registry() -> InteractiveRegistry:
+def create_registry(
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> InteractiveRegistry:
     """Create a new interactive registry instance.
     
     Each adapter should create its own registry to avoid conflicts
     when multiple adapters are used in the same process.
-    
+
+    Args:
+        store: Optional :class:`CallbackPayloadStoreProtocol` used to resolve
+            stored-reference callbacks (``<namespace>:@<ref>``). Pass the same
+            store instance that the render side hands to
+            ``adapt_presentation(..., callback_store=...)`` so long
+            ``reply``/``select`` values round-trip losslessly on
+            tight-callback-cap channels (e.g. Telegram). When omitted,
+            behaviour is unchanged.
+
     Returns:
         A new InteractiveRegistry instance
     """
-    return InteractiveRegistry()
+    return InteractiveRegistry(store=store)
 
 
 def get_registry() -> InteractiveRegistry:
