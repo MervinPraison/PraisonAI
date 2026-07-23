@@ -88,7 +88,7 @@ class GrokBackend:
     ) -> List[str]:
         cmd = [self.config.command, *self.config.args, "--cwd", os.getcwd()]
 
-        if session and session.session_id:
+        if session and session.session_id and getattr(session, "is_resume", False):
             cmd.extend(["--resume", session.session_id])
 
         if system_prompt:

@@ -87,7 +87,12 @@ class CodexBackend:
         system_prompt: Optional[str] = None,
         **kwargs,
     ) -> List[str]:
-        cmd = [self.config.command, *self.config.args, "-C", os.getcwd()]
+        cmd = [self.config.command, *self.config.args]
+
+        if session and session.session_id and getattr(session, "is_resume", False):
+            cmd.extend(["resume", session.session_id])
+
+        cmd.extend(["-C", os.getcwd()])
 
         if system_prompt:
             cmd.extend(["-c", f'instructions="{system_prompt}"'])
