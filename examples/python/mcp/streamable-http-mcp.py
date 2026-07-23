@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 MCP Streamable HTTP Transport Example
 

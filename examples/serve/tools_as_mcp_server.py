@@ -1,3 +1,4 @@
+# praisonai: skip=true
 #!/usr/bin/env python3
 """
 Tools as MCP Server Example

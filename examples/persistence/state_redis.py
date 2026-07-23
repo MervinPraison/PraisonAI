@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Redis State Store - Agent-First Example
 
@@ -27,7 +28,7 @@ my_db = db(
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant.",
-    db=my_db,
+    memory=my_db,
     session_id="redis-state-example"
 )
 

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Codex CLI Integration Example
 

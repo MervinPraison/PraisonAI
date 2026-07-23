@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 PraisonAI A2A Server Example
 

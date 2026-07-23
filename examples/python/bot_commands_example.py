@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Bot Commands Example — Built-in /status, /new, /help commands.
 

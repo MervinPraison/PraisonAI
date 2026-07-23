@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """Docker compute provider — run agent tools inside a Docker container.
 
 Requires: Docker running locally.

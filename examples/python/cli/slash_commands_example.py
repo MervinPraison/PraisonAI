@@ -46,6 +46,6 @@ custom_cmd = SlashCommand(
     alt_names=["mc"]
 )
 
-handler.register(custom_cmd)
+handler.register_command(custom_cmd)
 result = handler.execute("/mycommand arg1 arg2")
 print(f"\n=== Custom Command ===\n{result.get('message', '')}")

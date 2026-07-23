@@ -102,7 +102,7 @@ async def demo_with_run_control():
     
     from praisonai.bots._run_control import SessionRunControl
     from praisonai.bots._session import BotSessionManager
-    from praisonai.bots._commands import handle_stop_command
+    from praisonai.bots._commands import handle_stop_command_async
     
     # Session manager with run control
     run_control = SessionRunControl(
@@ -136,7 +136,7 @@ async def demo_with_run_control():
     print("\n3. User decides to stop current task:")
     print("   User: '/stop'")
     
-    stop_response = await handle_stop_command(user_id, run_control)
+    stop_response = await handle_stop_command_async(user_id, run_control)
     print(f"   Bot: {stop_response}")
     
     # Wait for first task to complete (it should be cancelled)

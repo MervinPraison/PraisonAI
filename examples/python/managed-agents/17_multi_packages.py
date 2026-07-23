@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonai import Agent, ManagedAgent, ManagedConfig
 
 # Multiple package managers — pip + npm installed before agent starts

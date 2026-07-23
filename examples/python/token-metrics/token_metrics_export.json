@@ -1,0 +1,30 @@
+{
+  "timestamp": "unknown",
+  "session_summary": {
+    "total_interactions": 0,
+    "total_tokens": 0,
+    "total_metrics": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cached_tokens": 0,
+      "reasoning_tokens": 0,
+      "audio_input_tokens": 0,
+      "audio_output_tokens": 0,
+      "total_tokens": 0
+    },
+    "by_model": {},
+    "by_agent": {}
+  },
+  "recent_interactions": [],
+  "cost_estimate": {
+    "input_cost": "$0.0000",
+    "output_cost": "$0.0000",
+    "total_cost": "$0.0000",
+    "note": "Cost estimates based on example rates"
+  },
+  "metadata": {
+    "export_version": "1.0",
+    "agent_count": 2,
+    "task_count": 2
+  }
+}

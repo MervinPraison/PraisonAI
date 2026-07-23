@@ -1,3 +1,4 @@
+# praisonai: skip=true
 import yfinance as yf
 from mcp.server.fastmcp import FastMCP
 

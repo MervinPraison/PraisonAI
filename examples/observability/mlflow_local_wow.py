@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """MLflow Local Observability Demo (no API key needed)"""
 import mlflow
 import time

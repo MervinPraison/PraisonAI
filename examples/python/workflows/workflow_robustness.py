@@ -85,7 +85,8 @@ def main():
     
     print("-" * 50)
     print(f"Workflow completed!")
-    print(f"Result: {result[:200]}..." if len(str(result)) > 200 else f"Result: {result}")
+    text = str(result)
+    print(f"Result: {text[:200]}..." if len(text) > 200 else f"Result: {text}")
     
     # Get execution history for debugging
     history = workflow.get_history()

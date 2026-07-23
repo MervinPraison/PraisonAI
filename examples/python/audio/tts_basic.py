@@ -1,3 +1,4 @@
+# praisonai: skip=true
 # Text-to-Speech with OpenAI
 # Requires: export OPENAI_API_KEY=your-key
 

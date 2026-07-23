@@ -1,3 +1,4 @@
+# praisonai: skip=true
 from praisonaiagents import Agent, AgentTeam, Tools
 
 research_agent = Agent(name="Research", instructions="You are a research agent to search internet about AI 2024", tools=[Tools.internet_search])

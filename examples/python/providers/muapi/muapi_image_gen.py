@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Example: Using MuAPI with PraisonAI for image generation.
 

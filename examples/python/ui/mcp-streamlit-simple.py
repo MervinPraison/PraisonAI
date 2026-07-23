@@ -1,3 +1,4 @@
+# praisonai: skip=true
 import streamlit as st
 from praisonaiagents import Agent
 from praisonaiagents.mcp import MCP

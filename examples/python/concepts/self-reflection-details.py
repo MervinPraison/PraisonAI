@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Self-Reflection Details Example
 

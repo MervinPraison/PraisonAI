@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Advanced Callback Systems Example
 

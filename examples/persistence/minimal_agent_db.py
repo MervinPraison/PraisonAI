@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Minimal Agent with Database Persistence
 

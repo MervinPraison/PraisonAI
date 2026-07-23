@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Secondary Market Research FastAPI Application
 

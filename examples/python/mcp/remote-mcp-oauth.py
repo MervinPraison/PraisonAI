@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Remote MCP Server with OAuth Authentication Example
 

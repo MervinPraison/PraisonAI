@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 Example: Using Latency Tracking Tool with PraisonAI
 

@@ -1,3 +1,4 @@
+# praisonai: skip=true
 """
 MySQL ConversationStore — Full Persistence Example
 
