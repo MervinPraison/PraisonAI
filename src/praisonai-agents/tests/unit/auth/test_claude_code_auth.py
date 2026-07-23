@@ -61,6 +61,9 @@ def test_refresh_is_read_only():
 def test_resolve_credentials_does_not_refresh_when_expiring(monkeypatch):
     """Expiring tokens are returned as-is; no network refresh."""
     import time
+    # Isolate from ambient OAuth env vars so the Keychain path is exercised.
+    monkeypatch.delenv("ANTHROPIC_TOKEN", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.setattr(
         "praisonaiagents.auth.subscription.claude_code._read_keychain_credentials",
         lambda: {
@@ -110,6 +113,10 @@ def test_headers_for_includes_required_oauth_headers():
     headers = auth.headers_for("https://api.anthropic.com", "claude-3-haiku")
 
     assert "interleaved-thinking-2025-05-14" in headers["anthropic-beta"]
+    assert "fine-grained-tool-streaming-2025-05-14" in headers["anthropic-beta"]
     assert "claude-code-20250219" in headers["anthropic-beta"]
+    # The unsupported long-context beta caused subscription API failures and
+    # must stay removed for shared OAuth sessions.
+    assert "context-1m-2025-08-07" not in headers["anthropic-beta"]
     assert headers["user-agent"].startswith("claude-cli/")
     assert headers["x-app"] == "cli"
