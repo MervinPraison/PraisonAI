@@ -755,15 +755,17 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Check for permanent auth errors first (non-retryable)
         if any(indicator in error_str for indicator in [
-            "invalid api key", "api key not found", "invalid_api_key", 
-            "incorrect api key", "authentication_error"
+            "invalid api key", "api key not found", "invalid_api_key",
+            "incorrect api key", "authentication_error",
+            "oauth access token has been revoked", "token has been revoked",
+            "oauth session expired", "could not be refreshed",
         ]):
             return "auth_permanent"
         
         # Retryable authentication errors
         if any(indicator in error_str for indicator in [
             "unauthorized", "api key", "authentication failed",
-            "invalid_request_error", "openai_error"
+            "openai_error",
         ]):
             return "auth"
         
@@ -975,6 +977,10 @@ Respond with ONLY a valid JSON tool call in this format:
         for the same exception, which would double-count those mutations.
         """
         if not (self._auth_provider_id and attempt == 0):
+            return False
+        # Shared OAuth stores (Claude Code Keychain) must not be refreshed here:
+        # rotation invalidates tokens for other CLI consumers without persisting back.
+        if self._auth_provider_id == "claude-code":
             return False
         return self.classify_error_kind(e) == "auth"
 

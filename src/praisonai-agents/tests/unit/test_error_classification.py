@@ -89,7 +89,7 @@ class TestClassifyErrorKind:
     
     def setup_method(self):
         """Set up test fixtures."""
-        self.llm = LLM(api_base="test", api_key="test")
+        self.llm = LLM(model="gpt-4o-mini", base_url="test", api_key="test")
     
     def test_auth_permanent_classification(self):
         """Test classification of permanent auth errors."""
@@ -110,14 +110,35 @@ class TestClassifyErrorKind:
         test_cases = [
             "Unauthorized",
             "Authentication failed",
-            "invalid_request_error",
-            "openai_error"
+            "openai_error",
         ]
         
         for error_msg in test_cases:
             error = Exception(error_msg)
             result = self.llm.classify_error_kind(error)
             assert result == "auth", f"Failed for: {error_msg}"
+
+    def test_invalid_request_error_not_auth(self):
+        """invalid_request_error must not trigger OAuth refresh."""
+        error = Exception(
+            'AnthropicException - {"type":"invalid_request_error",'
+            '"message":"The long context beta is not yet available"}'
+        )
+        assert self.llm.classify_error_kind(error) == "unknown"
+
+    def test_revoked_token_is_auth_permanent(self):
+        """Revoked OAuth tokens must not trigger refresh retries."""
+        error = Exception(
+            'AuthenticationError - {"type":"authentication_error",'
+            '"message":"OAuth access token has been revoked."}'
+        )
+        assert self.llm.classify_error_kind(error) == "auth_permanent"
+
+    def test_claude_code_skips_auth_refresh_retry(self):
+        """claude-code shared OAuth must never refresh on LLM auth errors."""
+        llm = LLM(model="gpt-4o-mini", base_url="test", api_key="test", auth="claude-code")
+        error = Exception("Unauthorized")
+        assert llm._should_attempt_auth_refresh(error, attempt=0) is False
     
     def test_rate_limit_classification(self):
         """Test classification of rate limit errors."""
@@ -256,7 +277,7 @@ class TestResolveFailoverDecision:
     
     def setup_method(self):
         """Set up test fixtures."""
-        self.llm = LLM(api_base="test", api_key="test")
+        self.llm = LLM(model="gpt-4o-mini", base_url="test", api_key="test")
     
     def test_non_retryable_errors_surface_immediately(self):
         """Test that non-retryable errors surface immediately."""

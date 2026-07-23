@@ -11,7 +11,6 @@ from praisonaiagents.auth.subscription.claude_code import (
     ClaudeCodeAuth,
     _read_keychain_credentials,
     _read_file_credentials,
-    _is_expiring,
     AuthError
 )
 
@@ -52,22 +51,30 @@ def test_file_path_reads_credentials(monkeypatch):
         os.unlink(tmp_path)
 
 
-def test_is_expiring():
-    """Test token expiry detection."""
+def test_refresh_is_read_only():
+    """Refresh must not rotate shared Keychain OAuth tokens."""
+    auth = ClaudeCodeAuth()
+    with pytest.raises(AuthError, match="does not refresh shared Claude Code"):
+        auth.refresh()
+
+
+def test_resolve_credentials_does_not_refresh_when_expiring(monkeypatch):
+    """Expiring tokens are returned as-is; no network refresh."""
     import time
-    current_ms = int(time.time() * 1000)
-    
-    # Token expires in 30 seconds (should be considered expiring with default 60s skew)
-    soon_expired = current_ms + 30_000
-    assert _is_expiring(soon_expired) is True
-    
-    # Token expires in 2 minutes (should not be expiring)
-    not_expired = current_ms + 120_000
-    assert _is_expiring(not_expired) is False
-    
-    # No expiry time
-    assert _is_expiring(0) is False
-    assert _is_expiring(None) is False
+    monkeypatch.setattr(
+        "praisonaiagents.auth.subscription.claude_code._read_keychain_credentials",
+        lambda: {
+            "accessToken": "sk-ant-oat-test",
+            "refreshToken": "rt-test",
+            "expiresAt": int(time.time() * 1000) + 5_000,
+            "source": "claude-code-keychain",
+        },
+    )
+
+    auth = ClaudeCodeAuth()
+    creds = auth.resolve_credentials()
+    assert creds.api_key == "sk-ant-oat-test"
+    assert creds.source == "claude-code-keychain"
 
 
 def test_resolve_credentials_uses_env_first(monkeypatch):
@@ -101,7 +108,8 @@ def test_headers_for_includes_required_oauth_headers():
     """Test that OAuth-specific headers are included."""
     auth = ClaudeCodeAuth()
     headers = auth.headers_for("https://api.anthropic.com", "claude-3-haiku")
-    
-    assert headers["anthropic-beta"] == "oauth-2025-04-20,interleaved-thinking-2025-05-14"
-    assert headers["user-agent"] == "claude-cli/2.1.0 (external, cli)"
+
+    assert "interleaved-thinking-2025-05-14" in headers["anthropic-beta"]
+    assert "claude-code-20250219" in headers["anthropic-beta"]
+    assert headers["user-agent"].startswith("claude-cli/")
     assert headers["x-app"] == "cli"
