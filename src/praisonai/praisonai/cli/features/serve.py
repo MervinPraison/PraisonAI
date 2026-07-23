@@ -284,10 +284,14 @@ Launch PraisonAI servers with unified discovery support.
             capabilities=["invoke", "health"],
         ))
         
-        # Cache a single AgentsGenerator for the app's lifetime instead of
-        # rebuilding it (re-parsing YAML, re-resolving the framework registry and
-        # spawning a fresh 32-worker tool-timeout pool) on every request. An
-        # asyncio.Lock serialises access because ``cli_config`` is instance state.
+        # Cache the *expensive* shared pieces once for the app's lifetime — the
+        # resolved framework adapter, the config list, the tool-timeout thread
+        # pool and the tool resolver — instead of rebuilding them (re-parsing
+        # YAML, re-resolving the framework registry and spawning a fresh
+        # 32-worker pool) on every request. Each request then builds a cheap
+        # per-request AgentsGenerator that *borrows* those shared resources and
+        # owns its own ``cli_config``, so requests never mutate shared instance
+        # state and can run concurrently without a run-length lock.
         import asyncio as _asyncio
         from contextlib import asynccontextmanager
 
@@ -314,12 +318,31 @@ Launch PraisonAI servers with unified discovery support.
                     f"falling back to per-request build: {e}"
                 )
             app.state.generator = gen
-            app.state.generator_lock = _asyncio.Lock()
             try:
                 yield
             finally:
                 if gen is not None:
                     gen.close()
+
+        def _build_request_generator(base, query):
+            """Build a lightweight per-request generator that borrows the cached
+            generator's shared adapter, config list, tool-timeout executor and
+            resolver. It owns its ``cli_config`` so concurrent requests never
+            mutate shared state — no lock needed. Returns None if no cached
+            generator was built at startup so callers fall back to ``arun``."""
+            if base is None:
+                return None
+            from praisonai.agents_generator import AgentsGenerator
+            return AgentsGenerator(
+                agent_file=base.agent_file,
+                framework=base.framework,
+                config_list=base.config_list,
+                adapter=getattr(base, "_adapter", None),
+                adapter_registry=getattr(base, "_adapter_registry", None),
+                tool_timeout_executor=base._get_tool_timeout_executor(),
+                tool_resolver=getattr(base, "tool_resolver", None),
+                cli_config={"topic": query} if query else {},
+            )
 
         # Create app
         app = FastAPI(
@@ -369,26 +392,26 @@ Launch PraisonAI servers with unified discovery support.
                 agent_name = query_data.agent
             
             try:
-                # A named ``agent`` no longer short-circuits to a hand-rolled
-                # PraisonAgent (which silently dropped tool_timeout / approval /
-                # guardrails). Both the anonymous and named paths converge on the
-                # generator below so identical YAML gets identical safety lowering.
+                # A named ``agent`` in the POST /agents body runs the same YAML
+                # workflow (this endpoint has always driven the whole workflow);
+                # per-agent selection is served by POST /agents/{agent_name}.
                 _ = agent_name
 
-                # Reuse the app-cached generator so we do not re-parse the YAML,
-                # re-resolve the framework registry and spawn a fresh 32-worker
-                # tool-timeout pool on every request. The lock serialises the
-                # shared ``cli_config`` mutation. Thread the request ``query``
-                # through as the workflow input so the caller's prompt drives the
-                # run; the YAML's static ``input`` is only used when no query is
-                # sent. Fall back to the per-request entrypoint if no cached
-                # generator was built at startup.
-                gen = getattr(request.app.state, "generator", None)
+                # Build a lightweight per-request generator that borrows the
+                # cached generator's shared adapter, tool-timeout pool and
+                # resolver, so we skip the expensive rebuild yet keep its own
+                # ``cli_config``. Because nothing shared is mutated, concurrent
+                # requests overlap without any lock. Thread the request ``query``
+                # through as the workflow input; the YAML's static ``input`` is
+                # only used when no query is sent. Fall back to the per-request
+                # entrypoint if no cached generator was built at startup.
+                base = getattr(request.app.state, "generator", None)
+                gen = _build_request_generator(base, query)
                 if gen is not None:
-                    lock = request.app.state.generator_lock
-                    async with lock:
-                        gen.cli_config = {"topic": query} if query else {}
+                    try:
                         result = await gen.agenerate_crew_and_kickoff()
+                    finally:
+                        gen.close()
                     return {"response": result}
 
                 import praisonai
@@ -416,17 +439,45 @@ Launch PraisonAI servers with unified discovery support.
                 if not query:
                     raise HTTPException(status_code=400, detail="No query or message provided")
                 
-                # Route through the same cached generator as POST /agents so this
-                # named-agent path applies the identical YAML lowering:
-                # ToolResolver, tool_timeout wrapping, approval gating, guardrails
-                # and retry policy. The previous hand-rolled PraisonAgent silently
-                # dropped every one of those safety/reliability fields.
-                gen = getattr(request.app.state, "generator", None)
+                # Honour the requested agent: dispatch to the named agent from
+                # the registry (populated from the YAML roles at startup) and
+                # return 404 for an unknown name, instead of silently running the
+                # whole workflow. This preserves per-agent selection for n8n.
+                try:
+                    from praisonai.api import agent_invoke
+                    get_agent = getattr(agent_invoke, "get_agent", None)
+                except ImportError:
+                    get_agent = None
+
+                if get_agent is not None:
+                    agent = get_agent(agent_name)
+                    if agent is not None:
+                        if hasattr(agent, "astart"):
+                            result = await agent.astart(query)
+                        elif hasattr(agent, "start"):
+                            import asyncio as _aio
+                            result = await _aio.to_thread(agent.start, query)
+                        else:
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Agent '{agent_name}' has no start/astart method",
+                            )
+                        return {"response": str(result)}
+                    raise HTTPException(
+                        status_code=404, detail=f"Agent '{agent_name}' not found"
+                    )
+
+                # No agent registry available: fall back to running the workflow
+                # through a per-request generator (borrows the cached generator's
+                # shared resources, no shared-state mutation, no lock) so tool
+                # timeouts, approval gating and guardrails still apply.
+                base = getattr(request.app.state, "generator", None)
+                gen = _build_request_generator(base, query)
                 if gen is not None:
-                    lock = request.app.state.generator_lock
-                    async with lock:
-                        gen.cli_config = {"topic": query}
+                    try:
                         result = await gen.agenerate_crew_and_kickoff()
+                    finally:
+                        gen.close()
                     return {"response": str(result)}
 
                 import praisonai
