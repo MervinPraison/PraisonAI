@@ -27,10 +27,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2707 |
 | ✅ Bots | 7 | 28 | 11301 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 33777 |
+| ✅ CLI | 5 | 119 | 33852 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3907 |
+| ✅ Code Execution | 2 | 13 | 3970 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 7 | 2772 |
 | ✅ Context Management | 16 | 34 | 13204 |
@@ -46,7 +46,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Gateway | 7 | 54 | 19347 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 4011 |
+| ✅ Hooks | 2 | 9 | 4124 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4830 |
@@ -59,9 +59,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
-| ✅ Plugins | 8 | 3 | 1879 |
+| ✅ Plugins | 8 | 3 | 1900 |
 | ✅ Prompts | 2 | 9 | 1910 |
-| ✅ Providers | 1 | 55 | 7459 |
+| ✅ Providers | 1 | 55 | 7502 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
 | ✅ Realtime | 2 | 5 | 668 |
