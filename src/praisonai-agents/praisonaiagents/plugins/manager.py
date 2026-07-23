@@ -890,11 +890,12 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("cli_backend_execute"):
         def cli_backend_execute_hook(data, _p=plugin):
+            from ..cli_backend.debug import redact_command
             _p.cli_backend_execute({
                 "agent_name": getattr(data, "agent_name", None),
                 "backend": getattr(data, "backend", None),
                 "session_id": getattr(data, "session_id", None),
-                "command": getattr(data, "command", None),
+                "command": redact_command(getattr(data, "command", None)),
                 "content": getattr(data, "content", None),
                 "error": getattr(data, "error", None),
                 "transport": getattr(data, "transport", None),

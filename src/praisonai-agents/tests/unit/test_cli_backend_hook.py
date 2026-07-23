@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from praisonaiagents.cli_backend.debug import backend_label
+from praisonaiagents.cli_backend.debug import backend_label, redact_command
 from praisonaiagents.cli_backend.protocols import CliBackendConfig, CliBackendResult
 from praisonaiagents.hooks.events import CliBackendExecuteInput
 from praisonaiagents.hooks.registry import HookRegistry
@@ -44,6 +44,27 @@ def test_cli_backend_execute_input_serialises():
     assert data["backend"] == "gemini"
     assert data["transport"] == "subprocess"
     assert data["praisonai_llm_http"] is False
+    # Prompt value following -p is redacted at the serialization boundary,
+    # while the live in-memory command field is untouched.
+    assert data["command"] == ["gemini", "-p", "<redacted>"]
+    assert payload.command == ["gemini", "-p", "hi"]
+
+
+def test_redact_command_masks_prompt_values():
+    argv = ["gemini", "--yolo", "-p", "secret prompt", "--system", "sys instr"]
+    assert redact_command(argv) == [
+        "gemini",
+        "--yolo",
+        "-p",
+        "<redacted>",
+        "--system",
+        "<redacted>",
+    ]
+
+
+def test_redact_command_passes_through_non_list():
+    assert redact_command(None) is None
+    assert redact_command("gemini -p hi") == "gemini -p hi"
 
 
 class _TracerPlugin(Plugin):
@@ -83,7 +104,8 @@ def test_cli_backend_execute_hook_fires_via_plugin_bridge():
 
     assert len(plugin.events) == 1
     assert plugin.events[0]["backend"] == "gemini"
-    assert plugin.events[0]["command"] == ["gemini", "-p", "hi"]
+    # Prompt value redacted before reaching the plugin bridge.
+    assert plugin.events[0]["command"] == ["gemini", "-p", "<redacted>"]
     assert plugin.events[0]["praisonai_llm_http"] is False
 
 
@@ -119,4 +141,36 @@ async def test_chat_via_cli_backend_emits_hook():
     assert result == "ok"
     assert len(captured) == 1
     assert captured[0]["backend"] == "gemini"
-    assert captured[0]["command"] == ["gemini", "-p", "hi"]
+    assert captured[0]["command"] == ["gemini", "-p", "<redacted>"]
+
+
+@pytest.mark.asyncio
+async def test_chat_via_cli_backend_emits_hook_on_failure():
+    """Subprocess startup errors must still surface through the hook."""
+    from praisonaiagents.agent.agent import Agent
+    from praisonaiagents.hooks.types import HookResult
+
+    captured = []
+
+    def _handler(data):
+        captured.append(data.to_dict())
+        return HookResult.allow()
+
+    reg = HookRegistry()
+    reg.register_function(
+        HookEvent.CLI_BACKEND_EXECUTE,
+        _handler,
+        name="capture",
+    )
+
+    agent = Agent(name="assistant", instructions="test", hooks=reg)
+    agent._cli_backend = Mock()
+    agent._cli_backend.config = CliBackendConfig(command="gemini")
+    agent._cli_backend.execute = AsyncMock(side_effect=RuntimeError("spawn failed"))
+
+    with pytest.raises(RuntimeError):
+        await agent._chat_via_cli_backend("hello")
+
+    assert len(captured) == 1
+    assert captured[0]["backend"] == "gemini"
+    assert "spawn failed" in captured[0]["error"]

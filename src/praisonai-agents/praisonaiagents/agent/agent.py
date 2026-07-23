@@ -6118,27 +6118,11 @@ Answer:"""
                 system_prompt=system_prompt
             )
 
-            from ..hooks.types import HookEvent
-            from ..hooks.events import CliBackendExecuteInput
-            from ..cli_backend.debug import backend_label
-
-            if self._hook_runner.registry.has_hooks(HookEvent.CLI_BACKEND_EXECUTE):
-                metadata = getattr(result, "metadata", None) or {}
-                hook_input = CliBackendExecuteInput(
-                    session_id=session_id,
-                    cwd=os.getcwd(),
-                    event_name=HookEvent.CLI_BACKEND_EXECUTE.value,
-                    timestamp=str(time.time()),
-                    agent_name=self.display_name,
-                    backend=backend_label(backend),
-                    command=metadata.get("command"),
-                    content=getattr(result, "content", None),
-                    error=getattr(result, "error", None),
-                )
-                await self._hook_runner.execute(
-                    HookEvent.CLI_BACKEND_EXECUTE,
-                    hook_input,
-                )
+            await self._emit_cli_backend_hook(
+                backend=backend,
+                session_id=session_id,
+                result=result,
+            )
             
             # Check for CLI backend errors
             if result is None:
@@ -6167,10 +6151,55 @@ Answer:"""
             return result.content if result else None
             
         except Exception as e:
+            await self._emit_cli_backend_hook(
+                backend=backend,
+                session_id=session_id,
+                result=None,
+                error=str(e),
+            )
             raise RuntimeError(
                 f"CLI backend execution failed for agent={self.display_name!r}: {e}"
             ) from e
-    
+
+    async def _emit_cli_backend_hook(
+        self,
+        *,
+        backend: Any,
+        session_id: Optional[str],
+        result: Any,
+        error: Optional[str] = None,
+    ) -> None:
+        """Emit the CLI_BACKEND_EXECUTE hook (no-op when no listener is registered).
+
+        Fires on both success and failure so subprocess startup errors and
+        timeouts remain observable. Prompt-bearing argv values are redacted at
+        the payload serialization boundary.
+        """
+        from ..hooks.types import HookEvent
+
+        if not self._hook_runner.registry.has_hooks(HookEvent.CLI_BACKEND_EXECUTE):
+            return
+
+        from ..hooks.events import CliBackendExecuteInput
+        from ..cli_backend.debug import backend_label
+
+        metadata = getattr(result, "metadata", None) or {}
+        hook_input = CliBackendExecuteInput(
+            session_id=session_id,
+            cwd=os.getcwd(),
+            event_name=HookEvent.CLI_BACKEND_EXECUTE.value,
+            timestamp=str(time.time()),
+            agent_name=self.display_name,
+            backend=backend_label(backend),
+            command=metadata.get("command"),
+            content=getattr(result, "content", None),
+            error=error if error is not None else getattr(result, "error", None),
+        )
+        await self._hook_runner.execute(
+            HookEvent.CLI_BACKEND_EXECUTE,
+            hook_input,
+        )
+
     # -------------------------------------------------------------------------
     #                       Resource Lifecycle Management
     # -------------------------------------------------------------------------

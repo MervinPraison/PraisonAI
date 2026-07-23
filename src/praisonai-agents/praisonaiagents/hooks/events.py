@@ -371,10 +371,11 @@ class CliBackendExecuteInput(HookInput):
     praisonai_llm_http: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
+        from ..cli_backend.debug import redact_command
         base = super().to_dict()
         base.update({
             "backend": self.backend,
-            "command": self.command,
+            "command": redact_command(self.command),
             "content": self.content[:500] if self.content else None,
             "error": self.error,
             "transport": self.transport,
