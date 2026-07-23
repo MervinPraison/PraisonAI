@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         BlockType,
         ActionType,
     )
+    from praisonaiagents.bots.protocols import CallbackPayloadStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +75,19 @@ class TelegramPresentationRenderer:
         return PresentationLimits.telegram()
     
     @staticmethod
-    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+    def render(
+        presentation: "MessagePresentation",
+        callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
+    ) -> Dict[str, Any]:
         """Render a presentation for Telegram.
         
         Args:
             presentation: The presentation to render
+            callback_store: Optional store that persists overflowing
+                ``reply``/``select`` values under a short ``@<ref>`` so long
+                option values round-trip losslessly past Telegram's 64-byte
+                inline-callback cap. Pass the same instance the inbound registry
+                was created with (see ``TelegramBot``).
             
         Returns:
             Dict with 'text' and optional 'reply_markup'
@@ -89,7 +98,11 @@ class TelegramPresentationRenderer:
             adapt_presentation,
         )
         
-        presentation = adapt_presentation(presentation, PresentationLimits.telegram())
+        presentation = adapt_presentation(
+            presentation,
+            PresentationLimits.telegram(),
+            callback_store=callback_store,
+        )
         
         text_parts = []
         inline_keyboard = []

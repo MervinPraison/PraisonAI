@@ -188,9 +188,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # is attached so /approve taps resolve against the durable store.
         self._approval_backend = None
         
-        # Create adapter-specific registry and register handlers
-        from praisonaiagents.bots import create_registry
-        self._interactive_registry = create_registry()
+        # Create adapter-specific registry and register handlers.
+        # A single in-memory callback-payload store is shared between the render
+        # side (render_presentation) and the inbound registry so a reply/select
+        # value too long for Telegram's 64-byte inline-callback cap is persisted
+        # under a short ``@<ref>`` on send and resolved back to the exact value
+        # on click, instead of being replaced by an unrecoverable hash.
+        from praisonaiagents.bots import create_registry, InMemoryCallbackPayloadStore
+        self._callback_store = InMemoryCallbackPayloadStore()
+        self._interactive_registry = create_registry(store=self._callback_store)
         self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
         
@@ -2082,7 +2088,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     btn = {**btn, "web_app": WebAppInfo(**web_app)}
                 return InlineKeyboardButton(**btn)
 
-            rendered = TelegramPresentationRenderer.render(presentation)
+            rendered = TelegramPresentationRenderer.render(
+                presentation,
+                callback_store=getattr(self, "_callback_store", None),
+            )
             send_kwargs: Dict[str, Any] = {
                 "chat_id": int(target),
                 "text": rendered.get("text") or "\u200b",

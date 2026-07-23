@@ -31,6 +31,8 @@ from .protocols import (
     ChannelField,
     ChannelDescriptor,
     WebhookVerifierProtocol,
+    CallbackPayloadStoreProtocol,
+    InMemoryCallbackPayloadStore,
 )
 from .base import (
     BasePlatformAdapter,
@@ -118,6 +120,8 @@ __all__ = [
     "ChannelField",
     "ChannelDescriptor",
     "WebhookVerifierProtocol",
+    "CallbackPayloadStoreProtocol",
+    "InMemoryCallbackPayloadStore",
     "BasePlatformAdapter",
     "SendResult",
     "InteractiveContext",
