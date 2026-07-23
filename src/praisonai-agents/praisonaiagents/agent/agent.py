@@ -6118,14 +6118,27 @@ Answer:"""
                 system_prompt=system_prompt
             )
 
-            from ..cli_backend.debug import log_cli_backend_execution
-            log_cli_backend_execution(
-                logger,
-                backend=backend,
-                result=result,
-                agent_name=self.display_name,
-                session_id=session_id,
-            )
+            from ..hooks.types import HookEvent
+            from ..hooks.events import CliBackendExecuteInput
+            from ..cli_backend.debug import backend_label
+
+            if self._hook_runner.registry.has_hooks(HookEvent.CLI_BACKEND_EXECUTE):
+                metadata = getattr(result, "metadata", None) or {}
+                hook_input = CliBackendExecuteInput(
+                    session_id=session_id,
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.CLI_BACKEND_EXECUTE.value,
+                    timestamp=str(time.time()),
+                    agent_name=self.display_name,
+                    backend=backend_label(backend),
+                    command=metadata.get("command"),
+                    content=getattr(result, "content", None),
+                    error=getattr(result, "error", None),
+                )
+                await self._hook_runner.execute(
+                    HookEvent.CLI_BACKEND_EXECUTE,
+                    hook_input,
+                )
             
             # Check for CLI backend errors
             if result is None:

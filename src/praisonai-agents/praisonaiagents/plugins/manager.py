@@ -888,6 +888,21 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             return HookResult.allow()
         yield HookEvent.ON_ERROR, on_error_hook
 
+    if _overrides("cli_backend_execute"):
+        def cli_backend_execute_hook(data, _p=plugin):
+            _p.cli_backend_execute({
+                "agent_name": getattr(data, "agent_name", None),
+                "backend": getattr(data, "backend", None),
+                "session_id": getattr(data, "session_id", None),
+                "command": getattr(data, "command", None),
+                "content": getattr(data, "content", None),
+                "error": getattr(data, "error", None),
+                "transport": getattr(data, "transport", None),
+                "praisonai_llm_http": getattr(data, "praisonai_llm_http", None),
+            })
+            return HookResult.allow()
+        yield HookEvent.CLI_BACKEND_EXECUTE, cli_backend_execute_hook
+
 
 # Global plugin manager instance
 _default_manager: Optional[PluginManager] = None
