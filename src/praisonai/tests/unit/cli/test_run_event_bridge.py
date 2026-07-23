@@ -128,6 +128,25 @@ def test_error_event_mapped(capsys):
     assert any(e["event"] == "run.error" and e["data"]["error"] == "boom" for e in events)
 
 
+def test_retry_event_mapped_to_run_retry(capsys):
+    output = OutputController(mode=OutputMode.STREAM_JSON)
+    agent = _FakeAgent()
+    attach_bridge(agent, output)
+
+    agent.stream_emitter.emit(_FakeStreamEvent("delta_text", content="hi"))
+    # A retry event carries attempt/delay in metadata.
+    event = _FakeStreamEvent("retry")
+    event.metadata = {"attempt": 2, "max_attempts": 4, "delay": 8.0, "reason": "rate limit"}
+    agent.stream_emitter.emit(event)
+
+    events = _capture(capsys)
+    retry = next(e for e in events if e["event"] == "run.retry")
+    assert retry["data"]["attempt"] == 2
+    assert retry["data"]["max_attempts"] == 4
+    assert retry["data"]["delay"] == 8.0
+    assert retry["data"]["reason"] == "rate limit"
+
+
 def test_run_lifecycle_helpers(capsys):
     output = OutputController(mode=OutputMode.STREAM_JSON)
     bridge = StreamEventBridge(output)

@@ -330,3 +330,44 @@ class TestGeneratorStreamingPath:
         sig = inspect.signature(OpenAIClient.chat_completion_with_tools_stream)
         params = list(sig.parameters.keys())
         assert 'stream_callback' in params, "chat_completion_with_tools_stream should have stream_callback"
+
+
+class TestRetryStreamEvent:
+    """Tests for the RETRY stream event (rate-limit/backoff visibility)."""
+
+    def test_retry_event_type_exists(self):
+        """StreamEventType should expose a RETRY member with value 'retry'."""
+        from praisonaiagents.streaming.events import StreamEventType
+
+        assert hasattr(StreamEventType, "RETRY")
+        assert StreamEventType.RETRY.value == "retry"
+
+    def test_retry_event_carries_attempt_and_delay(self):
+        """A RETRY event carries attempt/max_attempts/delay/reason in metadata."""
+        from praisonaiagents.streaming.events import (
+            StreamEvent,
+            StreamEventType,
+            StreamEventEmitter,
+        )
+
+        received = []
+        emitter = StreamEventEmitter()
+        emitter.add_callback(lambda ev: received.append(ev))
+
+        emitter.emit(StreamEvent(
+            type=StreamEventType.RETRY,
+            metadata={
+                "attempt": 2,
+                "max_attempts": 4,
+                "delay": 8.0,
+                "reason": "rate limit",
+            },
+        ))
+
+        assert len(received) == 1
+        ev = received[0]
+        assert ev.type == StreamEventType.RETRY
+        assert ev.metadata["attempt"] == 2
+        assert ev.metadata["max_attempts"] == 4
+        assert ev.metadata["delay"] == 8.0
+        assert ev.metadata["reason"] == "rate limit"

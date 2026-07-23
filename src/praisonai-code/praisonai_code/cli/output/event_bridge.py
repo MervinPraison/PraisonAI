@@ -39,6 +39,7 @@ EVENT_TEXT_DELTA = "text.delta"
 EVENT_REASONING_DELTA = "reasoning.delta"
 EVENT_RUN_RESULT = "run.result"
 EVENT_RUN_ERROR = "run.error"
+EVENT_RUN_RETRY = "run.retry"
 
 
 class StreamEventBridge:
@@ -103,6 +104,21 @@ class StreamEventBridge:
                         self._emit(EVENT_REASONING_DELTA, {"text": content}, agent_id=agent_id)
                     else:
                         self._emit(EVENT_TEXT_DELTA, {"text": content}, agent_id=agent_id)
+            elif type_value == "retry":
+                # A backoff/retry before re-issuing a rate-limited or transient
+                # request. Surface attempt/delay so consumers can render a live
+                # "retrying in Ns (attempt k/N)" status instead of a silent hang.
+                md = getattr(event, "metadata", None) or {}
+                self._emit(
+                    EVENT_RUN_RETRY,
+                    {
+                        "attempt": md.get("attempt"),
+                        "max_attempts": md.get("max_attempts"),
+                        "delay": md.get("delay"),
+                        "reason": md.get("reason"),
+                    },
+                    agent_id=agent_id,
+                )
             elif type_value == "error":
                 # A core stream-level error is a generic streaming/LLM/transport
                 # failure, not a tool-scoped failure -> map to run.error.
