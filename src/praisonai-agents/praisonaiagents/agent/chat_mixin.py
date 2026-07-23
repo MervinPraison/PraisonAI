@@ -4419,6 +4419,32 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
 
+    def _emit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
+        """Emit a ``StreamEventType.RETRY`` event during backoff.
+
+        Lets consumers (e.g. the CLI stream-json bridge) render a live
+        "retrying in Ns (attempt k/N)" status instead of appearing hung.
+        Guarded by ``has_callbacks`` so it stays zero-overhead when nothing is
+        listening, and never raises into the retry loop.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            emitter.emit(StreamEvent(
+                type=StreamEventType.RETRY,
+                metadata={
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "delay": delay,
+                    "reason": reason,
+                },
+                agent_id=getattr(self, 'name', None),
+            ))
+        except Exception as _re:
+            logger.debug(f"Failed to emit RETRY stream event: {_re}")
+
     def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
