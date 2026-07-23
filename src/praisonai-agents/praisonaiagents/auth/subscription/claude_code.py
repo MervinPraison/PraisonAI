@@ -6,20 +6,12 @@ import os
 import re
 import subprocess
 import sys
-import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .protocols import AuthError, SubscriptionAuthProtocol, SubscriptionCredentials
+from .protocols import AuthError, SubscriptionCredentials
 from .registry import register_subscription_provider
 
-_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-_TOKEN_ENDPOINTS = (
-    "https://platform.claude.com/v1/oauth/token",
-    "https://console.anthropic.com/v1/oauth/token",
-)
 _CLAUDE_CODE_VERSION_FALLBACK = "2.1.74"
 
 
@@ -97,43 +89,6 @@ def _read_file_credentials() -> Optional[Dict[str, Any]]:
     }
 
 
-def _is_expiring(expires_at_ms: Optional[int], skew_ms: int = 60_000) -> bool:
-    if not expires_at_ms:
-        return False
-    return int(time.time() * 1000) >= (expires_at_ms - skew_ms)
-
-
-def _refresh(refresh_token: str) -> Dict[str, Any]:
-    """Pure refresh — does not touch local files."""
-    if not refresh_token:
-        raise AuthError("no refresh_token; please re-run 'claude /login'")
-    body = urllib.parse.urlencode({
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": _OAUTH_CLIENT_ID,
-    }).encode()
-    last = None
-    for endpoint in _TOKEN_ENDPOINTS:
-        req = urllib.request.Request(
-            endpoint, data=body, method="POST",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent":   f"claude-cli/{_detect_claude_code_version()} (external, cli)",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read().decode())
-            return {
-                "accessToken":  payload["access_token"],
-                "refreshToken": payload.get("refresh_token", refresh_token),
-                "expiresAt":    int(time.time() * 1000) + int(payload.get("expires_in", 3600)) * 1000,
-            }
-        except Exception as exc:
-            last = exc
-    raise AuthError(f"Anthropic refresh failed: {last}")
-
-
 class ClaudeCodeAuth:
     """Claude Code OAuth subscription auth."""
 
@@ -159,8 +114,9 @@ class ClaudeCodeAuth:
                 "No Claude Code credentials found. Install Claude Code and run "
                 "'claude /login', or set ANTHROPIC_TOKEN."
             )
-        if _is_expiring(creds["expiresAt"]) and creds.get("refreshToken"):
-            creds.update(_refresh(creds["refreshToken"]))
+        # Read-only: never refresh here. Anthropic rotates refresh tokens and
+        # PraisonAI does not write back to Keychain, which would invalidate
+        # Claude CLI and other tools sharing the same session.
         return SubscriptionCredentials(
             api_key=creds["accessToken"],
             base_url="https://api.anthropic.com",
@@ -171,17 +127,11 @@ class ClaudeCodeAuth:
         )
 
     def refresh(self) -> SubscriptionCredentials:
-        creds = _read_keychain_credentials() or _read_file_credentials()
-        if not creds or not creds.get("refreshToken"):
-            raise AuthError("cannot refresh: no refresh token available")
-        new = _refresh(creds["refreshToken"])
-        return SubscriptionCredentials(
-            api_key=new["accessToken"],
-            base_url="https://api.anthropic.com",
-            headers=self.headers_for("https://api.anthropic.com", ""),
-            auth_scheme="bearer",
-            expires_at_ms=new["expiresAt"],
-            source="claude-code-refreshed",
+        raise AuthError(
+            "PraisonAI does not refresh shared Claude Code OAuth sessions "
+            "(refresh-token rotation would invalidate Claude CLI and other "
+            "tools using the same Keychain entry). Run 'claude /login' or "
+            "let Claude CLI refresh credentials, then retry."
         )
 
     def headers_for(self, base_url: str, model: str) -> Dict[str, str]:
@@ -190,8 +140,7 @@ class ClaudeCodeAuth:
         return {
             "anthropic-beta": ",".join([
                 "interleaved-thinking-2025-05-14",
-                "fine-grained-tool-streaming-2025-05-14", 
-                "context-1m-2025-08-07",
+                "fine-grained-tool-streaming-2025-05-14",
                 "claude-code-20250219",
             ]),
             "user-agent":     f"claude-cli/{_detect_claude_code_version()} (external, cli)",
