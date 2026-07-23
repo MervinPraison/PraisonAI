@@ -25,6 +25,12 @@ def __getattr__(name: str):
     elif name == "CliBackendDelta":
         from .protocols import CliBackendDelta
         return CliBackendDelta
+    elif name == "cli_backend_debug_enabled":
+        from .debug import cli_backend_debug_enabled
+        return cli_backend_debug_enabled
+    elif name == "log_cli_backend_execution":
+        from .debug import log_cli_backend_execution
+        return log_cli_backend_execution
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
@@ -33,5 +39,7 @@ __all__ = [
     "CliBackendConfig", 
     "CliSessionBinding",
     "CliBackendResult",
-    "CliBackendDelta"
+    "CliBackendDelta",
+    "cli_backend_debug_enabled",
+    "log_cli_backend_execution",
 ]

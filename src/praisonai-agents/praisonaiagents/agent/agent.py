@@ -6117,6 +6117,15 @@ Answer:"""
                 images=images,
                 system_prompt=system_prompt
             )
+
+            from ..cli_backend.debug import log_cli_backend_execution
+            log_cli_backend_execution(
+                logger,
+                backend=backend,
+                result=result,
+                agent_name=self.display_name,
+                session_id=session_id,
+            )
             
             # Check for CLI backend errors
             if result is None:
