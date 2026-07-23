@@ -9,9 +9,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def _prepend_skip(rel: str) -> None:
     path = ROOT / rel
     text = path.read_text(encoding="utf-8")
-    if "# praisonai: skip=true" in text.splitlines()[:3]:
+    lines = text.splitlines(keepends=True)
+    if any("# praisonai: skip=true" in ln for ln in lines[:3]):
         return
-    path.write_text("# praisonai: skip=true\n" + text, encoding="utf-8")
+    # Preserve a shebang on the first line so direct execution still works.
+    if lines and lines[0].startswith("#!"):
+        lines.insert(1, "# praisonai: skip=true\n")
+        path.write_text("".join(lines), encoding="utf-8")
+    else:
+        path.write_text("# praisonai: skip=true\n" + text, encoding="utf-8")
 
 
 def fix_knowledge_reranker() -> None:
@@ -132,6 +138,9 @@ def main() -> None:
 
     fix_knowledge_reranker()
     print("fixed knowledge-reranker")
+
+    fix_mcp_env_examples()
+    print("fixed MCP environment examples")
 
     # advanced-task-management TaskOutput import
     p = ROOT / "examples/python/tasks/advanced-task-management.py"

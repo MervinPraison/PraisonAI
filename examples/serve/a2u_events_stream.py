@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python3
+# praisonai: skip=true
 """
 A2U (Agent-to-User) Event Stream Example
 

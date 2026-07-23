@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python3
+# praisonai: skip=true
 """
 Agent Comparison Test - Run 5 tasks with both wrapper and direct agent
 

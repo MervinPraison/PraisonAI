@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python
+# praisonai: skip=true
 # coding: utf-8
 
 # # News and Podcast Aggregator Agent using Agents

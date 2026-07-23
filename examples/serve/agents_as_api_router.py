@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python3
+# praisonai: skip=true
 """
 Multi-Agent Router as HTTP API Example
 

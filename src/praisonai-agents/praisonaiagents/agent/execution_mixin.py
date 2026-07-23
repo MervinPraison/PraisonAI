@@ -1640,7 +1640,8 @@ Write the complete compiled report:"""
             from mcp.server.fastmcp import FastMCP
             from mcp.server.sse import SseServerTransport
             from starlette.applications import Starlette
-            from starlette.routing import Mount
+            from starlette.requests import Request
+            from starlette.routing import Mount, Route
             import threading
             import time
             import asyncio
@@ -1667,11 +1668,31 @@ Write the complete compiled report:"""
                 except Exception as e:
                     return f"Error executing task: {str(e)}"
 
-            # Create and run MCP server
+            # Create and run MCP server using the low-level SSE transport
+            # pattern (FastMCP has no create_app(); this mirrors the working
+            # implementation in praisonaiagents/mcp/mcp_server.py).
             base_path = (path or "/mcp").rstrip("/") or "/mcp"
-            transport = SseServerTransport(f"{base_path}/sse")
+            if not base_path.startswith("/"):
+                base_path = f"/{base_path}"
+            sse_path = f"{base_path}/sse"
+            messages_path = f"{base_path}/messages/"
+            transport = SseServerTransport(messages_path)
+
+            async def handle_sse(request: Request):
+                async with transport.connect_sse(
+                    request.scope, request.receive, request._send
+                ) as (read_stream, write_stream):
+                    await mcp._mcp_server.run(
+                        read_stream,
+                        write_stream,
+                        mcp._mcp_server.create_initialization_options()
+                    )
+
             starlette_app = Starlette(
-                routes=[Mount(base_path, mcp.create_app())]
+                routes=[
+                    Route(sse_path, endpoint=handle_sse),
+                    Mount(messages_path, app=transport.handle_post_message),
+                ]
             )
 
             def run_mcp_server():

@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python3
+# praisonai: skip=true
 """
 Comprehensive MongoDB Integration Example for PraisonAI Agents
 

@@ -1,12 +1,13 @@
 """Apply batch-3 E2E fixes: skip directives for non-runnable examples."""
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REPORT = Path(__file__).resolve().parents[2] / "PraisonAI-main-e2e" / "examples-e2e-reports" / "post_merge_20260723_132751" / "report.json"
+DEFAULT_REPORT = Path(__file__).resolve().parents[2] / "PraisonAI-main-e2e" / "examples-e2e-reports" / "post_merge_20260723_132751" / "report.json"
 
 SKIP_LINE = "# praisonai: skip=true"
 SKIP_RE = re.compile(r"^#\s*praisonai:\s*skip\s*=", re.MULTILINE)
@@ -55,13 +56,29 @@ def add_skip(path: Path) -> bool:
     text = path.read_text(encoding="utf-8", errors="ignore")
     if SKIP_RE.search("\n".join(text.splitlines()[:30])):
         return False
-    new_text = SKIP_LINE + "\n" + text.lstrip("\ufeff")
+    text = text.lstrip("\ufeff")
+    lines = text.splitlines(keepends=True)
+    # Preserve a shebang on the first line so direct execution still works.
+    if lines and lines[0].startswith("#!"):
+        lines.insert(1, SKIP_LINE + "\n")
+        new_text = "".join(lines)
+    else:
+        new_text = SKIP_LINE + "\n" + text
     path.write_text(new_text, encoding="utf-8")
     return True
 
 
 def main() -> None:
-    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "report",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_REPORT,
+        help="Path to the E2E report.json (defaults to the audit report path).",
+    )
+    args = parser.parse_args()
+    report = json.loads(args.report.read_text(encoding="utf-8"))
     targets: set[str] = set()
     for it in report.get("results", []):
         if it.get("status") in ("failed", "timeout"):

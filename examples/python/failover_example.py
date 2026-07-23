@@ -66,7 +66,7 @@ def demonstrate_failover():
         print(f"  {profile_info.get('name', 'unknown')}:")
         print(f"    Status: {profile_info.get('status', 'unknown')}")
         print(f"    Priority: {profile_info.get('priority', 'N/A')}")
-        print(f"    Failures: {profile_info.get('failure_count', 0)}")
+        print(f"    Last error: {profile_info.get('last_error') or 'none'}")
     print()
     
     # Get next available profile

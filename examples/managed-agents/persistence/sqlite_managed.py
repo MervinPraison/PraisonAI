@@ -1,5 +1,5 @@
-# praisonai: skip=true
 #!/usr/bin/env python3
+# praisonai: skip=true
 """
 ManagedAgent + SQLite Persistence — Real conversation with session resume.
 
