@@ -173,3 +173,19 @@ def test_mcp_tool_name_repairs_case_and_separator():
 
     result = agent._execute_tool_impl("Read-File", {"path": "x"})
     assert result == "read_file:{'path': 'x'}"
+
+
+def test_available_active_tool_names():
+    def web_search(query: str) -> str:
+        """Search the web."""
+        return query
+
+    def calculate(a: int, b: int) -> int:
+        """Add numbers."""
+        return a + b
+
+    agent = _make_agent([web_search, calculate])
+
+    names = agent._available_active_tool_names()
+    assert "web_search" in names
+    assert "calculate" in names
