@@ -182,6 +182,62 @@ def test_enable_shell_http_approval_mode(mock_execute_command):
 
 
 @patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_webhook_mode_without_url_falls_back(mock_execute_command):
+    """approval_mode=webhook with no URL must not build WebhookApproval("None")."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.WebhookApproval") as wh_cls:
+            with patch(
+                "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend"
+            ) as gw_cls:
+                gw_cls.return_value = object()
+                enable_shell_tools(
+                    agent,
+                    config=BotConfig(),
+                    ch_cfg={
+                        "allow_shell": True,
+                        "auto_approve_shell": False,
+                        "approval_mode": "webhook",
+                    },
+                    channel_type="whatsapp",
+                )
+
+    wh_cls.assert_not_called()
+    gw_cls.assert_called_once()
+    assert agent._approval_backend is gw_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_webhook_mode_with_url(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch("praisonai_bot.bots.WebhookApproval") as wh_cls:
+            wh_cls.return_value = object()
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": False,
+                    "approval_mode": "webhook",
+                    "approval_webhook_url": "https://hooks.example.com/approve",
+                },
+                channel_type="whatsapp",
+            )
+
+    wh_cls.assert_called_once_with(webhook_url="https://hooks.example.com/approve")
+    assert agent._approval_backend is wh_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
 def test_enable_shell_whatsapp_falls_back_to_gateway(mock_execute_command):
     mock_execute_command.name = "execute_command"
     agent = MagicMock()

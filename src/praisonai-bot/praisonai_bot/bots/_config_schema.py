@@ -428,6 +428,26 @@ class ChannelConfigSchema(BaseModel):
                 f"Invalid group_policy '{v}'. Must be one of: {', '.join(sorted(allowed))}"
             )
         return v
+
+    @field_validator("approval_mode")
+    @classmethod
+    def validate_approval_mode(cls, v: Optional[str]) -> Optional[str]:
+        """Fail-closed on an unknown shell-approval backend selector.
+
+        A typo (``chanel``/``webook``) must be rejected at load time rather
+        than silently falling through to the gateway-queue fallback, which
+        would leave shell approvals stuck where the operator never looks.
+        """
+        if v is None:
+            return v
+        allowed = {"channel", "gateway", "http", "webhook"}
+        normalized = v.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"Invalid approval_mode '{v}'. Must be one of: "
+                f"{', '.join(sorted(allowed))}"
+            )
+        return normalized
     
     @model_validator(mode="after")
     def validate_security(self):

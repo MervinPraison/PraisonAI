@@ -385,13 +385,19 @@ def _wire_shell_approval_backend(
 
     webhook_url = ch_cfg.get("approval_webhook_url") or os.environ.get("APPROVAL_WEBHOOK_URL")
     if approval_mode == "webhook" or webhook_url:
-        try:
-            from praisonai_bot.bots import WebhookApproval
+        if not webhook_url:
+            logger.warning(
+                "approval_mode=webhook requires approval_webhook_url or "
+                "APPROVAL_WEBHOOK_URL — falling back to gateway approval queue"
+            )
+        else:
+            try:
+                from praisonai_bot.bots import WebhookApproval
 
-            agent._approval_backend = WebhookApproval(webhook_url=str(webhook_url))
-            return
-        except (ImportError, ValueError) as exc:
-            logger.warning("WebhookApproval unavailable for allow_shell: %s", exc)
+                agent._approval_backend = WebhookApproval(webhook_url=str(webhook_url))
+                return
+            except (ImportError, ValueError) as exc:
+                logger.warning("WebhookApproval unavailable for allow_shell: %s", exc)
 
     if channel_type == "slack":
         approval_channel = (
