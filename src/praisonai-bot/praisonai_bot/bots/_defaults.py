@@ -468,9 +468,34 @@ def _wire_shell_approval_backend(
     except ImportError:
         pass
 
+    # No usable approval backend could be wired. A prior apply_bot_smart_defaults()
+    # may have installed an AutoApproveBackend (config.auto_approve_tools). Leaving it
+    # in place would silently auto-approve shell despite the explicit opt-out, so fail
+    # closed: replace it with a deny-by-default backend that rejects shell commands.
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    backend = getattr(agent, "_approval_backend", None)
+    if backend is None or isinstance(backend, AutoApproveBackend):
+        try:
+            from praisonaiagents.approval.backends import CallbackBackend
+            from praisonaiagents.approval.protocols import ApprovalDecision
+
+            def _deny_shell(tool_name, arguments, risk_level):
+                if tool_name in _SHELL_TOOL_NAMES:
+                    return ApprovalDecision(
+                        approved=False,
+                        reason="shell auto-approval disabled; no approval backend configured",
+                        approver="system",
+                    )
+                return ApprovalDecision(approved=True, reason="auto-approved", approver="system")
+
+            agent._approval_backend = CallbackBackend(_deny_shell)
+        except ImportError:  # pragma: no cover - core always present in-tree
+            agent._approval_backend = None
     logger.warning(
         "allow_shell with auto_approve_shell=false needs approval_channel, "
-        "approval_mode (gateway|http|webhook), or a custom approval backend on the agent"
+        "approval_mode (gateway|http|webhook), or a custom approval backend on the agent "
+        "— shell commands will be denied until one is configured"
     )
 
 

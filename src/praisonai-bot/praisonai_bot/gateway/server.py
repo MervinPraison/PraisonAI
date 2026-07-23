@@ -868,6 +868,13 @@ class WebSocketGateway:
         self._scheduled_outbox: Optional[Any] = None
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
         self._routing_bindings: Dict[str, List[Any]] = {}  # channel_name -> [RouteBinding] (Issue #2225)
+        # channel_name -> (config, ch_cfg) for channels that opt into shell
+        # execution, so routed agents also receive the shell tool/approval setup.
+        self._channel_shell_cfg: Dict[str, Any] = {}
+        # (channel_name, agent_id) -> shell-enabled clone of a routed agent, so
+        # shell enablement never leaks onto the shared agent used by other,
+        # non-shell channels and is only computed once per routed agent.
+        self._shell_routed_agents: Dict[Any, "Agent"] = {}
         self._channel_tasks: Dict[str, asyncio.Task] = {}  # channel_name -> asyncio task
         
         # Pairing store for channel authorization
@@ -5056,6 +5063,10 @@ class WebSocketGateway:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
                 if bot is None:
                     continue
+                # Record shell opt-in so routed agents (resolved per-message in
+                # _inject_routing_handler) also receive the shell tool/approval
+                # setup applied to the default channel clone in _create_bot.
+                self._register_channel_shell_cfg(channel_name, config, ch_cfg)
                 # Issue #2721: enable inbound speech-to-text so voice notes are
                 # transcribed and fed to the agent. On by default; the resolved
                 # policy (config.metadata["stt"]) drives the opt-out.
@@ -5317,6 +5328,61 @@ class WebSocketGateway:
         elif hasattr(bot, "_turn_lock_map"):
             bot._turn_lock_map = lock_map
 
+    def _register_channel_shell_cfg(
+        self, channel_name: str, config: Any, ch_cfg: Dict[str, Any]
+    ) -> None:
+        """Remember a channel's shell opt-in for per-message routed agents.
+
+        ``_create_bot`` applies ``enable_shell_tools`` to the default channel
+        clone, but ``_inject_routing_handler`` swaps in a routed agent per
+        message. Recording the channel's shell config here lets that handler
+        re-apply the same (idempotent) setup so routed agents are not silently
+        stripped of ``execute_command`` despite ``allow_shell: true``.
+        """
+        if ch_cfg and ch_cfg.get("allow_shell"):
+            self._channel_shell_cfg[channel_name] = (config, dict(ch_cfg))
+        else:
+            self._channel_shell_cfg.pop(channel_name, None)
+
+    def _apply_channel_shell(
+        self, channel_name: str, agent: "Agent"
+    ) -> "Agent":
+        """Return a shell-enabled variant of a routed agent for this channel.
+
+        No-op (returns the same instance) when the channel did not opt into
+        shell execution. When it did, the routed agent is cloned once per
+        ``(channel, agent)`` and shell-enabled, so the shared agent used by
+        other non-shell channels never gains ``execute_command`` and the setup
+        is computed once rather than on every inbound message.
+        """
+        entry = self._channel_shell_cfg.get(channel_name)
+        if not entry or agent is None:
+            return agent
+        config, ch_cfg = entry
+        cache_key = (channel_name, id(agent))
+        cached = self._shell_routed_agents.get(cache_key)
+        if cached is not None:
+            return cached
+        # Resolve the *platform* (slack/telegram/...) — not the per-message chat
+        # type — so SlackApproval wiring in enable_shell_tools keys correctly.
+        platform = str(ch_cfg.get("platform") or channel_name).lower()
+        try:
+            from praisonai_bot.bots._defaults import enable_shell_tools
+
+            clone = agent.clone_for_channel() if hasattr(agent, "clone_for_channel") else agent
+            enabled = enable_shell_tools(
+                clone, config, ch_cfg, channel_type=platform
+            )
+            self._shell_routed_agents[cache_key] = enabled
+            return enabled
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to apply shell config to routed agent on channel %r: %s",
+                channel_name,
+                exc,
+            )
+            return agent
+
     def _create_bot(
         self,
         channel_type: str,
@@ -5505,6 +5571,10 @@ class WebSocketGateway:
                 channel_name, routing_ctx, facts=facts
             )
             if agent:
+                # Routed agents come straight from self._agents and lack the
+                # shell setup applied to the default channel clone; re-apply it
+                # here so ``allow_shell: true`` also covers routed turns.
+                agent = gateway._apply_channel_shell(channel_name, agent)
                 bot.set_agent(agent)
                 # Per-route toolset scope (Issue #2298): the adapter's own
                 # on_message calls ``_session.chat()`` without a tool_policy
@@ -5598,7 +5668,12 @@ class WebSocketGateway:
                 channel_name, routing_ctx, facts=facts
             )
             if not agent:
-                agent = bot._agent  # fallback to default
+                agent = bot._agent  # fallback to default (already shell-enabled)
+            else:
+                # Routed agents come from self._agents without the shell setup
+                # applied to the default channel clone; re-apply so allow_shell
+                # also covers routed turns.
+                agent = gateway._apply_channel_shell(channel_name, agent)
             # Per-route toolset scope for this inbound message (Issue #2298).
             tool_policy = gateway._resolve_tool_policy_for_message(
                 channel_name, facts=facts
@@ -5950,6 +6025,11 @@ class WebSocketGateway:
             del self._routing_rules[channel_name]
         if channel_name in self._routing_bindings:
             del self._routing_bindings[channel_name]
+        # Drop stale shell config + cached routed clones so the reloaded channel
+        # rebuilds them from the new config (and a removed allow_shell is honoured).
+        self._channel_shell_cfg.pop(channel_name, None)
+        for key in [k for k in self._shell_routed_agents if k[0] == channel_name]:
+            self._shell_routed_agents.pop(key, None)
         
         # Start the channel again with new config
         if channel_name in channels_cfg:
@@ -6059,6 +6139,9 @@ class WebSocketGateway:
             bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
             if bot is None:
                 return
+            # Record shell opt-in so routed agents also get shell setup (parity
+            # with start_channels; see _inject_routing_handler).
+            self._register_channel_shell_cfg(channel_name, config, ch_cfg)
             # Issue #2721: enable inbound STT on the hot-reloaded channel too.
             self._enable_stt(bot, config)
             # Issue #2454: stamp the shared admission gate so a channel restarted
@@ -6161,6 +6244,8 @@ class WebSocketGateway:
                 guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
                 if agents_cfg:
                     self._agents.clear()
+                    # Recreating agents invalidates id()-keyed shell clones.
+                    self._shell_routed_agents.clear()
                     self._create_agents_from_config(
                         agents_cfg,
                         default_model=default_model,
@@ -6212,6 +6297,8 @@ class WebSocketGateway:
             guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
             if agents_cfg:
                 self._agents.clear()
+                # Recreating agents invalidates id()-keyed shell clones.
+                self._shell_routed_agents.clear()
                 self._create_agents_from_config(
                     agents_cfg,
                     default_model=default_model,
@@ -6232,6 +6319,8 @@ class WebSocketGateway:
                 guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
                 if agents_cfg:
                     self._agents.clear()
+                    # Recreating agents invalidates id()-keyed shell clones.
+                    self._shell_routed_agents.clear()
                     self._create_agents_from_config(
                         agents_cfg,
                         default_model=default_model,

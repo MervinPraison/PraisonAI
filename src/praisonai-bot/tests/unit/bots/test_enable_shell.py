@@ -256,3 +256,74 @@ def test_enable_shell_whatsapp_falls_back_to_gateway(mock_execute_command):
 
     gw_cls.assert_called_once()
     assert agent._approval_backend is gw_cls.return_value
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_manual_approval_replaces_stale_auto_backend(mock_execute_command, monkeypatch):
+    """auto_approve_shell=false must not leave a prior AutoApproveBackend that
+    silently auto-approves shell (Greptile security P1)."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    # Simulate apply_bot_smart_defaults() having installed auto-approve.
+    agent._approval_backend = AutoApproveBackend()
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": False},
+                channel_type="slack",  # no approval_channel -> no SlackApproval
+            )
+
+    backend = agent._approval_backend
+    assert not isinstance(backend, AutoApproveBackend)
+    # Shell commands are denied fail-closed.
+    decision = backend.request_approval_sync(
+        ApprovalRequest(tool_name="execute_command", arguments={}, risk_level="high")
+    )
+    assert decision.approved is False
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_manual_approval_without_backend_denies_shell(mock_execute_command, monkeypatch):
+    """auto_approve_shell=false with no pre-existing backend also fails closed."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+    from praisonaiagents.approval.protocols import ApprovalRequest
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": False},
+                channel_type="slack",
+            )
+
+    backend = agent._approval_backend
+    assert not isinstance(backend, AutoApproveBackend)
+    decision = backend.request_approval_sync(
+        ApprovalRequest(tool_name="execute_command", arguments={}, risk_level="high")
+    )
+    assert decision.approved is False
