@@ -19,6 +19,9 @@ agents:
 channels:
   telegram:
     token: "${TELEGRAM_BOT_TOKEN}"
+    # allow_shell: true
+    # auto_approve_shell: false
+    # approval_channel: "123456789"   # Telegram chat ID for shell approvals
     routing:
       dm: "personal"
       group: "support"
@@ -26,6 +29,9 @@ channels:
 
   discord:
     token: "${DISCORD_BOT_TOKEN}"
+    # allow_shell: true
+    # auto_approve_shell: false
+    # approval_channel: "9876543210"  # Discord channel ID (or use home_channel)
     routing:
       dm: "personal"
       channel: "support"

@@ -326,6 +326,11 @@ class ChannelConfigSchema(BaseModel):
     auto_approve_shell: bool = True
     approval_channel: Optional[str] = None
     approval_users: Optional[Union[str, List[str]]] = None
+    # channel (default) | gateway | http | webhook
+    approval_mode: Optional[str] = None
+    approval_webhook_url: Optional[str] = None
+    approval_http_host: Optional[str] = None
+    approval_http_port: Optional[int] = None
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp
