@@ -97,6 +97,9 @@ def __getattr__(name: str):
     elif name == "GrokBackend":
         from .grok import GrokBackend
         return GrokBackend
+    elif name == "GeminiBackend":
+        from .gemini import GeminiBackend
+        return GeminiBackend
     elif name == "list_cli_backends":
         from .registry import list_cli_backends
         return list_cli_backends
@@ -111,5 +114,6 @@ __all__ = [
     "ClaudeCodeBackend",
     "CodexBackend",
     "GrokBackend",
+    "GeminiBackend",
     "list_cli_backends"
 ]

@@ -25,10 +25,15 @@ def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:
         from .grok import GrokBackend
         return GrokBackend
 
+    def gemini_loader():
+        from .gemini import GeminiBackend
+        return GeminiBackend
+
     return {
         "claude-code": claude_loader,
         "codex-cli": codex_loader,
         "grok-cli": grok_loader,
+        "gemini-cli": gemini_loader,
     }
 
 # Global CLI backend registry instance
