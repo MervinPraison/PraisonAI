@@ -1274,3 +1274,77 @@ class BotOSProtocol(Protocol):
             The Bot instance, or None if not found.
         """
         ...
+
+
+@runtime_checkable
+class CallbackPayloadStoreProtocol(Protocol):
+    """Protocol for durable, reference-addressable interactive callback values.
+
+    Some channels hard-cap inline callback payloads (e.g. Telegram's 64-byte
+    inline-callback limit). When an interactive ``reply``/``select`` value is
+    too long to travel inline, the framework persists the canonical value under
+    a short, collision-resistant reference and emits that reference in the
+    callback instead. On click the registry resolves the reference back to the
+    exact value — so long option values (URLs, file paths, free-text choices)
+    round-trip losslessly on every channel.
+
+    This mirrors :class:`ApprovalStoreProtocol`: the contract lives in core so
+    any backend and any channel can interoperate; core ships a bounded
+    in-memory default (:class:`InMemoryCallbackPayloadStore`) and heavier
+    durable backends (e.g. SQLite) live in the ``praisonai-bot`` runtime.
+
+    Behaviour is unchanged when no store is configured — values that fit inline
+    are always sent inline, so this is additive and backward compatible.
+    """
+
+    def put(self, ref: str, value: str, *, expires_at: float) -> None:
+        """Persist ``value`` under ``ref`` until ``expires_at`` (epoch seconds).
+
+        Called from the synchronous render path, so this is a plain method.
+        """
+        ...
+
+    def get(self, ref: str) -> Optional[str]:
+        """Return the value stored for ``ref``, or ``None`` if unknown/expired."""
+        ...
+
+
+class InMemoryCallbackPayloadStore:
+    """Bounded, zero-dependency in-memory :class:`CallbackPayloadStoreProtocol`.
+
+    The default store when a channel does not inject a durable one. Entries are
+    kept until their ``expires_at`` and the store is capped at ``max_entries``
+    (oldest inserted evicted first) so a long-running process cannot grow
+    unbounded. This is per-process only; durable, restart-surviving persistence
+    belongs to a runtime-provided backend (as approvals already do).
+    """
+
+    def __init__(self, *, max_entries: int = 4096) -> None:
+        self._max_entries = max(1, int(max_entries))
+        # ref -> (value, expires_at); insertion-ordered for FIFO eviction.
+        self._entries: "Dict[str, tuple[str, float]]" = {}
+
+    def _purge_expired(self, now: float) -> None:
+        expired = [ref for ref, (_, exp) in self._entries.items() if exp <= now]
+        for ref in expired:
+            self._entries.pop(ref, None)
+
+    def put(self, ref: str, value: str, *, expires_at: float) -> None:
+        now = time.time()
+        self._purge_expired(now)
+        # Refresh insertion order on overwrite so it is treated as most-recent.
+        self._entries.pop(ref, None)
+        self._entries[ref] = (value, expires_at)
+        while len(self._entries) > self._max_entries:
+            oldest = next(iter(self._entries))
+            self._entries.pop(oldest, None)
+
+    def get(self, ref: str) -> Optional[str]:
+        entry = self._entries.get(ref)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if expires_at <= time.time():
+            self._entries.pop(ref, None)
+            return None
+        return value

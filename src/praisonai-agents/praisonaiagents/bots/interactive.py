@@ -17,9 +17,38 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, TYPE_CHECKIN
 
 if TYPE_CHECKING:
     from .presentation import PresentationAction
-    from .protocols import BotAdapter, BotMessage
+    from .protocols import BotAdapter, BotMessage, CallbackPayloadStoreProtocol
 
 logger = logging.getLogger(__name__)
+
+# Marker prefixing a stored-reference callback payload. Mirrors
+# ``presentation.CALLBACK_REF_MARKER``; kept local so the inbound handler does
+# not import the (heavier) render module. When an interactive value is too long
+# for the channel callback byte-cap and a callback-payload store is available,
+# the encoder emits ``<namespace>:@<ref>``; the registry resolves the reference
+# back to the exact value the agent authored before routing it.
+_CALLBACK_REF_MARKER = "@"
+
+
+def _extract_ref(value: Optional[str]) -> Optional[str]:
+    """Return the stored-payload reference in ``value``, or ``None``.
+
+    The decoded callback ``value`` is either the whole payload (``reply``) or a
+    ``<action_id>:<value>`` tail (``select``). A stored reference always appears
+    as a trailing ``@<ref>`` segment — i.e. the marker sits at the start of the
+    value or immediately after a ``:`` separator. Requiring that anchoring means
+    an ordinary value that merely contains an ``@`` (e.g. an email address) is
+    never mistaken for a reference.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    if value.startswith(_CALLBACK_REF_MARKER):
+        return value[len(_CALLBACK_REF_MARKER):] or None
+    sep = f":{_CALLBACK_REF_MARKER}"
+    idx = value.rfind(sep)
+    if idx != -1:
+        return value[idx + len(sep):] or None
+    return None
 
 
 @dataclass
@@ -176,11 +205,25 @@ class InteractiveRegistry:
     callback namespaces. Each namespace can have one handler.
     """
     
-    def __init__(self):
-        """Initialize the registry."""
+    def __init__(
+        self,
+        store: Optional["CallbackPayloadStoreProtocol"] = None,
+    ):
+        """Initialize the registry.
+
+        Args:
+            store: Optional :class:`CallbackPayloadStoreProtocol` used to resolve
+                stored-reference callbacks (``<namespace>:@<ref>``) emitted when
+                an interactive value was too long to travel inline on a
+                tight-callback-cap channel. When supplied, a reference is
+                resolved back to the exact value before the handler runs, so
+                long ``reply``/``select`` values round-trip losslessly. When
+                omitted, behaviour is unchanged.
+        """
         self._handlers: Dict[str, InteractiveHandler] = {}
         self._authorizers: Dict[str, "InteractiveAuthorizer"] = {}
         self._fallback_handler: Optional[InteractiveHandler] = None
+        self._store = store
     
     def register(
         self,
@@ -239,7 +282,39 @@ class InteractiveRegistry:
             True if handled, False otherwise
         """
         namespace, payload = decode_callback(context.callback_data)
-        
+
+        # Resolve a stored-reference payload (``<namespace>:@<ref>``) back to the
+        # canonical value the agent authored. Long ``reply``/``select`` values
+        # that overflow the channel callback byte-cap are persisted under a short
+        # reference on render; here we restore the exact value before routing so
+        # the handler receives what the user actually chose. An unknown/expired
+        # reference is dropped (fails closed) rather than routing the opaque
+        # reference token.
+        value = payload.get("value") if isinstance(payload, dict) else None
+        ref = _extract_ref(value)
+        if ref is not None:
+            resolved = None
+            if self._store is not None:
+                try:
+                    resolved = self._store.get(ref)
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.error(f"Callback payload store lookup failed: {e}")
+                    resolved = None
+            if resolved is None:
+                logger.warning(
+                    "Interactive callback referenced a stored value that is "
+                    "unknown or expired; dropping rather than routing an "
+                    "unresolvable reference."
+                )
+                return False
+            # Replace only the trailing ``@<ref>`` segment with the restored
+            # value, preserving any leading ``<action_id>:`` prefix (the
+            # ``select`` payload is ``<action_id>:<value>``) so handlers that
+            # parse the action scope still see it.
+            marked = f"{_CALLBACK_REF_MARKER}{ref}"
+            payload = dict(payload)
+            payload["value"] = value[: len(value) - len(marked)] + resolved
+
         # Try to find a handler for this namespace
         handler = self._handlers.get(namespace)
         

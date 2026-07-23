@@ -12,13 +12,40 @@ rendering belongs in ``praisonai-bot`` (``praisonai_bot.bots``).
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
+
+if TYPE_CHECKING:
+    from .protocols import CallbackPayloadStoreProtocol
 
 # Most channels (e.g. Telegram) hard-cap inline callback payloads at 64 bytes.
 # Keep degraded select callbacks within this bound while preserving uniqueness.
 _MAX_CALLBACK_LEN = 64
+
+# Marker prefixing a stored-reference payload. When an interactive value does
+# not fit the channel callback byte-cap and a ``CallbackPayloadStoreProtocol``
+# is available, the canonical value is persisted under a short reference and the
+# callback carries ``@<ref>`` instead of the (unrecoverable) hash. The inbound
+# registry resolves the reference back to the exact value on click.
+CALLBACK_REF_MARKER = "@"
+
+# Default lifetime (seconds) for a persisted callback reference. An interactive
+# menu is a short-lived affordance; a bounded TTL keeps the store from growing
+# without cleanup while comfortably covering a user pondering their choice.
+CALLBACK_REF_TTL = 3600.0
+
+
+def _callback_ref(namespace: str, value: str) -> str:
+    """Build a short, collision-resistant reference for a callback ``value``.
+
+    The reference is derived from both the namespace/action scope and the value
+    so distinct choices stay distinct, and is short enough to always fit within
+    ``_MAX_CALLBACK_LEN`` alongside its prefix.
+    """
+    digest = hashlib.sha256(f"{namespace}\x00{value}".encode("utf-8")).hexdigest()
+    return digest[:16]
 
 
 class ActionType(str, Enum):
@@ -570,7 +597,11 @@ class PresentationLimits:
         )
 
 
-def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> PresentationButton:
+def _adapt_button(
+    button: PresentationButton,
+    limits: PresentationLimits,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> PresentationButton:
     """Return a copy of a button adapted to the given limits.
 
     Truncates the label and, when the channel does not support web apps,
@@ -591,7 +622,7 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
         if action_type == ActionType.REPLY.value and action.value is not None:
             action = PresentationAction(
                 type=ActionType.CALLBACK,
-                value=_encode_reply_callback(action.value),
+                value=_encode_reply_callback(action.value, store),
             )
         elif (
             not limits.supports_web_apps
@@ -624,7 +655,10 @@ REPLY_CALLBACK_PREFIX = "reply:"
 REPLY_HASH_MARKER = "#"
 
 
-def _encode_reply_callback(value: str) -> str:
+def _encode_reply_callback(
+    value: str,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> str:
     """Build a channel-safe callback payload for a ``reply`` action.
 
     Produces ``reply:<value>`` so the inbound interactive registry can route
@@ -632,33 +666,59 @@ def _encode_reply_callback(value: str) -> str:
     in UTF-8 bytes because channel callback caps (e.g. Telegram's 64-byte cap)
     are byte limits, not character limits.
 
-    When the raw form exceeds ``_MAX_CALLBACK_LEN`` the value is replaced with a
-    short, collision-resistant hash marked with ``#`` (``reply:#<digest>``).
-    Truncating to a prefix was unsafe: two long choices sharing a prefix would
-    collapse to the same payload, and the agent would receive a value it never
-    authored. The hash keeps distinct choices distinct; the marker lets the
-    reply handler recognise that the original value could not be carried inline
-    and avoid routing a lossy value into the turn.
+    When the raw form exceeds ``_MAX_CALLBACK_LEN`` and a *store* is available,
+    the canonical value is persisted under a short reference and the callback
+    carries ``reply:@<ref>``; the inbound handler resolves the reference back to
+    the exact value, so long values round-trip losslessly.
+
+    Without a store the value is replaced with a short, collision-resistant hash
+    marked with ``#`` (``reply:#<digest>``). Truncating to a prefix was unsafe:
+    two long choices sharing a prefix would collapse to the same payload. The
+    marker lets the reply handler recognise that the original value could not be
+    carried and avoid routing a lossy value into the turn.
     """
     raw = f"{REPLY_CALLBACK_PREFIX}{value}"
     if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
+    if store is not None:
+        ref = _callback_ref(REPLY_CALLBACK_PREFIX.rstrip(":"), value)
+        store.put(ref, value, expires_at=time.time() + CALLBACK_REF_TTL)
+        return f"{REPLY_CALLBACK_PREFIX}{CALLBACK_REF_MARKER}{ref}"
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     return f"{REPLY_CALLBACK_PREFIX}{REPLY_HASH_MARKER}{digest}"
 
 
-def _encode_select_callback(action_id: str, value: str) -> str:
+def _encode_select_callback(
+    action_id: str,
+    value: str,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> str:
     """Build a channel-safe callback payload for a degraded select option.
 
     The raw ``select:<action_id>:<value>`` form can exceed channel callback
-    limits (e.g. Telegram's 64-byte cap) and collide when distinct options
-    share a long prefix. When the raw payload fits within ``_MAX_CALLBACK_LEN``
-    it is returned unchanged; otherwise the value is replaced with a short,
-    collision-resistant hash so distinct options stay distinct after truncation.
+    limits (e.g. Telegram's 64-byte cap). When it fits it is returned unchanged.
+
+    When it overflows and a *store* is available, the canonical value is
+    persisted under a short reference and the callback carries
+    ``select:<action_id>:@<ref>``; the registry resolves the reference back to
+    the exact value on click, so long option values round-trip losslessly.
+
+    Without a store the value is replaced with a short, collision-resistant hash
+    so distinct options stay distinct after truncation (but the value cannot be
+    recovered — see the issue this addresses).
     """
     raw = f"select:{action_id}:{value}"
     if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
+    if store is not None:
+        ref = _callback_ref(f"select:{action_id}", value)
+        store.put(ref, value, expires_at=time.time() + CALLBACK_REF_TTL)
+        prefix = f"select:{action_id}:{CALLBACK_REF_MARKER}"
+        if len(prefix.encode("utf-8")) + len(ref) > _MAX_CALLBACK_LEN:
+            # action_id itself is long; hash it so the ref still fits the bound.
+            aid_digest = hashlib.sha1((action_id or "").encode("utf-8")).hexdigest()[:8]
+            prefix = f"select:{aid_digest}:{CALLBACK_REF_MARKER}"
+        return f"{prefix}{ref}"
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     prefix = f"select:{action_id}:"
     # Reserve room for the digest; trim the action_id prefix if needed.
@@ -670,7 +730,10 @@ def _encode_select_callback(action_id: str, value: str) -> str:
     return f"{prefix[:_MAX_CALLBACK_LEN - len(digest)]}{digest}"
 
 
-def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
+def _select_to_buttons(
+    block: PresentationBlock,
+    store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> PresentationBlock:
     """Convert a SELECT block into an equivalent BUTTONS block.
 
     Used when a channel does not support native select menus. Each option
@@ -688,7 +751,7 @@ def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
                 label=label,
                 action=PresentationAction(
                     type=ActionType.CALLBACK,
-                    value=_encode_select_callback(action_id, option.value),
+                    value=_encode_select_callback(action_id, option.value, store),
                 ),
             )
         )
@@ -698,6 +761,8 @@ def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
 def adapt_presentation(
     presentation: MessagePresentation,
     limits: PresentationLimits,
+    *,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
 ) -> MessagePresentation:
     """Return a copy of ``presentation`` guaranteed to satisfy ``limits``.
 
@@ -720,6 +785,12 @@ def adapt_presentation(
     Args:
         presentation: The portable presentation to adapt.
         limits: The target channel's capability limits.
+        callback_store: Optional :class:`CallbackPayloadStoreProtocol`. When a
+            ``reply``/``select`` value overflows the channel callback byte-cap
+            and a store is supplied, the canonical value is persisted under a
+            short reference and the callback carries ``@<ref>`` so the inbound
+            registry can resolve the exact value on click. When omitted the
+            existing (lossy) hash behaviour is preserved for compatibility.
 
     Returns:
         A new ``MessagePresentation`` that is safe to render natively.
@@ -731,7 +802,7 @@ def adapt_presentation(
 
         if block_type == BlockType.SELECT.value and not limits.supports_select:
             # Degrade select -> buttons, then adapt the resulting buttons block
-            block = _select_to_buttons(block)
+            block = _select_to_buttons(block, callback_store)
             block_type = BlockType.BUTTONS.value
 
         if block_type == BlockType.BUTTONS.value and block.buttons:
@@ -754,7 +825,7 @@ def adapt_presentation(
                 kept.sort(key=lambda iv: iv[0])
                 buttons = [b for _, b in kept]
 
-            adapted_buttons = [_adapt_button(b, limits) for b in buttons]
+            adapted_buttons = [_adapt_button(b, limits, callback_store) for b in buttons]
             adapted_blocks.append(
                 PresentationBlock(type=BlockType.BUTTONS, buttons=adapted_buttons)
             )
