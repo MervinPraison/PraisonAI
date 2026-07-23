@@ -36,6 +36,7 @@ class StreamEventType(Enum):
     STREAM_END = "stream_end"            # Stream completed successfully
     ERROR = "error"                      # Error during streaming
     STREAM_UNAVAILABLE = "stream_unavailable"  # Streaming not available in current configuration
+    RETRY = "retry"                      # Backing off before retrying a failed request (rate limit/transient)
 
 
 @dataclass

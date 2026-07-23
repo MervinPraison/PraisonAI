@@ -4480,6 +4480,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
                 
+                # Surface the retry as a first-class stream event so CLI/UI
+                # consumers can show a live "retrying in Ns" status instead of
+                # appearing hung. Guarded by has_callbacks -> zero overhead when
+                # nothing is listening.
+                emitter = getattr(self, 'stream_emitter', None)
+                if emitter is not None and emitter.has_callbacks:
+                    from ..streaming.events import StreamEvent, StreamEventType
+                    emitter.emit(StreamEvent(
+                        type=StreamEventType.RETRY,
+                        metadata={
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
+                            "delay": delay,
+                            "reason": str(e),
+                        },
+                    ))
+                
                 # Log retry attempt (buffered to avoid spam during transient failures)
                 logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
                 
@@ -4560,6 +4577,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     attempt=attempt
                 )
                 await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Surface the retry as a first-class stream event (see sync path).
+                # Guarded by has_callbacks -> zero overhead when nothing is listening.
+                emitter = getattr(self, 'stream_emitter', None)
+                if emitter is not None and emitter.has_callbacks:
+                    from ..streaming.events import StreamEvent, StreamEventType
+                    await emitter.emit_async(StreamEvent(
+                        type=StreamEventType.RETRY,
+                        metadata={
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
+                            "delay": delay,
+                            "reason": str(e),
+                        },
+                    ))
                 
                 # Log retry attempt
                 logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
