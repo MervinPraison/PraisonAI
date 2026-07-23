@@ -2079,7 +2079,21 @@ class ToolExecutionMixin:
         if func is None:
             # Tool not found in declared tools or registry — do not fall back to
             # globals() or __main__ as that allows undeclared callables to execute.
-            pass
+            # Cheap, deterministic self-repair: the model often emits a name that
+            # only differs by case/separator (e.g. 'WebSearch' -> 'web_search').
+            # Build a normalised index of the agent's active tools and re-match.
+            def _norm(n):
+                return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
+
+            normalised = {}
+            for name, tool in self._iter_active_named_tools():
+                normalised.setdefault(_norm(name), []).append((name, tool))
+            match = normalised.get(_norm(function_name))
+            if match and len(match) == 1:
+                matched_name, func = match[0]
+                logging.debug(
+                    f"Self-repaired tool name {function_name!r} -> {matched_name!r}"
+                )
 
         if func:
             try:
@@ -2114,11 +2128,119 @@ class ToolExecutionMixin:
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
+                schema = self._tool_parameter_hint(func)
+                if schema:
+                    # Fold the parameter names into the error string itself so the
+                    # hint survives conversion to ToolExecutionError (which keeps
+                    # only the message) and actually reaches the model.
+                    error_msg = (
+                        f"{error_msg} Expected parameters for '{function_name}' — "
+                        f"required: {schema['required']}, optional: {schema['optional']}."
+                    )
+                    return {"error": error_msg, "expected_parameters": schema}
                 return {"error": error_msg}
-        
-        error_msg = f"Tool '{function_name}' is not callable"
+
+        # Unresolved: return a corrective, model-readable message so the model can
+        # retry with a valid name instead of repeating the same mistake.
+        available = self._available_active_tool_names()
+        suggestion = None
+        try:
+            import difflib
+            near = difflib.get_close_matches(function_name, available, n=1, cutoff=0.5)
+            suggestion = near[0] if near else None
+        except Exception:
+            pass
+        hint = f" Did you mean '{suggestion}'?" if suggestion else ""
+        error_msg = (
+            f"Tool '{function_name}' not found.{hint} "
+            f"Available tools: {available}"
+        )
         logging.error(error_msg)
-        return {"error": error_msg}
+        return {"error": error_msg, "available_tools": available}
+
+    def _get_tool_display_name(self, tool):
+        """Best-effort display name for an agent tool of any supported kind."""
+        try:
+            from ..tools.base import BaseTool
+            if isinstance(tool, BaseTool):
+                return getattr(tool, 'name', None)
+        except ImportError:
+            pass
+        name = getattr(tool, 'name', None)
+        if isinstance(name, str) and name:
+            return name
+        if callable(tool) or inspect.isclass(tool):
+            return getattr(tool, '__name__', None)
+        return None
+
+    def _iter_active_named_tools(self):
+        """Yield ``(name, tool)`` for every active tool.
+
+        MCP instances are expanded into their contained tools (each MCP tool is
+        an iterable callable with a ``__name__``/``name``) so they participate
+        in name repair and appear in the corrective inventory, rather than only
+        exposing the opaque container.
+        """
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            pass
+
+        def _expand(tool):
+            if MCP is not None and isinstance(tool, MCP):
+                try:
+                    for sub in tool:
+                        sub_name = self._get_tool_display_name(sub)
+                        if sub_name:
+                            yield sub_name, sub
+                except Exception:
+                    pass
+                return
+            name = self._get_tool_display_name(tool)
+            if name:
+                yield name, tool
+
+        tools = self.tools
+        if MCP is not None and isinstance(tools, MCP):
+            yield from _expand(tools)
+            return
+        for tool in tools if isinstance(tools, (list, tuple)) else []:
+            yield from _expand(tool)
+
+    def _available_active_tool_names(self):
+        """Names of the agent's currently active tools, for corrective feedback."""
+        names = [name for name, _tool in self._iter_active_named_tools()]
+        return sorted(set(names))
+
+    def _tool_parameter_hint(self, func):
+        """Return {'required': [...], 'optional': [...]} for a callable tool."""
+        target = func
+        try:
+            from ..tools.base import BaseTool
+            if isinstance(func, BaseTool):
+                target = func.run
+            elif inspect.isclass(func):
+                target = getattr(func, 'run', None) or getattr(func, '_run', None)
+            if target is None or not callable(target):
+                return None
+            sig = inspect.signature(target)
+            required, optional = [], []
+            for pname, param in sig.parameters.items():
+                if pname == 'self' or param.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
+                    continue
+                if param.default is inspect.Parameter.empty:
+                    required.append(pname)
+                else:
+                    optional.append(pname)
+            if not required and not optional:
+                return None
+            return {"required": required, "optional": optional}
+        except (ValueError, TypeError):
+            return None
 
     async def submit_for_approval(self, function_name: str, arguments: Dict[str, Any]) -> str:
         """Fire an approval request in the background without blocking.
