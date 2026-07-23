@@ -2086,10 +2086,8 @@ class ToolExecutionMixin:
                 return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
 
             normalised = {}
-            for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
-                name = self._get_tool_display_name(tool)
-                if name:
-                    normalised.setdefault(_norm(name), []).append((name, tool))
+            for name, tool in self._iter_active_named_tools():
+                normalised.setdefault(_norm(name), []).append((name, tool))
             match = normalised.get(_norm(function_name))
             if match and len(match) == 1:
                 matched_name, func = match[0]
@@ -2132,6 +2130,13 @@ class ToolExecutionMixin:
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
                 schema = self._tool_parameter_hint(func)
                 if schema:
+                    # Fold the parameter names into the error string itself so the
+                    # hint survives conversion to ToolExecutionError (which keeps
+                    # only the message) and actually reaches the model.
+                    error_msg = (
+                        f"{error_msg} Expected parameters for '{function_name}' — "
+                        f"required: {schema['required']}, optional: {schema['optional']}."
+                    )
                     return {"error": error_msg, "expected_parameters": schema}
                 return {"error": error_msg}
 
@@ -2168,13 +2173,44 @@ class ToolExecutionMixin:
             return getattr(tool, '__name__', None)
         return None
 
-    def _available_active_tool_names(self):
-        """Names of the agent's currently active tools, for corrective feedback."""
-        names = []
-        for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
+    def _iter_active_named_tools(self):
+        """Yield ``(name, tool)`` for every active tool.
+
+        MCP instances are expanded into their contained tools (each MCP tool is
+        an iterable callable with a ``__name__``/``name``) so they participate
+        in name repair and appear in the corrective inventory, rather than only
+        exposing the opaque container.
+        """
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            pass
+
+        def _expand(tool):
+            if MCP is not None and isinstance(tool, MCP):
+                try:
+                    for sub in tool:
+                        sub_name = self._get_tool_display_name(sub)
+                        if sub_name:
+                            yield sub_name, sub
+                except Exception:
+                    pass
+                return
             name = self._get_tool_display_name(tool)
             if name:
-                names.append(name)
+                yield name, tool
+
+        tools = self.tools
+        if MCP is not None and isinstance(tools, MCP):
+            yield from _expand(tools)
+            return
+        for tool in tools if isinstance(tools, (list, tuple)) else []:
+            yield from _expand(tool)
+
+    def _available_active_tool_names(self):
+        """Names of the agent's currently active tools, for corrective feedback."""
+        names = [name for name, _tool in self._iter_active_named_tools()]
         return sorted(set(names))
 
     def _tool_parameter_hint(self, func):
