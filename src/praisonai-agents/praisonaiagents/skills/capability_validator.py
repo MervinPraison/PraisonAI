@@ -204,11 +204,20 @@ class CapabilityValidator:
         return self._tool_cache
     
     def _get_available_servers(self) -> Set[str]:
-        """Get set of available MCP server names."""
+        """Get set of available MCP server names.
+
+        Derives names from the MCP client registry of servers that have been
+        namespaced (via ``with_tool_prefix``) in this process. Without this an
+        MCP-server-gated skill could never pass STRICT validation because the
+        set was always empty (issue #3307).
+        """
         if self._server_cache is None:
-            # TODO: Implement MCP server discovery
-            # For now, return empty set - this can be extended later
-            self._server_cache = set()
+            try:
+                from ..mcp.mcp import MCP
+                self._server_cache = MCP.list_active_server_names()
+            except ImportError:
+                logger.debug("MCP not available")
+                self._server_cache = set()
         return self._server_cache
     
     def _log_validation_result(self, result: ValidationResult) -> None:

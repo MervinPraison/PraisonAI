@@ -2447,8 +2447,7 @@ Your Goal: {self.goal}"""
         """Internal chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -3049,8 +3048,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Internal async chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
