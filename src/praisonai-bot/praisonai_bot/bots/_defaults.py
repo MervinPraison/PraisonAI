@@ -7,7 +7,8 @@ consistent behavior across all entry points.
 """
 
 import logging
-from typing import Any, Optional, List
+import os
+from typing import Any, Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -322,3 +323,97 @@ def _get_fallback_tools_with_workspace(workspace=None) -> list:
             pass
         
     return fallback_tools
+
+
+_SHELL_TOOL_NAMES = frozenset({"execute_command", "shell_command", "acp_execute_command"})
+
+
+def enable_shell_tools(
+    agent: Any,
+    config: Optional[Any] = None,
+    ch_cfg: Optional[Dict[str, Any]] = None,
+    *,
+    channel_type: str = "",
+) -> Any:
+    """Opt-in shell execution for inbound channel bots (Slack, Telegram, etc.)."""
+    if agent is None:
+        return agent
+
+    ch_cfg = ch_cfg or {}
+    if not ch_cfg.get("allow_shell"):
+        return agent
+
+    tools = list(getattr(agent, "tools", None) or [])
+    existing = {
+        getattr(t, "name", None) or getattr(t, "__name__", "")
+        for t in tools
+    }
+    if "execute_command" not in existing:
+        try:
+            from praisonaiagents.tools import execute_command
+
+            tools.append(execute_command)
+            agent.tools = tools
+        except ImportError:
+            logger.warning("execute_command unavailable — install praisonaiagents with shell tools")
+
+    instructions = getattr(agent, "instructions", "") or ""
+    if "execute_command" not in instructions.lower():
+        agent.instructions = (
+            instructions
+            + "\n\nYou can run shell commands on the bot server using the execute_command tool."
+        ).strip()
+
+    deny = set(getattr(agent, "_perm_deny", None) or frozenset())
+    deny -= _SHELL_TOOL_NAMES
+    agent._perm_deny = frozenset(deny)
+
+    auto_approve = ch_cfg.get("auto_approve_shell", True)
+    if isinstance(auto_approve, str):
+        auto_approve = auto_approve.strip().lower() in ("1", "true", "yes", "on")
+
+    if auto_approve:
+        try:
+            from praisonaiagents.approval.backends import AutoApproveBackend
+
+            agent._approval_backend = AutoApproveBackend()
+        except ImportError:
+            logger.warning("AutoApproveBackend unavailable for allow_shell")
+        return agent
+
+    approval_channel = (
+        ch_cfg.get("approval_channel")
+        or (getattr(config, "owner_user_id", None) if config else None)
+        or os.environ.get("SLACK_APPROVAL_CHANNEL")
+    )
+    approvers_raw = ch_cfg.get("approval_users") or os.environ.get("SLACK_APPROVERS", "")
+    if isinstance(approvers_raw, str):
+        allowed_approvers = [u.strip() for u in approvers_raw.split(",") if u.strip()]
+    elif isinstance(approvers_raw, list):
+        allowed_approvers = [str(u).strip() for u in approvers_raw if str(u).strip()]
+    else:
+        allowed_approvers = []
+
+    if channel_type == "slack" and approval_channel:
+        try:
+            from praisonai_bot.bots import SlackApproval
+
+            agent._approval_backend = SlackApproval(
+                channel=str(approval_channel),
+                allowed_approvers=allowed_approvers or None,
+            )
+        except ImportError:
+            logger.warning("SlackApproval unavailable — shell commands may block without approval backend")
+    elif not auto_approve:
+        logger.warning(
+            "allow_shell with auto_approve_shell=false requires approval_channel "
+            "(Slack) or a custom approval backend on the agent"
+        )
+
+    logger.info(
+        "Shell tools enabled for agent %r on channel %r (auto_approve_shell=%s)",
+        getattr(agent, "name", "?"),
+        channel_type or "?",
+        auto_approve,
+    )
+    return agent

@@ -34,6 +34,8 @@ channels:
   slack:
     token: "${SLACK_BOT_TOKEN}"
     app_token: "${SLACK_APP_TOKEN}"
+    allow_shell: true
+    auto_approve_shell: true
     routing:
       dm: "personal"
       channel: "support"

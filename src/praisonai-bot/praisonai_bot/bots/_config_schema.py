@@ -320,6 +320,12 @@ class ChannelConfigSchema(BaseModel):
     # adapters transcribe it and feed the transcript to the agent. On by
     # default; set ``stt.enabled: false`` to opt out.
     stt: Optional[SttConfigSchema] = None
+
+    # Shell execution opt-in for inbound channel bots (Slack/Telegram/etc.)
+    allow_shell: bool = False
+    auto_approve_shell: bool = True
+    approval_channel: Optional[str] = None
+    approval_users: Optional[Union[str, List[str]]] = None
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp
