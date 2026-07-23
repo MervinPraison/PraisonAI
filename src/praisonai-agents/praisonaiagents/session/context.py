@@ -40,6 +40,39 @@ if TYPE_CHECKING:
     from ..gateway.protocols import OutboundMessengerProtocol, SendPolicyProtocol
 
 
+def neutralize_untrusted_text(value: object, *, max_chars: int = 240) -> str:
+    """Collapse untrusted platform metadata to a single inert line.
+
+    Sender display names, group titles, channel topics and user names are
+    third-party controlled strings. When they are interpolated verbatim into
+    the prompt (e.g. the ``[{sender}] `` attribution prefix), an embedded
+    newline lets a hostile value masquerade as a fresh markdown heading or a
+    fake system directive in content the model reads every turn — a classic
+    prompt-injection vector.
+
+    This canonical, dependency-free transform makes such values inert:
+
+    * newlines/carriage returns are collapsed to spaces (kills the fake
+      heading / fake system block vector),
+    * other control characters are stripped,
+    * surrounding/repeated whitespace is collapsed,
+    * the result is length-bounded (defends against a giant name flooding
+      the context).
+
+    A well-behaved value (``"Bob"``, ``"Alice \U0001F642"``) renders
+    byte-identically, so normal UX is unchanged.
+    """
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+    text = "".join(ch if ch >= " " or ch == "\t" else " " for ch in text)
+    text = " ".join(text.split())
+    if max_chars and len(text) > max_chars:
+        if max_chars <= 3:
+            text = text[:max_chars]
+        else:
+            text = text[: max_chars - 3] + "..."
+    return text
+
+
 @dataclass(frozen=True)
 class Origin:
     """Information about where a message originated."""
@@ -263,6 +296,7 @@ __all__ = [
     "SessionContext",
     "Origin",
     "ReachableTarget",
+    "neutralize_untrusted_text",
     "set_session_context",
     "get_session_context",
     "clear_session_context",
