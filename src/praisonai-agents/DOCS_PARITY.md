@@ -18,16 +18,16 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 45 | 14073 |
+| ✅ Agent | 21 | 45 | 14186 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2286 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 2868 |
 | ✅ Autonomy | 3 | 7 | 2707 |
-| ✅ Bots | 7 | 28 | 11274 |
+| ✅ Bots | 7 | 28 | 11301 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 33738 |
+| ✅ CLI | 5 | 119 | 33777 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3907 |
@@ -49,7 +49,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Hooks | 2 | 9 | 4011 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
-| ✅ LLM | 3 | 14 | 4767 |
+| ✅ LLM | 3 | 14 | 4830 |
 | ✅ Loops | 4 | 4 | 1202 |
 | ✅ MCP | 1 | 58 | 13322 |
 | ✅ Memory | 6 | 17 | 6635 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1879 |
-| ✅ Prompts | 2 | 8 | 1726 |
+| ✅ Prompts | 2 | 9 | 1910 |
 | ✅ Providers | 1 | 55 | 7459 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
