@@ -352,8 +352,14 @@ class BotSessionManager:
             from praisonaiagents.session.context import neutralize_untrusted_text
 
             safe_sender = neutralize_untrusted_text(sender)
-        except Exception:  # pragma: no cover — never break chat on import error
-            safe_sender = str(sender).replace("\r", " ").replace("\n", " ")
+        except Exception:  # pragma: no cover — older core / import error
+            # Local, dependency-free equivalent so the injection defence holds
+            # even when the core helper is unavailable: collapse newlines, strip
+            # control chars, collapse whitespace and length-bound the result.
+            _t = str(sender).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            _t = "".join(c if c >= " " or c == "\t" else " " for c in _t)
+            _t = " ".join(_t.split())
+            safe_sender = _t[:237] + "..." if len(_t) > 240 else _t
         try:
             prefix = self._attribution.format(
                 sender=safe_sender,

@@ -66,7 +66,10 @@ def neutralize_untrusted_text(value: object, *, max_chars: int = 240) -> str:
     text = "".join(ch if ch >= " " or ch == "\t" else " " for ch in text)
     text = " ".join(text.split())
     if max_chars and len(text) > max_chars:
-        text = text[: max(0, max_chars - 3)] + "..."
+        if max_chars <= 3:
+            text = text[:max_chars]
+        else:
+            text = text[: max_chars - 3] + "..."
     return text
 
 

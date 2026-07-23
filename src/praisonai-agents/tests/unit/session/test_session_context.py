@@ -47,6 +47,12 @@ class TestNeutralizeUntrustedText:
         assert len(out) == 240
         assert out.endswith("...")
 
+    def test_small_bounds_never_exceed_max_chars(self):
+        # Greptile P2: max_chars of 1/2/3 must not return the 3-char "..."
+        for n in (1, 2, 3):
+            out = neutralize_untrusted_text("x" * 50, max_chars=n)
+            assert len(out) == n
+
     def test_non_string_input(self):
         assert neutralize_untrusted_text(None) == "None"
         assert neutralize_untrusted_text(123) == "123"
