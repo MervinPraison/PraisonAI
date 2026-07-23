@@ -7,7 +7,8 @@ consistent behavior across all entry points.
 """
 
 import logging
-from typing import Any, Optional, List
+import os
+from typing import Any, Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -322,3 +323,222 @@ def _get_fallback_tools_with_workspace(workspace=None) -> list:
             pass
         
     return fallback_tools
+
+
+_SHELL_TOOL_NAMES = frozenset({"execute_command", "shell_command", "acp_execute_command"})
+
+_APPROVER_ENV = {
+    "slack": "SLACK_APPROVERS",
+    "telegram": "TELEGRAM_APPROVERS",
+    "discord": "DISCORD_APPROVERS",
+}
+
+
+def _parse_shell_approvers(ch_cfg: Dict[str, Any], channel_type: str) -> List[str]:
+    env_key = _APPROVER_ENV.get(channel_type, "")
+    approvers_raw = ch_cfg.get("approval_users") or (os.environ.get(env_key, "") if env_key else "")
+    if isinstance(approvers_raw, str):
+        return [u.strip() for u in approvers_raw.split(",") if u.strip()]
+    if isinstance(approvers_raw, list):
+        return [str(u).strip() for u in approvers_raw if str(u).strip()]
+    return []
+
+
+def _channel_token(config: Optional[Any], ch_cfg: Dict[str, Any]) -> Optional[str]:
+    token = ch_cfg.get("token") or (getattr(config, "token", None) if config else None)
+    return str(token) if token else None
+
+
+def _wire_shell_approval_backend(
+    agent: Any,
+    *,
+    channel_type: str,
+    config: Optional[Any],
+    ch_cfg: Dict[str, Any],
+    allowed_approvers: List[str],
+) -> None:
+    """Attach a platform or gateway approval backend when auto-approve is off."""
+    approval_mode = str(ch_cfg.get("approval_mode") or "channel").strip().lower()
+    token = _channel_token(config, ch_cfg)
+    approvers = allowed_approvers or None
+
+    if approval_mode == "gateway":
+        try:
+            from praisonai_bot.gateway.gateway_approval import GatewayApprovalBackend
+
+            agent._approval_backend = GatewayApprovalBackend()
+            return
+        except ImportError:
+            logger.warning("GatewayApprovalBackend unavailable for allow_shell")
+
+    if approval_mode == "http":
+        try:
+            from praisonai_bot.bots import HTTPApproval
+
+            agent._approval_backend = HTTPApproval(
+                host=str(ch_cfg.get("approval_http_host") or "127.0.0.1"),
+                port=int(ch_cfg.get("approval_http_port") or 8899),
+            )
+            return
+        except ImportError:
+            logger.warning("HTTPApproval unavailable for allow_shell")
+
+    webhook_url = ch_cfg.get("approval_webhook_url") or os.environ.get("APPROVAL_WEBHOOK_URL")
+    if approval_mode == "webhook" or webhook_url:
+        if not webhook_url:
+            logger.warning(
+                "approval_mode=webhook requires approval_webhook_url or "
+                "APPROVAL_WEBHOOK_URL — falling back to gateway approval queue"
+            )
+        else:
+            try:
+                from praisonai_bot.bots import WebhookApproval
+
+                agent._approval_backend = WebhookApproval(webhook_url=str(webhook_url))
+                return
+            except (ImportError, ValueError) as exc:
+                logger.warning("WebhookApproval unavailable for allow_shell: %s", exc)
+
+    if channel_type == "slack":
+        approval_channel = (
+            ch_cfg.get("approval_channel")
+            or (getattr(config, "owner_user_id", None) if config else None)
+            or os.environ.get("SLACK_APPROVAL_CHANNEL")
+        )
+        if approval_channel:
+            try:
+                from praisonai_bot.bots import SlackApproval
+
+                agent._approval_backend = SlackApproval(
+                    token=token,
+                    channel=str(approval_channel),
+                    allowed_approvers=approvers,
+                )
+                return
+            except ImportError:
+                logger.warning("SlackApproval unavailable for allow_shell")
+
+    elif channel_type == "telegram":
+        chat_id = (
+            ch_cfg.get("approval_channel")
+            or (getattr(config, "owner_user_id", None) if config else None)
+            or os.environ.get("TELEGRAM_CHAT_ID")
+        )
+        if chat_id:
+            try:
+                from praisonai_bot.bots import TelegramApproval
+
+                agent._approval_backend = TelegramApproval(
+                    token=token,
+                    chat_id=str(chat_id),
+                    allowed_approvers=approvers,
+                )
+                return
+            except ImportError:
+                logger.warning("TelegramApproval unavailable for allow_shell")
+
+    elif channel_type == "discord":
+        channel_id = (
+            ch_cfg.get("approval_channel")
+            or ch_cfg.get("home_channel")
+            or os.environ.get("DISCORD_APPROVAL_CHANNEL")
+        )
+        if channel_id:
+            try:
+                from praisonai_bot.bots import DiscordApproval
+
+                agent._approval_backend = DiscordApproval(
+                    token=token,
+                    channel_id=str(channel_id),
+                    allowed_approvers=approvers,
+                )
+                return
+            except ImportError:
+                logger.warning("DiscordApproval unavailable for allow_shell")
+
+    try:
+        from praisonai_bot.gateway.gateway_approval import GatewayApprovalBackend
+
+        agent._approval_backend = GatewayApprovalBackend()
+        logger.info(
+            "Shell approval falling back to gateway queue for channel %r",
+            channel_type or "?",
+        )
+        return
+    except ImportError:
+        pass
+
+    logger.warning(
+        "allow_shell with auto_approve_shell=false needs approval_channel, "
+        "approval_mode (gateway|http|webhook), or a custom approval backend on the agent"
+    )
+
+
+def enable_shell_tools(
+    agent: Any,
+    config: Optional[Any] = None,
+    ch_cfg: Optional[Dict[str, Any]] = None,
+    *,
+    channel_type: str = "",
+) -> Any:
+    """Opt-in shell execution for inbound channel bots (Slack, Telegram, etc.)."""
+    if agent is None:
+        return agent
+
+    ch_cfg = ch_cfg or {}
+    if not ch_cfg.get("allow_shell"):
+        return agent
+
+    tools = list(getattr(agent, "tools", None) or [])
+    existing = {
+        getattr(t, "name", None) or getattr(t, "__name__", "")
+        for t in tools
+    }
+    if "execute_command" not in existing:
+        try:
+            from praisonaiagents.tools import execute_command
+
+            tools.append(execute_command)
+            agent.tools = tools
+        except ImportError:
+            logger.warning("execute_command unavailable — install praisonaiagents with shell tools")
+
+    instructions = getattr(agent, "instructions", "") or ""
+    if "execute_command" not in instructions.lower():
+        agent.instructions = (
+            instructions
+            + "\n\nYou can run shell commands on the bot server using the execute_command tool."
+        ).strip()
+
+    deny = set(getattr(agent, "_perm_deny", None) or frozenset())
+    deny -= _SHELL_TOOL_NAMES
+    agent._perm_deny = frozenset(deny)
+
+    auto_approve = ch_cfg.get("auto_approve_shell", True)
+    if isinstance(auto_approve, str):
+        auto_approve = auto_approve.strip().lower() in ("1", "true", "yes", "on")
+
+    if auto_approve:
+        try:
+            from praisonaiagents.approval.backends import AutoApproveBackend
+
+            agent._approval_backend = AutoApproveBackend()
+        except ImportError:
+            logger.warning("AutoApproveBackend unavailable for allow_shell")
+        return agent
+
+    _wire_shell_approval_backend(
+        agent,
+        channel_type=channel_type,
+        config=config,
+        ch_cfg=ch_cfg,
+        allowed_approvers=_parse_shell_approvers(ch_cfg, channel_type),
+    )
+
+    logger.info(
+        "Shell tools enabled for agent %r on channel %r (auto_approve_shell=%s)",
+        getattr(agent, "name", "?"),
+        channel_type or "?",
+        auto_approve,
+    )
+    return agent

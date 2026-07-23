@@ -5331,8 +5331,15 @@ class WebSocketGateway:
         agent = agent.clone_for_channel()
         
         # Apply smart defaults to agent (same logic as Bot() wrapper)
-        from praisonai_bot.bots._defaults import apply_bot_smart_defaults
+        from praisonai_bot.bots._defaults import apply_bot_smart_defaults, enable_shell_tools
         agent = apply_bot_smart_defaults(agent, config)
+        if ch_cfg.get("allow_shell"):
+            agent = enable_shell_tools(
+                agent,
+                config,
+                ch_cfg,
+                channel_type=channel_type,
+            )
 
         # Check if agent ended up with zero tools after defaults and warn
         current_tools = getattr(agent, 'tools', None) or []
