@@ -72,6 +72,49 @@ class TestFindFirstCommand(unittest.TestCase):
         )
 
 
+class TestLooksLikeBarePrompt(unittest.TestCase):
+    """``_looks_like_bare_prompt`` gates the modern `run` forwarder.
+
+    True only for a flagless, non-YAML first positional token — so a bare
+    ``praisonai "hello"`` reaches Typer `run` while ``.yaml`` workflows and any
+    flag-bearing (legacy) invocation stay on the legacy dispatcher.
+    """
+
+    def test_plain_prompt_is_bare(self):
+        argv = ["Build a weather agent"]
+        first = dispatcher._find_first_command(argv)
+        self.assertTrue(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_single_word_prompt_is_bare(self):
+        argv = ["hello"]
+        first = dispatcher._find_first_command(argv)
+        self.assertTrue(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_yaml_token_is_not_bare(self):
+        for token in ("agents.yaml", "agents.yml", "AGENTS.YAML"):
+            argv = [token]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(
+                dispatcher._looks_like_bare_prompt(argv, first),
+                f"{token!r} should not be treated as a bare prompt",
+            )
+
+    def test_any_flag_is_not_bare(self):
+        argv = ["Do something", "--framework", "crewai"]
+        first = dispatcher._find_first_command(argv)
+        self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_leading_flag_is_not_bare(self):
+        # A leading flag means the first positional was discovered past a flag;
+        # such invocations belong to legacy, not the bare `run` forwarder.
+        argv = ["--verbose", "hello"]
+        first = dispatcher._find_first_command(argv)
+        self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_no_positional_is_not_bare(self):
+        self.assertFalse(dispatcher._looks_like_bare_prompt([], None))
+
+
 class TestGetTyperCommandsCache(unittest.TestCase):
     """``_get_typer_commands`` caches its result under a lock and does
     not poison the cache on failure."""
@@ -236,8 +279,23 @@ class TestMainRouting(unittest.TestCase):
         run_typer.assert_called_once()
         run_legacy.assert_not_called()
 
-    def test_freetext_prompt_routes_to_legacy(self):
+    def test_freetext_prompt_routes_to_typer_run(self):
+        # A bare free-text prompt now reaches the modern Typer `run` engine
+        # (session continuity, --output modes, credential gate) instead of the
+        # legacy path — rewritten to ``run <prompt>``.
         sys.argv = ["praisonai", "Create a weather app"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(["run", "Create a weather app"])
+        run_legacy.assert_not_called()
+
+    def test_bare_prompt_with_legacy_flag_routes_to_legacy(self):
+        # A prompt combined with any flag stays on legacy: the legacy argparse
+        # surface owns the large deprecated/legacy flag set that `run` lacks.
+        sys.argv = ["praisonai", "Create a weather app", "--framework", "crewai"]
         with mock.patch.object(
             dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
         ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
@@ -259,15 +317,18 @@ class TestMainRouting(unittest.TestCase):
         run_legacy.assert_called_once()
         run_typer.assert_not_called()
 
-    def test_unknown_command_routes_to_legacy(self):
+    def test_unknown_single_token_routes_to_typer_run(self):
+        # A lone unknown token (no flags, not a YAML path) is treated as a bare
+        # prompt and forwarded to the modern Typer `run` engine — matching the
+        # prior legacy behaviour of running an unknown word as a one-shot prompt.
         sys.argv = ["praisonai", "totally-unknown"]
         with mock.patch.object(
             dispatcher, "_get_typer_commands", return_value={"chat"}
         ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
              mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
             dispatcher.main()
-        run_legacy.assert_called_once()
-        run_typer.assert_not_called()
+        run_typer.assert_called_once_with(["run", "totally-unknown"])
+        run_legacy.assert_not_called()
 
 
 class TestRunLegacyArgvRestoration(unittest.TestCase):

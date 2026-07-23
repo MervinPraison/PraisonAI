@@ -74,6 +74,31 @@ def _find_first_command(argv):
     return None
 
 
+def _looks_like_bare_prompt(argv, first_cmd):
+    """Return True when argv is a bare free-text prompt for the modern `run` path.
+
+    A *bare prompt* is a first positional token that is neither a Typer command
+    (already handled upstream) nor a ``.yaml``/``.yml`` file token, invoked with
+    no ``-``/``--`` flags at all. Such an invocation expresses the same intent as
+    ``praisonai run "<prompt>"`` and should reach the modern Typer ``run`` engine
+    (session continuity, ``--output`` modes, credential gate, permissions).
+
+    The rule is deliberately conservative: any flag present keeps the invocation
+    on the legacy dispatcher, because the legacy argparse surface owns a large set
+    of flags (``--framework``, ``--auto``, ``--call``, ``--serve``, ...) that
+    ``run`` does not implement. ``.yaml``/``.yml`` workflows also stay on legacy.
+    """
+    if not first_cmd:
+        return False
+    # Any flag anywhere → legacy owns the large deprecated/legacy flag surface.
+    if any(arg.startswith("-") for arg in argv):
+        return False
+    # YAML workflow files stay on the legacy multi-framework path.
+    if first_cmd.lower().endswith((".yaml", ".yml")):
+        return False
+    return True
+
+
 def _run_typer(argv):
     """Dispatch to the Typer CLI app."""
     import os
@@ -149,7 +174,8 @@ def main():
       2. --help / -h             → Typer help (global or command-level)
       3. No arguments            → Typer interactive TUI
       4. First arg is a Typer cmd→ Typer (auto-discovered from app.py)
-      5. Everything else         → Legacy (prompt, .yaml, deprecated flags)
+      5. Bare free-text prompt   → Typer `run` (modern engine)
+      6. Everything else         → Legacy (.yaml, deprecated flags)
     """
     argv = sys.argv[1:]
 
@@ -180,8 +206,13 @@ def main():
     if first_cmd in _get_typer_commands():
         # Known Typer command → Typer
         _run_typer(argv)
+    elif _looks_like_bare_prompt(argv, first_cmd):
+        # Bare free-text prompt → modern Typer `run` engine (same as
+        # `praisonai run "<prompt>"`), inheriting session continuity,
+        # --output modes, the credential gate and permissions.
+        _run_typer(["run", *argv])
     else:
-        # Prompt, YAML file, or legacy invocation → legacy
+        # YAML workflow or legacy/deprecated-flag invocation → legacy
         _run_legacy(argv)
 
 
