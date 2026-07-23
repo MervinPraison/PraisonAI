@@ -27,13 +27,14 @@ class _FakeEnum:
 
 class _FakeStreamEvent:
     def __init__(self, type_value, content=None, tool_call=None,
-                 error=None, is_reasoning=False, agent_id=None):
+                 error=None, is_reasoning=False, agent_id=None, metadata=None):
         self.type = _FakeEnum(type_value)
         self.content = content
         self.tool_call = tool_call
         self.error = error
         self.is_reasoning = is_reasoning
         self.agent_id = agent_id
+        self.metadata = metadata
 
 
 class _FakeEmitter:
@@ -145,6 +146,18 @@ def test_retry_event_mapped_to_run_retry(capsys):
     assert retry["data"]["max_attempts"] == 4
     assert retry["data"]["delay"] == 8.0
     assert retry["data"]["reason"] == "rate limit"
+    assert retry["data"]["schema_version"] == SCHEMA_VERSION
+
+
+def test_retry_event_silent_in_text_mode(capsys):
+    output = OutputController(mode=OutputMode.TEXT)
+    agent = _FakeAgent()
+    bridge = attach_bridge(agent, output)
+    # Bridge is a no-op in non-JSON modes.
+    assert bridge is None
+    agent.stream_emitter.emit(_FakeStreamEvent(
+        "retry", metadata={"attempt": 1, "max_attempts": 3, "delay": 1.0}))
+    assert capsys.readouterr().out.strip() == ""
 
 
 def test_run_lifecycle_helpers(capsys):

@@ -4419,6 +4419,64 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
 
+    def _emit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
+        """Emit a ``StreamEventType.RETRY`` event during backoff.
+
+        Lets consumers (e.g. the CLI stream-json bridge) render a live
+        "retrying in Ns (attempt k/N)" status instead of appearing hung.
+        Guarded by ``has_callbacks`` so it stays zero-overhead when nothing is
+        listening, and never raises into the retry loop.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            emitter.emit(self._build_retry_stream_event(
+                StreamEvent, StreamEventType,
+                attempt=attempt, max_attempts=max_attempts, delay=delay, reason=reason,
+            ))
+        except Exception as _re:
+            logger.debug(f"Failed to emit RETRY stream event: {_re}")
+
+    async def _aemit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
+        """Async counterpart of ``_emit_retry_stream_event``.
+
+        Uses ``emit_async`` so consumers registered via the public
+        ``add_async_callback()`` API also receive RETRY events; ``emit`` alone
+        only visits synchronous callbacks. Same zero-overhead guard and
+        never-raise contract as the sync path.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            event = self._build_retry_stream_event(
+                StreamEvent, StreamEventType,
+                attempt=attempt, max_attempts=max_attempts, delay=delay, reason=reason,
+            )
+            emit_async = getattr(emitter, 'emit_async', None)
+            if emit_async is not None:
+                await emit_async(event)
+            else:
+                emitter.emit(event)
+        except Exception as _re:
+            logger.debug(f"Failed to emit RETRY stream event: {_re}")
+
+    def _build_retry_stream_event(self, StreamEvent, StreamEventType, *, attempt, max_attempts, delay, reason):
+        """Construct the RETRY ``StreamEvent`` shared by the sync/async emitters."""
+        return StreamEvent(
+            type=StreamEventType.RETRY,
+            metadata={
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "delay": delay,
+                "reason": reason,
+            },
+            agent_id=getattr(self, 'name', None),
+        )
+
     def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
@@ -4482,20 +4540,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Surface the retry as a first-class stream event so CLI/UI
                 # consumers can show a live "retrying in Ns" status instead of
-                # appearing hung. Guarded by has_callbacks -> zero overhead when
-                # nothing is listening.
-                emitter = getattr(self, 'stream_emitter', None)
-                if emitter is not None and emitter.has_callbacks:
-                    from ..streaming.events import StreamEvent, StreamEventType
-                    emitter.emit(StreamEvent(
-                        type=StreamEventType.RETRY,
-                        metadata={
-                            "attempt": attempt + 1,
-                            "max_attempts": max_attempts,
-                            "delay": delay,
-                            "reason": str(e),
-                        },
-                    ))
+                # appearing hung. Guarded so it is zero-overhead when nothing
+                # is listening.
+                self._emit_retry_stream_event(
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    delay=delay,
+                    reason=str(e),
+                )
                 
                 # Log retry attempt (buffered to avoid spam during transient failures)
                 logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
@@ -4578,20 +4630,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
                 
-                # Surface the retry as a first-class stream event (see sync path).
-                # Guarded by has_callbacks -> zero overhead when nothing is listening.
-                emitter = getattr(self, 'stream_emitter', None)
-                if emitter is not None and emitter.has_callbacks:
-                    from ..streaming.events import StreamEvent, StreamEventType
-                    await emitter.emit_async(StreamEvent(
-                        type=StreamEventType.RETRY,
-                        metadata={
-                            "attempt": attempt + 1,
-                            "max_attempts": max_attempts,
-                            "delay": delay,
-                            "reason": str(e),
-                        },
-                    ))
+                # Surface a streaming RETRY event (see sync path for rationale).
+                # Use the async emitter so async-only consumers registered via
+                # add_async_callback() also receive the event.
+                await self._aemit_retry_stream_event(
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    delay=delay,
+                    reason=str(e),
+                )
                 
                 # Log retry attempt
                 logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
