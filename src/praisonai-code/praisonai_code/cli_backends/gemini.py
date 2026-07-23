@@ -88,7 +88,7 @@ class GeminiBackend:
     ) -> List[str]:
         cmd = [self.config.command, *self.config.args]
 
-        if session and session.session_id:
+        if session and session.session_id and getattr(session, "is_resume", False):
             cmd.extend(["--resume", session.session_id])
 
         if system_prompt:
