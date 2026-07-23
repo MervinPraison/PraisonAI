@@ -292,6 +292,21 @@ class TestMainRouting(unittest.TestCase):
         run_typer.assert_called_once_with(["run", "Create a weather app"])
         run_legacy.assert_not_called()
 
+    def test_multi_token_prompt_joined_into_single_run_argument(self):
+        # An unquoted multi-word prompt arrives as several argv tokens. The
+        # modern `run` command takes a single positional ``target``, so the
+        # dispatcher must join the tokens into one argument — otherwise Typer
+        # would reject the extra positionals or the agent would receive only
+        # the first word. Regression guard for Greptile P1 (multi-token prompt).
+        sys.argv = ["praisonai", "build", "a", "weather", "agent"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(["run", "build a weather agent"])
+        run_legacy.assert_not_called()
+
     def test_bare_prompt_with_legacy_flag_routes_to_legacy(self):
         # A prompt combined with any flag stays on legacy: the legacy argparse
         # surface owns the large deprecated/legacy flag set that `run` lacks.
@@ -473,6 +488,25 @@ class TestCommandRegistryNoDrift(unittest.TestCase):
             missing,
             set(),
             f"Previously-drifted commands not found in routing set: {missing}",
+        )
+
+    def test_flagless_operational_commands_are_typer_not_prompts(self):
+        # Greptile P1 (flagless legacy-only commands) is a false positive:
+        # ``serve``, ``call``, ``realtime``, ``debug``, ``lsp``, ``diag`` are all
+        # registered Typer commands in ``_LAZY_COMMANDS`` and are therefore
+        # recognised by ``get_command_names()`` — so ``main()`` routes them to
+        # Typer at the command-membership check *before* ever reaching the
+        # bare-prompt forwarder. Pin that so they never regress into prompts.
+        from praisonai.cli import app as cli_app
+
+        routing = cli_app.get_command_names()
+        operational = {"serve", "call", "realtime", "debug", "lsp", "diag"}
+        missing = operational - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Operational commands not recognised as Typer commands "
+            f"(would be misrouted to `run` as prompts): {missing}",
         )
 
 

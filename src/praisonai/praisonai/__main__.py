@@ -210,7 +210,15 @@ def main():
         # Bare free-text prompt → modern Typer `run` engine (same as
         # `praisonai run "<prompt>"`), inheriting session continuity,
         # --output modes, the credential gate and permissions.
-        _run_typer(["run", *argv])
+        #
+        # ``run`` takes a single positional ``target``. An unquoted prompt
+        # (``praisonai build a weather agent``) arrives as multiple argv
+        # tokens; join them into one argument so the whole prompt reaches
+        # ``run`` intact instead of Typer rejecting the extra positionals.
+        # This is flag-free (guarded by ``_looks_like_bare_prompt``), so a
+        # simple space-join faithfully reconstructs the user's prompt.
+        prompt = " ".join(argv)
+        _run_typer(["run", prompt])
     else:
         # YAML workflow or legacy/deprecated-flag invocation → legacy
         _run_legacy(argv)
