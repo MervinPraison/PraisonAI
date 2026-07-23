@@ -344,9 +344,19 @@ class BotSessionManager:
         """
         if not self._attribution or not sender:
             return prompt
+        # ``sender`` is a raw, third-party-controlled platform display name /
+        # group title. Neutralise it before interpolation so an embedded
+        # newline can't masquerade as a fake heading / system directive in
+        # the per-turn prompt prefix (prompt-injection defence, on by default).
+        try:
+            from praisonaiagents.session.context import neutralize_untrusted_text
+
+            safe_sender = neutralize_untrusted_text(sender)
+        except Exception:  # pragma: no cover — never break chat on import error
+            safe_sender = str(sender).replace("\r", " ").replace("\n", " ")
         try:
             prefix = self._attribution.format(
-                sender=sender,
+                sender=safe_sender,
                 time=datetime.now().strftime("%H:%M"),
             )
         except (KeyError, IndexError, ValueError) as e:  # pragma: no cover — defensive
