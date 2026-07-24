@@ -21,24 +21,52 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _run_sync(coro):
+_RUN_SYNC_TIMEOUT = float(os.environ.get("PRAISONAI_RUN_SYNC_TIMEOUT", "300"))
+
+
+def _run_sync(coro, *, timeout: Optional[float] = _RUN_SYNC_TIMEOUT):
     """Run a coroutine to completion from sync code without a wrapper dependency.
 
     ``praisonai-code`` is a Tier-2 package and must not import the ``praisonai``
-    wrapper at the hot path (C7 gate / ARCHITECTURE §2). When no event loop is
-    running we use ``asyncio.run``; when one is already running (e.g. called from
-    within async agent execution) we offload to a worker thread so we never try
-    to nest ``asyncio.run`` on a live loop.
+    wrapper at the hot path (C7 gate / ARCHITECTURE §2). This bridge keeps the
+    union of both historical guarantees:
+
+    - **Running-loop safety:** when a loop is already running (e.g. called from
+      within async agent execution) we offload to a worker thread so we never
+      try to nest ``asyncio.run`` on a live loop.
+    - **Timeout:** a stuck coroutine is bounded by ``timeout`` seconds (honoured
+      the same way whether or not a loop is already running) so a hung tool call
+      cannot block the agent indefinitely.
     """
+    import concurrent.futures
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        running_loop = False
+    else:
+        running_loop = True
+
+    if not running_loop and timeout is None:
         return asyncio.run(coro)
 
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    # Offload to a worker thread so the timeout can be enforced via
+    # ``Future.result`` even when a loop is already running (never nest
+    # ``asyncio.run`` on a live loop). We deliberately avoid the executor's
+    # context manager: on ``__exit__`` it calls ``shutdown(wait=True)``, which
+    # would re-block on a coroutine that is still hung — defeating the timeout.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(asyncio.run, coro)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        raise
+    finally:
+        # Return promptly: do not wait for a worker that may still be running
+        # the (now abandoned) coroutine. The daemon-like thread is reclaimed on
+        # interpreter exit; on success it has already finished by this point.
+        pool.shutdown(wait=False)
 
 
 def _sanitize_filepath(filepath: str, workspace: Optional[str] = None) -> str:
