@@ -3198,7 +3198,44 @@ Summary:"""
     # ================================================================
     # Filesystem tracking convenience methods (powered by FileSnapshot)
     # ================================================================
-    
+
+    def set_snapshot_root(self, project_path: str) -> bool:
+        """Root filesystem change-tracking at ``project_path``.
+
+        Bots/gateway resolve file tools against a per-chat ``Workspace`` and
+        attach it *after* construction, but the FileSnapshot backing
+        :meth:`undo`/:meth:`redo`/:meth:`diff` was created at ``__init__`` time
+        rooted at ``os.getcwd()``. Without this, ``/undo`` tracks the wrong
+        directory (never where the tools actually wrote). Call this once after
+        the workspace is known so change tracking follows the tools.
+
+        Rooting at a new directory clears the undo/redo stacks (they belong to
+        the previous root). A no-op when the root is unchanged. Returns ``True``
+        when a snapshot manager is rooted at ``project_path``.
+        """
+        import os
+        new_root = os.path.abspath(str(project_path))
+        current = self._file_snapshot
+        if current is not None and getattr(current, "project_path", None) == new_root:
+            return True
+        try:
+            from ..snapshot import FileSnapshot
+            snapshot_dir = None
+            cfg = getattr(self, "autonomy_config", None)
+            if isinstance(cfg, dict):
+                snapshot_dir = cfg.get("snapshot_dir")
+            self._file_snapshot = FileSnapshot(
+                project_path=new_root,
+                snapshot_dir=snapshot_dir,
+            )
+            with self._snapshot_lock:
+                self._snapshot_stack = []
+                self._redo_stack = []
+            return True
+        except Exception as e:  # pragma: no cover - git may be unavailable
+            logger.debug(f"Re-rooting FileSnapshot failed: {e}")
+            return False
+
     def undo(self) -> bool:
         """Undo the last set of file changes.
         
