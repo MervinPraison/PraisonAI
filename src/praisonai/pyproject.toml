@@ -91,6 +91,9 @@ daytona = [
     # Note: daytona package not yet available on PyPI
     # Install via: pip install git+https://github.com/daytonaio/daytona-python
 ]
+tenki = [
+    "tenki-sandbox>=0.4.0",
+]
 realtime = [
     "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",

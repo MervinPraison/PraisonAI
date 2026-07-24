@@ -1032,7 +1032,7 @@ class LocalManagedAgent:
         Accepts:
         - None → no remote compute
         - A string: ``"local"``, ``"docker"``, ``"e2b"``, ``"modal"``,
-          ``"daytona"``, ``"flyio"``
+          ``"daytona"``, ``"flyio"``, ``"tenki"``
         - An already-instantiated compute provider object
         """
         if compute is None:
@@ -1057,6 +1057,9 @@ class LocalManagedAgent:
             elif name == "flyio":
                 from praisonai.integrations.compute.flyio import FlyioCompute
                 return FlyioCompute()
+            elif name == "tenki":
+                from praisonai.integrations.compute.tenki import TenkiCompute
+                return TenkiCompute()
             else:
                 raise ValueError(f"Unknown compute provider: {name}")
         return compute  # Already an instance
