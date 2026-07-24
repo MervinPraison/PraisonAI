@@ -559,32 +559,44 @@ class TestAgentIntegration:
         get_registry().clear()
     
     def test_agent_execute_tool_from_registry(self):
-        """Agent should find tools in registry during execute_tool."""
+        """Agent should find tools in registry when allow_global_tools is opted in."""
         from praisonaiagents import Agent, BaseTool, register_tool, get_registry
-        
+        from praisonaiagents.config.feature_configs import ToolConfig
+
         # Clear registry first
         get_registry().clear()
-        
+
         class PowerTool(BaseTool):
             name = "power"
             description = "Raise to power"
-            
+
             def run(self, base: int, exp: int) -> int:
                 return base ** exp
-        
+
         register_tool(PowerTool())
-        
-        # Agent without tools - should still find from registry
+
+        # Agent that opts into the global registry via allow_global_tools=True.
         agent = Agent(
             name="TestAgent",
             role="Tester",
             goal="Test tools",
-            tools=[]
+            tools=[],
+            tool_config=ToolConfig(allow_global_tools=True),
         )
-        
+
         result = agent.execute_tool("power", {"base": 2, "exp": 3})
         assert result == 8
-        
+
+        # Default agent (no opt-in) must NOT reach the global registry.
+        safe_agent = Agent(
+            name="SafeAgent",
+            role="Tester",
+            goal="Test isolation",
+            tools=[],
+        )
+        with pytest.raises(Exception):
+            safe_agent.execute_tool("power", {"base": 2, "exp": 3})
+
         # Clean up
         get_registry().clear()
 

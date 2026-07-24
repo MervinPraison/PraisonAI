@@ -2116,6 +2116,12 @@ Your Goal: {self.goal}
         
         # Store tool retry policy for tool execution with exponential backoff
         self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
+
+        # Whether undeclared tool names may resolve via the process-global @tool
+        # registry. Default False keeps the agent scoped to its own tools=[...].
+        self._allow_global_tools = (
+            _tool_config.allow_global_tools if _tool_config else False
+        )
         
         # Retry configuration with jittered exponential backoff.
         # Default (retry is None) applies RetryBackoffConfig() so the native

@@ -1076,7 +1076,13 @@ class ToolConfig:
     artifact_retention_days: int = 7  # Days to retain artifacts before garbage collection
     artifact_store: Optional[Any] = None  # Custom artifact store instance
     redact_secrets: bool = True  # Whether to redact secrets from artifacts
-    
+
+    # Allow resolving tool calls via the process-global @tool registry when a
+    # tool name is not in this agent's declared tools=[...]. Default False so an
+    # agent is scoped strictly to its own tools (safe by default); opt in for
+    # plugin-host style dynamic dispatch.
+    allow_global_tools: bool = False
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if self.output_limit <= 0:
@@ -1105,6 +1111,7 @@ class ToolConfig:
             "artifact_retention_days": self.artifact_retention_days,
             "artifact_store": self.artifact_store,
             "redact_secrets": self.redact_secrets,
+            "allow_global_tools": self.allow_global_tools,
         }
     
     @classmethod
@@ -1130,6 +1137,7 @@ class ToolConfig:
             artifact_retention_days=data.get("artifact_retention_days", 7),
             artifact_store=data.get("artifact_store"),
             redact_secrets=data.get("redact_secrets", True),
+            allow_global_tools=data.get("allow_global_tools", False),
         )
 
 
