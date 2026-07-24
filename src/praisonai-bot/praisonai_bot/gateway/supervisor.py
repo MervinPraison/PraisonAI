@@ -21,6 +21,7 @@ from ..bots._resilience import (
     ConnectionMonitor,
     is_recoverable_error,
     is_conflict_error,
+    is_credential_error,
     sleep_with_abort,
 )
 from .health_monitor import ChannelHealthMonitor, HealthMonitorConfig
@@ -34,6 +35,12 @@ class ChannelState(Enum):
     FAILED = "failed"
     PAUSED = "paused"
     STOPPED = "stopped"
+    # Issue #3348: the channel's credential was rejected at runtime (revoked,
+    # rotated, or expired token → 401/403). Distinct from FAILED: it is not
+    # terminal — the supervisor stops hammering the invalid token and waits for
+    # the credential to change (a reconnect/hot-reload), then auto-recovers
+    # without a full process restart. Surfaced as a degraded, redacted state.
+    CREDENTIAL_UNAVAILABLE = "credential-unavailable"
 
 
 @dataclass
@@ -274,7 +281,31 @@ class ChannelSupervisor:
                     status.next_retry_at = None
                     logger.error(f"Channel '{name}' failed with conflict error: {e}")
                     break
-                    
+
+                elif is_credential_error(e, monitor.platform):
+                    # Issue #3348: the credential was rejected at runtime (401/403,
+                    # revoked/rotated/expired token). Do NOT hammer the invalid
+                    # token in a tight reconnect loop and do NOT go terminal
+                    # FAILED (which would require a full restart even after the
+                    # token is fixed). Enter a first-class, redacted degraded
+                    # state and wait for the credential to change — a reconnect()
+                    # or config hot-reload sets the abort signal, wakes this loop,
+                    # and the channel auto-recovers without a process restart. The
+                    # reason is redacted: it never includes the token, only that
+                    # the credential is unavailable.
+                    status.state = ChannelState.CREDENTIAL_UNAVAILABLE
+                    status.last_error = "credential unavailable"
+                    status.last_error_time = time.time()
+                    status.next_retry_at = None
+                    logger.error(
+                        f"Channel '{name}' credential rejected "
+                        f"(auth failure); pausing until the credential changes. "
+                        f"Fix/rotate the token and reconnect to auto-recover."
+                    )
+                    await abort_signal.wait()  # Wait for reconnect/hot-reload.
+                    abort_signal.clear()
+                    continue
+
                 elif not is_recoverable:
                     # Non-recoverable error - treat as fatal
                     status.state = ChannelState.FAILED  
@@ -300,8 +331,12 @@ class ChannelSupervisor:
                         # Aborted - check if paused or reconnect requested
                         continue
         
-        # Cleanup - don't overwrite terminal failure states
-        if status.state != ChannelState.FAILED:
+        # Cleanup - don't overwrite terminal failure or degraded credential
+        # states (a credential-unavailable channel stays queryable as degraded).
+        if status.state not in (
+            ChannelState.FAILED,
+            ChannelState.CREDENTIAL_UNAVAILABLE,
+        ):
             status.state = ChannelState.STOPPED
         logger.info(f"Supervision ended for channel '{name}'")
         
