@@ -283,6 +283,18 @@ class MCP:
         ```
     """
     
+    # Process-level registry of active MCP server names (sanitized prefixes),
+    # mirroring how tools/registry.py tracks tool names. Populated when a
+    # server is namespaced via with_tool_prefix(), so skills' capability
+    # validator can discover which MCP servers are actually connected
+    # (issue #3307) instead of always seeing an empty set.
+    _active_server_names: set = set()
+
+    @classmethod
+    def list_active_server_names(cls) -> set:
+        """Return the set of active MCP server names (sanitized prefixes)."""
+        return set(cls._active_server_names)
+
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
@@ -833,6 +845,14 @@ class MCP:
             )
 
         self._tool_prefix = sanitized
+
+        # Track this server name so skills' capability validator can see that
+        # it is connected (issue #3307). Register both the caller-supplied
+        # name and its sanitized prefix, since skill requirements may use
+        # either spelling.
+        MCP._active_server_names.add(sanitized)
+        if prefix:
+            MCP._active_server_names.add(prefix)
 
         # Rename already-generated callable tools. Dispatch inside each
         # wrapper closes over the original tool name, so only the public

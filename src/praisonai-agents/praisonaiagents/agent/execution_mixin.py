@@ -1146,13 +1146,9 @@ Write the complete compiled report:"""
         # Record the tool name for this turn so the self-improve review policy
         # sees async tool usage too (issue #3037). Mirrors the sync path in
         # _execute_tool_with_context; skipped during a guarded review turn so
-        # the review's own calls are not tracked and cannot recurse.
-        if not getattr(self, "_in_skill_review", False):
-            turn_tools = getattr(self, "_turn_tools_used", None)
-            if turn_tools is None:
-                self._turn_tools_used = []
-                turn_tools = self._turn_tools_used
-            turn_tools.append(function_name)
+        # the review's own calls are not tracked and cannot recurse. Locked so
+        # concurrent turns on the same Agent don't corrupt the buffer (#3307).
+        self._record_turn_tool(function_name)
 
         # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,
         # mirroring the sync execute_tool path in tool_execution.py. Without

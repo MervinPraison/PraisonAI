@@ -20,7 +20,7 @@ from .async_memory_mixin import AsyncMemoryMixin
 from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
-from .async_safety import AsyncSafeState
+from .async_safety import AsyncSafeState, DualLock
 # NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
 # (Issue #2644). It is kept in the MRO for backward compatibility during the
 # deprecation cycle and will be removed afterwards.
@@ -2224,7 +2224,10 @@ Your Goal: {self.goal}
         # Per-turn tool-name buffer feeding the self-improve review policy.
         # Populated in _execute_tool_with_context, reset each chat turn, and
         # read by _trigger_after_agent_hook when tools_used is not passed.
+        # Guarded by a DualLock (like chat_history) so concurrent chat()/achat()
+        # turns on the same Agent instance don't corrupt each other's buffer.
         self._turn_tools_used = []
+        self._turn_tools_lock = DualLock()
 
         # Database persistence (lazy - no imports until used)
         self._db = db

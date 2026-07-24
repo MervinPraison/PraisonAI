@@ -87,7 +87,6 @@ class CapabilityValidator:
         """
         self.enforcement_level = enforcement_level
         self._tool_cache: Optional[Set[str]] = None
-        self._server_cache: Optional[Set[str]] = None
     
     def validate_skill(
         self,
@@ -204,12 +203,25 @@ class CapabilityValidator:
         return self._tool_cache
     
     def _get_available_servers(self) -> Set[str]:
-        """Get set of available MCP server names."""
-        if self._server_cache is None:
-            # TODO: Implement MCP server discovery
-            # For now, return empty set - this can be extended later
-            self._server_cache = set()
-        return self._server_cache
+        """Get set of available MCP server names.
+
+        Derives names from the MCP client registry of servers that have been
+        namespaced (via ``with_tool_prefix``) in this process. Without this an
+        MCP-server-gated skill could never pass STRICT validation because the
+        set was always empty (issue #3307).
+
+        Queried live (not cached) because MCP servers register lazily: a skill
+        may be validated before its required server connects. Caching the first
+        empty snapshot would leave STRICT validation permanently reporting the
+        skill unavailable even after the server registers. The registry read is
+        just a cheap ``set`` copy, so there is no hot-path cost.
+        """
+        try:
+            from ..mcp.mcp import MCP
+            return MCP.list_active_server_names()
+        except ImportError:
+            logger.debug("MCP not available")
+            return set()
     
     def _log_validation_result(self, result: ValidationResult) -> None:
         """Log validation result based on enforcement level."""
@@ -233,4 +245,3 @@ class CapabilityValidator:
     def clear_cache(self) -> None:
         """Clear cached capability information."""
         self._tool_cache = None
-        self._server_cache = None
