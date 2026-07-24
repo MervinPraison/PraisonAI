@@ -29,8 +29,8 @@ def _tool_name(tool: Any) -> str:
     """Best-effort stable name for a tool entry.
 
     Tools may be plain callables, dicts holding an OpenAI-style function
-    schema, or objects exposing ``__name__``/``name``. Only the *name* is
-    used — it is what identifies the schema slot in the serialised tool block.
+    schema, or objects exposing ``__name__``/``name``. The name identifies the
+    schema slot in the serialised tool block.
     """
     if isinstance(tool, dict):
         fn = tool.get("function")
@@ -47,13 +47,55 @@ def _tool_name(tool: Any) -> str:
     return str(tool)
 
 
+def _tool_fingerprint(tool: Any) -> str:
+    """Best-effort stable fingerprint of a tool's *provider-visible* schema.
+
+    The serialised tool block sent to the provider is not just the tool name —
+    it is the full function schema (name + description + parameters). A change
+    to a tool's description, parameters, or required fields *without* a rename
+    changes those bytes and therefore invalidates the prompt cache, so the
+    fingerprint must reflect the whole schema, not only the name (Issue #3352
+    review). Falls back to the name when no richer schema is exposed.
+    """
+    name = _tool_name(tool)
+
+    # Dict tools already carry an OpenAI-style function schema — fingerprint the
+    # description + parameters alongside the name so a same-name schema edit is
+    # detected. ``json.dumps(sort_keys=True)`` makes the render deterministic.
+    if isinstance(tool, dict):
+        fn = tool.get("function")
+        schema = fn if isinstance(fn, dict) else tool
+        desc = schema.get("description") if isinstance(schema, dict) else None
+        params = schema.get("parameters") if isinstance(schema, dict) else None
+        try:
+            import json
+
+            return "\x01".join(
+                (
+                    name,
+                    str(desc or ""),
+                    json.dumps(params or {}, sort_keys=True, default=str),
+                )
+            )
+        except Exception:  # pragma: no cover — defensive
+            return name
+
+    # Callable/object tools: fold in the docstring (the description the schema
+    # generator emits) so an edited tool doc flips the signature too.
+    doc = getattr(tool, "__doc__", None)
+    if doc:
+        return f"{name}\x01{doc}"
+    return name
+
+
 def prompt_prefix_signature(agent: Any) -> str:
     """Return a sha256 signature of an agent's cache-relevant prompt prefix.
 
     The signature is computed over, and only over:
 
     * the model identity (``agent.llm``),
-    * the sorted set of tool names (``agent.tools``),
+    * the sorted set of tool *schema fingerprints* (name + description +
+      parameters, ``agent.tools``) — so a same-name schema edit is detected,
     * a fingerprint of the system instructions (``agent.instructions``).
 
     Volatile per-turn data is intentionally excluded so that an unchanged
@@ -73,9 +115,9 @@ def prompt_prefix_signature(agent: Any) -> str:
 
     try:
         tools = getattr(agent, "tools", None) or []
-        tool_names = sorted(_tool_name(t) for t in tools)
+        tool_fps = sorted(_tool_fingerprint(t) for t in tools)
     except Exception:
-        tool_names = []
+        tool_fps = []
 
     try:
         instructions = getattr(agent, "instructions", None) or ""
@@ -87,7 +129,7 @@ def prompt_prefix_signature(agent: Any) -> str:
     hasher.update(b"model\x00")
     hasher.update(str(model).encode("utf-8", "replace"))
     hasher.update(b"\x00tools\x00")
-    hasher.update("\x00".join(tool_names).encode("utf-8", "replace"))
+    hasher.update("\x00".join(tool_fps).encode("utf-8", "replace"))
     hasher.update(b"\x00instructions\x00")
     hasher.update(instructions.encode("utf-8", "replace"))
     return hasher.hexdigest()

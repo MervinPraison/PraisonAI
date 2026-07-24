@@ -5083,6 +5083,9 @@ class WebSocketGateway:
                 # to the same session serialise turns on the resolved id. No-op
                 # without an identity resolver (single-channel behaviour).
                 self._stamp_turn_lock_map(bot)
+                # Issue #3352: share the gateway's metrics registry so per-turn
+                # prompt-prefix drift increments ``prompt_cache_invalidations_total``.
+                self._stamp_metrics(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -5327,6 +5330,29 @@ class WebSocketGateway:
             sess._locks = lock_map
         elif hasattr(bot, "_turn_lock_map"):
             bot._turn_lock_map = lock_map
+
+    def _stamp_metrics(self, bot: Any) -> None:
+        """Share the gateway's ``GatewayMetrics`` registry with a channel bot.
+
+        Issue #3352: the concrete adapters build their own ``BotSessionManager``
+        (exposed as ``_session`` / ``_session_mgr``), which increments
+        ``prompt_cache_invalidations_total`` on per-turn prompt-prefix drift only
+        when ``session._metrics`` is set. Without this splice that reference stays
+        ``None`` for gateway-managed sessions and the counter never moves despite
+        genuine invalidations. Mirrors ``_stamp_admission_gate`` /
+        ``_stamp_identity_resolver`` and is a no-op when no registry exists
+        (``--no-metrics``), preserving today's behaviour. Called from both
+        ``start_channels`` and ``_start_single_channel`` (hot-reload).
+        """
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None:
+            return
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_metrics"):
+            sess._metrics = metrics
 
     def _register_channel_shell_cfg(
         self, channel_name: str, config: Any, ch_cfg: Dict[str, Any]
@@ -6158,6 +6184,9 @@ class WebSocketGateway:
             # channel so a restarted channel keeps serialising turns on the
             # resolved id alongside its still-running siblings.
             self._stamp_turn_lock_map(bot)
+            # Issue #3352: re-share the metrics registry on the hot-reloaded
+            # channel so prompt-cache invalidation metering keeps working.
+            self._stamp_metrics(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:

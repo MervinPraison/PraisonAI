@@ -1569,6 +1569,9 @@ class BotSessionManager:
             # End the session so lifecycle hooks fire and can re-open later.
             self._fire_session_end(storage_key, reason="stale")
             self._histories.pop(storage_key, None)
+            # Drop the prompt-prefix baseline so a reopened session establishes
+            # a fresh one instead of emitting a false invalidation (Issue #3352).
+            self._prefix_sig.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
             self._locks.drop(storage_key)
             if self._store is not None:
@@ -1639,6 +1642,10 @@ class BotSessionManager:
                 scope clears the shared key, not a re-derived per_user one).
         """
         self._histories.pop(storage_key, None)
+        # Reset the prompt-prefix baseline with the history so the next turn on
+        # this key starts a fresh baseline rather than comparing against the
+        # cleared session and firing a false invalidation (Issue #3352).
+        self._prefix_sig.pop(storage_key, None)
         # Don't clear last_active as we still need it for idle tracking
         # Don't drop lock here as it may still be held by caller
         
@@ -1819,6 +1826,9 @@ class BotSessionManager:
                     logger.warning("Failed to clear session %s: %s", key, e)
 
         self._histories.clear()
+        # Clear prompt-prefix baselines alongside history so reopened sessions
+        # each establish a fresh baseline (Issue #3352).
+        self._prefix_sig.clear()
         return count
 
     @property
