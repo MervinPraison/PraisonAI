@@ -481,14 +481,68 @@ class KanbanDispatcher:
             logger.warning(f"Error preparing worktree for task {task.id}: {e}")
             return None
 
-    def _remove_worktree(self, path: str):
-        """Tear down a task worktree (best-effort)."""
+    def _worktree_outstanding_work(self, path: str, branch: str) -> Optional[str]:
+        """Detect work a worktree still holds that removal would destroy.
+
+        Lossless-only guard (Refinement 2): a dispatcher must never be the thing
+        that silently destroys work a worker produced but failed to integrate.
+        Returns a human-readable reason when the worktree is **dirty** (has
+        uncommitted changes) or its branch has commits **not yet in base**
+        (ahead-count > 0); returns ``None`` when the worktree is safe to remove.
+        Any error inspecting the tree is treated as "outstanding" so we err
+        toward preservation, never toward destruction.
+        """
+        try:
+            status = self._run_git("status", "--porcelain", cwd=path)
+            if status.returncode != 0:
+                return f"could not read worktree status: {status.stderr.strip()}"
+            if status.stdout.strip():
+                return "worktree has uncommitted changes"
+            base = self._base_branch()
+            ahead = self._run_git(
+                "rev-list", "--count", f"{base}..{branch}", cwd=path
+            )
+            if ahead.returncode != 0:
+                return f"could not compute ahead-count: {ahead.stderr.strip()}"
+            count = ahead.stdout.strip()
+            if count and count != "0":
+                return f"branch has {count} commit(s) not in {base}"
+            return None
+        except Exception as e:
+            return f"error inspecting worktree: {e}"
+
+    def _remove_worktree(self, path: str, branch: Optional[str] = None,
+                         *, force: bool = False) -> Optional[str]:
+        """Tear down a task worktree, losslessly by default.
+
+        Unless ``force`` is set, refuse to remove a worktree that still holds
+        outstanding work (dirty tree or unmerged commits): keep it and return
+        the preservation reason so the caller can record it. Removal with
+        outstanding work is an explicit force operation only. Returns ``None``
+        only when the worktree was actually removed; otherwise returns a reason
+        string (preservation guard, failed ``git worktree remove``, or
+        exception) so the caller keeps tracking it instead of orphaning it.
+        """
+        if not force and branch is not None:
+            reason = self._worktree_outstanding_work(path, branch)
+            if reason is not None:
+                logger.warning(
+                    "Preserving worktree %s (not removing): %s", path, reason,
+                )
+                return reason
         try:
             result = self._run_git("worktree", "remove", "--force", path)
             if result.returncode != 0:
-                logger.debug(f"worktree remove failed for {path}: {result.stderr.strip()}")
+                # Removal failed: the worktree is still on disk. Surface the
+                # reason so the caller does not drop tracking and leave an
+                # orphaned worktree/branch behind.
+                detail = result.stderr.strip() or f"exit code {result.returncode}"
+                logger.warning(f"worktree remove failed for {path}: {detail}")
+                return f"worktree removal failed: {detail}"
         except Exception as e:
-            logger.debug(f"Error removing worktree {path}: {e}")
+            logger.warning(f"Error removing worktree {path}: {e}")
+            return f"worktree removal error: {e}"
+        return None
 
     def _commit_worktree_changes(self, path: str, branch: str) -> None:
         """Commit any uncommitted edits the worker left in its worktree.
@@ -591,9 +645,22 @@ class KanbanDispatcher:
             logger.warning(f"Task {task_id} blocked: merge conflict in {files}")
             return True
 
-        # Clean merge: tear down the worktree.
-        self._remove_worktree(path)
-        self._worktrees.pop(task_id, None)
+        # Clean merge: tear down the worktree losslessly. A non-None result
+        # means the worktree still exists on disk -- either the guard preserved
+        # outstanding work (dirty/unmerged) or the removal itself failed. In
+        # both cases keep the tracking entry and record the reason rather than
+        # dropping it and orphaning the worktree.
+        preserved = self._remove_worktree(path, branch)
+        if preserved is not None:
+            try:
+                store.add_comment(
+                    task_id, self.worker_id,
+                    f"worktree_preserved at {path}: {preserved}",
+                )
+            except Exception:
+                pass
+        else:
+            self._worktrees.pop(task_id, None)
         return False
 
     async def _spawn_worker(self, task: Any, store: Any) -> bool:

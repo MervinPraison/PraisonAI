@@ -256,6 +256,168 @@ def test_integration_exception_blocks_task(git_repo):
     assert ("t_e", "blocked") in store.moves
 
 
+def test_dirty_worktree_preserved_on_cleanup(git_repo):
+    """A worktree left dirty after integration is preserved, not deleted."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_dirty", "worktree"), store)
+    d._worktrees = {"t_dirty": (path, "kanban/t_dirty")}
+    (git_repo / ".wt" / "t_dirty" / "new.txt").write_text("committed\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "add new")
+
+    # Simulate a post-integration dirty tree by patching removal-time status:
+    # leave an uncommitted edit in the worktree just before cleanup.
+    original_integrate = d._try_integrate
+
+    def _integrate(branch):
+        ok, files = original_integrate(branch)
+        # Introduce an uncommitted change after the merge, before removal.
+        (git_repo / ".wt" / "t_dirty" / "leftover.txt").write_text("dirty\n")
+        return ok, files
+
+    d._try_integrate = _integrate
+
+    conflicted = d._integrate_worktree("t_dirty", store)
+
+    assert conflicted is False
+    # Worktree preserved because it is dirty; a preservation comment recorded.
+    assert os.path.exists(path)
+    assert any("worktree_preserved" in c[2] for c in store.comments)
+
+
+def test_unpushed_commits_block_removal(git_repo):
+    """Removal is refused when the branch has commits not in base."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_ahead", "worktree"), store)
+    branch = "kanban/t_ahead"
+    (git_repo / ".wt" / "t_ahead" / "a.txt").write_text("a\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "unmerged work")
+
+    # The branch is 1 commit ahead of base (never integrated) -> preserve.
+    reason = d._remove_worktree(path, branch)
+    assert reason is not None
+    assert "not in" in reason
+    assert os.path.exists(path)
+
+
+def test_lossless_removal_of_clean_worktree(git_repo):
+    """A fully-integrated, clean worktree is removed (no false preservation)."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_clean", "worktree"), store)
+    d._worktrees = {"t_clean": (path, "kanban/t_clean")}
+    (git_repo / ".wt" / "t_clean" / "c.txt").write_text("c\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "add c")
+
+    conflicted = d._integrate_worktree("t_clean", store)
+
+    assert conflicted is False
+    # Branch merged into base -> nothing outstanding -> removed.
+    assert not os.path.exists(path)
+    assert "t_clean" not in d._worktrees
+    assert not any("worktree_preserved" in c[2] for c in store.comments)
+
+
+def test_force_removal_ignores_outstanding_work(git_repo):
+    """force=True removes even a worktree with unmerged commits (explicit)."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_force", "worktree"), store)
+    (git_repo / ".wt" / "t_force" / "f.txt").write_text("f\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "unmerged")
+
+    reason = d._remove_worktree(path, "kanban/t_force", force=True)
+    assert reason is None
+    assert not os.path.exists(path)
+
+
+def test_failed_removal_returns_reason(git_repo):
+    """A nonzero `git worktree remove` surfaces a reason (not a silent None)."""
+    d = _dispatcher_in(git_repo)
+
+    path = d._prepare_worktree(_FakeTask("t_rmfail", "worktree"), _FakeStore())
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        # Fail only the removal; let status/ahead checks pass so we reach it.
+        if args[:2] == ("worktree", "remove"):
+            class _R:
+                returncode = 1
+                stdout = ""
+                stderr = "worktree is locked"
+            return _R()
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    reason = d._remove_worktree(path, "kanban/t_rmfail")
+    # A failed removal must NOT report success (None); it returns a reason so
+    # the caller keeps tracking the still-on-disk worktree.
+    assert reason is not None
+    assert "failed" in reason
+    assert os.path.exists(path)
+
+
+def test_failed_removal_keeps_tracking_and_comments(git_repo):
+    """A failed removal after a clean merge preserves tracking + records it."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_track", "worktree"), store)
+    d._worktrees = {"t_track": (path, "kanban/t_track")}
+    (git_repo / ".wt" / "t_track" / "c.txt").write_text("c\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "add c")
+
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        if args[:2] == ("worktree", "remove"):
+            class _R:
+                returncode = 1
+                stdout = ""
+                stderr = "worktree is locked"
+            return _R()
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    conflicted = d._integrate_worktree("t_track", store)
+
+    assert conflicted is False
+    # Removal failed => entry must NOT be dropped (no orphaned worktree).
+    assert "t_track" in d._worktrees
+    assert any("worktree_preserved" in c[2] for c in store.comments)
+
+
+def test_removal_exception_returns_reason(git_repo):
+    """An exception during removal is surfaced, not swallowed as success."""
+    d = _dispatcher_in(git_repo)
+
+    path = d._prepare_worktree(_FakeTask("t_exc", "worktree"), _FakeStore())
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        if args[:2] == ("worktree", "remove"):
+            raise RuntimeError("git exploded")
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    reason = d._remove_worktree(path, "kanban/t_exc")
+    assert reason is not None
+    assert "error" in reason
+
+
 def test_unsafe_task_id_refused(git_repo):
     """Traversal / invalid-ref ids do not create a worktree (no fail-open)."""
     d = _dispatcher_in(git_repo)
