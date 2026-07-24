@@ -655,7 +655,11 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 except Exception as e:
                     logger.error(f"Message handler error: {e}")
 
-            text = (decision.get("content") or event.get("text", "")).strip()
+            # fire_message_received always returns the (possibly hook-rewritten)
+            # inbound content, seeded from the converted message. Use it
+            # verbatim so a hook that intentionally redacts to empty is honoured
+            # instead of silently restoring the raw Slack event text.
+            text = (decision.get("content") or "").strip()
             if self._bot_user:
                 text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()
 

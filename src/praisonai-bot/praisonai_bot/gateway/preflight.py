@@ -451,14 +451,20 @@ def parse_since_window(since: str) -> float:
     return 600.0
 
 
-def _gateway_auth_headers(host: str) -> Dict[str, str]:
-    """Build auth headers for gateway endpoints that require a token."""
+def _gateway_auth_headers(host: str, scheme: str = "http") -> Dict[str, str]:
+    """Build auth headers for gateway endpoints that require a token.
+
+    The bearer token is only attached when it cannot be exposed to a network
+    observer: over loopback, or over HTTPS. Sending it over plaintext HTTP to a
+    remote host would leak the credential, so it is deliberately withheld there.
+    """
     token = os.environ.get("GATEWAY_AUTH_TOKEN", "").strip()
     if not token:
         return {}
-    if host in ("127.0.0.1", "localhost", "::1"):
-        return {}
-    return {"Authorization": f"Bearer {token}"}
+    is_loopback = host in ("127.0.0.1", "localhost", "::1")
+    if is_loopback or scheme == "https":
+        return {"Authorization": f"Bearer {token}"}
+    return {}
 
 
 def _http_get_json(
@@ -474,7 +480,7 @@ def _http_get_json(
     import urllib.request
 
     url = f"http://{host}:{port}{path}"
-    headers = _gateway_auth_headers(host) if auth else {}
+    headers = _gateway_auth_headers(host, scheme="http") if auth else {}
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -659,23 +665,27 @@ def _metrics_inbound_delta(
     port: int,
     since_seconds: float,
     timeout: float = 5.0,
-) -> Tuple[Optional[float], Optional[float]]:
-    """Return ``(current_total, delta_since_baseline)`` for inbound metrics."""
+) -> Tuple[Optional[float], Optional[float], bool]:
+    """Return ``(current_total, delta_since_baseline, had_baseline)``.
+
+    ``had_baseline`` is ``False`` on the first check for a host/port (or after
+    the state file is cleared), signalling that ``delta`` could not be computed
+    yet because there was nothing to compare against — not that inbound traffic
+    is absent. Callers use this to avoid a false "no inbound" verdict on the
+    first run when the gateway already has a non-zero counter.
+    """
     import time
 
     current = _scrape_metrics_counter(host, port, "messages_inbound_total", timeout=timeout)
     baseline = _load_metrics_baseline(host, port)
+    had_baseline = baseline is not None and baseline.get("counter") is not None
     delta: Optional[float] = None
-    if (
-        baseline is not None
-        and current is not None
-        and baseline.get("counter") is not None
-    ):
+    if had_baseline and current is not None:
         age = time.time() - float(baseline.get("ts") or 0)
         if age <= since_seconds:
             delta = max(0.0, current - float(baseline["counter"]))
     _save_metrics_baseline(host, port, current)
-    return current, delta
+    return current, delta, had_baseline
 
 
 def _expected_bot_hint(probe_results: dict) -> Optional[str]:
@@ -706,13 +716,21 @@ def check_inbound(
     count, last_at, last_text = parse_inbound_log(path, since_seconds)
 
     host, port = resolve_gateway_endpoint(config_path)
-    metrics_total, metrics_delta = _metrics_inbound_delta(
+    metrics_total, metrics_delta, had_baseline = _metrics_inbound_delta(
         host, port, since_seconds, timeout=timeout
     )
 
+    has_delta = bool(metrics_delta and metrics_delta > 0)
+    # First run for this host/port: we just seeded the baseline, so a windowed
+    # delta cannot exist yet. Treat a pre-existing non-zero counter as evidence
+    # rather than reporting a false "no inbound" for already-active traffic.
+    baseline_just_seeded = (
+        not had_baseline and metrics_total is not None and metrics_total > 0
+    )
+
     hint = _expected_bot_hint(probe_results or {})
-    no_inbound = count == 0 and not (metrics_delta and metrics_delta > 0)
-    ok = count > 0 or bool(metrics_delta and metrics_delta > 0)
+    no_inbound = count == 0 and not has_delta and not baseline_just_seeded
+    ok = count > 0 or has_delta or baseline_just_seeded
 
     if no_inbound and hint:
         hint = (
@@ -723,6 +741,11 @@ def check_inbound(
         hint = (
             "No @mention received in the log window. "
             "Send a Slack message to your bot, then re-run with --check-inbound."
+        )
+    elif baseline_just_seeded and not has_delta and count == 0:
+        hint = (
+            "Inbound metrics baseline established from existing traffic; "
+            "re-run with --check-inbound to confirm delivery within the window."
         )
 
     return InboundCheckResult(

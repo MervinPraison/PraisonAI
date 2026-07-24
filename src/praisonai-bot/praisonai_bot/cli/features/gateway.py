@@ -710,7 +710,10 @@ class GatewayHandler:
         try:
             req = urllib.request.Request(url)
             token = __import__("os").environ.get("GATEWAY_AUTH_TOKEN", "").strip()
-            if token and host not in ("127.0.0.1", "localhost", "::1"):
+            # Only attach the bearer token where it cannot leak to a network
+            # observer: over loopback (never on the wire). A remote plaintext
+            # HTTP probe deliberately omits it rather than expose the credential.
+            if token and host in ("127.0.0.1", "localhost", "::1"):
                 req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=3) as response:
                 data = json.loads(response.read().decode())

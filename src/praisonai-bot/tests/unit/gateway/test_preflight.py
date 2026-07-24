@@ -246,9 +246,10 @@ def test_metrics_inbound_delta(tmp_path, monkeypatch):
     (tmp_path / "baseline.json").write_text(
         json.dumps({"host": host, "port": port, "counter": 2.0, "ts": time.time()})
     )
-    current, delta = _metrics_inbound_delta(host, port, since_seconds=600)
+    current, delta, had_baseline = _metrics_inbound_delta(host, port, since_seconds=600)
     assert current == 5.0
     assert delta == 3.0
+    assert had_baseline is True
 
     cfg = tmp_path / "bot.yaml"
     cfg.write_text("gateway:\n  host: 127.0.0.1\n  port: 8765\n")
