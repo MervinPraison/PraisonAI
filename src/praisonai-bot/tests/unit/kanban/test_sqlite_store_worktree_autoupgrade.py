@@ -90,3 +90,24 @@ def test_explicit_worktree_kind_still_derives_branch(store):
     task = store.create_task({"title": "t", "workspace_kind": "worktree"})
     assert task.workspace_kind == "worktree"
     assert task.branch == f"kanban/{task.id}"
+
+
+def test_repo_path_preserved_in_metadata(store, git_repo):
+    """The repo linkage that drove the upgrade is retained in metadata."""
+    task = store.create_task({"title": "t", "repo_path": str(git_repo)})
+    # Linkage must not be discarded: it is persisted so a consumer can locate
+    # the isolating repository between create and dispatch.
+    assert task.metadata.get("repo_path") == str(git_repo)
+    # Re-read from the store to confirm it round-trips through persistence.
+    reloaded = store.get_task(task.id)
+    assert reloaded.metadata.get("repo_path") == str(git_repo)
+
+
+def test_explicit_metadata_repo_path_not_overwritten(store, git_repo):
+    """An explicit metadata.repo_path wins over the top-level repo_path."""
+    task = store.create_task({
+        "title": "t",
+        "repo_path": str(git_repo),
+        "metadata": {"repo_path": "/explicit/path"},
+    })
+    assert task.metadata.get("repo_path") == "/explicit/path"

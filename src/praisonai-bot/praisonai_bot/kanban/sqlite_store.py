@@ -301,6 +301,15 @@ class SQLiteKanbanStore:
         if workspace_kind == 'worktree' and not branch:
             branch = f"kanban/{task_id}"
 
+        # Preserve the repo linkage that drove the upgrade: carry a top-level
+        # ``repo_path`` into metadata so the isolating repository is never
+        # discarded between create and dispatch. Metadata already present wins,
+        # so an explicit metadata.repo_path is left untouched.
+        metadata = dict(task_data.get('metadata') or {})
+        top_repo_path = task_data.get('repo_path')
+        if top_repo_path and not metadata.get('repo_path'):
+            metadata['repo_path'] = top_repo_path
+
         task = Task(
             id=task_id,
             title=task_data['title'],
@@ -313,7 +322,7 @@ class SQLiteKanbanStore:
             workspace_kind=workspace_kind,
             branch=branch,
             worktree_path=task_data.get('worktree_path'),
-            metadata=task_data.get('metadata', {}),
+            metadata=metadata,
             max_retries=max_retries,
             created_at=now,
             updated_at=now

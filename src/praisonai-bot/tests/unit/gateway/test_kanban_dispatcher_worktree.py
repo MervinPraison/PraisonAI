@@ -340,6 +340,84 @@ def test_force_removal_ignores_outstanding_work(git_repo):
     assert not os.path.exists(path)
 
 
+def test_failed_removal_returns_reason(git_repo):
+    """A nonzero `git worktree remove` surfaces a reason (not a silent None)."""
+    d = _dispatcher_in(git_repo)
+
+    path = d._prepare_worktree(_FakeTask("t_rmfail", "worktree"), _FakeStore())
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        # Fail only the removal; let status/ahead checks pass so we reach it.
+        if args[:2] == ("worktree", "remove"):
+            class _R:
+                returncode = 1
+                stdout = ""
+                stderr = "worktree is locked"
+            return _R()
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    reason = d._remove_worktree(path, "kanban/t_rmfail")
+    # A failed removal must NOT report success (None); it returns a reason so
+    # the caller keeps tracking the still-on-disk worktree.
+    assert reason is not None
+    assert "failed" in reason
+    assert os.path.exists(path)
+
+
+def test_failed_removal_keeps_tracking_and_comments(git_repo):
+    """A failed removal after a clean merge preserves tracking + records it."""
+    d = _dispatcher_in(git_repo)
+    store = _FakeStore()
+
+    path = d._prepare_worktree(_FakeTask("t_track", "worktree"), store)
+    d._worktrees = {"t_track": (path, "kanban/t_track")}
+    (git_repo / ".wt" / "t_track" / "c.txt").write_text("c\n")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-m", "add c")
+
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        if args[:2] == ("worktree", "remove"):
+            class _R:
+                returncode = 1
+                stdout = ""
+                stderr = "worktree is locked"
+            return _R()
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    conflicted = d._integrate_worktree("t_track", store)
+
+    assert conflicted is False
+    # Removal failed => entry must NOT be dropped (no orphaned worktree).
+    assert "t_track" in d._worktrees
+    assert any("worktree_preserved" in c[2] for c in store.comments)
+
+
+def test_removal_exception_returns_reason(git_repo):
+    """An exception during removal is surfaced, not swallowed as success."""
+    d = _dispatcher_in(git_repo)
+
+    path = d._prepare_worktree(_FakeTask("t_exc", "worktree"), _FakeStore())
+    original = d._run_git
+
+    def _run_git(*args, cwd=None):
+        if args[:2] == ("worktree", "remove"):
+            raise RuntimeError("git exploded")
+        return original(*args, cwd=cwd)
+
+    d._run_git = _run_git
+
+    reason = d._remove_worktree(path, "kanban/t_exc")
+    assert reason is not None
+    assert "error" in reason
+
+
 def test_unsafe_task_id_refused(git_repo):
     """Traversal / invalid-ref ids do not create a worktree (no fail-open)."""
     d = _dispatcher_in(git_repo)
