@@ -156,3 +156,112 @@ def test_restart_explicit_config_overrides_persisted(tmp_path, monkeypatch):
     assert kwargs["config_file"] == "new.yaml"
     # Other persisted flags are still replayed.
     assert kwargs["reliability"] == "production"
+
+
+def test_restart_omitted_drain_timeout_replays_persisted(tmp_path, monkeypatch):
+    """An omitted --drain-timeout must replay the persisted value, not 10s (#3349).
+
+    Regression for the silent-shortening hazard: Typer's None default must fall
+    back to the persisted start value for both the OLD-process drain and the
+    relaunch, so a production drain window survives a restart.
+    """
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+
+    from praisonai_bot.cli.commands import gateway as gw_cmd
+
+    _persist_start_flags("127.0.0.1", 8765, {"drain_timeout": 90.0})
+
+    import praisonai_bot.daemon as daemon_mod
+    import praisonai_bot.cli.features.gateway as feat_mod
+
+    monkeypatch.setattr(
+        daemon_mod, "get_daemon_status", lambda: {"installed": False}
+    )
+
+    captured = {}
+
+    class _FakeHandler:
+        def stop(self, *a, **k):
+            captured["stop_kwargs"] = k
+
+        def start(self, *a, **k):
+            captured["start_kwargs"] = k
+            return 0
+
+    monkeypatch.setattr(feat_mod, "GatewayHandler", _FakeHandler)
+
+    # drain_timeout omitted -> None (Typer default).
+    gw_cmd.gateway_restart(host="127.0.0.1", port=8765, drain_timeout=None)
+
+    # The relaunch replays the persisted 90s window, not a fixed 10s.
+    assert captured["start_kwargs"]["drain_timeout"] == 90.0
+    # The OLD process is drained with the same persisted window.
+    assert captured["stop_kwargs"]["drain_timeout"] == 90.0
+
+
+def test_restart_explicit_drain_timeout_overrides_persisted(tmp_path, monkeypatch):
+    """An explicit --drain-timeout still wins over the persisted value (#3349)."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+
+    from praisonai_bot.cli.commands import gateway as gw_cmd
+
+    _persist_start_flags("127.0.0.1", 8765, {"drain_timeout": 90.0})
+
+    import praisonai_bot.daemon as daemon_mod
+    import praisonai_bot.cli.features.gateway as feat_mod
+
+    monkeypatch.setattr(
+        daemon_mod, "get_daemon_status", lambda: {"installed": False}
+    )
+
+    captured = {}
+
+    class _FakeHandler:
+        def stop(self, *a, **k):
+            captured["stop_kwargs"] = k
+
+        def start(self, *a, **k):
+            captured["start_kwargs"] = k
+            return 0
+
+    monkeypatch.setattr(feat_mod, "GatewayHandler", _FakeHandler)
+
+    gw_cmd.gateway_restart(host="127.0.0.1", port=8765, drain_timeout=5.0)
+
+    assert captured["start_kwargs"]["drain_timeout"] == 5.0
+    assert captured["stop_kwargs"]["drain_timeout"] == 5.0
+
+
+def test_restart_default_drain_timeout_when_none_persisted(tmp_path, monkeypatch):
+    """With no persisted drain value and no flag, the OLD process drains at 10s."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+
+    from praisonai_bot.cli.commands import gateway as gw_cmd
+
+    _persist_start_flags("127.0.0.1", 8765, {"reliability": "production"})
+
+    import praisonai_bot.daemon as daemon_mod
+    import praisonai_bot.cli.features.gateway as feat_mod
+
+    monkeypatch.setattr(
+        daemon_mod, "get_daemon_status", lambda: {"installed": False}
+    )
+
+    captured = {}
+
+    class _FakeHandler:
+        def stop(self, *a, **k):
+            captured["stop_kwargs"] = k
+
+        def start(self, *a, **k):
+            captured["start_kwargs"] = k
+            return 0
+
+    monkeypatch.setattr(feat_mod, "GatewayHandler", _FakeHandler)
+
+    gw_cmd.gateway_restart(host="127.0.0.1", port=8765, drain_timeout=None)
+
+    # No persisted drain window -> OLD process falls back to the 10s default.
+    assert captured["stop_kwargs"]["drain_timeout"] == 10.0
+    # ...and no drain_timeout is forced into the relaunch (falls back to YAML).
+    assert "drain_timeout" not in captured["start_kwargs"]

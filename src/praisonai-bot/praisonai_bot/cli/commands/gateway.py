@@ -209,9 +209,10 @@ def gateway_restart(
     agents: Optional[str] = typer.Option(
         None, "--agents", help="Path to agent configuration file (for direct relaunch)"
     ),
-    drain_timeout: float = typer.Option(
-        10.0, "--drain-timeout",
-        help="Seconds to wait for in-flight agent turns to finish before relaunch",
+    drain_timeout: Optional[float] = typer.Option(
+        None, "--drain-timeout",
+        help="Seconds to wait for in-flight agent turns to finish before "
+        "relaunch (default: the persisted start value, else 10)",
     ),
 ):
     """Gracefully drain in-flight turns, then relaunch the gateway.
@@ -228,7 +229,9 @@ def gateway_restart(
     ``--reliability``, ``--max-concurrent-runs``) from the persisted start-flags
     artefact written at ``start`` time, so a restart faithfully reproduces the
     running gateway instead of silently reverting to defaults (#3349). Flags
-    passed explicitly to ``restart`` still win over the persisted values.
+    passed explicitly to ``restart`` still win over the persisted values; an
+    omitted ``--drain-timeout`` replays the persisted drain window rather than
+    forcing a fixed default.
 
     Examples:
         praisonai gateway restart
@@ -265,13 +268,6 @@ def gateway_restart(
             "falling back to direct drain + relaunch."
         )
 
-    # Direct path: gracefully stop the running gateway (honouring drain), then
-    # start a fresh instance in the foreground. The requested drain window is
-    # applied to the OLD process too, so a long --drain-timeout is not cut off
-    # by a fixed 10s wait before force-kill (#3161).
-    handler = GatewayHandler()
-    handler.stop(host=host, port=port, force=False, drain_timeout=drain_timeout)
-
     # Replay the CLI-only runtime flags the original process was started with so
     # the restart reproduces the exact posture (durable delivery, concurrency
     # ceiling, OpenAI-compat surface, lifecycle) instead of silently reverting
@@ -283,7 +279,25 @@ def gateway_restart(
         start_kwargs["config_file"] = config
     if agents is not None:
         start_kwargs["agent_file"] = agents
-    start_kwargs["drain_timeout"] = drain_timeout
+    # An omitted --drain-timeout (None) must replay the persisted start value,
+    # not clobber it with Typer's old fixed 10s default — otherwise every
+    # restart silently shortens a production drain window (#3349). An explicit
+    # value still wins over the persisted one.
+    if drain_timeout is not None:
+        start_kwargs["drain_timeout"] = drain_timeout
+    # Effective window for draining the OLD process before relaunch: explicit
+    # flag > persisted start value > 10s fallback, so a long configured drain is
+    # not cut off by a fixed wait before force-kill (#3161).
+    effective_drain = drain_timeout
+    if effective_drain is None:
+        effective_drain = persisted.get("drain_timeout")
+    if effective_drain is None:
+        effective_drain = 10.0
+
+    # Direct path: gracefully stop the running gateway (honouring drain), then
+    # start a fresh instance in the foreground.
+    handler = GatewayHandler()
+    handler.stop(host=host, port=port, force=False, drain_timeout=effective_drain)
 
     if persisted:
         output.print_info(

@@ -242,29 +242,34 @@ class GatewayHandler:
         # substitution — daemons don't inherit shell env.
         _load_praisonai_env_file()
 
-        # Persist the CLI-only runtime flags this process was launched with so a
+        # Snapshot the CLI-only runtime flags this process was launched with so a
         # later direct ``gateway restart`` can replay the exact posture (durable
         # delivery, concurrency ceiling, OpenAI-compat surface, lifecycle)
-        # instead of silently reverting to defaults (#3349). Best-effort — never
-        # blocks start.
-        _persist_start_flags(
-            host, port,
-            {
-                "agent_file": agent_file,
-                "config_file": config_file,
-                "drain_timeout": drain_timeout,
-                "max_concurrent_runs": max_concurrent_runs,
-                "queue_depth": queue_depth,
-                "overflow_policy": overflow_policy,
-                "reliability": reliability,
-                "openai_api": openai_api,
-                "mcp": mcp,
-                "identity_store": identity_store,
-                "scale_to_zero": scale_to_zero,
-                "idle_minutes": idle_minutes,
-                "drain_marker": drain_marker,
-            },
-        )
+        # instead of silently reverting to defaults (#3349). The snapshot is only
+        # WRITTEN once startup validation passes and the gateway is about to bind
+        # (``_commit_start_flags`` below): a start attempt that fails import /
+        # config / agent-file validation must NOT clobber the running gateway's
+        # saved posture, or its next restart would replay the rejected attempt.
+        start_flags = {
+            "agent_file": agent_file,
+            "config_file": config_file,
+            "drain_timeout": drain_timeout,
+            "max_concurrent_runs": max_concurrent_runs,
+            "queue_depth": queue_depth,
+            "overflow_policy": overflow_policy,
+            "reliability": reliability,
+            "openai_api": openai_api,
+            "mcp": mcp,
+            "identity_store": identity_store,
+            "scale_to_zero": scale_to_zero,
+            "idle_minutes": idle_minutes,
+            "drain_marker": drain_marker,
+        }
+
+        def _commit_start_flags() -> None:
+            # Best-effort — never blocks start (#3349).
+            _persist_start_flags(host, port, start_flags)
+
         logger.info(
             "Gateway starting (host=%s port=%s config=%s agents=%s)",
             host, port, config_file or "-", agent_file or "-",
@@ -332,6 +337,10 @@ class GatewayHandler:
             if drain_marker is not None:
                 self._gateway._drain_marker_override = drain_marker
             print(f"Loading gateway config from {config_file}")
+            # Config wiring validated; the gateway is about to bind. Persist the
+            # launch posture now so a restart can replay it, but only after the
+            # attempt has cleared validation (#3349).
+            _commit_start_flags()
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
             except KeyboardInterrupt:
@@ -413,6 +422,10 @@ class GatewayHandler:
         print(f"Starting gateway on ws://{host}:{port}")
         print("Press Ctrl+C to stop")
 
+        # Admission/agent wiring validated; the gateway is about to bind.
+        # Persist the launch posture now so a restart can replay it, but only
+        # after the attempt has cleared validation (#3349).
+        _commit_start_flags()
         try:
             asyncio.run(self._gateway.start())
         except KeyboardInterrupt:
