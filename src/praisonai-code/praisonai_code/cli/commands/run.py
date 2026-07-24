@@ -21,6 +21,48 @@ _FRAMEWORK_HELP = "Framework: praisonai, crewai, autogen"
 _ALLOW_LOCAL_TOOLS_ENV = "PRAISONAI_ALLOW_LOCAL_TOOLS"
 
 
+def _run_succeeded(result: Any) -> bool:
+    """Whether an agent run result represents a genuine success.
+
+    The public ``Agent.start``/``run`` surface collapses failures (swallowed
+    LLM/auth error, guardrail block, tool failure, ``max_iter`` without
+    completion) to a falsy result (``None``/empty), while a real answer is a
+    non-empty string. Treat a falsy result as failure so ``praisonai run`` can
+    exit non-zero and emit a machine-readable outcome instead of reporting
+    success unconditionally.
+    """
+    if result is None:
+        return False
+    if isinstance(result, str):
+        return bool(result.strip())
+    return True
+
+
+def _report_run_failure(output: Any) -> None:
+    """Report an agent-run failure and exit non-zero.
+
+    Mirrors the existing arg-error exit convention (``typer.Exit(1)``) but for a
+    *run* failure: emits a machine-readable outcome under ``--output json`` and
+    prints a human-facing error, so CI/scripts can branch on the exit code and
+    the JSON ``status`` instead of scraping stderr.
+    """
+    message = "Run failed: the agent did not produce a result."
+    output.emit_result(
+        message=message,
+        data={"status": "failed", "result": None},
+    )
+    output.emit_error(message=message, data={"status": "failed"})
+    output.print_error(
+        message,
+        code="run_failed",
+        remediation=(
+            "Re-run with --verbose to see the underlying error, "
+            "or check credentials with: praisonai setup"
+        ),
+    )
+    raise typer.Exit(1)
+
+
 def _is_yaml_file(target: Optional[str]) -> bool:
     """Return True when ``target`` is an existing YAML file path.
 
@@ -655,6 +697,11 @@ def _try_attach_runtime(
         # Runtime went away mid-flight; fall back to in-process execution.
         return False
 
+    # The warm runtime handled the request; apply the same failure contract as
+    # the in-process paths so an empty result exits non-zero instead of silently
+    # reporting success.
+    if not _run_succeeded(result):
+        _report_run_failure(output)
     output.emit_result(
         message="Prompt completed",
         data={"result": str(result) if result else None},
@@ -1352,6 +1399,8 @@ def _run_from_file(
         result = praison.run()
         
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not _run_succeeded(result):
+            _report_run_failure(output)
         output.emit_result(
             message="Run completed",
             data={"result": str(result) if result else None}
@@ -1361,6 +1410,11 @@ def _run_from_file(
             if not output.is_json_mode:
                 output.print_success("Run completed")
     
+    except typer.Exit:
+        # A deliberate non-zero exit (e.g. a classified run failure) must
+        # propagate unchanged; the broad handler below is only for unexpected
+        # errors and would otherwise re-report the same failure.
+        raise
     except Exception as e:
         output.emit_error(message=str(e))
         output.print_error(str(e))
@@ -1562,9 +1616,12 @@ def _run_prompt(
             finally:
                 detach_bridge(agent, bridge)
 
+            succeeded = _run_succeeded(result)
             if bridge is not None:
-                bridge.emit_run_result(result, ok=True)
+                bridge.emit_run_result(result, ok=succeeded)
             _record_session_usage(session_id or auto_save_name, model, output)
+            if not succeeded:
+                _report_run_failure(output)
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -1632,6 +1689,8 @@ def _run_prompt(
         result = praison.handle_direct_prompt(prompt)
         
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not _run_succeeded(result):
+            _report_run_failure(output)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
@@ -1789,6 +1848,12 @@ def _run_from_file_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+    # Honour the same failure contract as the non-profiled YAML path: an empty
+    # agent result is a run failure and must exit non-zero (reported after the
+    # profiling output so the profile is still shown).
+    if not _run_succeeded(result):
+        _report_run_failure(get_output_controller())
 
 
 def _wire_subagent_delegation(
@@ -1994,9 +2059,12 @@ def _run_custom_agent(
         finally:
             detach_bridge(agent, bridge)
 
+        succeeded = _run_succeeded(result)
         if bridge is not None:
-            bridge.emit_run_result(result, ok=True)
+            bridge.emit_run_result(result, ok=succeeded)
         _record_session_usage(session_id or auto_save_name, model, output)
+        if not succeeded:
+            _report_run_failure(output)
         output.emit_result(
             message="Agent completed",
             data={"result": str(result) if result else None}
@@ -2116,3 +2184,9 @@ def _run_prompt_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+    # Honour the same failure contract as the non-profiled paths: an empty
+    # agent result is a run failure and must exit non-zero (the report is
+    # emitted after the profiling output so the profile is still shown).
+    if not _run_succeeded(response):
+        _report_run_failure(get_output_controller())
