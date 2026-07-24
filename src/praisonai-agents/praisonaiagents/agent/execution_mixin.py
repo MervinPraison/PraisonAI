@@ -1638,7 +1638,6 @@ Write the complete compiled report:"""
         try:
             import uvicorn
             from mcp.server.fastmcp import FastMCP
-            from mcp.server.sse import SseServerTransport
             from starlette.applications import Starlette
             from starlette.routing import Mount
             import threading
@@ -1669,7 +1668,6 @@ Write the complete compiled report:"""
 
             # Create and run MCP server
             base_path = (path or "/mcp").rstrip("/") or "/mcp"
-            transport = SseServerTransport(f"{base_path}/sse")
             starlette_app = Starlette(
                 routes=[Mount(base_path, mcp.sse_app())]
             )
