@@ -411,3 +411,192 @@ def check_gateway_env_substitution(config: DoctorConfig) -> CheckResult:
             remediation="Check config file access",
             duration_ms=(time.time() - start) * 1000,
         )
+
+
+def _find_gateway_config_path(config: DoctorConfig) -> Optional[str]:
+    """Resolve gateway/bot config path, honouring ``--file`` first."""
+    config_paths: List[str] = []
+    if getattr(config, "config_file", None):
+        config_paths.append(config.config_file)
+
+    from praisonai_code.cli._paths import resolve_bot_config_path
+
+    config_paths.extend([
+        resolve_bot_config_path("gateway.yaml"),
+        resolve_bot_config_path("bot.yaml"),
+        "gateway.yaml",
+        "bot.yaml",
+    ])
+
+    for path in config_paths:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+@register_check(
+    id="gateway_shell_readiness",
+    title="Gateway Shell Readiness",
+    description="Validate allow_shell wiring offline (no LLM)",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.HIGH,
+)
+def check_gateway_shell_readiness(config: DoctorConfig) -> CheckResult:
+    """Offline shell wiring check for channels with ``allow_shell: true``."""
+    start = time.time()
+    skipped = skip_if_no_wrapper(
+        "gateway_shell_readiness", "Gateway Shell Readiness", start=start
+    )
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package(
+        "gateway_shell_readiness", "Gateway Shell Readiness", start=start
+    )
+    if skipped:
+        return skipped
+
+    config_path = _find_gateway_config_path(config)
+    if not config_path:
+        return CheckResult(
+            id="gateway_shell_readiness",
+            title="Gateway Shell Readiness",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.WARN,
+            message="No gateway/bot config found",
+            remediation="Run 'praisonai onboard' or pass --file /path/to/bot.yaml",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    try:
+        from praisonai_code._bot_bridge import import_bot_module
+
+        preflight = import_bot_module("praisonai_bot.gateway.preflight")
+        result = preflight.run_shell_readiness_check(config_path)
+    except Exception as exc:
+        return CheckResult(
+            id="gateway_shell_readiness",
+            title="Gateway Shell Readiness",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.ERROR,
+            message=f"Shell readiness check failed: {str(exc)[:100]}",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    if result.ok:
+        return CheckResult(
+            id="gateway_shell_readiness",
+            title="Gateway Shell Readiness",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.PASS,
+            message=result.message,
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    return CheckResult(
+        id="gateway_shell_readiness",
+        title="Gateway Shell Readiness",
+        category=CheckCategory.BOTS,
+        status=CheckStatus.FAIL,
+        message=result.message,
+        details="\n".join(result.issues) if result.issues else None,
+        remediation="Fix allow_shell / auto_approve_shell settings in bot.yaml",
+        duration_ms=(time.time() - start) * 1000,
+    )
+
+
+@register_check(
+    id="gateway_channel_probe",
+    title="Gateway Channel Probe",
+    description="Live credential probe for configured channels",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.HIGH,
+    requires_deep=True,
+)
+def check_gateway_channel_probe(config: DoctorConfig) -> CheckResult:
+    """Live platform credential probe (``auth.test``, ``getMe``, etc.)."""
+    import asyncio
+
+    start = time.time()
+    skipped = skip_if_no_wrapper(
+        "gateway_channel_probe", "Gateway Channel Probe", start=start
+    )
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package(
+        "gateway_channel_probe", "Gateway Channel Probe", start=start
+    )
+    if skipped:
+        return skipped
+
+    config_path = _find_gateway_config_path(config)
+    if not config_path:
+        return CheckResult(
+            id="gateway_channel_probe",
+            title="Gateway Channel Probe",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.SKIP,
+            message="No gateway/bot config found",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    try:
+        from praisonai_code._bot_bridge import import_bot_module
+
+        preflight = import_bot_module("praisonai_bot.gateway.preflight")
+        channels = preflight.load_channels_mapping(config_path)
+        if not channels:
+            return CheckResult(
+                id="gateway_channel_probe",
+                title="Gateway Channel Probe",
+                category=CheckCategory.BOTS,
+                status=CheckStatus.SKIP,
+                message="No channels configured",
+                duration_ms=(time.time() - start) * 1000,
+            )
+        results = asyncio.run(preflight.probe_channels(channels))
+    except Exception as exc:
+        return CheckResult(
+            id="gateway_channel_probe",
+            title="Gateway Channel Probe",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.ERROR,
+            message=f"Probe failed: {str(exc)[:100]}",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    lines = []
+    failed = []
+    for name, probe in results.items():
+        if getattr(probe, "ok", False):
+            identity = getattr(probe, "bot_username", None) or ""
+            detail = f"@{identity}" if identity else getattr(probe, "platform", name)
+            lines.append(f"{name}: OK ({detail})")
+        else:
+            err = getattr(probe, "error", None) or "unknown error"
+            lines.append(f"{name}: FAIL ({err})")
+            failed.append(name)
+
+    if failed:
+        return CheckResult(
+            id="gateway_channel_probe",
+            title="Gateway Channel Probe",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.FAIL,
+            message=f"{len(failed)} channel probe(s) failed",
+            details="\n".join(lines),
+            remediation=(
+                "Fix channel tokens or run: "
+                f"praisonai gateway test --config {config_path}"
+            ),
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    return CheckResult(
+        id="gateway_channel_probe",
+        title="Gateway Channel Probe",
+        category=CheckCategory.BOTS,
+        status=CheckStatus.PASS,
+        message=f"All {len(results)} channel probe(s) passed",
+        details="\n".join(lines),
+        duration_ms=(time.time() - start) * 1000,
+    )
