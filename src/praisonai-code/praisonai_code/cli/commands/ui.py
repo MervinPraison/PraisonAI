@@ -21,6 +21,25 @@ app = typer.Typer(
 )
 
 
+def _resolve_bundled_default_app(default_app_name: str) -> Optional[Path]:
+    """Locate a bundled ``ui_*/default_app.py`` inside the praisonai wrapper.
+
+    The five bundled UI presets ship in the ``praisonai`` wrapper package
+    (``praisonai/<name>/default_app.py``), not in ``praisonai_code`` where this
+    loader now lives after the CLI extraction. Cross-tier wrapper access is
+    routed through the lazy ``_wrapper_bridge`` per ARCHITECTURE.md §2 rather
+    than traversing the wrapper package directly. Returns ``None`` when the
+    wrapper is not installed so the caller can guide the user to
+    ``pip install "praisonai[ui]"``.
+    """
+    from praisonai_code._wrapper_bridge import wrapper_package_path
+
+    wrapper_path = wrapper_package_path()
+    if wrapper_path is None:
+        return None
+    return wrapper_path / default_app_name / "default_app.py"
+
+
 def _launch_aiui_app(
     app_dir: str,
     default_app_name: str,
@@ -54,9 +73,14 @@ def _launch_aiui_app(
         # Ensure default app exists
         if not default_app.exists():
             ui_dir.mkdir(parents=True, exist_ok=True)
-            bundled = Path(__file__).parent.parent.parent / default_app_name / "default_app.py"
-            if not bundled.exists():
-                print(f"\033[91mERROR: Bundled default_app.py not found at {bundled}\033[0m")
+            # Bundled ui_*/default_app.py assets ship in the praisonai wrapper,
+            # not in praisonai_code — resolve against the installed wrapper.
+            bundled = _resolve_bundled_default_app(default_app_name)
+            if bundled is None or not bundled.exists():
+                print(
+                    "\033[91mERROR: Bundled default_app.py not found. "
+                    'Install with:\n  pip install "praisonai[ui]"\033[0m'
+                )
                 sys.exit(1)
             default_app.write_text(bundled.read_text())
             print(f"   ✓ Created default {ui_name} config: {default_app}")

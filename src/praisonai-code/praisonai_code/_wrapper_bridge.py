@@ -8,8 +8,9 @@ agent commands; wrapper imports fail with a clear install hint.
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from types import ModuleType
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -21,6 +22,22 @@ def wrapper_available() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("praisonai") is not None
+
+
+def wrapper_package_path() -> Optional[Path]:
+    """Return the on-disk directory of the installed ``praisonai`` wrapper.
+
+    Resolves the wrapper package location without importing it, so callers can
+    reach bundled wrapper assets (e.g. ``ui_*/default_app.py`` presets) that live
+    beside the wrapper rather than in ``praisonai_code``. Returns ``None`` when the
+    wrapper is not installed so callers can guide the user to ``pip install``.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec("praisonai")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return Path(spec.submodule_search_locations[0])
 
 
 def import_wrapper_module(name: str) -> ModuleType:
