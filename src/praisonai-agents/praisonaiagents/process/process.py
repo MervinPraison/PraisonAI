@@ -616,10 +616,33 @@ class Process:
             start_task = list(self.tasks.values())[0]
             logging.debug(f"No start task marked, using first task: {start_task.name}")
 
+        # If loop type and no input_file, default to tasks.csv
+        if start_task and start_task.task_type == "loop" and not start_task.input_file:
+            start_task.input_file = "tasks.csv"
+
+        # --- If loop + input_file, read file & create tasks using consolidated helper
+        if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
+            try:
+                parent_loop_task = start_task
+                parent_input_file = parent_loop_task.input_file
+                self._create_loop_subtasks(parent_loop_task, decision_mode=True)
+                # Get the first created subtask as the new start task
+                subtasks = [
+                    t for t in self.tasks.values()
+                    if t.name.startswith(parent_loop_task.name + "_")
+                ]
+                if subtasks:
+                    # Mark parent loop task as completed and find start subtask
+                    parent_loop_task.status = "completed"
+                    parent_loop_task._subtasks_created = True
+                    start_task = next((t for t in subtasks if t.is_start), subtasks[0])
+                    logging.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
+            except Exception as e:
+                logging.error(f"Failed to read file tasks: {e}")
+
+        # end of start task handling
         current_task = start_task
         visited_tasks = set()
-
-        # TODO: start task with loop feature is not available in aworkflow method
 
         while current_task:
             current_iter += 1

@@ -2224,7 +2224,11 @@ Your Goal: {self.goal}
         # Per-turn tool-name buffer feeding the self-improve review policy.
         # Populated in _execute_tool_with_context, reset each chat turn, and
         # read by _trigger_after_agent_hook when tools_used is not passed.
-        self._turn_tools_used = []
+        # Guarded by an AsyncSafeState lock (same primitive as chat_history) so
+        # concurrent chat()/achat() turns on one Agent don't corrupt the buffer
+        # (issue #3307). Preferred access is via _reset/_record/_drain_turn_tools;
+        # the _turn_tools_used property is kept for backward compatibility.
+        self._turn_tools_state = AsyncSafeState([])
 
         # Database persistence (lazy - no imports until used)
         self._db = db
@@ -2493,6 +2497,33 @@ Your Goal: {self.goal}
         """Thread-safe replacement of entire chat history using proper locking."""
         with self._history_lock.lock():
             self._history_lock.value[:] = new_history
+
+    @property
+    def _turn_tools_used(self) -> List[str]:
+        """Per-turn tool buffer (backward-compatible view of the locked state)."""
+        return self._turn_tools_state.value
+
+    @_turn_tools_used.setter
+    def _turn_tools_used(self, value):
+        with self._turn_tools_state.lock():
+            self._turn_tools_state.value = list(value) if value else []
+
+    def _reset_turn_tools(self):
+        """Thread-safe reset of the per-turn tool buffer (issue #3307)."""
+        with self._turn_tools_state.lock():
+            self._turn_tools_state.value = []
+
+    def _record_turn_tool(self, function_name: str):
+        """Thread-safe append of a tool name to the per-turn buffer (issue #3307)."""
+        with self._turn_tools_state.lock():
+            self._turn_tools_state.value.append(function_name)
+
+    def _drain_turn_tools(self) -> List[str]:
+        """Thread-safe read-and-clear of the per-turn tool buffer (issue #3307)."""
+        with self._turn_tools_state.lock():
+            drained = list(self._turn_tools_state.value)
+            self._turn_tools_state.value = []
+        return drained
 
     @property
     def _cache_lock(self):
