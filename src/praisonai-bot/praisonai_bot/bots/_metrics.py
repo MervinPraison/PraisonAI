@@ -42,6 +42,10 @@ _COUNTER_HELP: Dict[str, str] = {
     "approval_decided_total": "Total approval requests decided (allowed or denied).",
     "channel_errors_total": "Total channel errors observed by supervision.",
     "channel_restarts_total": "Total channel restarts performed by supervision.",
+    "prompt_cache_invalidations_total": (
+        "Total turns whose prompt prefix (model + tool schemas + system prompt) "
+        "changed from the previous turn, invalidating the provider prompt cache."
+    ),
 }
 
 _GAUGE_HELP: Dict[str, str] = {
