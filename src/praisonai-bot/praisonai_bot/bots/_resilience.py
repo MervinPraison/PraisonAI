@@ -103,6 +103,29 @@ _TELEGRAM_RECOVERABLE: Set[str] = {
     "webhook",
 }
 
+# Auth/credential rejection patterns. A token that is revoked, rotated, wrong,
+# or expired is NOT transient (retrying an invalid token forever is pointless)
+# and NOT a generic fatal (it self-heals the moment the credential is fixed).
+# It is its own first-class outcome so the gateway can surface it as a
+# redacted, operator-actionable degraded state and auto-recover on repair.
+_CREDENTIAL_PATTERNS: Set[str] = {
+    "unauthorized",
+    "invalid token",
+    "invalid_auth",
+    "token_revoked",
+    "token revoked",
+    "not_authed",
+    "authentication failed",
+    "authentication error",
+    "invalid credentials",
+    "invalid api key",
+    "invalid_api_key",
+    "expired token",
+    "token expired",
+    "access token is invalid",
+    "unauthenticated",
+}
+
 
 def _parse_http_date_seconds(value: str) -> Optional[float]:
     """Parse an HTTP-date Retry-After value into seconds from now.
@@ -232,6 +255,45 @@ def is_recoverable_error(err: BaseException, platform: str = "") -> bool:
     if isinstance(err, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)):
         return True
     
+    return False
+
+
+def is_credential_error(err: BaseException, platform: str = "") -> bool:
+    """Check if an error is an auth/credential rejection (revoked/expired token).
+
+    A runtime 401/403 (or the platform text equivalent — "Unauthorized",
+    "invalid token", Slack's ``invalid_auth``/``token_revoked``) means the
+    channel's credential is invalid *right now*. This is a distinct outcome from
+    both transient/recoverable errors (network blips, 5xx, rate limits) and
+    generic fatal errors: it should stop the pointless reconnect loop against a
+    known-bad credential and surface as a redacted, operator-actionable degraded
+    state that auto-recovers when the credential is repaired.
+
+    Args:
+        err: The exception to classify.
+        platform: Optional platform name (reserved for platform-specific tuning).
+
+    Returns:
+        True if the error signals an invalid/rejected credential.
+    """
+    if err is None:
+        return False
+
+    # HTTP 401 Unauthorized / 403 Forbidden are the canonical auth-rejection
+    # status codes across platforms (Telegram exposes ``error_code``).
+    status = getattr(err, "status", None)
+    if status is None:
+        status = getattr(err, "status_code", None)
+    if status is None:
+        status = getattr(err, "error_code", None)
+    if isinstance(status, int) and status in (401, 403):
+        return True
+
+    msg = str(err).lower()
+    for pattern in _CREDENTIAL_PATTERNS:
+        if pattern in msg:
+            return True
+
     return False
 
 

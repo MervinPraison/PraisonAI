@@ -50,7 +50,7 @@ from praisonaiagents.session.store import DefaultSessionStore
 logger = logging.getLogger(__name__)
 
 from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
-from .supervisor import ChannelSupervisor
+from .supervisor import ChannelState, ChannelSupervisor
 
 
 # WebSocket close code for a slow-consumer eviction. 1013 ("Try Again Later")
@@ -4056,7 +4056,7 @@ class WebSocketGateway:
             # Get supervision state
             sup_status = supervision_status.get(name)
             if sup_status:
-                channel_status[name] = {
+                entry = {
                     "platform": platform,
                     "running": running,
                     "supervision": {
@@ -4068,6 +4068,16 @@ class WebSocketGateway:
                         "manual_pause": sup_status.manual_pause,
                     }
                 }
+                # Issue #3348: a channel whose credential was rejected at
+                # runtime (revoked/rotated/expired token) is surfaced as the
+                # same degraded, redacted "credential unavailable" state the
+                # gateway already reports at boot (#3159) — so an operator sees
+                # *why* the channel is down and that it auto-recovers on repair,
+                # instead of a bare FAILED/reconnect with no explanation.
+                if sup_status.state == ChannelState.CREDENTIAL_UNAVAILABLE:
+                    entry["status"] = "degraded"
+                    entry["reason"] = "credential unavailable"
+                channel_status[name] = entry
             else:
                 channel_status[name] = {
                     "platform": platform,
