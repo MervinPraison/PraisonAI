@@ -600,3 +600,158 @@ def check_gateway_channel_probe(config: DoctorConfig) -> CheckResult:
         details="\n".join(lines),
         duration_ms=(time.time() - start) * 1000,
     )
+
+
+@register_check(
+    id="gateway_duplicate_services",
+    title="Gateway Duplicate Services",
+    description="Scan for competing gateway services and shared Slack tokens",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.HIGH,
+    requires_deep=True,
+)
+def check_gateway_duplicate_services(config: DoctorConfig) -> CheckResult:
+    """Detect duplicate LaunchAgents and shared token fingerprints."""
+    start = time.time()
+    skipped = skip_if_no_wrapper(
+        "gateway_duplicate_services", "Gateway Duplicate Services", start=start
+    )
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package(
+        "gateway_duplicate_services", "Gateway Duplicate Services", start=start
+    )
+    if skipped:
+        return skipped
+
+    config_path = _find_gateway_config_path(config)
+    if not config_path:
+        return CheckResult(
+            id="gateway_duplicate_services",
+            title="Gateway Duplicate Services",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.SKIP,
+            message="No gateway/bot config found",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    try:
+        from praisonai_code._bot_bridge import import_bot_module
+
+        preflight = import_bot_module("praisonai_bot.gateway.preflight")
+        result = preflight.check_duplicates(config_path)
+    except Exception as exc:
+        return CheckResult(
+            id="gateway_duplicate_services",
+            title="Gateway Duplicate Services",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.ERROR,
+            message=f"Duplicate scan failed: {str(exc)[:100]}",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    lines = list(result.warnings)
+    for service in result.services:
+        if service.running:
+            lines.append(f"{service.label}: running (pid={service.pid})")
+
+    if not result.ok:
+        return CheckResult(
+            id="gateway_duplicate_services",
+            title="Gateway Duplicate Services",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.WARN,
+            message="Possible competing gateway or shared token detected",
+            details="\n".join(lines) if lines else None,
+            remediation=(
+                "Compare SLACK_APP_TOKEN across services; stop duplicate gateways "
+                "before messaging Slack."
+            ),
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    return CheckResult(
+        id="gateway_duplicate_services",
+        title="Gateway Duplicate Services",
+        category=CheckCategory.BOTS,
+        status=CheckStatus.PASS,
+        message="No duplicate gateway conflicts detected",
+        details="\n".join(lines) if lines else None,
+        duration_ms=(time.time() - start) * 1000,
+    )
+
+
+@register_check(
+    id="gateway_no_inbound_recent",
+    title="Gateway Recent Inbound",
+    description="Check for recent inbound delivery in gateway logs",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.MEDIUM,
+    requires_deep=True,
+)
+def check_gateway_no_inbound_recent(config: DoctorConfig) -> CheckResult:
+    """Warn when no inbound mentions appear in recent gateway logs."""
+    start = time.time()
+    skipped = skip_if_no_wrapper(
+        "gateway_no_inbound_recent", "Gateway Recent Inbound", start=start
+    )
+    if skipped:
+        return skipped
+    skipped = skip_if_no_bot_package(
+        "gateway_no_inbound_recent", "Gateway Recent Inbound", start=start
+    )
+    if skipped:
+        return skipped
+
+    config_path = _find_gateway_config_path(config)
+    if not config_path:
+        return CheckResult(
+            id="gateway_no_inbound_recent",
+            title="Gateway Recent Inbound",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.SKIP,
+            message="No gateway/bot config found",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    try:
+        from praisonai_code._bot_bridge import import_bot_module
+
+        preflight = import_bot_module("praisonai_bot.gateway.preflight")
+        inbound = preflight.check_inbound(config_path, since="10m")
+    except Exception as exc:
+        return CheckResult(
+            id="gateway_no_inbound_recent",
+            title="Gateway Recent Inbound",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.ERROR,
+            message=f"Inbound check failed: {str(exc)[:100]}",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    if inbound.ok:
+        detail = f"{inbound.mentions_in_window} mention(s) in last 10m"
+        if inbound.last_mention_at:
+            detail += f"; last at {inbound.last_mention_at}"
+        return CheckResult(
+            id="gateway_no_inbound_recent",
+            title="Gateway Recent Inbound",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.PASS,
+            message=detail,
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+    return CheckResult(
+        id="gateway_no_inbound_recent",
+        title="Gateway Recent Inbound",
+        category=CheckCategory.BOTS,
+        status=CheckStatus.WARN,
+        message="No inbound delivery in recent logs",
+        details=inbound.hint,
+        remediation=(
+            "Send a Slack @mention to your bot, then run: "
+            f"praisonai gateway test --config {config_path} --check-inbound --since 5m"
+        ),
+        duration_ms=(time.time() - start) * 1000,
+    )
