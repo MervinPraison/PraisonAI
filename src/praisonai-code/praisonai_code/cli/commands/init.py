@@ -16,6 +16,13 @@ Tools dropped in `.praisonai/tools/*.py` execute local code, so loading them is
 opt-in: pass `--allow-local-tools` (or set `PRAISONAI_ALLOW_LOCAL_TOOLS=true`)
 on `run` to enable them. Without the opt-in, `run` prints a one-line hint when
 tool files are present so the enable step is never a silent no-op.
+
+With ``--generate`` (and a provider credential present), init additionally runs
+a short analysis agent that inspects the repository (top-level tree, detected
+manifests, README head) and writes a concise, repository-tailored ``AGENTS.md``
+at the repo root — immediately discovered by the rules loader on the next run.
+Generation is non-destructive (respects ``--force``) and falls back to the
+static scaffold when no credential is available or generation fails.
 """
 
 from pathlib import Path
@@ -120,6 +127,85 @@ def _write(path: Path, content: str, force: bool) -> bool:
     return True
 
 
+def _prescan_repo(root: Path) -> str:
+    """Build a cheap, token-bounded snapshot of the repository for analysis.
+
+    Captures the top-level tree, any detected manifest/CI files, and the head of
+    the README so the analysis agent has high-signal context without reading the
+    whole tree. Kept intentionally small to bound tokens and cost.
+    """
+    lines: list[str] = []
+
+    try:
+        entries = sorted(
+            p.name + ("/" if p.is_dir() else "")
+            for p in root.iterdir()
+            if not p.name.startswith(".git")
+        )
+    except OSError:
+        entries = []
+    if entries:
+        lines.append("Top-level entries:")
+        lines.extend(f"  {e}" for e in entries[:60])
+
+    manifests = (
+        "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
+        "package.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
+        "Makefile", "Dockerfile", "docker-compose.yml", "tox.ini",
+    )
+    found = [m for m in manifests if (root / m).exists()]
+    if found:
+        lines.append("")
+        lines.append(f"Detected manifests: {', '.join(found)}")
+
+    for readme in ("README.md", "README.rst", "README.txt", "README"):
+        rp = root / readme
+        if rp.exists():
+            try:
+                head = rp.read_text(encoding="utf-8", errors="replace")[:1500]
+            except OSError:
+                break
+            lines.append("")
+            lines.append(f"{readme} (head):")
+            lines.append(head)
+            break
+
+    return "\n".join(lines)
+
+
+def _generate_agents_md(root: Path, model: str) -> str:
+    """Run a read-only analysis agent that produces a repo-tailored AGENTS.md.
+
+    Reuses the existing Agent runtime with the current provider credential. Feeds
+    it a cheap pre-scan so it can focus on high-signal, project-specific context.
+    Raises on any failure so the caller can fall back to the static scaffold.
+    """
+    from praisonaiagents import Agent
+
+    prescan = _prescan_repo(root)
+    prompt = (
+        "Analyse the repository described below and write a concise AGENTS.md "
+        "capturing only high-signal, project-specific context an AI coding agent "
+        "needs on first contact: how to build, test and run; key directories; "
+        "conventions; and notable constraints or gotchas. Omit generic "
+        "boilerplate. Output ONLY the markdown body, no code fences.\n\n"
+        f"Repository snapshot:\n{prescan}"
+    )
+
+    agent = Agent(
+        instructions=(
+            "You produce concise, accurate, project-specific AGENTS.md files. "
+            "Prefer concrete commands and paths over generic advice."
+        ),
+        llm=model,
+    )
+    result = agent.start(prompt)
+    text = str(result).strip()
+    if not text:
+        raise ValueError("empty generation result")
+    return text if text.endswith("\n") else text + "\n"
+
+
 @app.callback(invoke_without_command=True)
 def init(
     ctx: typer.Context,
@@ -133,6 +219,13 @@ def init(
         "--force",
         "-f",
         help="Overwrite existing files",
+    ),
+    generate: bool = typer.Option(
+        False,
+        "--generate",
+        "-g",
+        help="Analyse the repository and generate a tailored AGENTS.md "
+             "(requires a provider credential; falls back to the static scaffold)",
     ),
 ) -> None:
     """Scaffold the .praisonai/ project convention (config + starter agent + command)."""
@@ -188,6 +281,40 @@ def init(
         output.print_info(f"Created {path}")
     for path in skipped:
         output.print_warning(f"Skipped (already exists, use --force): {path}")
+
+    # Optional agent-driven generation of a repository-tailored AGENTS.md.
+    # Non-destructive (respects --force) and degrades gracefully: when no
+    # provider credential is present or generation fails, the static scaffold
+    # above remains the guaranteed result. The file lands at the repo root so
+    # rules_manager discovers it on the next run.
+    if generate:
+        agents_path = base.parent / "AGENTS.md"
+        if agents_path.exists() and not force:
+            output.print_warning(
+                f"Skipped generation (already exists, use --force): {agents_path}"
+            )
+        elif not provider_detected:
+            output.print_warning(
+                "Skipped --generate: no provider credential detected. "
+                "Falling back to the static scaffold above."
+            )
+        else:
+            try:
+                content = _generate_agents_md(base.parent, scaffold_model)
+            except Exception as exc:  # noqa: BLE001 - fall back, never fail init
+                output.print_warning(
+                    f"Generation failed ({exc}); kept the static scaffold above."
+                )
+            else:
+                try:
+                    agents_path.write_text(content, encoding="utf-8")
+                except OSError as exc:
+                    output.print_error(
+                        f"Failed to write {agents_path}: {exc.strerror or exc}",
+                        remediation="Check write permissions and free disk space.",
+                    )
+                    raise typer.Exit(code=1)
+                output.print_success(f"Generated {agents_path}")
 
     if written:
         output.print_success(f"Initialised {base}")
