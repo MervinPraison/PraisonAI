@@ -1839,6 +1839,35 @@ class ToolExecutionMixin:
             raise last_exception
         return {"error": "Maximum retry attempts exceeded"}
 
+    @staticmethod
+    def _remove_circuit_breaker(breaker_name):
+        """Remove a circuit breaker entry from the process-global registry."""
+        try:
+            from ..tools.circuit_breaker import _get_global_registry
+        except Exception:
+            return
+        try:
+            _get_global_registry().remove(breaker_name)
+        except Exception:
+            pass
+
+    def _register_breaker_finalizer(self, breaker_name):
+        """Register a weakref finalizer so this agent's breaker entry is removed
+        the moment the agent is garbage-collected, even if close() is never called.
+        """
+        registered = self.__dict__.setdefault('_breaker_finalizer_names', set())
+        if breaker_name in registered:
+            return
+        registered.add(breaker_name)
+        try:
+            import weakref
+            finalizers = self.__dict__.setdefault('_breaker_finalizers', [])
+            finalizers.append(
+                weakref.finalize(self, self._remove_circuit_breaker, breaker_name)
+            )
+        except Exception:
+            pass
+
     def _execute_tool_with_circuit_breaker_impl(self, function_name, arguments):
         """Execute tool with circuit breaker protection (internal implementation).
         
@@ -1870,7 +1899,13 @@ class ToolExecutionMixin:
                 graceful_degradation=True   # Return error instead of raising exception
             )
             breaker = get_circuit_breaker(breaker_name, config)
-            
+
+            # Ensure the registry entry is removed the moment this Agent is
+            # actually garbage-collected, regardless of whether close()/aclose()
+            # was ever called. This closes the CPython id-reuse window where a
+            # new Agent at the same address could inherit a stale OPEN breaker.
+            self._register_breaker_finalizer(breaker_name)
+
             # Execute tool through circuit breaker with failure detection wrapper
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
@@ -2067,8 +2102,11 @@ class ToolExecutionMixin:
                 func = tool
                 break
         
-        if func is None:
-            # Check the global tool registry for plugins
+        if func is None and getattr(self, '_allow_global_tools', False):
+            # Check the process-global tool registry for plugins. Gated behind
+            # ToolConfig(allow_global_tools=True) so an agent is scoped strictly
+            # to its declared tools=[...] by default (safe by default) and cannot
+            # execute an @tool-decorated callable it was never given.
             try:
                 from ..tools.registry import get_registry
                 registry = get_registry()
