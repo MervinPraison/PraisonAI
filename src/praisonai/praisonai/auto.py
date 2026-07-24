@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import asyncio
+import contextvars
 import threading
 from praisonai._logging import get_logger
 
@@ -670,7 +671,14 @@ class BaseAutoGenerator:
             except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
                 error.append(e)
 
-        thread = threading.Thread(target=_runner, name="praisonai-sync-completion")
+        # Run the worker under a copy of the caller's context so run_sync()
+        # resolves the SAME AsyncBridge the caller would (a scoped_bridge()
+        # override, else the shared default). A bare Thread does not inherit
+        # contextvars, which would otherwise leak this fallback onto the global
+        # bridge and bypass a caller's per-session loop isolation.
+        thread = threading.Thread(
+            target=contextvars.copy_context().run, args=(_runner,),
+            name="praisonai-sync-completion")
         thread.start()
         thread.join()
         if error:
@@ -749,7 +757,13 @@ class BaseAutoGenerator:
             except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
                 error.append(e)
 
-        thread = threading.Thread(target=_runner, name="praisonai-sync-generate")
+        # Run under a copy of the caller's context so run_sync() resolves the
+        # same AsyncBridge (scoped_bridge() override, else shared default); a
+        # bare Thread does not inherit contextvars and would otherwise bypass a
+        # caller's per-session loop isolation.
+        thread = threading.Thread(
+            target=contextvars.copy_context().run, args=(_runner,),
+            name="praisonai-sync-generate")
         thread.start()
         thread.join()
         if error:
