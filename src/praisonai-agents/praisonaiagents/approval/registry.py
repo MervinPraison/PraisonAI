@@ -199,8 +199,6 @@ class ApprovalRegistry:
         # for critical tools (e.g. execute_command after AutoApproveBackend).
         if self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set()):
             return True
-        if self.get_risk_level(tool_name) == "critical":
-            return False
         return False
 
     def _is_session_scoped(

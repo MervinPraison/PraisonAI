@@ -627,14 +627,20 @@ def gateway_doctor(
     if turn:
         target = channel or (next(iter(channels.keys())) if channels else None)
         if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
             if json_output:
                 print(json.dumps(payload, indent=2))
-            print("Error: --turn requires at least one configured channel")
+            else:
+                print(f"Error: {err}")
             raise typer.Exit(1)
         if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
             if json_output:
                 print(json.dumps(payload, indent=2))
-            print(f"Error: channel '{target}' probe failed — cannot run --turn")
+            else:
+                print(f"Error: {err}")
             raise typer.Exit(1)
         ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
         payload["turn"] = {"channel": target, "ok": ok, "response": message}
@@ -749,14 +755,20 @@ def gateway_test(
     if turn:
         target = channel or (next(iter(channels.keys())) if channels else None)
         if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
             if json_output:
                 print(json.dumps(payload, indent=2))
-            print("Error: --turn requires at least one configured channel")
+            else:
+                print(f"Error: {err}")
             raise typer.Exit(1)
         if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
             if json_output:
                 print(json.dumps(payload, indent=2))
-            print(f"Error: channel '{target}' probe failed — cannot run --turn")
+            else:
+                print(f"Error: {err}")
             raise typer.Exit(1)
         ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
         payload["turn"] = {"channel": target, "ok": ok, "response": message}
