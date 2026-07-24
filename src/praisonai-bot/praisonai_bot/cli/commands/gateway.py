@@ -284,13 +284,18 @@ def gateway_restart(
 def gateway_status(
     host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
     port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Gateway config path"),
     daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
+    deep: bool = typer.Option(False, "--deep", help="Extended diagnostics (health + log tail)"),
+    probe: bool = typer.Option(False, "--probe", help="Live credential probe per channel"),
 ):
     """Check gateway status and daemon service status.
 
     Examples:
         praisonai gateway status
         praisonai gateway status --port 9000
+        praisonai gateway status --deep --config bot.yaml
+        praisonai gateway status --probe --config bot.yaml
         praisonai gateway status --daemon-only
     """
     import os
@@ -334,7 +339,26 @@ def gateway_status(
     if not daemon_only:
         try:
             handler = GatewayHandler()
-            handler.status(host=host, port=port)
+            handler.status(host=host, port=port, deep=deep)
+            if deep and config and os.path.exists(config):
+                from praisonai_bot.daemon.launchd import get_logs
+
+                output.print_info("Recent log tail:")
+                print(get_logs(lines=20))
+                channels = _load_channels(config)
+                for name, ch in channels.items():
+                    platform = (ch or {}).get("platform", name)
+                    dlq_path = _resolve_platform_dlq_path(str(platform))
+                    output.print_info(
+                        f"DLQ ({name}): praisonai bot dlq list --path {dlq_path}"
+                    )
+            if probe and config and os.path.exists(config):
+                import asyncio
+
+                channels = _load_channels(config)
+                results = asyncio.run(_probe_channels(channels))
+                output.print_info("Live channel probe:")
+                _render_probe_results(results, json_output=False)
         except Exception as e:
             output.print_error(f"Error checking gateway server status: {str(e)}")
 
@@ -403,10 +427,14 @@ def _check_gateway_secret_strength(config_path: str):
 
 from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
     apply_probe_ca_bundle as _apply_probe_ca_bundle,
+    check_duplicates as _check_duplicates,
     check_gateway_running as _check_gateway_running,
+    check_inbound as _check_inbound,
+    check_runtime as _check_runtime,
     probe_channels as _probe_channels,
     probe_results_to_dict as _probe_results_to_dict,
     resolve_env_token as _resolve_env_token,
+    resolve_platform_dlq_path as _resolve_platform_dlq_path,
     run_shell_readiness_check as _run_shell_readiness_check,
     run_turn_test as _run_gateway_turn_test,
 )
@@ -678,20 +706,41 @@ def gateway_test(
         "--check-running",
         help="Verify the gateway REST /info endpoint is reachable",
     ),
+    check_runtime: bool = typer.Option(
+        False,
+        "--check-runtime",
+        help="Probe /info, /health, /ready, and /live (superset of --check-running)",
+    ),
+    check_inbound: bool = typer.Option(
+        False,
+        "--check-inbound",
+        help="Verify recent inbound delivery via gateway logs",
+    ),
+    check_duplicates: bool = typer.Option(
+        False,
+        "--check-duplicates",
+        help="Scan for competing gateway services and shared tokens",
+    ),
+    since: str = typer.Option(
+        "10m",
+        "--since",
+        help="Time window for --check-inbound (e.g. 5m, 2h)",
+    ),
 ):
     """One-shot gateway readiness check (probes + shell wiring + optional turn).
 
     Recommended onboarding path before ``gateway start``. Combines credential
-    probes, offline shell wiring validation, and an optional offline agent turn.
+    probes, offline shell wiring validation, and optional offline agent turn.
 
     ``--turn`` uses ``BotSessionManager.chat`` only — it does not prove live
     Slack @mention delivery. After starting, confirm ``@mention received`` in
-    gateway logs.
+    gateway logs or use ``--check-inbound``.
 
     Examples:
         praisonai gateway test --config bot.yaml
         praisonai gateway test --config bot.yaml --channel slack --turn "Say OK"
-        praisonai gateway test --config bot.yaml --check-running
+        praisonai gateway test --config bot.yaml --check-runtime --check-duplicates
+        praisonai gateway test --config bot.yaml --check-inbound --since 5m
     """
     import asyncio
     import json
@@ -744,13 +793,60 @@ def gateway_test(
 
     failed = bool(gateway_secret_error) or not all_ok or not shell_result.ok
 
-    if check_running:
-        running_ok, running_msg = _check_gateway_running(config)
-        payload["running"] = {"ok": running_ok, "message": running_msg}
+    runtime_requested = check_runtime or check_running
+    if runtime_requested:
+        if check_runtime:
+            runtime_result = _check_runtime(config)
+            payload["runtime"] = runtime_result.to_dict()
+            runtime_ok = runtime_result.ok
+            if not json_output:
+                for name, key in (
+                    ("info", "info"),
+                    ("health", "health"),
+                    ("ready", "ready"),
+                    ("live", "live"),
+                ):
+                    probe = getattr(runtime_result, key)
+                    mark = "✓" if probe.ok else "✗"
+                    print(f"gateway {name:<6} {mark}  HTTP {probe.status_code or '—'}")
+        else:
+            running_ok, running_msg = _check_gateway_running(config)
+            payload["running"] = {"ok": running_ok, "message": running_msg}
+            runtime_ok = running_ok
+            if not json_output:
+                mark = "✓" if running_ok else "✗"
+                print(f"gateway up    {mark}  {running_msg}")
+        failed = failed or not runtime_ok
+
+    if check_duplicates:
+        dup_result = _check_duplicates(config)
+        payload["duplicates"] = dup_result.to_dict()
         if not json_output:
-            mark = "✓" if running_ok else "✗"
-            print(f"gateway up    {mark}  {running_msg}")
-        failed = failed or not running_ok
+            mark = "✓" if dup_result.ok else "✗"
+            print(f"duplicates  {mark}  {len(dup_result.warnings)} warning(s)")
+            for warning in dup_result.warnings:
+                print(f"  - {warning}")
+        failed = failed or not dup_result.ok
+
+    if check_inbound:
+        inbound_result = _check_inbound(
+            config,
+            since=since,
+            probe_results=results,
+        )
+        payload["inbound"] = inbound_result.to_dict()
+        if not json_output:
+            mark = "✓" if inbound_result.ok else "✗"
+            print(
+                f"inbound     {mark}  "
+                f"{inbound_result.mentions_in_window} mention(s) in window "
+                f"(proves {inbound_result.proves})"
+            )
+            if inbound_result.last_mention_at:
+                print(f"  last: {inbound_result.last_mention_at}")
+            if inbound_result.hint:
+                print(f"  hint: {inbound_result.hint}")
+        failed = failed or not inbound_result.ok
 
     if turn:
         target = channel or (next(iter(channels.keys())) if channels else None)
@@ -1297,6 +1393,71 @@ hooks_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hooks_app, name="hooks")
+
+
+sessions_app = typer.Typer(
+    help="Inspect stored gateway conversation sessions",
+    no_args_is_help=True,
+)
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("list")
+def gateway_sessions_list(
+    platform: Optional[str] = typer.Option(None, "--platform", help="Filter by platform (e.g. slack)"),
+    active: Optional[int] = typer.Option(None, "--active", help="Only sessions updated within N seconds"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """List stored bot session files under ~/.praisonai/sessions/."""
+    import json
+
+    from praisonai_bot.gateway.preflight import list_gateway_sessions
+
+    rows = list_gateway_sessions(platform=platform, active_seconds=active)
+    if json_output:
+        print(json.dumps(rows, indent=2))
+    else:
+        if not rows:
+            print("No sessions found.")
+        for row in rows:
+            print(
+                f"{row['session_id']:<40} "
+                f"msgs={row['message_count']:<4} "
+                f"user={row.get('user_id') or '—'}"
+            )
+        print(
+            "\nSessions reflect stored history; use "
+            "`praisonai gateway test --check-inbound` for live delivery."
+        )
+
+
+@sessions_app.command("show")
+def gateway_sessions_show(
+    session_ref: str = typer.Argument(..., help="Session id, user id, or partial filename match"),
+    tail: int = typer.Option(20, "--tail", help="Number of recent messages to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Show a stored session's recent messages."""
+    import json
+
+    from praisonai_bot.gateway.preflight import show_gateway_session
+
+    try:
+        data = show_gateway_session(session_ref, tail=tail)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        raise typer.Exit(1) from exc
+
+    if json_output:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Session: {data.get('session_id')}  user={data.get('user_id')}")
+        print(f"Agent: {data.get('agent_name')}  messages={data.get('message_count')}")
+        for msg in data.get("messages") or []:
+            role = msg.get("role", "?")
+            content = (msg.get("content") or "")[:200]
+            print(f"  [{role}] {content}")
+        print(f"\n{data.get('footer')}")
 
 
 def _run_hooks_action(**kwargs) -> None:

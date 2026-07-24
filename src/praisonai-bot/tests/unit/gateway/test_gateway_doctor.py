@@ -471,3 +471,105 @@ def test_gateway_test_command(monkeypatch, tmp_path):
     assert "shell wiring" in result.stdout
     assert "slack" in result.stdout
 
+
+def test_gateway_test_check_runtime_json(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_runtime",
+        lambda _cfg: type(
+            "R",
+            (),
+            {
+                "ok": True,
+                "to_dict": lambda self: {"ok": True, "health": {"ok": True}},
+            },
+        )(),
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app, ["test", "--config", str(cfg), "--check-runtime", "--json"]
+    )
+    assert result.exit_code == 0
+    import json
+
+    payload = json.loads(result.stdout)
+    assert payload["runtime"]["ok"] is True
+
+
+def test_gateway_test_check_inbound_fails(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_inbound",
+        lambda *a, **k: type(
+            "I",
+            (),
+            {
+                "ok": False,
+                "proves": "inbound_delivery",
+                "mentions_in_window": 0,
+                "hint": "No inbound",
+                "to_dict": lambda self: {
+                    "ok": False,
+                    "proves": "inbound_delivery",
+                    "mentions_in_window": 0,
+                },
+            },
+        )(),
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app, ["test", "--config", str(cfg), "--check-inbound", "--since", "5m"]
+    )
+    assert result.exit_code == 1
+    assert "inbound" in result.stdout
+
+
+def test_gateway_sessions_list_cli(tmp_path, monkeypatch):
+    typer_testing = pytest.importorskip("typer.testing")
+    import json
+
+    monkeypatch.setattr(
+        "praisonai_bot.gateway.preflight.list_gateway_sessions",
+        lambda **kwargs: [
+            {"session_id": "bot_slack_U1", "message_count": 2, "user_id": "U1"}
+        ],
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["sessions", "list", "--platform", "slack"])
+    assert result.exit_code == 0
+    assert "bot_slack_U1" in result.stdout
+    assert "--check-inbound" in result.stdout
+

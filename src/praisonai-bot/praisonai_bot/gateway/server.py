@@ -2109,6 +2109,14 @@ class WebSocketGateway:
         """
         self._last_inbound_ts = time.time()
 
+    def _record_channel_inbound(self, channel_name: str) -> None:
+        """Record inbound channel activity for metrics and idle tracking."""
+        self.notify_inbound()
+        self.record_metric(
+            "messages_inbound_total",
+            labels={"channel": channel_name},
+        )
+
     def _probe_idle_facts(self) -> Tuple[int, float, bool]:
         """Read live liveness facts from gateway sessions for the idle policy.
 
@@ -4045,28 +4053,70 @@ class WebSocketGateway:
 
     def health(self) -> Dict[str, Any]:
         """Get gateway health status including per-channel bot status and supervision state."""
+        from praisonaiagents.bots.protocols import HealthReason, HealthResult, evaluate_channel_health
+
         uptime = time.time() - self._started_at if self._started_at else 0
         channel_status = {}
         supervision_status = self._channel_supervisor.get_all_status()
+        stale_after = (
+            getattr(self._health_config, "stale_after", 120.0)
+            if self._health_config is not None
+            else 120.0
+        )
+        startup_grace = (
+            getattr(self._health_config, "startup_grace", 60.0)
+            if self._health_config is not None
+            else 60.0
+        )
         
         for name, bot in self._channel_bots.items():
             running = getattr(bot, "is_running", False)
             platform = getattr(bot, "platform", "unknown")
-            
+            last_activity = getattr(bot, "_last_inbound_activity", None)
+            if last_activity is None:
+                last_activity = getattr(bot, "_started_at", None)
+            active_runs = 0
+            counter = getattr(bot, "_active_run_count", None)
+            if callable(counter):
+                try:
+                    active_runs = int(counter() or 0)
+                except Exception:
+                    active_runs = 0
+
+            health_result = HealthResult(
+                ok=running,
+                platform=platform,
+                is_running=running,
+                last_activity=last_activity,
+                active_runs=int(active_runs or 0),
+            )
+            reason = evaluate_channel_health(
+                health_result,
+                startup_grace_seconds=startup_grace,
+                stale_after_seconds=stale_after,
+            )
+            cached_probe = getattr(bot, "_last_probe_result", None)
+            probe_ok = getattr(cached_probe, "ok", None) if cached_probe is not None else None
+
             # Get supervision state
             sup_status = supervision_status.get(name)
+            entry: Dict[str, Any] = {
+                "platform": platform,
+                "running": running,
+                "last_activity": last_activity,
+                "ok": reason == HealthReason.HEALTHY,
+                "reason": reason.value,
+            }
+            if probe_ok is not None:
+                entry["probe"] = {"ok": probe_ok}
             if sup_status:
-                entry = {
-                    "platform": platform,
-                    "running": running,
-                    "supervision": {
-                        "state": sup_status.state.value,
-                        "last_error": sup_status.last_error,
-                        "last_error_time": sup_status.last_error_time,
-                        "next_retry_at": sup_status.next_retry_at,
-                        "total_recoveries": sup_status.total_recoveries,
-                        "manual_pause": sup_status.manual_pause,
-                    }
+                entry["supervision"] = {
+                    "state": sup_status.state.value,
+                    "last_error": sup_status.last_error,
+                    "last_error_time": sup_status.last_error_time,
+                    "next_retry_at": sup_status.next_retry_at,
+                    "total_recoveries": sup_status.total_recoveries,
+                    "manual_pause": sup_status.manual_pause,
                 }
                 # Issue #3348: a channel whose credential was rejected at
                 # runtime (revoked/rotated/expired token) is surfaced as the
@@ -4077,12 +4127,7 @@ class WebSocketGateway:
                 if sup_status.state == ChannelState.CREDENTIAL_UNAVAILABLE:
                     entry["status"] = "degraded"
                     entry["reason"] = "credential unavailable"
-                channel_status[name] = entry
-            else:
-                channel_status[name] = {
-                    "platform": platform,
-                    "running": running,
-                }
+            channel_status[name] = entry
 
         # Issue #3159: surface channels that were configured but skipped at
         # startup because their credential was unavailable. Without this a
@@ -4105,6 +4150,7 @@ class WebSocketGateway:
             "sessions": len(self._sessions),
             "clients": len(self._clients),
             "channels": channel_status,
+            "last_inbound_at": self._last_inbound_ts,
         }
 
         # Issue #3021: surface opt-in lifecycle state so an operator can see
@@ -5499,6 +5545,7 @@ class WebSocketGateway:
             # its own event loop which conflicts with our gateway loop.
             # Use the lower-level API instead.
             if self._is_telegram_bot(bot):
+                self._inject_routing_handler(name, bot)
                 await self._start_telegram_bot_polling(name, bot)
             elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
                 # WhatsApp/Linear run their own aiohttp webhook servers
@@ -5556,6 +5603,7 @@ class WebSocketGateway:
         async def _routed_message_handler(message):
             if not message.sender:
                 return
+            gateway._record_channel_inbound(channel_name)
             # Determine routing context from channel type
             ch_type = message.channel.channel_type if message.channel else ""
             is_dm = ch_type in ("dm", "private")

@@ -626,6 +626,11 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             bot_message = self._convert_event_to_message(event)
             bot_message._channel_type = "slack"
 
+            decision = self.fire_message_received(bot_message)
+            if decision.get("drop"):
+                logger.debug("@mention dropped by MESSAGE_RECEIVED hook")
+                return
+
             if not self.config.is_channel_allowed(
                 bot_message.channel.channel_id if bot_message.channel else ""
             ):
@@ -650,10 +655,10 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 except Exception as e:
                     logger.error(f"Message handler error: {e}")
 
-            text = event.get("text", "")
+            text = (decision.get("content") or event.get("text", "")).strip()
             if self._bot_user:
                 text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()
-            
+
             if self._agent:
                 try:
                     user_id = event.get("user", "unknown")
