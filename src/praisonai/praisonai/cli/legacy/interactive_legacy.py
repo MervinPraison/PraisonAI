@@ -45,6 +45,15 @@ def _start_interactive_mode(self, args):
         # Set interactive mode flag
         self._interactive_mode = True
         
+        # Session↔directory binding: when resuming a session, root the tools at
+        # the directory the session started in (persisted UnifiedSession.workspace)
+        # so `--continue`/`--session` resume INTO that directory instead of the
+        # unrelated cwd. Only applies on resume and only when the user has not
+        # already pinned a workspace via --workspace (PRAISONAI_WORKSPACE). If the
+        # recorded directory no longer exists, warn and fall back to cwd.
+        if not os.environ.get("PRAISONAI_WORKSPACE"):
+            _bind_resume_workspace(args, console)
+        
         # Load interactive tools
         tools_list = _load_interactive_tools(self)
         
@@ -575,6 +584,46 @@ def _start_interactive_mode(self, args):
         traceback.print_exc()
         sys.exit(1)
 
+def _bind_resume_workspace(args, console=None):
+    """Root a resumed session at the directory it was created in.
+
+    Reads back the persisted ``UnifiedSession.workspace`` for a
+    ``--continue``/``--session`` resume and exports it as ``PRAISONAI_WORKSPACE``
+    so the tool loader (and everything downstream) operates in that directory.
+    No-op when not resuming. If the recorded directory is gone, warn and leave
+    the resolution to fall back to cwd.
+    """
+    resume_session_id = getattr(args, 'resume_session', None) if args is not None else None
+    if not resume_session_id:
+        return
+    try:
+        try:
+            from .session import get_session_store
+        except ImportError:
+            from praisonai.cli.session import get_session_store
+        store = get_session_store()
+        if resume_session_id == 'last':
+            session = store.get_last_session()
+        else:
+            session = store.get_or_create(resume_session_id)
+    except Exception:
+        return
+    workspace = getattr(session, 'workspace', None) if session else None
+    if not workspace:
+        return
+    if not os.path.isdir(workspace):
+        if console is not None:
+            try:
+                console.print(
+                    f"[yellow]⚠ Session workspace no longer exists: {workspace} — "
+                    f"using current directory instead.[/yellow]"
+                )
+            except Exception:
+                pass
+        return
+    os.environ["PRAISONAI_WORKSPACE"] = workspace
+
+
 def _load_interactive_tools(self):
     """
     Load tools for interactive mode using the canonical provider.
@@ -596,15 +645,25 @@ def _load_interactive_tools(self):
         if getattr(self.args, 'no_lsp', False):
             disable_groups.append('lsp')
     
-    # Get workspace
-    workspace = os.getcwd()
+    # Resolve the workspace root the agent's tools operate on.
+    # Order: explicit PRAISONAI_WORKSPACE (set by `code --workspace` or by
+    # resume-into-session-directory) → legacy PRAISON_WORKSPACE → cwd. Previously
+    # this hardcoded os.getcwd() and then overwrote config.workspace with it,
+    # which silently discarded the --workspace flag (the flag was dead).
+    workspace = (
+        os.environ.get("PRAISONAI_WORKSPACE")
+        or os.environ.get("PRAISON_WORKSPACE")
+        or os.getcwd()
+    )
     
     try:
         from ..features.interactive_tools import get_interactive_tools, ToolConfig
         
-        # Create config
+        # Create config. from_env() already honours the workspace env vars; only
+        # override when we resolved a concrete workspace so the two paths agree.
         config = ToolConfig.from_env()
-        config.workspace = workspace
+        if workspace:
+            config.workspace = workspace
         
         # Apply CLI overrides
         if 'acp' in disable_groups:
