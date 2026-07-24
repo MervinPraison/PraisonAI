@@ -304,6 +304,19 @@ class ChannelSupervisor:
                     )
                     await abort_signal.wait()  # Wait for reconnect/hot-reload.
                     abort_signal.clear()
+                    # Re-source the credential onto the *same* bot instance
+                    # before restarting from the parked state. Without this, a
+                    # reconnect() would restart the bot still holding the
+                    # rejected token and bounce straight back to
+                    # CREDENTIAL_UNAVAILABLE. A config hot-reload swaps in a
+                    # freshly-built bot (new token) via _start_single_channel, so
+                    # this hook only matters for an out-of-band repair (e.g. a
+                    # rotated env var) driving a bare reconnect(). Duck-typed and
+                    # opt-in: bots that expose refresh_credentials() get a chance
+                    # to re-read their token; all others are a no-op and rely on
+                    # start() rebuilding the adapter (which re-resolves env-var
+                    # tokens) or on hot-reload.
+                    await self._refresh_credentials(name, bot)
                     continue
 
                 elif not is_recoverable:
@@ -355,6 +368,33 @@ class ChannelSupervisor:
         # Unregister from health monitor
         self._health_monitor.unregister_channel(name)
     
+    async def _refresh_credentials(self, name: str, bot: Any) -> None:
+        """Give a parked bot a chance to re-source its credential before restart.
+
+        Issue #3348: when a channel wakes from ``CREDENTIAL_UNAVAILABLE`` (an
+        operator repaired the token and called ``reconnect()``), the *same* bot
+        instance is about to be restarted. If the bot exposes an opt-in
+        ``refresh_credentials()`` it is invoked here so the repaired token is
+        picked up without a full restart. Duck-typed and best-effort: a bot
+        without the hook is a no-op (base ``Bot.start()`` already rebuilds its
+        adapter and re-resolves env-var tokens), and any error is swallowed so a
+        buggy hook cannot wedge supervision — the restart still proceeds and, if
+        the credential is still bad, the channel simply re-parks.
+        """
+        refresh = getattr(bot, "refresh_credentials", None)
+        if not callable(refresh):
+            return
+        try:
+            result = refresh()
+            if asyncio.iscoroutine(result):
+                await result
+            logger.info(f"Channel '{name}' credential re-sourced before restart")
+        except Exception as exc:
+            logger.warning(
+                f"Channel '{name}' credential refresh hook failed "
+                f"(continuing with restart): {exc}"
+            )
+
     async def _get_channel_health(self, name: str, bot: Any) -> Any:
         """Get health status for a channel.
         

@@ -92,6 +92,57 @@ def test_runtime_credential_rejection_enters_degraded_state():
     asyncio.run(asyncio.wait_for(scenario(), timeout=5.0))
 
 
+def test_reconnect_resources_credential_via_refresh_hook():
+    """Issue #3348: a bot exposing refresh_credentials() re-sources its token
+    on wake so the *same* instance recovers after an out-of-band repair — it
+    does not restart still holding the rejected credential."""
+
+    recovered = asyncio.Event()
+
+    class _Bot:
+        platform = "slack"
+
+        def __init__(self):
+            self.token = "bad"
+            self.refreshed = 0
+
+        def refresh_credentials(self):
+            # Operator repaired the credential out-of-band (e.g. rotated env).
+            self.token = "good"
+            self.refreshed += 1
+
+    bot = _Bot()
+
+    async def start_fn(name, b):
+        if b.token != "good":
+            raise _AuthError("401 Unauthorized: invalid token", 401)
+        recovered.set()
+        await asyncio.Event().wait()
+
+    sup = ChannelSupervisor()
+
+    async def scenario():
+        task = asyncio.create_task(sup.run("slack", bot, start_fn))
+        for _ in range(200):
+            if sup.get_status("slack").state == ChannelState.CREDENTIAL_UNAVAILABLE:
+                break
+            await asyncio.sleep(0.01)
+        assert sup.get_status("slack").state == ChannelState.CREDENTIAL_UNAVAILABLE
+
+        assert sup.reconnect("slack") is True
+        await asyncio.wait_for(recovered.wait(), timeout=2.0)
+        assert bot.refreshed == 1
+        assert sup.get_status("slack").state == ChannelState.RUNNING
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5.0))
+
+
 def test_generic_fatal_still_failed():
     """A non-auth, non-recoverable error stays terminal FAILED (unchanged)."""
 
