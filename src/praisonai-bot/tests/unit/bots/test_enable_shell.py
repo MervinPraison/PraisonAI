@@ -296,6 +296,54 @@ def test_manual_approval_replaces_stale_auto_backend(mock_execute_command, monke
 
 
 @patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_syncs_approval_registry(mock_execute_command):
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    from praisonaiagents.approval import get_approval_registry
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    reg = get_approval_registry()
+    assert isinstance(reg.get_backend("assistant"), AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_critical_tool_honours_agent_approval(mock_execute_command):
+    """Agent-level approval must flow through to @require_approval(critical)."""
+    from praisonaiagents import Agent
+    from praisonaiagents.approval import get_approval_registry, mark_approved
+    from praisonaiagents.tools import execute_command
+
+    mock_execute_command.name = "execute_command"
+    agent = Agent(name="assistant", tools=[])
+    enable_shell_tools(
+        agent,
+        config=BotConfig(),
+        ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+        channel_type="slack",
+    )
+
+    decision = agent._resolve_approval_decision(
+        "execute_command", {"command": "uname -a"}, is_async=False
+    )
+    assert decision.approved is True
+    mark_approved("execute_command")
+    assert get_approval_registry().is_already_approved("execute_command")
+    assert execute_command in (agent.tools or [])
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
 def test_manual_approval_without_backend_denies_shell(mock_execute_command, monkeypatch):
     """auto_approve_shell=false with no pre-existing backend also fails closed."""
     from praisonaiagents.approval.backends import AutoApproveBackend

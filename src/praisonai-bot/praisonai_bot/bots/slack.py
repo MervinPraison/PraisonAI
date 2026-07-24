@@ -637,7 +637,19 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
                 if not user_allowed:
                     return
-            
+
+            # Gateway routing (shell opt-in, per-route agents) runs via on_message
+            # handlers — mirror the regular message path so @mentions are not stuck
+            # on a stale default agent missing execute_command.
+            for handler in self._message_handlers:
+                try:
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(bot_message)
+                    else:
+                        handler(bot_message)
+                except Exception as e:
+                    logger.error(f"Message handler error: {e}")
+
             text = event.get("text", "")
             if self._bot_user:
                 text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()

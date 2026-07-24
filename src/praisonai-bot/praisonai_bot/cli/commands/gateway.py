@@ -587,6 +587,70 @@ async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
     return dict(results)
 
 
+async def _run_gateway_turn_test(
+    config_path: str,
+    channel_name: str,
+    prompt: str,
+) -> tuple:
+    """Simulate one inbound channel turn offline (no gateway process required).
+
+    Mirrors gateway routing + ``allow_shell`` setup, then runs
+    ``BotSessionManager.chat()`` — the same path Slack/Telegram use.
+    Returns ``(ok, message)``.
+    """
+    import yaml
+    from praisonaiagents import Agent
+    from praisonaiagents.bots.config import BotConfig
+    from praisonai_bot.bots._defaults import apply_bot_smart_defaults, enable_shell_tools
+    from praisonai_bot.bots._session import BotSessionManager
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    channels = cfg.get("channels") or {}
+    if channel_name not in channels:
+        return False, f"Channel '{channel_name}' not found in config"
+
+    ch_cfg = dict(channels[channel_name] or {})
+    ch_cfg.setdefault("platform", channel_name)
+
+    agents_cfg = cfg.get("agents") or {}
+    routing = ch_cfg.get("routing") or cfg.get("routing") or {}
+    agent_id = routing.get("default")
+    if not agent_id:
+        agent_id = next(iter(agents_cfg), None)
+    if not agent_id or agent_id not in agents_cfg:
+        return False, f"No agent configured for channel '{channel_name}'"
+
+    acfg = agents_cfg[agent_id] or {}
+    agent = Agent(
+        name=acfg.get("name", agent_id),
+        instructions=acfg.get("instructions", ""),
+        llm=acfg.get("model") or acfg.get("llm", "gpt-4o-mini"),
+    )
+    bot_config = BotConfig()
+    agent = apply_bot_smart_defaults(agent, bot_config)
+    platform = str(ch_cfg.get("platform") or channel_name).lower()
+    if ch_cfg.get("allow_shell"):
+        agent = enable_shell_tools(agent, bot_config, ch_cfg, channel_type=platform)
+
+    mgr = BotSessionManager(platform=platform)
+    try:
+        result = await mgr.chat(
+            agent,
+            "gateway-doctor-test",
+            prompt,
+            chat_id="gateway-doctor-test",
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+    text = str(result or "").strip()
+    if not text:
+        return False, "Agent returned an empty response"
+    return True, text[:500]
+
+
 def _compute_secret_availability(channels: dict) -> dict:
     """Per-channel credential availability without revealing values (#3102).
 
@@ -663,6 +727,16 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
 def gateway_doctor(
     config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    channel: Optional[str] = typer.Option(
+        None,
+        "--channel",
+        help="Channel name for --turn (default: first configured channel)",
+    ),
+    turn: Optional[str] = typer.Option(
+        None,
+        "--turn",
+        help="Run one live inbound agent turn offline (requires LLM API key)",
+    ),
 ):
     """Validate every configured channel's credentials (pre-flight check).
 
@@ -670,9 +744,14 @@ def gateway_doctor(
     (Telegram getMe, Slack auth.test, Discord identify, WhatsApp token check)
     without starting message processing. Exits non-zero if any channel fails.
 
+    Optional ``--turn`` simulates one inbound message through the same agent
+    path a channel uses (including ``allow_shell`` setup) without starting the
+    gateway or waiting for Slack/Telegram traffic.
+
     Examples:
         praisonai gateway doctor
         praisonai gateway doctor --config my-gateway.yaml --json
+        praisonai gateway doctor --config gateway.yaml --channel slack --turn "Say OK"
     """
     import asyncio
 
@@ -729,6 +808,21 @@ def gateway_doctor(
 
     if not all_ok or gateway_secret_error:
         raise typer.Exit(1)
+
+    if turn:
+        target = channel or (next(iter(channels.keys())) if channels else None)
+        if not target:
+            print("Error: --turn requires at least one configured channel")
+            raise typer.Exit(1)
+        ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
+        if json_output:
+            import json
+            print(json.dumps({"turn": {"channel": target, "ok": ok, "response": message}}, indent=2))
+        else:
+            print(f"\nTurn test ({target}): {'OK' if ok else 'FAIL'}")
+            print(message if ok else f"Error: {message}")
+        if not ok:
+            raise typer.Exit(1)
 
 
 @app.command("channels")

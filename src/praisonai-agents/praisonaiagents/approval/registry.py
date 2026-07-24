@@ -195,9 +195,13 @@ class ApprovalRegistry:
         self._approved_context.set(approved)
 
     def is_already_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> bool:
+        # Honour an explicit mark_approved() from the agent approval path even
+        # for critical tools (e.g. execute_command after AutoApproveBackend).
+        if self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set()):
+            return True
         if self.get_risk_level(tool_name) == "critical":
             return False
-        return self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set())
+        return False
 
     def _is_session_scoped(
         self, agent_name: Optional[str], tool_name: str, arguments: Optional[Dict]

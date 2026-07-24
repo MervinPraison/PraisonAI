@@ -782,6 +782,7 @@ jobs:
           tests/unit/test_decorator_simple.py
           tests/unit/test_db_adapter_tracing_init.py
           ../praisonai-bot/tests/unit/test_bot_wiring.py
+          ../praisonai-bot/tests/unit/bots/test_enable_shell.py
           ../praisonai-bot/tests/unit/test_bot_history.py
           ../praisonai-bot/tests/unit/test_bot_fixes.py
           tests/unit/test_auto_lazy_loading.py

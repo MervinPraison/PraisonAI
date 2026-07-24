@@ -625,11 +625,26 @@ Your Goal: {self.goal}"""
                     formatted_tools.extend(openai_tools)
                 elif openai_tools is not None:
                     formatted_tools.append(openai_tools)
-            # Handle callable functions
-            elif callable(tool):
-                tool_def = self._generate_tool_definition(tool.__name__)
+            # Handle BaseTool-style instances (ClarifyTool, etc.)
+            elif getattr(tool, "name", None) and hasattr(tool, "run"):
+                tool_def = self._generate_tool_definition(tool.name)
                 if tool_def:
                     formatted_tools.append(tool_def)
+                else:
+                    logging.warning(
+                        "Could not generate definition for tool: %s", tool.name
+                    )
+            # Handle callable functions
+            elif callable(tool):
+                fname = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+                if not fname:
+                    logging.warning("Tool %r not recognized (no name)", tool)
+                    continue
+                tool_def = self._generate_tool_definition(fname)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+                else:
+                    logging.warning(f"Could not generate definition for tool: {fname}")
             else:
                 logging.warning(f"Tool {tool} not recognized")
         

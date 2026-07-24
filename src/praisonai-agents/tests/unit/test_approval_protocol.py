@@ -210,6 +210,14 @@ class TestApprovalRegistry:
         reg.mark_approved("write_file")
         assert reg.is_already_approved("write_file")
 
+    def test_critical_tool_honours_mark_approved(self):
+        from praisonaiagents.approval.registry import ApprovalRegistry
+        reg = ApprovalRegistry()
+        reg.add_requirement("execute_command", "critical")
+        assert not reg.is_already_approved("execute_command")
+        reg.mark_approved("execute_command")
+        assert reg.is_already_approved("execute_command")
+
     def test_already_approved_skips_backend(self):
         """Once approved, no backend call needed."""
         from praisonaiagents.approval.registry import ApprovalRegistry
