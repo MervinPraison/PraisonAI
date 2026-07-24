@@ -138,17 +138,32 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
 
         _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
 
-        sig = inspect.signature(cls.run)
-        kw_only = {
-            p.name for p in sig.parameters.values()
-            if p.kind in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        }
-        missing = _REQUIRED_KW - kw_only
-        if missing:
-            raise TypeError(
-                f"FrameworkAdapter {name!r} does not implement the protocol: "
-                f"missing keyword-only parameters {sorted(missing)}"
-            )
+        def _accepts_required(fn) -> Optional[str]:
+            params = inspect.signature(fn).parameters.values()
+            # A **kwargs catch-all accepts every required keyword by definition,
+            # so entry-point plugins that forward **kwargs to a delegate (the
+            # advertised extension surface) validate instead of being silently
+            # dropped from pick_default()/list_available_frameworks().
+            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+                return None
+            named = {
+                p.name for p in params
+                if p.kind in (inspect.Parameter.KEYWORD_ONLY,
+                              inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            }
+            missing = _REQUIRED_KW - named
+            return f"missing keyword parameters {sorted(missing)}" if missing else None
+
+        for method_name in ("run", "arun"):
+            fn = getattr(cls, method_name, None)
+            if fn is None:
+                continue  # arun is optional; sync-only adapters keep working
+            err = _accepts_required(fn)
+            if err:
+                raise TypeError(
+                    f"FrameworkAdapter {name!r}.{method_name} does not implement "
+                    f"the protocol: {err}"
+                )
         self._validated_classes.add(cls)
 
     def create(self, name: str, *args, **kwargs):
