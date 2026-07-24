@@ -1671,7 +1671,7 @@ Write the complete compiled report:"""
             base_path = (path or "/mcp").rstrip("/") or "/mcp"
             transport = SseServerTransport(f"{base_path}/sse")
             starlette_app = Starlette(
-                routes=[Mount(base_path, mcp.create_app())]
+                routes=[Mount(base_path, mcp.sse_app())]
             )
 
             def run_mcp_server():

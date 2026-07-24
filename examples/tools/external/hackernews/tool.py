@@ -30,9 +30,11 @@ def main():
     else:
         print(f"Found {len(stories)} top stories:")
         for story in stories:
-            print(f"  - {story.get('title', 'N/A')[:50]}...")
+            title = story.get("title") or "N/A"
+            url = story.get("url") or "N/A"
+            print(f"  - {title[:50]}...")
             print(f"    Score: {story.get('score', 'N/A')} | Comments: {story.get('descendants', 'N/A')}")
-            print(f"    URL: {story.get('url', 'N/A')[:60]}...")
+            print(f"    URL: {url[:60]}...")
             print()
     
     print("✅ Hacker News tool working correctly!")
