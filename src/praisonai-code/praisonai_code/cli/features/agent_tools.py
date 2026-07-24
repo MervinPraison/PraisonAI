@@ -21,24 +21,45 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _run_sync(coro):
+_RUN_SYNC_TIMEOUT = float(os.environ.get("PRAISONAI_RUN_SYNC_TIMEOUT", "300"))
+
+
+def _run_sync(coro, *, timeout: Optional[float] = _RUN_SYNC_TIMEOUT):
     """Run a coroutine to completion from sync code without a wrapper dependency.
 
     ``praisonai-code`` is a Tier-2 package and must not import the ``praisonai``
-    wrapper at the hot path (C7 gate / ARCHITECTURE §2). When no event loop is
-    running we use ``asyncio.run``; when one is already running (e.g. called from
-    within async agent execution) we offload to a worker thread so we never try
-    to nest ``asyncio.run`` on a live loop.
+    wrapper at the hot path (C7 gate / ARCHITECTURE §2). This bridge keeps the
+    union of both historical guarantees:
+
+    - **Running-loop safety:** when a loop is already running (e.g. called from
+      within async agent execution) we offload to a worker thread so we never
+      try to nest ``asyncio.run`` on a live loop.
+    - **Timeout:** a stuck coroutine is bounded by ``timeout`` seconds (honoured
+      the same way whether or not a loop is already running) so a hung tool call
+      cannot block the agent indefinitely.
     """
+    import concurrent.futures
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        running_loop = False
+    else:
+        running_loop = True
 
-    import concurrent.futures
+    if not running_loop:
+        if timeout is None:
+            return asyncio.run(coro)
+        # Offload to a worker thread even without a running loop so the timeout
+        # can be enforced via ``Future.result`` without blocking indefinitely.
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        future = pool.submit(asyncio.run, coro)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise
 
 
 def _sanitize_filepath(filepath: str, workspace: Optional[str] = None) -> str:
