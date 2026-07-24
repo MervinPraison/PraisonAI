@@ -185,6 +185,17 @@ class BotSessionManager:
         # Agent instance never leaks one user's model to another. Keyed by
         # storage_key (same as _histories).
         self._model_overrides: Dict[str, Any] = {}
+        # Prompt-cache-stability contract (Issue #3352): last prompt-prefix
+        # signature seen per storage_key. The prefix is the cache-relevant
+        # part of every request (model + tool schemas + system-prompt fp); a
+        # signature change turn-over-turn means the provider prompt cache will
+        # miss. Recorded here so the gateway can meter and surface that
+        # invalidation instead of it happening silently. Keyed like _histories.
+        self._prefix_sig: Dict[str, str] = {}
+        # Optional GatewayMetrics registry. When a gateway wires one in, the
+        # ``prompt_cache_invalidations_total`` counter is incremented on each
+        # prefix drift. ``None`` (default) keeps direct/standalone use unchanged.
+        self._metrics: Optional[Any] = None
         # Per-route toolset scope staged by a routing handler that cannot thread
         # ``tool_policy`` through the adapter's own ``chat()`` call (Issue #2298).
         # The gateway's injected on_message handler runs synchronously right
@@ -532,6 +543,50 @@ class BotSessionManager:
             )
         except Exception as e:
             logger.debug("SESSION_START emit error (non-fatal): %s", e)
+
+    def _check_prefix_stability(self, agent: "Agent", storage_key: str) -> None:
+        """Meter prompt-cache prefix drift for this turn (Issue #3352).
+
+        Computes the agent's cache-relevant prefix signature (model + sorted
+        tool names + system-prompt fingerprint) *after* the per-turn tool/model
+        swaps are applied, and compares it to the last signature for this
+        session. On a change — the one auditable point where provider prompt
+        caching is knowingly sacrificed — it increments an optional metric and
+        fires the advisory PROMPT_PREFIX_INVALIDATED hook. Best-effort: any
+        failure is swallowed so metering never breaks a turn.
+        """
+        try:
+            from praisonaiagents.agent.prompt_cache import prompt_prefix_signature
+            sig = prompt_prefix_signature(agent)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("prompt prefix signature error (non-fatal): %s", e)
+            return
+        last = self._prefix_sig.get(storage_key)
+        self._prefix_sig[storage_key] = sig
+        if last is None or last == sig:
+            return
+        if self._metrics is not None:
+            try:
+                self._metrics.inc("prompt_cache_invalidations_total")
+            except Exception:  # pragma: no cover - defensive
+                pass
+        try:
+            from ._protocol_mixin import (
+                fire_prompt_prefix_invalidated,
+                _resolve_runner_from_agent,
+            )
+            runner = _resolve_runner_from_agent(agent)
+            agent_name = getattr(agent, "agent_name", None) or getattr(agent, "name", "bot")
+            fire_prompt_prefix_invalidated(
+                runner,
+                session_id=storage_key,
+                old_sig=last,
+                new_sig=sig,
+                agent_name=agent_name,
+                reason="tools/model",
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("PROMPT_PREFIX_INVALIDATED emit error (non-fatal): %s", e)
 
     def _fire_session_end(self, storage_key: str, reason: str = "clear") -> None:
         """Emit SESSION_END for *storage_key* if a session was open, then forget it.
@@ -1068,6 +1123,11 @@ class BotSessionManager:
                         storage_key = self._storage_key(user_id)
                         if controller:
                             self._active_runs[storage_key] = controller
+                        # Prompt-cache-stability contract (Issue #3352): now that
+                        # the per-turn tool/model swaps are applied, meter whether
+                        # this turn's cached prompt prefix drifted from the last
+                        # turn so silent provider-cache misses become auditable.
+                        self._check_prefix_stability(agent, storage_key)
                         # In-run progress liveness (Issue #2393): mark progress
                         # at run start so a fresh long run is never STUCK on a
                         # stale inbound timestamp; streamed events refresh it
