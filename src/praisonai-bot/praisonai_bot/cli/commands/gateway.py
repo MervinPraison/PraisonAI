@@ -223,10 +223,12 @@ def gateway_restart(
     launch arguments. Otherwise it drains the running PID and relaunches
     directly (#3161).
 
-    Note: the direct (non-service) relaunch cannot recover CLI-only flags the
+    The direct (non-service) relaunch replays the CLI-only runtime flags the
     original process was started with (e.g. ``--openai-api``,
-    ``--max-concurrent-runs``); put production settings in ``gateway.yaml`` (or
-    install as a service) so a restart preserves them.
+    ``--reliability``, ``--max-concurrent-runs``) from the persisted start-flags
+    artefact written at ``start`` time, so a restart faithfully reproduces the
+    running gateway instead of silently reverting to defaults (#3349). Flags
+    passed explicitly to ``restart`` still win over the persisted values.
 
     Examples:
         praisonai gateway restart
@@ -235,7 +237,7 @@ def gateway_restart(
     """
     import os
     from praisonai_bot.daemon import restart_daemon, get_daemon_status
-    from ..features.gateway import GatewayHandler
+    from ..features.gateway import GatewayHandler, load_start_flags
     from ..output.console import get_output_controller
 
     if port is None:
@@ -270,14 +272,26 @@ def gateway_restart(
     handler = GatewayHandler()
     handler.stop(host=host, port=port, force=False, drain_timeout=drain_timeout)
 
+    # Replay the CLI-only runtime flags the original process was started with so
+    # the restart reproduces the exact posture (durable delivery, concurrency
+    # ceiling, OpenAI-compat surface, lifecycle) instead of silently reverting
+    # to defaults (#3349). Flags passed explicitly to ``restart`` (config /
+    # agents / drain_timeout) still win over the persisted values.
+    persisted = load_start_flags(host, port)
+    start_kwargs = dict(persisted)
+    if config is not None:
+        start_kwargs["config_file"] = config
+    if agents is not None:
+        start_kwargs["agent_file"] = agents
+    start_kwargs["drain_timeout"] = drain_timeout
+
+    if persisted:
+        output.print_info(
+            "Replaying persisted start flags: "
+            + ", ".join(sorted(persisted.keys()))
+        )
     output.print_info("Relaunching gateway...")
-    handler.start(
-        host=host,
-        port=port,
-        agent_file=agents,
-        config_file=config,
-        drain_timeout=drain_timeout,
-    )
+    handler.start(host=host, port=port, **start_kwargs)
 
 
 @app.command("status")

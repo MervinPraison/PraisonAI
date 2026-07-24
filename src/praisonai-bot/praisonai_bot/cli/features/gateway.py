@@ -100,6 +100,68 @@ def _load_praisonai_env_file() -> Dict[str, str]:
     return loaded
 
 
+# Runtime start-flag keys that materially change gateway behaviour and only
+# exist on ``start`` (durability, concurrency ceiling, OpenAI-compat surface,
+# lifecycle). Persisting them lets a direct ``restart`` replay the exact
+# posture the process was started with, instead of silently reverting to
+# defaults (#3349).
+_START_FLAG_KEYS = (
+    "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
+    "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
+    "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
+)
+
+
+def _start_flags_path(host: str, port: int) -> Path:
+    """Path to the persisted start-flags file, keyed by the bound host+port.
+
+    Keying by host:port lets multiple gateways on one machine each keep their
+    own launch posture, matching how the PID lock is keyed (#3349).
+    """
+    home = Path(os.environ.get("PRAISONAI_HOME") or (Path.home() / ".praisonai"))
+    safe_host = str(host).replace(":", "_")
+    return home / f"gateway.start.{safe_host}.{port}.json"
+
+
+def _persist_start_flags(host: str, port: int, flags: Dict) -> None:
+    """Persist the CLI-only runtime start flags so ``restart`` can replay them.
+
+    Only non-``None`` values are stored (``None`` means "fall back to YAML"),
+    so a restart reproduces the running process faithfully. Best-effort: a
+    write failure never blocks start (#3349).
+    """
+    import json
+
+    path = _start_flags_path(host, port)
+    payload = {k: v for k, v in flags.items() if v is not None}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    except OSError as exc:  # pragma: no cover — advisory only
+        logger.warning("Could not persist gateway start flags to %s: %s", path, exc)
+
+
+def load_start_flags(host: str, port: int) -> Dict:
+    """Load the persisted start flags for a gateway bound to host:port.
+
+    Returns an empty dict when no artefact exists (or it is unreadable), so
+    a first-ever ``restart`` behaves exactly as before (#3349).
+    """
+    import json
+
+    path = _start_flags_path(host, port)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:  # pragma: no cover — advisory only
+        logger.warning("Could not read gateway start flags from %s: %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in _START_FLAG_KEYS}
+
+
 class GatewayHandler:
     """Handler for gateway CLI commands."""
     
@@ -179,6 +241,30 @@ class GatewayHandler:
         # Load ~/.praisonai/.env BEFORE any config parsing or ${VAR}
         # substitution — daemons don't inherit shell env.
         _load_praisonai_env_file()
+
+        # Persist the CLI-only runtime flags this process was launched with so a
+        # later direct ``gateway restart`` can replay the exact posture (durable
+        # delivery, concurrency ceiling, OpenAI-compat surface, lifecycle)
+        # instead of silently reverting to defaults (#3349). Best-effort — never
+        # blocks start.
+        _persist_start_flags(
+            host, port,
+            {
+                "agent_file": agent_file,
+                "config_file": config_file,
+                "drain_timeout": drain_timeout,
+                "max_concurrent_runs": max_concurrent_runs,
+                "queue_depth": queue_depth,
+                "overflow_policy": overflow_policy,
+                "reliability": reliability,
+                "openai_api": openai_api,
+                "mcp": mcp,
+                "identity_store": identity_store,
+                "scale_to_zero": scale_to_zero,
+                "idle_minutes": idle_minutes,
+                "drain_marker": drain_marker,
+            },
+        )
         logger.info(
             "Gateway starting (host=%s port=%s config=%s agents=%s)",
             host, port, config_file or "-", agent_file or "-",
