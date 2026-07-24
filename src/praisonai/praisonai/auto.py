@@ -535,6 +535,13 @@ class BaseAutoGenerator:
         if registered is not None:
             return registered
 
+        # Preserve the original LiteLLM failure so that, if the OpenAI fallback
+        # also fails, the user sees BOTH tracebacks (via ``raise ... from``)
+        # instead of only the second one. Otherwise the real cause (auth/region
+        # error, a provider-only model, malformed response_format) survives only
+        # in a WARNING log line the caller likely never sees.
+        litellm_error: Optional[BaseException] = None
+
         # Try LiteLLM first (preferred - supports 100+ providers)
         if is_available("litellm"):
             try:
@@ -567,6 +574,7 @@ class BaseAutoGenerator:
                     "LiteLLM structured completion failed (%s); "
                     "falling back to OpenAI SDK.", e
                 )
+                litellm_error = e
 
         # Fallback to the core-owned OpenAI client (uses beta.chat.completions.parse).
         # Delegating to praisonaiagents.llm.openai_client.OpenAIClient keeps the
@@ -577,21 +585,28 @@ class BaseAutoGenerator:
             # The async path awaits the core coroutine directly. The sync path
             # offloads the blocking core call via asyncio.to_thread so it never
             # blocks the bridge event loop this coroutine runs on.
-            if is_async:
-                return await client.aparse_structured_output(
-                    messages=messages,
-                    response_format=response_model,
-                    model=model_name,
-                    **kwargs,
+            try:
+                if is_async:
+                    return await client.aparse_structured_output(
+                        messages=messages,
+                        response_format=response_model,
+                        model=model_name,
+                        **kwargs,
+                    )
+                return await asyncio.to_thread(
+                    lambda: client.parse_structured_output(
+                        messages=messages,
+                        response_format=response_model,
+                        model=model_name,
+                        **kwargs,
+                    )
                 )
-            return await asyncio.to_thread(
-                lambda: client.parse_structured_output(
-                    messages=messages,
-                    response_format=response_model,
-                    model=model_name,
-                    **kwargs,
-                )
-            )
+            except Exception as openai_error:
+                # Chain the LiteLLM traceback so users see BOTH provider
+                # failures, not just the OpenAI one that masked the real cause.
+                if litellm_error is not None:
+                    raise openai_error from litellm_error
+                raise
 
         # Neither available - raise helpful error
         raise ImportError(
@@ -641,8 +656,12 @@ class BaseAutoGenerator:
 
         def _runner() -> None:
             try:
+                # The runner thread has no running loop, so run_sync() is legal
+                # here and dispatches to the shared background loop (one loop for
+                # the whole process) instead of standing up a fresh event loop
+                # per call — preserving LiteLLM/HTTPX per-loop connection pools.
                 result.append(
-                    asyncio.run(
+                    run_sync(
                         self._completion_impl(
                             response_model, messages, is_async=False, **kwargs
                         )
@@ -722,7 +741,11 @@ class BaseAutoGenerator:
 
         def _runner() -> None:
             try:
-                result.append(asyncio.run(coro))
+                # The runner thread has no running loop, so run_sync() is legal
+                # here and dispatches to the shared background loop (one loop for
+                # the whole process) instead of standing up a fresh event loop
+                # per call — preserving LiteLLM/HTTPX per-loop connection pools.
+                result.append(run_sync(coro))
             except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
                 error.append(e)
 
