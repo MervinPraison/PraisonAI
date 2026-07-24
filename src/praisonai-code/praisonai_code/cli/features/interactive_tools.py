@@ -124,8 +124,12 @@ class ToolConfig:
         """Create config from environment variables."""
         config = cls()  # __post_init__ already applied PRAISON_TOOLS_DISABLE
 
-        # Check for workspace
-        workspace = os.environ.get("PRAISON_WORKSPACE", "")
+        # Check for workspace. The `praisonai code --workspace` flag writes
+        # PRAISONAI_WORKSPACE (code.py), so honour that canonical name first and
+        # fall back to the older PRAISON_WORKSPACE for backward compatibility.
+        workspace = os.environ.get("PRAISONAI_WORKSPACE") or os.environ.get(
+            "PRAISON_WORKSPACE", ""
+        )
         if workspace:
             config.workspace = workspace
         

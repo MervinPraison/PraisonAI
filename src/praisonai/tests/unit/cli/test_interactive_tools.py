@@ -115,12 +115,32 @@ class TestToolConfig:
             assert config.enable_basic is True
     
     def test_config_from_env_workspace(self):
-        """Test config from env with workspace override."""
+        """Test config from env with workspace override (legacy var)."""
         from praisonai.cli.features.interactive_tools import ToolConfig
         
         with patch.dict(os.environ, {"PRAISON_WORKSPACE": "/custom/path"}):
             config = ToolConfig.from_env()
             assert config.workspace == "/custom/path"
+
+    def test_config_from_env_workspace_canonical(self):
+        """PRAISONAI_WORKSPACE (written by `code --workspace`) is honoured."""
+        from praisonai.cli.features.interactive_tools import ToolConfig
+
+        with patch.dict(os.environ, {"PRAISONAI_WORKSPACE": "/canonical/path"}, clear=False):
+            os.environ.pop("PRAISON_WORKSPACE", None)
+            config = ToolConfig.from_env()
+            assert config.workspace == "/canonical/path"
+
+    def test_config_from_env_workspace_prefers_canonical(self):
+        """When both env names are set, the canonical PRAISONAI_ wins."""
+        from praisonai.cli.features.interactive_tools import ToolConfig
+
+        with patch.dict(
+            os.environ,
+            {"PRAISONAI_WORKSPACE": "/canonical", "PRAISON_WORKSPACE": "/legacy"},
+        ):
+            config = ToolConfig.from_env()
+            assert config.workspace == "/canonical"
 
 
 class TestResolveToolGroups:
