@@ -108,9 +108,53 @@ class TestSessionResumeRebindsDirectory:
                 return_value=store,
             ):
                 interactive_legacy._bind_resume_workspace(args, console=console)
-            # No workspace pinned -> tool loader resolution falls back to cwd.
-            assert "PRAISONAI_WORKSPACE" not in os.environ
+            # Canonical var is pinned to cwd so a stray legacy PRAISON_WORKSPACE
+            # cannot override the advertised current-directory fallback.
+            assert os.environ.get("PRAISONAI_WORKSPACE") == os.getcwd()
             console.print.assert_called_once()
+
+    def test_resume_missing_directory_pins_cwd_over_legacy_var(self, tmp_path):
+        """P1: missing saved dir + legacy PRAISON_WORKSPACE set must still
+        resolve to cwd in the tool loader, not the legacy directory."""
+        from praisonai.cli.legacy import interactive_legacy
+
+        missing = tmp_path / "gone"
+        legacy = tmp_path / "legacy_ws"
+        legacy.mkdir()
+        store = self._store_with(str(missing))
+        args = argparse.Namespace(resume_session="abc123")
+
+        with patch.dict(
+            os.environ, {"PRAISON_WORKSPACE": str(legacy)}, clear=False
+        ):
+            os.environ.pop("PRAISONAI_WORKSPACE", None)
+            with patch(
+                "praisonai.cli.session.get_session_store",
+                return_value=store,
+            ):
+                interactive_legacy._bind_resume_workspace(args, console=None)
+            assert os.environ.get("PRAISONAI_WORKSPACE") == os.getcwd()
+
+    def test_resume_uses_provided_session_without_relookup(self, tmp_path):
+        """P1: when the caller passes the already-resolved session, the binder
+        must not perform a second store lookup (avoids racing a concurrent CLI)."""
+        from praisonai.cli.legacy import interactive_legacy
+
+        ws = tmp_path / "provided"
+        ws.mkdir()
+        session = SimpleNamespace(workspace=str(ws))
+        args = argparse.Namespace(resume_session="last")
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PRAISONAI_WORKSPACE", None)
+            with patch(
+                "praisonai.cli.session.get_session_store"
+            ) as mock_store_getter:
+                interactive_legacy._bind_resume_workspace(
+                    args, console=None, session=session
+                )
+                mock_store_getter.assert_not_called()
+            assert os.environ.get("PRAISONAI_WORKSPACE") == str(ws)
 
     def test_no_resume_is_noop(self):
         from praisonai.cli.legacy import interactive_legacy
