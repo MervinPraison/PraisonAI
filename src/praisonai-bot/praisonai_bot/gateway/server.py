@@ -5367,9 +5367,13 @@ class WebSocketGateway:
         # type — so SlackApproval wiring in enable_shell_tools keys correctly.
         platform = str(ch_cfg.get("platform") or channel_name).lower()
         try:
-            from praisonai_bot.bots._defaults import enable_shell_tools
+            from praisonai_bot.bots._defaults import (
+                apply_bot_smart_defaults,
+                enable_shell_tools,
+            )
 
             clone = agent.clone_for_channel() if hasattr(agent, "clone_for_channel") else agent
+            clone = apply_bot_smart_defaults(clone, config)
             enabled = enable_shell_tools(
                 clone, config, ch_cfg, channel_type=platform
             )

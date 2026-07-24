@@ -349,6 +349,27 @@ def _channel_token(config: Optional[Any], ch_cfg: Dict[str, Any]) -> Optional[st
     return str(token) if token else None
 
 
+def _sync_approval_registry(agent: Any) -> None:
+    """Mirror ``agent._approval_backend`` onto the approval registry.
+
+    Tool functions decorated with ``@require_approval`` consult the registry
+    (often with ``agent_name=None``), so the agent backend alone is not enough
+    for bot/gateway shell paths.
+    """
+    backend = getattr(agent, "_approval_backend", None)
+    if backend is None:
+        return
+    try:
+        from praisonaiagents.approval import get_approval_registry
+
+        reg = get_approval_registry()
+        agent_name = getattr(agent, "name", None)
+        if agent_name:
+            reg.set_backend(backend, agent_name=agent_name)
+    except ImportError:
+        logger.warning("Approval registry unavailable — shell approval may prompt in CLI")
+
+
 def _wire_shell_approval_backend(
     agent: Any,
     *,
@@ -550,15 +571,16 @@ def enable_shell_tools(
             agent._approval_backend = AutoApproveBackend()
         except ImportError:
             logger.warning("AutoApproveBackend unavailable for allow_shell")
-        return agent
+    else:
+        _wire_shell_approval_backend(
+            agent,
+            channel_type=channel_type,
+            config=config,
+            ch_cfg=ch_cfg,
+            allowed_approvers=_parse_shell_approvers(ch_cfg, channel_type),
+        )
 
-    _wire_shell_approval_backend(
-        agent,
-        channel_type=channel_type,
-        config=config,
-        ch_cfg=ch_cfg,
-        allowed_approvers=_parse_shell_approvers(ch_cfg, channel_type),
-    )
+    _sync_approval_registry(agent)
 
     logger.info(
         "Shell tools enabled for agent %r on channel %r (auto_approve_shell=%s)",

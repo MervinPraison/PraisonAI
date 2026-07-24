@@ -401,26 +401,15 @@ def _check_gateway_secret_strength(config_path: str):
     return str(WeakGatewaySecretError(field="gateway.auth_token"))
 
 
-def _resolve_env_token(value):
-    """Resolve a credential input to its value for probing.
-
-    Handles ``${VAR}`` placeholders and the additive secret-reference form
-    ``{source: file|env|exec, id: ...}`` (Issue #3102). Resolved values are
-    registered for log redaction. Plain strings pass through unchanged.
-    """
-    import os
-
-    if isinstance(value, dict) and "source" in value and "id" in value:
-        try:
-            from praisonaiagents.secrets import resolve_secret
-
-            result = resolve_secret(value)
-            return result.value or ""
-        except Exception:  # pragma: no cover — defensive
-            return ""
-    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-        return os.environ.get(value[2:-1], "")
-    return value
+from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
+    apply_probe_ca_bundle as _apply_probe_ca_bundle,
+    check_gateway_running as _check_gateway_running,
+    probe_channels as _probe_channels,
+    probe_results_to_dict as _probe_results_to_dict,
+    resolve_env_token as _resolve_env_token,
+    run_shell_readiness_check as _run_shell_readiness_check,
+    run_turn_test as _run_gateway_turn_test,
+)
 
 
 def _secret_availability(value) -> str:
@@ -476,43 +465,6 @@ def _is_ssl_error(result) -> bool:
     )
 
 
-def _apply_probe_ca_bundle() -> None:
-    """Point the probe HTTP client at a custom CA bundle if configured.
-
-    Honors ``PRAISONAI_SSL_CA_BUNDLE`` (preferred), ``REQUESTS_CA_BUNDLE`` and
-    ``SSL_CERT_FILE`` so enterprise users behind an SSL-inspecting proxy can
-    supply their corporate CA and have the preflight probe trust it — mirroring
-    what the runtime adapter's SSL stack already honors (#2845). Setting
-    ``SSL_CERT_FILE`` is what Python's default ``ssl`` context (used by
-    ``aiohttp``) reads at load time.
-    """
-    import os
-
-    preferred = os.environ.get("PRAISONAI_SSL_CA_BUNDLE")
-    ca_bundle = (
-        preferred
-        or os.environ.get("REQUESTS_CA_BUNDLE")
-        or os.environ.get("SSL_CERT_FILE")
-    )
-    if not ca_bundle:
-        return
-
-    if not os.path.exists(ca_bundle):
-        print(
-            f"Warning: CA bundle path '{ca_bundle}' does not exist — "
-            "SSL_CERT_FILE / REQUESTS_CA_BUNDLE not updated for probe."
-        )
-        return
-
-    if preferred and preferred == ca_bundle:
-        # Explicit PraisonAI override wins over any pre-existing values.
-        os.environ["SSL_CERT_FILE"] = ca_bundle
-        os.environ["REQUESTS_CA_BUNDLE"] = ca_bundle
-    else:
-        os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
-        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
-
-
 def _load_channels(config: str) -> dict:
     """Load the ``channels`` mapping from a gateway.yaml file (or exit)."""
     import os
@@ -526,65 +478,6 @@ def _load_channels(config: str) -> dict:
         cfg = yaml.safe_load(f) or {}
 
     return cfg.get("channels", {})
-
-
-async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
-    """Build a lightweight Bot per channel and probe its credentials.
-
-    Probing builds the adapter lazily and calls the platform identity API
-    (Telegram getMe, Slack auth.test, …) without starting message
-    processing. No agent is required. Returns ``{name: ProbeResult}``.
-
-    Each probe is bounded by ``timeout`` (seconds) so one stuck adapter
-    cannot hang the whole pre-flight; a timeout is reported as a failure.
-
-    Loads ``~/.praisonai/.env`` first so ``${VAR}`` tokens stored there
-    (e.g. by ``praisonai onboard``) resolve — mirroring what
-    ``GatewayHandler.start()`` does at runtime, so every credential check
-    (doctor / channels --probe / start --preflight) uses the same
-    token-resolution behavior (#2426).
-    """
-    import asyncio as _asyncio
-
-    # Load env-file BEFORE resolving ${VAR} tokens so all probe paths
-    # (doctor, channels --probe, start --preflight) match runtime behavior.
-    try:
-        from ..features.gateway import _load_praisonai_env_file
-        _load_praisonai_env_file()
-    except Exception:  # pragma: no cover — defensive
-        pass
-
-    # Honor a custom CA bundle so the probe's HTTP client trusts a corporate
-    # proxy/MITM certificate the same way the runtime adapter does (#2845).
-    _apply_probe_ca_bundle()
-
-    from praisonai_bot.bots import Bot
-    from praisonaiagents.bots import ProbeResult
-
-    async def _probe_one(name: str, ch_cfg: dict):
-        platform = ch_cfg.get("platform", name)
-        token = _resolve_env_token(ch_cfg.get("token", ""))
-        extras = {
-            k: _resolve_env_token(v)
-            for k, v in ch_cfg.items()
-            if k not in ("platform", "token")
-        }
-        try:
-            bot = Bot(platform, token=token, **extras)
-            return name, await _asyncio.wait_for(bot.probe(), timeout=timeout)
-        except _asyncio.TimeoutError:
-            return name, ProbeResult(
-                ok=False,
-                platform=platform,
-                error=f"probe timed out after {timeout:g}s",
-            )
-        except Exception as e:  # pragma: no cover — defensive
-            return name, ProbeResult(ok=False, platform=platform, error=str(e))
-
-    results = await _asyncio.gather(
-        *(_probe_one(name, ch_cfg or {}) for name, ch_cfg in channels.items())
-    )
-    return dict(results)
 
 
 def _compute_secret_availability(channels: dict) -> dict:
@@ -618,14 +511,6 @@ def _print_secret_availability(report: dict) -> None:
             mark = "✓" if status == "available" else "✗"
             print(f"{name:<12} {f:<13} {mark}  {status}")
     print()
-
-
-def _probe_results_to_dict(results: dict) -> dict:
-    """JSON-serializable per-channel probe payload."""
-    return {
-        name: r.to_dict() if hasattr(r, "to_dict") else vars(r)
-        for name, r in results.items()
-    }
 
 
 def _render_probe_results(results: dict, json_output: bool = False) -> bool:
@@ -663,6 +548,16 @@ def _render_probe_results(results: dict, json_output: bool = False) -> bool:
 def gateway_doctor(
     config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    channel: Optional[str] = typer.Option(
+        None,
+        "--channel",
+        help="Channel name for --turn (default: first configured channel)",
+    ),
+    turn: Optional[str] = typer.Option(
+        None,
+        "--turn",
+        help="Run one live inbound agent turn offline (requires LLM API key)",
+    ),
 ):
     """Validate every configured channel's credentials (pre-flight check).
 
@@ -670,28 +565,26 @@ def gateway_doctor(
     (Telegram getMe, Slack auth.test, Discord identify, WhatsApp token check)
     without starting message processing. Exits non-zero if any channel fails.
 
+    Optional ``--turn`` runs an offline inbound agent turn via
+    ``BotSessionManager.chat`` (including ``allow_shell`` setup). It does
+    **not** exercise Slack Bolt/socket handlers or @mention routing.
+
     Examples:
         praisonai gateway doctor
         praisonai gateway doctor --config my-gateway.yaml --json
+        praisonai gateway doctor --config gateway.yaml --channel slack --turn "Say OK"
     """
     import asyncio
+    import json
 
-    # Inspect the gateway's OWN auth_token for known-weak/placeholder values
-    # (Issue #3259) — channel probes never cover this. Fail closed on an
-    # external bind, warn on loopback (consistent with runtime posture).
     gateway_secret_error = _check_gateway_secret_strength(config)
-
     channels = _load_channels(config)
-    if not channels:
-        if json_output:
-            # Always emit a single parseable JSON document, even on the
-            # weak/missing gateway-secret failure path, so automation can
-            # distinguish an auth failure from an empty/interrupted run.
-            import json
 
-            payload: dict = {"probes": {}}
-            if gateway_secret_error:
-                payload["gateway_auth_token"] = "weak"
+    if not channels:
+        payload: dict = {"probes": {}}
+        if gateway_secret_error:
+            payload["gateway_auth_token"] = "weak"
+        if json_output:
             print(json.dumps(payload, indent=2))
         else:
             print("No channels configured.")
@@ -701,33 +594,193 @@ def gateway_doctor(
             raise typer.Exit(1)
         raise typer.Exit(0)
 
-    # Credential source availability, computed WITHOUT printing any value
-    # (Issue #3102): operators can validate file/env secret wiring even when
-    # the network probe cannot run.
     availability = _compute_secret_availability(channels)
-
     results = asyncio.run(_probe_channels(channels))
     all_ok = all(getattr(r, "ok", False) for r in results.values())
+    turn_gate_ok = all_ok
+    if channel and channel in results:
+        turn_gate_ok = getattr(results[channel], "ok", False)
 
-    if json_output:
-        # Emit a SINGLE JSON document so consumers using json.load(s) can parse
-        # the whole output (previously the availability and probe blocks were
-        # printed as two separate top-level documents — invalid JSON).
-        import json
+    payload: dict = {"probes": _probe_results_to_dict(results)}
+    if availability:
+        payload["secrets"] = availability
+    if gateway_secret_error:
+        payload["gateway_auth_token"] = "weak"
 
-        payload = {"probes": _probe_results_to_dict(results)}
-        if availability:
-            payload["secrets"] = availability
-        if gateway_secret_error:
-            payload["gateway_auth_token"] = "weak"
-        print(json.dumps(payload, indent=2))
-    else:
+    if not json_output:
         _print_secret_availability(availability)
         _render_probe_results(results, json_output=False)
         if gateway_secret_error:
             print(gateway_secret_error)
 
-    if not all_ok or gateway_secret_error:
+    if gateway_secret_error:
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        raise typer.Exit(1)
+
+    probe_blocks_turn = not all_ok and not (turn and channel and turn_gate_ok)
+    if probe_blocks_turn and not turn:
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        raise typer.Exit(1)
+
+    if turn:
+        target = channel or (next(iter(channels.keys())) if channels else None)
+        if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
+        payload["turn"] = {"channel": target, "ok": ok, "response": message}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"\nTurn test ({target}): {'OK' if ok else 'FAIL'}")
+            print(message if ok else f"Error: {message}")
+        if not ok or not all_ok:
+            raise typer.Exit(1)
+        return
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+    if not all_ok:
+        raise typer.Exit(1)
+
+
+@app.command("test")
+def gateway_test(
+    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    channel: Optional[str] = typer.Option(
+        None,
+        "--channel",
+        help="Channel name for --turn (default: first configured channel)",
+    ),
+    turn: Optional[str] = typer.Option(
+        None,
+        "--turn",
+        help="Run one live inbound agent turn offline (requires LLM API key)",
+    ),
+    check_running: bool = typer.Option(
+        False,
+        "--check-running",
+        help="Verify the gateway REST /info endpoint is reachable",
+    ),
+):
+    """One-shot gateway readiness check (probes + shell wiring + optional turn).
+
+    Recommended onboarding path before ``gateway start``. Combines credential
+    probes, offline shell wiring validation, and an optional offline agent turn.
+
+    ``--turn`` uses ``BotSessionManager.chat`` only — it does not prove live
+    Slack @mention delivery. After starting, confirm ``@mention received`` in
+    gateway logs.
+
+    Examples:
+        praisonai gateway test --config bot.yaml
+        praisonai gateway test --config bot.yaml --channel slack --turn "Say OK"
+        praisonai gateway test --config bot.yaml --check-running
+    """
+    import asyncio
+    import json
+
+    gateway_secret_error = _check_gateway_secret_strength(config)
+    channels = _load_channels(config)
+    payload: dict = {}
+
+    if gateway_secret_error:
+        payload["gateway_auth_token"] = "weak"
+
+    if not channels:
+        payload.setdefault("probes", {})
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("No channels configured.")
+            if gateway_secret_error:
+                print(gateway_secret_error)
+        raise typer.Exit(1 if gateway_secret_error else 0)
+
+    availability = _compute_secret_availability(channels)
+    results = asyncio.run(_probe_channels(channels))
+    all_ok = all(getattr(r, "ok", False) for r in results.values())
+    turn_gate_ok = all_ok
+    if channel and channel in results:
+        turn_gate_ok = getattr(results[channel], "ok", False)
+
+    payload["probes"] = _probe_results_to_dict(results)
+    if availability:
+        payload["secrets"] = availability
+
+    shell_result = _run_shell_readiness_check(config)
+    payload["shell"] = {
+        "ok": shell_result.ok,
+        "message": shell_result.message,
+        "issues": shell_result.issues,
+    }
+
+    if not json_output:
+        _print_secret_availability(availability)
+        _render_probe_results(results, json_output=False)
+        shell_mark = "✓" if shell_result.ok else "✗"
+        print(f"shell wiring  {shell_mark}  {shell_result.message}")
+        if shell_result.issues:
+            for issue in shell_result.issues:
+                print(f"  - {issue}")
+        if gateway_secret_error:
+            print(gateway_secret_error)
+
+    failed = bool(gateway_secret_error) or not all_ok or not shell_result.ok
+
+    if check_running:
+        running_ok, running_msg = _check_gateway_running(config)
+        payload["running"] = {"ok": running_ok, "message": running_msg}
+        if not json_output:
+            mark = "✓" if running_ok else "✗"
+            print(f"gateway up    {mark}  {running_msg}")
+        failed = failed or not running_ok
+
+    if turn:
+        target = channel or (next(iter(channels.keys())) if channels else None)
+        if not target:
+            err = "--turn requires at least one configured channel"
+            payload["turn"] = {"channel": None, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        if not turn_gate_ok:
+            err = f"channel '{target}' probe failed — cannot run --turn"
+            payload["turn"] = {"channel": target, "ok": False, "response": err}
+            if json_output:
+                print(json.dumps(payload, indent=2))
+            else:
+                print(f"Error: {err}")
+            raise typer.Exit(1)
+        ok, message = asyncio.run(_run_gateway_turn_test(config, target, turn))
+        payload["turn"] = {"channel": target, "ok": ok, "response": message}
+        if not json_output:
+            print(f"\nTurn test ({target}): {'OK' if ok else 'FAIL'}")
+            print(message if ok else f"Error: {message}")
+        failed = failed or not ok
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+
+    if failed:
         raise typer.Exit(1)
 
 
@@ -1323,6 +1376,7 @@ Manage the gateway server: praisonai gateway <command>
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
   [green]doctor[/green]      Validate channel credentials (pre-flight check)
+  [green]test[/green]        One-shot readiness (probes + shell + optional turn)
   [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)
   [green]send[/green]        Send a test message to a channel
   [green]hooks[/green]       Manage inbound trigger hooks (add | list | remove)

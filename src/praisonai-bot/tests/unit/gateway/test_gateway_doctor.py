@@ -373,3 +373,101 @@ def test_start_no_preflight_skips_probe(monkeypatch, tmp_path):
     result = runner.invoke(app, ["start", "--config", str(cfg), "--no-preflight"])
     assert result.exit_code == 0
     assert started.get("called") is True
+
+
+def test_doctor_json_single_document_with_turn(monkeypatch, tmp_path):
+    """--json with --turn must emit one parseable document (#gateway-readiness)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import json
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: None,
+    )
+
+    async def fake_turn(config_path, channel_name, prompt):
+        return True, "turn-ok"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._run_gateway_turn_test",
+        fake_turn,
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(cfg), "--json", "--channel", "slack", "--turn", "hi"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout.strip())
+    assert "probes" in payload
+    assert payload["turn"]["ok"] is True
+    assert payload["turn"]["response"] == "turn-ok"
+
+
+def test_doctor_turn_runs_when_other_channel_fails(monkeypatch, tmp_path):
+    """--channel slack --turn runs when slack ok even if telegram fails."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def mixed_probe(self):
+        if self._platform == "slack":
+            return ProbeResult(ok=True, platform="slack", bot_username="slackbot")
+        return ProbeResult(ok=False, platform=self._platform, error="bad")
+
+    monkeypatch.setattr(Bot, "probe", mixed_probe)
+
+    async def fake_turn(config_path, channel_name, prompt):
+        return True, "slack-turn"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._run_gateway_turn_test",
+        fake_turn,
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  telegram:\n    platform: telegram\n    token: t\n"
+        "  slack:\n    platform: slack\n    token: s\n"
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(
+        app,
+        ["doctor", "--config", str(cfg), "--channel", "slack", "--turn", "hi"],
+    )
+    assert result.exit_code == 1  # telegram still failed overall
+    assert "Turn test (slack): OK" in result.stdout
+    assert "slack-turn" in result.stdout
+
+
+def test_gateway_test_command(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    async def all_ok_probe(self):
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", all_ok_probe)
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels:\n  slack:\n    platform: slack\n    token: s\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["test", "--config", str(cfg)])
+    assert result.exit_code == 0
+    assert "shell wiring" in result.stdout
+    assert "slack" in result.stdout
+
