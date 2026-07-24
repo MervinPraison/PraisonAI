@@ -697,6 +697,11 @@ def _try_attach_runtime(
         # Runtime went away mid-flight; fall back to in-process execution.
         return False
 
+    # The warm runtime handled the request; apply the same failure contract as
+    # the in-process paths so an empty result exits non-zero instead of silently
+    # reporting success.
+    if not _run_succeeded(result):
+        _report_run_failure(output)
     output.emit_result(
         message="Prompt completed",
         data={"result": str(result) if result else None},
@@ -1405,6 +1410,11 @@ def _run_from_file(
             if not output.is_json_mode:
                 output.print_success("Run completed")
     
+    except typer.Exit:
+        # A deliberate non-zero exit (e.g. a classified run failure) must
+        # propagate unchanged; the broad handler below is only for unexpected
+        # errors and would otherwise re-report the same failure.
+        raise
     except Exception as e:
         output.emit_error(message=str(e))
         output.print_error(str(e))
@@ -1839,6 +1849,12 @@ def _run_from_file_profiled(
     # Print profiling report
     profiler.print_report()
 
+    # Honour the same failure contract as the non-profiled YAML path: an empty
+    # agent result is a run failure and must exit non-zero (reported after the
+    # profiling output so the profile is still shown).
+    if not _run_succeeded(result):
+        _report_run_failure(get_output_controller())
+
 
 def _wire_subagent_delegation(
     agent_config: Dict[str, Any],
@@ -2168,3 +2184,9 @@ def _run_prompt_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+    # Honour the same failure contract as the non-profiled paths: an empty
+    # agent result is a run failure and must exit non-zero (the report is
+    # emitted after the profiling output so the profile is still shown).
+    if not _run_succeeded(response):
+        _report_run_failure(get_output_controller())

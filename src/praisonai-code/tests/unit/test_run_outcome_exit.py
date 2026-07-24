@@ -68,3 +68,48 @@ def test_report_run_failure_exits_nonzero_and_emits_status():
     _, code, remediation = output.printed_errors[-1]
     assert code == "run_failed"
     assert remediation
+
+
+def test_try_attach_runtime_exits_nonzero_on_empty_runtime_result(monkeypatch):
+    """A warm-runtime run returning an empty result must fail, not exit 0.
+
+    Regression guard: the warm-runtime attach path previously reported success
+    unconditionally, so a swallowed failure on the runtime still exited 0 and
+    broke CI/scripted failure detection.
+    """
+    output = _RecordingOutput()
+    monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
+
+    class _Descriptor:
+        pass
+
+    class _RuntimeUnavailable(Exception):
+        pass
+
+    class _RuntimeClient:
+        def __init__(self, descriptor):
+            pass
+
+        def run(self, prompt, model=None, session_id=None):
+            return None
+
+    import sys
+    import types
+
+    fake_runtime = types.ModuleType("praisonai_code.runtime")
+    fake_runtime.get_runtime_descriptor = lambda require_compatible=True: _Descriptor()
+    fake_runtime.RuntimeClient = _RuntimeClient
+    fake_runtime.RuntimeUnavailable = _RuntimeUnavailable
+    monkeypatch.setitem(sys.modules, "praisonai_code.runtime", fake_runtime)
+
+    with pytest.raises(typer.Exit) as exc:
+        run_cmd._try_attach_runtime(
+            "hello",
+            model=None,
+            output_mode=None,
+            session_id=None,
+        )
+
+    assert exc.value.exit_code == 1
+    assert output.printed_errors, "expected a printed failure"
+    assert output.printed_errors[-1][1] == "run_failed"
