@@ -199,8 +199,11 @@ def _generate_agents_md(root: Path, model: str) -> str:
         ),
         llm=model,
     )
-    result = agent.start(prompt)
-    text = str(result).strip()
+    # Use run() (always silent, non-streaming) rather than start() — start()
+    # auto-enables streaming in a TTY and returns a generator, whose repr would
+    # be written instead of the generated markdown.
+    result = agent.run(prompt)
+    text = (result or "").strip()
     if not text:
         raise ValueError("empty generation result")
     return text if text.endswith("\n") else text + "\n"
@@ -286,9 +289,12 @@ def init(
     # Non-destructive (respects --force) and degrades gracefully: when no
     # provider credential is present or generation fails, the static scaffold
     # above remains the guaranteed result. The file lands at the repo root so
-    # rules_manager discovers it on the next run.
+    # rules_manager discovers it on the next run. This is always the current
+    # repository (git root / cwd), never ~/AGENTS.md — even with --global,
+    # which only changes where the static scaffold is written.
     if generate:
-        agents_path = base.parent / "AGENTS.md"
+        repo_root = get_git_root() or Path.cwd()
+        agents_path = repo_root / "AGENTS.md"
         if agents_path.exists() and not force:
             output.print_warning(
                 f"Skipped generation (already exists, use --force): {agents_path}"
@@ -300,7 +306,7 @@ def init(
             )
         else:
             try:
-                content = _generate_agents_md(base.parent, scaffold_model)
+                content = _generate_agents_md(repo_root, scaffold_model)
             except Exception as exc:  # noqa: BLE001 - fall back, never fail init
                 output.print_warning(
                     f"Generation failed ({exc}); kept the static scaffold above."

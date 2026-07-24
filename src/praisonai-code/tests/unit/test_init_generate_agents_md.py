@@ -23,7 +23,8 @@ def _run_init(tmp_path: Path, **kwargs) -> None:
         invoked_subcommand = None
 
     with patch.object(init_mod, "get_git_root", return_value=tmp_path):
-        init_mod.init(_Ctx(), global_=False, force=kwargs.get("force", False),
+        init_mod.init(_Ctx(), global_=kwargs.get("global_", False),
+                      force=kwargs.get("force", False),
                       generate=kwargs.get("generate", False))
 
 
@@ -101,3 +102,45 @@ class TestGenerateWiring:
 
         assert not (tmp_path / "AGENTS.md").exists()
         gen.assert_not_called()
+
+    def test_global_writes_agents_md_to_repo_root_not_home(self, tmp_path, monkeypatch):
+        # --global changes only the static scaffold location; the generated
+        # AGENTS.md must still land at the repo root, never ~/AGENTS.md.
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+
+        captured = {}
+
+        def _fake_generate(root, model):
+            captured["root"] = root
+            return "# Repo agents\n"
+
+        with patch.object(init_mod, "_any_provider_credential", return_value=True), \
+             patch.object(init_mod, "_generate_agents_md", side_effect=_fake_generate):
+            _run_init(tmp_path, generate=True, global_=True)
+
+        assert (tmp_path / "AGENTS.md").exists()
+        assert not (home / "AGENTS.md").exists()
+        assert captured["root"] == tmp_path
+
+
+class TestGenerateHelper:
+    def test_uses_run_and_returns_string_not_generator(self, tmp_path):
+        # _generate_agents_md must call agent.run() (silent, returns str), not
+        # start() which can return a streaming generator whose repr would be
+        # written to AGENTS.md.
+        class _FakeAgent:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self, prompt):
+                return "# Generated\nBuild: make\n"
+
+            def start(self, prompt):  # pragma: no cover - must not be used
+                raise AssertionError("start() must not be used")
+
+        with patch("praisonaiagents.Agent", _FakeAgent):
+            out = init_mod._generate_agents_md(tmp_path, "gpt-4o-mini")
+
+        assert out == "# Generated\nBuild: make\n"
