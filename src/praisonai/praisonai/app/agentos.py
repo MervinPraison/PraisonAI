@@ -7,6 +7,7 @@ It creates a FastAPI-based web service for deploying agents.
 
 from typing import Any, Dict, List, Optional, Union
 
+import asyncio
 import os
 
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
@@ -196,9 +197,13 @@ class AgentOS:
             else:
                 raise HTTPException(status_code=400, detail="No agents available")
             
-            # Call the agent
+            # Call the agent without blocking the event loop: prefer the async
+            # twin, otherwise offload the sync call to a worker thread.
             try:
-                response = agent.chat(request.message)
+                if hasattr(agent, "achat") and callable(getattr(agent, "achat")):
+                    response = await agent.achat(request.message)
+                else:
+                    response = await asyncio.to_thread(agent.chat, request.message)
                 return ChatResponse(
                     response=str(response),
                     agent_name=getattr(agent, 'name', 'unknown'),

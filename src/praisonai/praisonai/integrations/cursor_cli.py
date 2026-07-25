@@ -81,17 +81,29 @@ class CursorCLIIntegration(BaseCLIIntegration):
         """Return the CLI command name."""
         return "cursor-agent"
     
-    def _build_command(self, prompt: str, **options) -> List[str]:
+    def _build_command(
+        self,
+        prompt: str,
+        *,
+        output_format: Optional[str] = None,
+        stream_partial: Optional[bool] = None,
+        **options,
+    ) -> List[str]:
         """
         Build the Cursor CLI command.
         
         Args:
             prompt: The prompt to send
+            output_format: Output format override (defaults to self.output_format)
+            stream_partial: Stream-partial override (defaults to self.stream_partial)
             **options: Additional options
             
         Returns:
             List of command arguments
         """
+        output_format = output_format or self.output_format
+        stream_partial = self.stream_partial if stream_partial is None else stream_partial
+        
         cmd = ["cursor-agent"]
         
         # Add print mode flag
@@ -106,10 +118,10 @@ class CursorCLIIntegration(BaseCLIIntegration):
             cmd.extend(["-m", self.model])
         
         # Add output format
-        cmd.extend(["--output-format", self.output_format])
+        cmd.extend(["--output-format", output_format])
         
         # Add stream partial flag if enabled
-        if self.stream_partial:
+        if stream_partial:
             cmd.append("--stream-partial-output")
         
         # Add resume session if specified
@@ -160,26 +172,21 @@ class CursorCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming
-        original_format = self.output_format
-        original_partial = self.stream_partial
+        # Use stream-json format for streaming (per-call override, no instance
+        # mutation); drop caller keys so the forced values win.
+        options.pop("output_format", None)
+        options.pop("stream_partial", None)
+        cmd = self._build_command(
+            prompt, output_format="stream-json", stream_partial=True, **options
+        )
         
-        self.output_format = "stream-json"
-        self.stream_partial = True
-        
-        try:
-            cmd = self._build_command(prompt, **options)
-            
-            async for line in self.stream_async(cmd):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        yield event
-                    except json.JSONDecodeError:
-                        yield {"type": "text", "content": line}
-        finally:
-            self.output_format = original_format
-            self.stream_partial = original_partial
+        async for line in self.stream_async(cmd):
+            if line.strip():
+                try:
+                    event = json.loads(line)
+                    yield event
+                except json.JSONDecodeError:
+                    yield {"type": "text", "content": line}
     
     def get_env(self) -> Dict[str, str]:
         """Get environment variables for CLI execution."""
