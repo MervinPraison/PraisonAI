@@ -107,6 +107,12 @@ __all__ = [
     # PromptOptimizer (optimise agent.instructions against an eval, keep best)
     "PromptOptimizer",
     "OptimizeResult",
+    # Trials engine (K isolated attempts per case, pass-rate + frontier)
+    "run_trials",
+    "arun_trials",
+    "TrialScore",
+    "TrialAttempt",
+    "TrialReport",
 ]
 
 _LAZY_IMPORTS = {
@@ -191,6 +197,12 @@ _LAZY_IMPORTS = {
     # PromptOptimizer (optimise agent.instructions against an eval, keep best)
     "PromptOptimizer": ("prompt_optimizer", "PromptOptimizer"),
     "OptimizeResult": ("prompt_optimizer", "OptimizeResult"),
+    # Trials engine (K isolated attempts per case, pass-rate + frontier)
+    "run_trials": ("trials", "run_trials"),
+    "arun_trials": ("trials", "arun_trials"),
+    "TrialScore": ("trials", "TrialScore"),
+    "TrialAttempt": ("trials", "TrialAttempt"),
+    "TrialReport": ("trials", "TrialReport"),
 }
 
 

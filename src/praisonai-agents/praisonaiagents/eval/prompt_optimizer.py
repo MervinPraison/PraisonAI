@@ -34,9 +34,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# An eval case is (prompt, expected). ``expected`` may be None when using a
-# Judge with only criteria.
-EvalCase = Tuple[str, Any]
+# An eval pair is (prompt, expected). ``expected`` may be None when using a
+# Judge with only criteria. Named ``EvalPair`` to avoid shadowing the package
+# ``EvalCase`` dataclass (praisonaiagents.eval.package.EvalCase).
+EvalPair = Tuple[str, Any]
 
 
 @dataclass
@@ -84,7 +85,7 @@ class PromptOptimizer:
     def __init__(
         self,
         agent: "Agent",
-        evalset: List[EvalCase],
+        evalset: List[EvalPair],
         *,
         scorer: Optional[Any] = None,
         metric: Optional[Callable[[str, Any], float]] = None,
