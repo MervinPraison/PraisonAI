@@ -5,7 +5,6 @@ Evaluates agent outputs against custom criteria using LLM-as-judge.
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Callable, Literal, Optional, Union, TYPE_CHECKING
 

@@ -5,7 +5,6 @@ over SSE transport.
 """
 
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 import inspect

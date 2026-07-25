@@ -15,7 +15,6 @@ Features:
 
 import asyncio
 import inspect
-import logging
 import sys
 from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, Union, TYPE_CHECKING

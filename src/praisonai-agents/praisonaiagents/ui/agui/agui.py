@@ -4,7 +4,6 @@ AGUI - Main AG-UI Interface Class
 Exposes PraisonAI Agents via the AG-UI protocol.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import uuid
 from typing import AsyncIterator, List, Optional, TYPE_CHECKING

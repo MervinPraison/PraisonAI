@@ -8,7 +8,6 @@ The implementation is extracted from workflows.py _evaluate_condition()
 to enable DRY condition handling across the codebase.
 """
 import re
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Dict, Any, List, Optional
 

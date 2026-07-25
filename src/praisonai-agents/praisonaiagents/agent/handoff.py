@@ -14,7 +14,6 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-import logging
 from praisonaiagents._logging import get_logger
 import asyncio
 import threading

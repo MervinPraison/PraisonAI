@@ -18,7 +18,6 @@ Example:
 
 from __future__ import annotations
 
-import logging
 from praisonaiagents._logging import get_logger
 import os
 from typing import Optional, Union, List

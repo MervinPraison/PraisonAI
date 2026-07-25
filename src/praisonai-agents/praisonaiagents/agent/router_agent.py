@@ -6,7 +6,6 @@ model selection based on task characteristics.
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Any, Union
 from .agent import Agent

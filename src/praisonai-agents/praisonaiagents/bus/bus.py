@@ -5,7 +5,6 @@ Provides publish/subscribe functionality for typed events.
 """
 
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Callable, Dict, List, Optional, Set, Union

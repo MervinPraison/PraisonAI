@@ -7,7 +7,6 @@ other config.yaml content.
 """
 
 import contextlib
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import threading

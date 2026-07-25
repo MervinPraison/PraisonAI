@@ -6,7 +6,6 @@ Represents a task running in the background.
 
 import uuid
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 from enum import Enum
 from dataclasses import dataclass, field

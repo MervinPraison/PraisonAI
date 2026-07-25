@@ -5,7 +5,6 @@ Evaluates agent output accuracy by comparing against expected output using LLM-a
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, Union, TYPE_CHECKING
 

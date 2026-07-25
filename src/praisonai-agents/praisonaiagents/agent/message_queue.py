@@ -8,7 +8,6 @@ Thread-safe implementation for concurrent access.
 import threading
 import heapq
 import time
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, Any, List, Tuple
 from dataclasses import dataclass, field

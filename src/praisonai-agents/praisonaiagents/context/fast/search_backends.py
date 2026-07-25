@@ -11,7 +11,6 @@ Design principles:
 - No performance impact on default behavior
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Protocol, List, Dict, Any, Optional, runtime_checkable
 

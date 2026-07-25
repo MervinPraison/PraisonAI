@@ -5,7 +5,6 @@ Thin orchestrator that uses Knowledge for retrieval and LLM for generation.
 Provides citations, streaming, and async support.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional

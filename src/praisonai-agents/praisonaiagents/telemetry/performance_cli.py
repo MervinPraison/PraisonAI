@@ -17,7 +17,6 @@ import argparse
 import json
 import sys
 from typing import Optional
-import logging
 from praisonaiagents._logging import get_logger
 
 try:

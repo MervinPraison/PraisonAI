@@ -7,7 +7,6 @@ Thread-safe and async-safe for multi-agent environments.
 
 import asyncio
 import importlib.util
-import logging
 from praisonaiagents._logging import get_logger
 import sys
 import threading

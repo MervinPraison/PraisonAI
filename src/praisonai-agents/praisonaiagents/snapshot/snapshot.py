@@ -5,7 +5,6 @@ Provides file change tracking using a shadow git repository.
 """
 
 import hashlib
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import shutil

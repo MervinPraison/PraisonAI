@@ -23,7 +23,6 @@ Usage:
 
 import time
 import asyncio
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
