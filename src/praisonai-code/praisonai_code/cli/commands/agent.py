@@ -94,6 +94,7 @@ def create(
             PERMISSION_PRESETS,
             draft_system_prompt,
             resolve_agents_dir,
+            validate_agent_name,
             write_agent_definition,
         )
         from praisonai_code.cli.features.custom_definitions import CustomDefinitionsDiscovery
@@ -112,6 +113,13 @@ def create(
             if not name:
                 output.print_error("An agent name is required (pass it as an argument or run interactively).")
                 raise typer.Exit(1)
+
+        # Validate early so path-unsafe names fail fast (before any LLM drafting).
+        try:
+            name = validate_agent_name(name)
+        except ValueError as exc:
+            output.print_error(str(exc))
+            raise typer.Exit(1)
 
         # Description.
         description = describe
@@ -175,15 +183,27 @@ def create(
             )
             raise typer.Exit(1)
 
-        # Post-write validation: reload through discovery and surface mismatches.
+        # Post-write validation: re-parse the exact file we just wrote (not a
+        # precedence lookup) so a global write is never validated against a
+        # same-named project definition that ``run`` would actually resolve.
         discovery = CustomDefinitionsDiscovery()
-        reloaded = discovery.get_agent(name)
+        source = "user" if global_ else "project"
+        reloaded = discovery._load_agent(path, source=source)
         if reloaded is None:
             output.print_warning(
-                f"Wrote {path}, but it was not re-discovered — check the frontmatter."
+                f"Wrote {path}, but it could not be re-parsed — check the frontmatter."
             )
         else:
             output.print_success(f"Created {path}")
+
+        # If a higher-precedence definition shadows this name, ``run`` would pick
+        # that one instead — warn so the reported next step is never misleading.
+        effective = discovery.get_agent(name)
+        if effective is not None and effective.path != path:
+            output.print_warning(
+                f"Another '{name}' agent takes precedence for 'run': {effective.path}. "
+                "Rename this agent or remove the other to use it directly."
+            )
 
         output.print_info("You can now run:")
         output.print_info(f'  praisonai run --agent {name} "..."')

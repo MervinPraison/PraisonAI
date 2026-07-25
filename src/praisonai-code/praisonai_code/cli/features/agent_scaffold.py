@@ -35,6 +35,30 @@ PERMISSION_PRESETS = {
 DEFAULT_PERMISSION = "full"
 
 
+def validate_agent_name(name: str) -> str:
+    """Return a sanitised agent name or raise ``ValueError``.
+
+    The name becomes a file stem under ``.praisonai/agents/``, so it must be a
+    single path-free token. Rejecting separators and traversal components keeps
+    every write contained within the chosen agents directory (no ``../`` escape,
+    no absolute paths).
+    """
+    candidate = (name or "").strip()
+    if not candidate:
+        raise ValueError("Agent name must not be empty.")
+    if candidate in {".", ".."} or any(sep in candidate for sep in ("/", "\\")):
+        raise ValueError(
+            f"Invalid agent name {name!r}: use a simple name without path "
+            "separators (e.g. 'code-reviewer')."
+        )
+    if Path(candidate).name != candidate:
+        raise ValueError(
+            f"Invalid agent name {name!r}: use a simple name without path "
+            "separators (e.g. 'code-reviewer')."
+        )
+    return candidate
+
+
 def resolve_agents_dir(global_: bool) -> Path:
     """Return the target ``.praisonai/agents/`` directory (project or global)."""
     from ..utils.project import get_git_root
@@ -143,7 +167,8 @@ def write_agent_definition(
     Raises ``FileExistsError`` when the target exists and ``force`` is False, so
     the caller can surface a clear message without overwriting user work.
     """
-    target = agents_dir / f"{name}.md"
+    safe_name = validate_agent_name(name)
+    target = agents_dir / f"{safe_name}.md"
     if target.exists() and not force:
         raise FileExistsError(str(target))
 
