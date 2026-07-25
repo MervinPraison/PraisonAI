@@ -70,6 +70,132 @@ def list(
 
 
 @app.command()
+def create(
+    name: Optional[str] = typer.Argument(None, help="Agent name (file stem for .praisonai/agents/<name>.md)"),
+    describe: Optional[str] = typer.Option(None, "--describe", "-d", help="One-line description of what the agent should do"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use (defaults to your detected provider)"),
+    permission: Optional[str] = typer.Option(None, "--permission", "-p", help="Permission preset: read-only, review, full"),
+    global_: bool = typer.Option(False, "--global", help="Write to user-global ~/.praisonai/agents/ instead of the project"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite an existing agent definition"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Non-interactive: accept defaults, skip prompts"),
+):
+    """Author a new custom agent definition (interactive or scriptable).
+
+    Interactive form prompts for the missing pieces; the non-interactive form
+    (``--describe ... --permission ... --yes``) is scriptable for CI. Drafts a
+    system prompt via the LLM when available and always writes a valid
+    ``.praisonai/agents/<name>.md`` that ``praisonai run --agent <name>`` uses.
+    """
+    output = get_output_controller()
+
+    try:
+        from praisonai_code.cli.features.agent_scaffold import (
+            DEFAULT_PERMISSION,
+            PERMISSION_PRESETS,
+            draft_system_prompt,
+            resolve_agents_dir,
+            write_agent_definition,
+        )
+        from praisonai_code.cli.features.custom_definitions import CustomDefinitionsDiscovery
+
+        interactive = not yes
+
+        try:
+            from rich.prompt import Prompt
+        except Exception:
+            Prompt = None
+
+        # Name.
+        if not name:
+            if interactive and Prompt is not None:
+                name = Prompt.ask("Agent name").strip()
+            if not name:
+                output.print_error("An agent name is required (pass it as an argument or run interactively).")
+                raise typer.Exit(1)
+
+        # Description.
+        description = describe
+        if not description:
+            if interactive and Prompt is not None:
+                description = Prompt.ask("Describe what this agent does").strip()
+            if not description:
+                description = f"A helpful {name} agent."
+
+        # Permission preset.
+        if not permission:
+            if interactive and Prompt is not None:
+                permission = Prompt.ask(
+                    "Permission preset",
+                    choices=list(PERMISSION_PRESETS.keys()),
+                    default=DEFAULT_PERMISSION,
+                )
+            else:
+                permission = DEFAULT_PERMISSION
+        if permission not in PERMISSION_PRESETS:
+            output.print_error(
+                f"Unknown permission preset '{permission}'. "
+                f"Valid presets: {', '.join(PERMISSION_PRESETS)}"
+            )
+            raise typer.Exit(1)
+
+        # Model (default via the shared resolver, mirroring init/run/setup).
+        if not model:
+            try:
+                from ..configuration.model_resolver import resolve_default_model
+                model = resolve_default_model(None, persist=False, notify=False)
+            except Exception:
+                model = None
+            if interactive and Prompt is not None:
+                model = Prompt.ask("Model", default=model or "").strip() or None
+
+        role = name.replace("-", " ").replace("_", " ").title()
+        goal = description
+
+        # Draft the system prompt; degrade to an editable stub on any failure.
+        body = draft_system_prompt(description, role, model)
+        if body is None:
+            output.print_warning("Could not draft a system prompt via the LLM; wrote an editable stub instead.")
+
+        agents_dir = resolve_agents_dir(global_)
+        try:
+            path = write_agent_definition(
+                name=name,
+                description=description,
+                role=role,
+                goal=goal,
+                model=model,
+                permission=permission,
+                agents_dir=agents_dir,
+                body=body,
+                force=force,
+            )
+        except FileExistsError as exc:
+            output.print_error(
+                f"Agent already exists: {exc}. Use --force to overwrite."
+            )
+            raise typer.Exit(1)
+
+        # Post-write validation: reload through discovery and surface mismatches.
+        discovery = CustomDefinitionsDiscovery()
+        reloaded = discovery.get_agent(name)
+        if reloaded is None:
+            output.print_warning(
+                f"Wrote {path}, but it was not re-discovered — check the frontmatter."
+            )
+        else:
+            output.print_success(f"Created {path}")
+
+        output.print_info("You can now run:")
+        output.print_info(f'  praisonai run --agent {name} "..."')
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command()
 def show(
     name: str = typer.Argument(help="Agent name to inspect"),
 ):
