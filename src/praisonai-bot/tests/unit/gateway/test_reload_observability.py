@@ -179,12 +179,27 @@ def test_apply_hot_reload_mutates_live_state():
     assert gw._reload_drain_timeout == 7.0
 
 
-def test_apply_hot_reload_ignores_invalid_timeout():
-    """An invalid timeout is ignored (set None) rather than raising."""
+def test_apply_hot_reload_invalid_timeout_preserves_live_value():
+    """A malformed timeout is ignored and keeps the current live value.
+
+    Regression for the P1: assigning ``None`` on a bad edit would silently drop
+    a previously-configured drain window, so subsequent channel reloads would
+    skip their drain. A malformed hot-reload edit must be a no-op for that key.
+    """
     gw = WebSocketGateway()
     gw._reload_drain_timeout = 5.0
     gw.apply_hot_reload(
         {"gateway.drain_timeout"}, {"gateway": {"drain_timeout": "oops"}}
+    )
+    assert gw._reload_drain_timeout == 5.0
+
+
+def test_apply_hot_reload_explicit_none_disables_timeout():
+    """An explicit None/absent value is an intentional disable (-> None)."""
+    gw = WebSocketGateway()
+    gw._reload_drain_timeout = 5.0
+    gw.apply_hot_reload(
+        {"gateway.drain_timeout"}, {"gateway": {"drain_timeout": None}}
     )
     assert gw._reload_drain_timeout is None
 

@@ -5994,8 +5994,19 @@ class WebSocketGateway:
         """
         gw_cfg = new_config.get("gateway", {}) or {}
 
-        def _coerce_timeout(value: Any) -> Optional[float]:
-            """Coerce a YAML/env timeout to a finite non-negative float or None."""
+        # Sentinel distinguishing "malformed value -> keep live state" from an
+        # explicit disable (None/absent). Assigning None on a malformed value
+        # would silently drop a previously-configured live drain window, so a
+        # bad hot-reload edit must be a no-op for that key (fail-safe).
+        _KEEP = object()
+
+        def _coerce_timeout(value: Any) -> Any:
+            """Coerce a YAML/env timeout to a finite non-negative float.
+
+            Returns ``None`` for an explicit disable (value is ``None``) and the
+            ``_KEEP`` sentinel for a malformed value so the caller preserves the
+            current live timeout instead of clearing it.
+            """
             if value is None:
                 return None
             try:
@@ -6005,8 +6016,12 @@ class WebSocketGateway:
                     raise ValueError
                 return coerced
             except (TypeError, ValueError):
-                logger.warning("Invalid hot-reload timeout %r; ignoring", value)
-                return None
+                logger.warning(
+                    "Invalid hot-reload timeout %r; keeping current value %s",
+                    value,
+                    self._reload_drain_timeout,
+                )
+                return _KEEP
 
         for path in sorted(paths):
             try:
@@ -6019,22 +6034,22 @@ class WebSocketGateway:
                         logger.info("Hot-applied logging level: %s", level)
 
                 elif path == "gateway.drain_timeout":
-                    self._reload_drain_timeout = _coerce_timeout(
-                        gw_cfg.get("drain_timeout")
-                    )
-                    logger.info(
-                        "Hot-applied drain_timeout: %s",
-                        self._reload_drain_timeout,
-                    )
+                    coerced = _coerce_timeout(gw_cfg.get("drain_timeout"))
+                    if coerced is not _KEEP:
+                        self._reload_drain_timeout = coerced
+                        logger.info(
+                            "Hot-applied drain_timeout: %s",
+                            self._reload_drain_timeout,
+                        )
 
                 elif path == "gateway.reload_drain_timeout":
-                    self._reload_drain_timeout = _coerce_timeout(
-                        gw_cfg.get("reload_drain_timeout")
-                    )
-                    logger.info(
-                        "Hot-applied reload_drain_timeout: %s",
-                        self._reload_drain_timeout,
-                    )
+                    coerced = _coerce_timeout(gw_cfg.get("reload_drain_timeout"))
+                    if coerced is not _KEEP:
+                        self._reload_drain_timeout = coerced
+                        logger.info(
+                            "Hot-applied reload_drain_timeout: %s",
+                            self._reload_drain_timeout,
+                        )
             except Exception as e:  # pragma: no cover - defensive
                 logger.warning("Failed to hot-apply %s: %s", path, e)
 
