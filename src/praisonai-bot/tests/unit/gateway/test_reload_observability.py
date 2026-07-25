@@ -139,6 +139,78 @@ def test_reload_failure_recorded_via_locked(tmp_path):
     assert gw._config_path == str(bad)
 
 
+# ── Hot-reload apply (Issue #3378) ─────────────────────────────────────────
+
+def test_hot_appliable_paths_classified_as_hot_not_restart():
+    """Hot-appliable keys go to hot_reload_paths, not a restart plan."""
+    gw = WebSocketGateway()
+    plan = gw._build_reload_plan(
+        {"gateway.logging.level", "channels.telegram.enabled", "gateway.drain_timeout"}
+    )
+    assert plan.hot_reload_paths == {"gateway.logging.level", "gateway.drain_timeout"}
+    assert "telegram" in plan.restart_channels
+    assert not plan.full_restart
+
+
+def test_unknown_gateway_key_still_full_restart():
+    """A gateway key not on the hot list stays fail-safe (full restart)."""
+    gw = WebSocketGateway()
+    plan = gw._build_reload_plan({"gateway.some_unknown_knob"})
+    assert plan.full_restart
+    assert not plan.hot_reload_paths
+
+
+def test_apply_hot_reload_mutates_live_state():
+    """apply_hot_reload applies logging level and drain timeouts in place."""
+    import logging
+
+    gw = WebSocketGateway()
+    gw._reload_drain_timeout = None
+    new_cfg = {
+        "gateway": {
+            "logging": {"level": "DEBUG"},
+            "reload_drain_timeout": 7,
+        }
+    }
+    gw.apply_hot_reload(
+        {"gateway.logging.level", "gateway.reload_drain_timeout"}, new_cfg
+    )
+    assert logging.getLogger("praisonai_bot").level == logging.DEBUG
+    assert gw._reload_drain_timeout == 7.0
+
+
+def test_apply_hot_reload_invalid_timeout_preserves_live_value():
+    """A malformed timeout is ignored and keeps the current live value.
+
+    Regression for the P1: assigning ``None`` on a bad edit would silently drop
+    a previously-configured drain window, so subsequent channel reloads would
+    skip their drain. A malformed hot-reload edit must be a no-op for that key.
+    """
+    gw = WebSocketGateway()
+    gw._reload_drain_timeout = 5.0
+    gw.apply_hot_reload(
+        {"gateway.drain_timeout"}, {"gateway": {"drain_timeout": "oops"}}
+    )
+    assert gw._reload_drain_timeout == 5.0
+
+
+def test_apply_hot_reload_explicit_none_disables_timeout():
+    """An explicit None/absent value is an intentional disable (-> None)."""
+    gw = WebSocketGateway()
+    gw._reload_drain_timeout = 5.0
+    gw.apply_hot_reload(
+        {"gateway.drain_timeout"}, {"gateway": {"drain_timeout": None}}
+    )
+    assert gw._reload_drain_timeout is None
+
+
+def test_gateway_conforms_to_supports_hot_reload_protocol():
+    """The gateway satisfies the core SupportsHotReload protocol."""
+    from praisonaiagents.gateway.config import SupportsHotReload
+
+    assert isinstance(WebSocketGateway(), SupportsHotReload)
+
+
 if __name__ == "__main__":
     import pytest
 

@@ -158,6 +158,10 @@ from .config import (
     DeliveryConfig,
     PollingConfig,
     LivenessConfig,
+    # Hot-reload registry (Issue #3378)
+    HOT_APPLIABLE_KEYS,
+    SupportsHotReload,
+    is_hot_appliable,
 )
 
 # Lazy loading cache
@@ -353,6 +357,10 @@ __all__ = [
     "DeliveryConfig",
     "PollingConfig",
     "LivenessConfig",
+    # Hot-reload registry (Issue #3378)
+    "HOT_APPLIABLE_KEYS",
+    "SupportsHotReload",
+    "is_hot_appliable",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",

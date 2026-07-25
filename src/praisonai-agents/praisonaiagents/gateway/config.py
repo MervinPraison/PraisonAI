@@ -5,7 +5,53 @@ Provides configuration dataclasses for gateway and session settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Set, runtime_checkable
+
+
+# ---------------------------------------------------------------------------
+# Hot-reload registry (Issue #3378)
+# ---------------------------------------------------------------------------
+#
+# Closed set of dotted config paths that are safe to apply *in place* on a
+# running gateway without restarting channels or agents. Anything not listed
+# here keeps falling through to the existing restart plans, so restart stays
+# the safe default for unknown/structural changes (fail-safe).
+#
+# This is a pure protocol/registry with no heavy imports; the authoritative
+# classification lives in core so every runtime reloads identically, while the
+# wrapper/bot gateway server only implements the in-place ``apply_hot_reload``.
+HOT_APPLIABLE_KEYS: "frozenset[str]" = frozenset({
+    "gateway.logging.level",
+    "gateway.drain_timeout",
+    "gateway.reload_drain_timeout",
+})
+
+
+def is_hot_appliable(path: str) -> bool:
+    """Return whether a dotted config ``path`` can be applied without restart.
+
+    A change is hot-appliable when the path itself is registered, or when it is
+    a leaf *under* a registered key (e.g. ``gateway.logging.level.extra``).
+    Callers should treat every other path as requiring a restart plan.
+    """
+    if path in HOT_APPLIABLE_KEYS:
+        return True
+    return any(path.startswith(key + ".") for key in HOT_APPLIABLE_KEYS)
+
+
+@runtime_checkable
+class SupportsHotReload(Protocol):
+    """Protocol a gateway implements to apply hot-reloadable config in place.
+
+    The gateway calls :meth:`apply_hot_reload` with the subset of changed paths
+    classified as hot-appliable (see :data:`HOT_APPLIABLE_KEYS`) and the newly
+    loaded config, mutating the relevant live subsystems without a restart.
+    """
+
+    def apply_hot_reload(
+        self, paths: Set[str], new_config: Mapping[str, Any]
+    ) -> None:
+        ...
 
 
 @dataclass
