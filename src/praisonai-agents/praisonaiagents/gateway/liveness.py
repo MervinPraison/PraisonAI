@@ -34,6 +34,7 @@ wrapper concern and intentionally not part of this module.
 from __future__ import annotations
 
 import faulthandler
+import math
 import os
 import sys
 import threading
@@ -81,8 +82,8 @@ class LoopWatchdogPolicy:
     dump_file: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.probe_interval_s <= 0:
-            raise ValueError("probe_interval_s must be > 0")
+        if not math.isfinite(self.probe_interval_s) or self.probe_interval_s <= 0:
+            raise ValueError("probe_interval_s must be a finite value > 0")
         if self.missed_probes_before_wedged < 1:
             raise ValueError("missed_probes_before_wedged must be >= 1")
         if self.on_wedge not in ("dump_and_exit", "dump_only"):
@@ -226,6 +227,11 @@ class LoopWatchdog:
         except Exception:  # pragma: no cover - fail open
             pass
         if self.policy.on_wedge == "dump_and_exit":
+            # If disarm() raced in while we were dumping stacks, honour the
+            # intentional shutdown and do not terminate the process — a
+            # deliberate disarm must never trigger a supervisor restart.
+            if self._stop.is_set():
+                return
             # Bypass Py_FinalizeEx: normal interpreter shutdown would try to
             # join the stuck loop thread and hang. os._exit hands the process
             # straight back to the supervisor.

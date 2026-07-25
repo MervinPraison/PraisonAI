@@ -7,6 +7,7 @@ do not kill the interpreter.
 """
 
 import asyncio
+import os
 import threading
 import time
 
@@ -32,6 +33,14 @@ def test_policy_validation():
         LoopWatchdogPolicy(missed_probes_before_wedged=0)
     with pytest.raises(ValueError):
         LoopWatchdogPolicy(on_wedge="boom")
+
+
+def test_policy_rejects_non_finite_interval():
+    """NaN / inf probe intervals must be rejected (Event.wait/Thread.join)."""
+    with pytest.raises(ValueError):
+        LoopWatchdogPolicy(probe_interval_s=float("nan"))
+    with pytest.raises(ValueError):
+        LoopWatchdogPolicy(probe_interval_s=float("inf"))
 
 
 def test_disarm_when_not_armed_is_safe():
@@ -128,6 +137,28 @@ def test_arm_is_idempotent():
     assert wd._thread is first
     wd.disarm()
     loop.close()
+
+
+def test_disarm_suppresses_in_flight_exit():
+    """A disarm racing an in-flight wedge must not call os._exit."""
+    wd = LoopWatchdog(
+        LoopWatchdogPolicy(
+            probe_interval_s=0.02,
+            missed_probes_before_wedged=1,
+            on_wedge="dump_and_exit",
+        )
+    )
+    # Simulate disarm() having set the stop flag while the worker is mid-wedge.
+    wd._stop.set()
+    exited = []
+    original_exit = os._exit
+    os._exit = lambda code: exited.append(code)
+    try:
+        wd._on_wedge()  # must observe _stop and return without exiting
+    finally:
+        os._exit = original_exit
+    assert exited == []
+    assert wd.wedged is True
 
 
 def test_closed_loop_does_not_trip():
