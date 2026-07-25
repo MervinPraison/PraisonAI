@@ -324,12 +324,34 @@ class OutboundQueue:
         key: str,
         error: str,
         permanent: bool = False,
+        *,
+        keep_recovered: bool = False,
     ) -> bool:
-        """Mark a message as failed."""
+        """Mark a message as failed.
+
+        Args:
+            key: Tracking key for the entry.
+            error: Error text to persist for retry/backoff decisions.
+            permanent: Mark a permanent failure that is never retried.
+            keep_recovered: When True, a transient (non-permanent) failure of a
+                crash-``recovered`` entry preserves its ``recovered`` status
+                instead of demoting it to ``failed``. This keeps the
+                "possible duplicate after restart" semantics sticky across
+                retries, so a ``recovery_annotator`` still labels the copy on
+                the next drain. Ignored for permanent failures.
+        """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._sync_mark_failed, key, error, permanent)
+        return await loop.run_in_executor(
+            None, self._sync_mark_failed, key, error, permanent, keep_recovered
+        )
     
-    def _sync_mark_failed(self, key: str, error: str, permanent: bool) -> bool:
+    def _sync_mark_failed(
+        self,
+        key: str,
+        error: str,
+        permanent: bool,
+        keep_recovered: bool = False,
+    ) -> bool:
         """Synchronous version of mark_failed for thread pool execution."""
         entry_id = self._extract_id_from_key(key)
         status = 'permanent_failure' if permanent else 'failed'
@@ -339,11 +361,26 @@ class OutboundQueue:
             # already recorded 'sent' for this row; clobbering it with 'failed'
             # here would re-queue an entry that already reached the channel and
             # produce a duplicate. Only in-flight states may transition to failed.
-            cur = conn.execute("""
-                UPDATE outbound_queue
-                SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
-                WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
-            """, (status, error, time.time(), entry_id))
+            #
+            # Keep a crash-recovered entry in the 'recovered' state on a
+            # transient failure (keep_recovered) so its "possible duplicate"
+            # semantics survive the retry: otherwise the row would flip to
+            # 'failed', the recovered-only annotator would be skipped on the
+            # next drain, and a later successful retry would deliver an
+            # unlabelled duplicate.
+            if keep_recovered and not permanent:
+                cur = conn.execute("""
+                    UPDATE outbound_queue
+                    SET status = 'recovered', error = ?, last_attempt = ?,
+                        attempts = attempts + 1
+                    WHERE id = ? AND status IN ('sending', 'recovered')
+                """, (error, time.time(), entry_id))
+            else:
+                cur = conn.execute("""
+                    UPDATE outbound_queue
+                    SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
+                    WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
+                """, (status, error, time.time(), entry_id))
             conn.commit()
             
             # Release active claim
@@ -443,6 +480,13 @@ class OutboundQueue:
                         f"falling back to re-send"
                     )
             
+            # Whether this entry entered the drain as a crash-recovered one.
+            # Captured before any status write so a transient re-send failure can
+            # keep it 'recovered' (sticky "possible duplicate" semantics) rather
+            # than demoting it to 'failed' and dropping the recovery label on the
+            # next retry.
+            was_recovered = entry.status == "recovered"
+
             try:
                 # Attempt delivery
                 payload = json.loads(entry.payload)
@@ -450,9 +494,20 @@ class OutboundQueue:
                 # positive reconciliation may be a duplicate, so let the caller
                 # visibly label it. Applied only on this unreconciled recovered
                 # branch — never to fresh pending/failed or reconciled entries.
-                if entry.status == "recovered" and recovery_annotator is not None:
+                if was_recovered and recovery_annotator is not None:
                     try:
-                        payload = recovery_annotator(entry, payload)
+                        # Hand the annotator its own fresh copy of the payload so
+                        # a partial in-place mutation followed by a raise cannot
+                        # leak a half-labelled payload into the send. Only adopt
+                        # the result once it completes and returns a dict;
+                        # otherwise fall back to the original unlabelled payload.
+                        annotated = recovery_annotator(entry, json.loads(entry.payload))
+                        if not isinstance(annotated, dict):
+                            raise TypeError(
+                                "recovery_annotator must return a dict, got "
+                                f"{type(annotated).__name__}"
+                            )
+                        payload = annotated
                     except Exception as e:  # pragma: no cover - defensive
                         logger.warning(
                             f"recovery_annotator failed for {key}: {e}; "
@@ -464,8 +519,14 @@ class OutboundQueue:
                     await self.mark_sent(key)
                     succeeded += 1
                 else:
-                    # Transient failure, will retry
-                    await self.mark_failed(key, "Delivery returned false", permanent=False)
+                    # Transient failure, will retry. Keep a recovered entry
+                    # 'recovered' so the duplicate label survives the retry.
+                    await self.mark_failed(
+                        key,
+                        "Delivery returned false",
+                        permanent=False,
+                        keep_recovered=was_recovered,
+                    )
                     failed += 1
                     
             except Exception as e:
@@ -480,7 +541,12 @@ class OutboundQueue:
                 mandated = server_retry_after(e)
                 if mandated is not None and "retry_after" not in error_text.lower():
                     error_text = f"{error_text} [retry_after: {mandated:g}]"
-                await self.mark_failed(key, error_text, permanent=permanent)
+                await self.mark_failed(
+                    key,
+                    error_text,
+                    permanent=permanent,
+                    keep_recovered=was_recovered,
+                )
                 failed += 1
                 
                 if permanent:
