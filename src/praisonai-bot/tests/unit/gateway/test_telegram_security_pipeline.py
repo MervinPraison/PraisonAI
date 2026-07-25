@@ -162,6 +162,82 @@ async def test_group_policy_mention_enforcement():
 
 
 @pytest.mark.asyncio
+async def test_group_policy_observe_records_passive_context():
+    """Issue #3380: ``observe`` records unmentioned group messages as context.
+
+    Under ``observe`` an unmentioned group message must NOT trigger a run
+    (returns None) but must be recorded to the session as passive context so
+    the bot has memory when it is next addressed. A mention still runs.
+    """
+    bot = create_test_bot(group_policy="observe", unknown_user_policy="allow")
+    bot._bot_user.username = "Test_Bot"
+
+    # Unmentioned group message: dropped from dispatch but recorded passively.
+    no_mention_update = create_mock_telegram_update(
+        chat_type="group", text="we just decided to ship on Friday"
+    )
+    no_mention_message = await process_inbound_telegram_message(no_mention_update, bot)
+    assert no_mention_message is None, "observe must not trigger a run on no mention"
+    assert bot._session.record_passive.called, (
+        "observe must record unmentioned group messages as passive context"
+    )
+    args, kwargs = bot._session.record_passive.call_args
+    assert "we just decided to ship on Friday" in (args[1] if len(args) > 1 else kwargs.get("content", ""))
+    # Issue #3380: the passive entry must carry the same routing an addressed
+    # turn uses so that with session_scope="per_chat" it lands on the shared
+    # group key the next mentioned run reads from (Greptile P1 / CodeRabbit).
+    assert kwargs.get("chat_id") == "-100123456789", (
+        "passive recording must thread chat_id so per_chat sessions see it"
+    )
+
+    # A mention still passes through to a real run.
+    bot._session.record_passive.reset_mock()
+    mention_update = create_mock_telegram_update(
+        chat_type="group", text="@test_bot summarise what we just decided"
+    )
+    mention_message = await process_inbound_telegram_message(mention_update, bot)
+    assert mention_message is not None, "observe must still run when the bot is mentioned"
+    assert not bot._session.record_passive.called, (
+        "a mentioned message runs; it is not recorded as passive-only context"
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_passive_per_chat_key_visible_to_addressed_turn():
+    """Issue #3380 (Greptile P1 / CodeRabbit): passive context must use the
+    per_chat group key, not the sender's per_user key.
+
+    With ``session_scope="per_chat"`` an addressed turn reads the shared
+    ``(platform, account, chat_id, thread_id)`` key. A passive record threaded
+    with the same routing must persist under that identical key so the bot sees
+    the preceding conversation when next mentioned — and must NOT leak into the
+    sender's separate per_user history.
+    """
+    from praisonai_bot.bots._session import BotSessionManager
+
+    mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+    route = {"account": "default", "chat_id": "-100999", "thread_id": ""}
+
+    ok = mgr.record_passive("sender42", "we ship on Friday", sender="Ann", **route)
+    assert ok is True
+
+    # The addressed turn resolves this shared group key.
+    group_key = mgr._storage_key("sender42", **route)
+    history = mgr._load_history("sender42", **route)
+    assert any(
+        e.get("passive") and "we ship on Friday" in e.get("content", "")
+        for e in history
+    ), "passive entry must be visible under the shared per_chat group key"
+
+    # It must NOT have leaked into the sender's separate per_user history.
+    per_user_key = mgr._storage_key("sender42")
+    assert per_user_key != group_key, "per_chat key must differ from per_user key"
+    assert not mgr._histories.get(per_user_key), (
+        "passive entry must not leak into the sender's per_user history"
+    )
+
+
+@pytest.mark.asyncio
 async def test_dm_messages_bypass_group_policies():
     """Test that DM messages bypass group-specific policies."""
     

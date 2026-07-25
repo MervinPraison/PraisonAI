@@ -1599,6 +1599,65 @@ class BotSessionManager:
         """
         return self._last_presentation.pop(self._storage_key(user_id), None)
 
+    def record_passive(
+        self,
+        user_id: str,
+        content: str,
+        sender: str = "",
+        **route: str,
+    ) -> bool:
+        """Append a group message as passive context without running the agent.
+
+        Issue #3380: under the ``observe`` group policy a message that does not
+        address the bot is recorded into the session transcript as an ordinary
+        ``user`` turn (optionally attributed to its sender for multi-party
+        chats) so that when the bot is next mentioned it can see the preceding
+        conversation. No agent run is dispatched. Appends directly under a
+        per-key threading lock so it is safe to call from any sync/async
+        context (including inline on the inbound handler's own loop thread);
+        errors are swallowed.
+
+        Optional ``chat_id``/``thread_id``/``account``/``chat_type`` route kwargs
+        are threaded through so that with ``session_scope='per_chat'`` the
+        passive entry lands on the same shared group key that a subsequent
+        addressed turn reads from (Issue #2376 routing); without them behaviour
+        is unchanged (per_user, keyed by the sender's session).
+        """
+        if not content:
+            return False
+        text = self._attribute(content, sender) if sender else content
+        entry = {
+            "role": "user",
+            "content": text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "passive": True,
+        }
+        # A single fire-and-forget append. Unlike the outbound mirror (called
+        # from other threads / cron), ``record_passive`` runs inline on the
+        # inbound handler's own event-loop thread, so the cross-thread
+        # ``run_coroutine_threadsafe`` bridge would dead-lock waiting on the
+        # very loop that is calling it. Append directly under a per-key
+        # threading lock (no asyncio lock touched) so it is safe from any
+        # context and never blocks the loop.
+        try:
+            storage_key = self._storage_key(user_id, **route)
+            sync_locks = getattr(self, "_user_sync_locks", None)
+            if sync_locks is None:
+                self._user_sync_locks = sync_locks = {}
+            lock = sync_locks.get(storage_key)
+            if lock is None:
+                import threading
+                lock = sync_locks[storage_key] = threading.Lock()
+            with lock:
+                history = list(self._load_history(user_id, **route))
+                history.append(entry)
+                self._save_history(user_id, history, **route)
+                self._last_active[storage_key] = time.monotonic()
+            return True
+        except Exception as e:  # pragma: no cover — defensive, never break inbound
+            logger.warning("record_passive failed: %s", e)
+            return False
+
     def reset(self, user_id: str, **route: str) -> bool:
         """Clear a session's history.  Returns True if it existed.
 

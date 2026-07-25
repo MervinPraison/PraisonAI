@@ -2112,6 +2112,38 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             return None
 
 
+def _record_passive_group_message(bot: "TelegramBot", message) -> None:
+    """Record an unmentioned group message as passive session context.
+
+    Issue #3380: used by the ``observe`` group policy so that unmentioned
+    messages are retained in the transcript (without triggering an agent run)
+    and are visible to the agent when it is next addressed. Best-effort — a
+    missing session manager or any failure is swallowed so inbound handling is
+    never broken by observation.
+    """
+    session_mgr = getattr(bot, "_session", None)
+    if session_mgr is None or not hasattr(session_mgr, "record_passive"):
+        return
+    try:
+        content = message.get_text() if hasattr(message, "get_text") else str(message.content)
+        user_id = message.sender.user_id if message.sender else ""
+        sender = (message.sender.display_name or user_id) if message.sender else user_id
+        # Thread the same routing fields an addressed turn uses so that with
+        # session_scope="per_chat" the passive entry lands on the shared group
+        # key the next mentioned run reads from (Issue #3380 / #2376). With the
+        # default per_user scope these are simply ignored.
+        session_mgr.record_passive(
+            user_id,
+            content,
+            sender=sender,
+            chat_id=str(message.channel.channel_id) if message.channel and message.channel.channel_id else "",
+            thread_id=str(message.thread_id) if getattr(message, "thread_id", None) else "",
+            account=getattr(bot.config, "account", "default"),
+        )
+    except Exception as e:  # pragma: no cover — defensive
+        logger.debug(f"Failed to record passive group message: {e}")
+
+
 async def process_inbound_telegram_message(
     update,  # Telegram Update
     bot: TelegramBot,
@@ -2205,7 +2237,7 @@ async def process_inbound_telegram_message(
             if message.message_type != MessageType.COMMAND:
                 logger.debug(f"Message dropped: non-command in command_only group {channel_id}")
                 return None
-        elif group_policy == "mention_only":
+        elif group_policy in ("mention_only", "observe"):
             # Check if bot was mentioned in the message
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             mention_handle = f"@{bot_username}" if bot_username else ""
@@ -2214,7 +2246,15 @@ async def process_inbound_telegram_message(
             ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
             
             if not bot_mentioned:
-                logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
+                # Issue #3380: under ``observe`` an unmentioned group message is
+                # recorded into the session transcript as passive context (no
+                # agent run) so the bot has memory of the conversation when it is
+                # next addressed. ``mention_only`` still drops it outright.
+                if group_policy == "observe":
+                    _record_passive_group_message(bot, message)
+                    logger.debug(f"Message observed (no run) in group {channel_id}")
+                else:
+                    logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
                 return None
         elif group_policy == "respond_all":
             # Allow all group messages

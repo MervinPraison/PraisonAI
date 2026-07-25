@@ -291,7 +291,7 @@ class ChannelConfigSchema(BaseModel):
     token: Union[str, Dict[str, Any]] = ""
     app_token: Optional[Union[str, Dict[str, Any]]] = None  # For Slack Socket Mode
     mode: str = "poll"  # poll | ws | webhook | hybrid
-    group_policy: str = "mention_only"  # Default to secure: respond_all, mention_only, command_only
+    group_policy: str = "mention_only"  # respond_all, mention_only, command_only, observe (record unmentioned msgs as context)
     allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
     silence_token: Optional[str] = None  # Custom silence token (defaults to NO_REPLY)
     allowlist: List[str] = Field(default_factory=list)
@@ -422,7 +422,7 @@ class ChannelConfigSchema(BaseModel):
     @field_validator("group_policy")
     @classmethod
     def validate_group_policy(cls, v: str) -> str:
-        allowed = {"respond_all", "mention_only", "command_only"}
+        allowed = {"respond_all", "mention_only", "command_only", "observe"}
         if v not in allowed:
             raise ValueError(
                 f"Invalid group_policy '{v}'. Must be one of: {', '.join(sorted(allowed))}"
