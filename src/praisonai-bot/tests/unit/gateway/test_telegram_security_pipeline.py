@@ -162,6 +162,41 @@ async def test_group_policy_mention_enforcement():
 
 
 @pytest.mark.asyncio
+async def test_group_policy_observe_records_passive_context():
+    """Issue #3380: ``observe`` records unmentioned group messages as context.
+
+    Under ``observe`` an unmentioned group message must NOT trigger a run
+    (returns None) but must be recorded to the session as passive context so
+    the bot has memory when it is next addressed. A mention still runs.
+    """
+    bot = create_test_bot(group_policy="observe", unknown_user_policy="allow")
+    bot._bot_user.username = "Test_Bot"
+
+    # Unmentioned group message: dropped from dispatch but recorded passively.
+    no_mention_update = create_mock_telegram_update(
+        chat_type="group", text="we just decided to ship on Friday"
+    )
+    no_mention_message = await process_inbound_telegram_message(no_mention_update, bot)
+    assert no_mention_message is None, "observe must not trigger a run on no mention"
+    assert bot._session.record_passive.called, (
+        "observe must record unmentioned group messages as passive context"
+    )
+    args, kwargs = bot._session.record_passive.call_args
+    assert "we just decided to ship on Friday" in (args[1] if len(args) > 1 else kwargs.get("content", ""))
+
+    # A mention still passes through to a real run.
+    bot._session.record_passive.reset_mock()
+    mention_update = create_mock_telegram_update(
+        chat_type="group", text="@test_bot summarise what we just decided"
+    )
+    mention_message = await process_inbound_telegram_message(mention_update, bot)
+    assert mention_message is not None, "observe must still run when the bot is mentioned"
+    assert not bot._session.record_passive.called, (
+        "a mentioned message runs; it is not recorded as passive-only context"
+    )
+
+
+@pytest.mark.asyncio
 async def test_dm_messages_bypass_group_policies():
     """Test that DM messages bypass group-specific policies."""
     

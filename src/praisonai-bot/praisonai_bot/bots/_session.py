@@ -1599,6 +1599,39 @@ class BotSessionManager:
         """
         return self._last_presentation.pop(self._storage_key(user_id), None)
 
+    def record_passive(
+        self,
+        user_id: str,
+        content: str,
+        sender: str = "",
+    ) -> bool:
+        """Append a group message as passive context without running the agent.
+
+        Issue #3380: under the ``observe`` group policy a message that does not
+        address the bot is recorded into the session transcript as an ordinary
+        ``user`` turn (optionally attributed to its sender for multi-party
+        chats) so that when the bot is next mentioned it can see the preceding
+        conversation. No agent run is dispatched. Reuses the same thread-safe
+        append path as the outbound mirror (``_add_mirror_entry_sync``) so it is
+        safe to call from any sync/async context; errors are swallowed. Keyed
+        by the sender's session, mirroring the existing ``mirror_to_session``
+        contract (per_user).
+        """
+        if not content:
+            return False
+        text = self._attribute(content, sender) if sender else content
+        entry = {
+            "role": "user",
+            "content": text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "passive": True,
+        }
+        try:
+            return self._add_mirror_entry_sync(user_id, entry)
+        except Exception as e:  # pragma: no cover — defensive, never break inbound
+            logger.warning("record_passive failed: %s", e)
+            return False
+
     def reset(self, user_id: str, **route: str) -> bool:
         """Clear a session's history.  Returns True if it existed.
 
