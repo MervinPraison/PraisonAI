@@ -171,6 +171,24 @@ def test_deterministic_output(tmp_path):
     assert o1.read_bytes() == o2.read_bytes()
 
 
+# ── --all includes unscored attempts ─────────────────────────────────────────
+
+def test_all_includes_unscored(tmp_path):
+    """With only_passed=False (--all), unscored attempts are exported, not dropped."""
+    case = {
+        "case_id": "c1",
+        "attempts": [
+            _attempt("4", score=1.0, passed=True),  # kept
+            _attempt("?", score=None),              # kept under --all
+        ],
+    }
+    out = tmp_path / "train.jsonl"
+    summary = export_trials(
+        _report([case]), out, only_passed=False, frontier_only=False)
+    assert summary.written == 2
+    assert summary.skipped_unscored == 0
+
+
 # ── alpaca fallback ───────────────────────────────────────────────────────────
 
 def test_alpaca_format(tmp_path):
@@ -182,6 +200,51 @@ def test_alpaca_format(tmp_path):
     row = _read_jsonl(out)[0]
     assert set(row) == {"instruction", "input", "output"}
     assert row["output"] == "4"
+
+
+def test_alpaca_keeps_user_prompt_with_system(tmp_path):
+    """A system+user conversation keeps the user prompt in Alpaca ``input``."""
+    case = {"case_id": "c1", "attempts": [
+        _attempt("4", score=1.0, passed=True),
+        _attempt("x", score=0.0, passed=False)]}
+    out = tmp_path / "train.jsonl"
+    export_trials(_report([case]), out, frontier_only=False, format="alpaca")
+    row = _read_jsonl(out)[0]
+    assert row["instruction"] == "You are helpful."
+    assert row["input"] == "2+2?"  # the sole user prompt is never dropped
+    assert row["output"] == "4"
+
+
+def test_alpaca_no_system_uses_first_user_as_instruction(tmp_path):
+    """Without a system turn, first user is instruction and the rest is input."""
+    a = {"messages": [
+        {"role": "user", "content": "translate"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "bonjour"},
+    ], "score": 1.0, "passed": True}
+    out = tmp_path / "train.jsonl"
+    export_trials(_report([{"case_id": "c1", "attempts": [
+        a, _attempt("x", score=0.0, passed=False)]}]),
+        out, frontier_only=False, format="alpaca")
+    row = _read_jsonl(out)[0]
+    assert row["instruction"] == "translate"
+    assert row["input"] == "hello"
+    assert row["output"] == "bonjour"
+
+
+# ── score threshold (no explicit passed flag) ─────────────────────────────────
+
+def test_score_below_threshold_is_failed(tmp_path):
+    """A positive score below the report's threshold counts as a failure."""
+    case = {"case_id": "c1", "attempts": [
+        {"messages": _attempt("4", 1.0)["messages"], "score": 0.9, "pass_threshold": 0.5},
+        {"messages": _attempt("5", 0.0)["messages"], "score": 0.3, "pass_threshold": 0.5},
+    ]}
+    out = tmp_path / "train.jsonl"
+    summary = export_trials(_report([case]), out, frontier_only=False)
+    assert summary.written == 1  # only the 0.9 passes the 0.5 bar
+    assert summary.skipped_failed == 1
+    assert _read_jsonl(out)[0]["conversations"][-1]["content"] == "4"
 
 
 def test_invalid_format_raises(tmp_path):

@@ -92,21 +92,44 @@ def _load_report(report: Any) -> Any:
     return report
 
 
+def _pass_threshold(attempt: Any) -> Optional[float]:
+    """The verifier's passing cutoff for this attempt, if the report carries one.
+
+    Looked up on the attempt (``pass_threshold`` / ``threshold`` / ``min_score``)
+    so a score-only report can still be judged against the exact bar the verifier
+    used, instead of the naive ``score > 0``.
+    """
+    for key in ("pass_threshold", "threshold", "min_score"):
+        val = _get(attempt, key)
+        if val is not None:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _passed(attempt: Any) -> bool:
     """A verifier-passed attempt.
 
-    Prefers an explicit ``passed`` flag; otherwise treats a truthy numeric score
-    (``score > 0``) as a pass, matching the "keep what passed" rejection-sampling
-    contract when the report carries only scores.
+    Prefers an explicit ``passed`` flag. Otherwise compares the numeric score
+    against the report's own passing threshold when one is present
+    (``pass_threshold``/``threshold``/``min_score``); only when no threshold is
+    carried does it fall back to treating a positive score as a pass, matching the
+    "keep what passed" rejection-sampling contract for bare score-only reports.
     """
     passed = _get(attempt, "passed")
     if passed is not None:
         return bool(passed)
     score = _get(attempt, "score")
     try:
-        return float(score) > 0
+        score_f = float(score)
     except (TypeError, ValueError):
         return False
+    threshold = _pass_threshold(attempt)
+    if threshold is not None:
+        return score_f >= threshold
+    return score_f > 0
 
 
 def _used_tools(attempt: Any) -> bool:
@@ -169,9 +192,16 @@ def _to_alpaca(turns: list[dict[str, str]]) -> dict[str, str]:
     output = next(
         (t["content"] for t in reversed(turns) if t["role"] == "assistant"), ""
     )
+    if system:
+        # System text is the instruction; every user turn is the input so the
+        # (often sole) user prompt is never dropped.
+        instruction, input_users = system, users
+    else:
+        # No system: first user turn is the instruction, the rest is the input.
+        instruction, input_users = (users[0] if users else ""), users[1:]
     return {
-        "instruction": system or (users[0] if users else ""),
-        "input": "\n".join(users[1:]) if system else "\n".join(users[1:]),
+        "instruction": instruction,
+        "input": "\n".join(input_users),
         "output": output,
     }
 
@@ -179,9 +209,12 @@ def _to_alpaca(turns: list[dict[str, str]]) -> dict[str, str]:
 def _classify(attempt: Any, only_passed: bool, summary: ExportSummary):
     """Ordered filter; returns turns to emit or ``None`` (and bumps a counter)."""
     if _get(attempt, "score") is None:
-        summary.skipped_unscored += 1
-        return None
-    if only_passed and not _passed(attempt):
+        # Unscored can't be judged as passing, so they're only ever candidates
+        # under ``--all`` (only_passed=False), which explicitly opts into them.
+        if only_passed:
+            summary.skipped_unscored += 1
+            return None
+    elif only_passed and not _passed(attempt):
         summary.skipped_failed += 1
         return None
     if _used_tools(attempt):
