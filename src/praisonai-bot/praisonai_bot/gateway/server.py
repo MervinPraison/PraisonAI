@@ -5923,6 +5923,8 @@ class WebSocketGateway:
         Returns:
             ReloadPlan with actions to take
         """
+        from praisonaiagents.gateway.config import is_hot_appliable
+
         plan = ReloadPlan()
         
         for path in changed_paths:
@@ -5930,7 +5932,15 @@ class WebSocketGateway:
             
             if not parts:
                 continue
-            
+
+            # Issue #3378: a closed set of paths (core registry) is safe to
+            # apply in place without restarting channels or agents. Everything
+            # else keeps falling through to the restart plans below, so restart
+            # stays the fail-safe default for unknown/structural changes.
+            if is_hot_appliable(path):
+                plan.hot_reload_paths.add(path)
+                continue
+
             # Top-level section changes
             if parts[0] == "agents":
                 if len(parts) == 1:
@@ -5967,7 +5977,67 @@ class WebSocketGateway:
                 plan.requires_full_restart()
         
         return plan
-    
+
+    def apply_hot_reload(
+        self, paths: Set[str], new_config: Dict[str, Any]
+    ) -> None:
+        """Apply hot-reloadable config paths in place (Issue #3378).
+
+        Implements the core ``SupportsHotReload`` protocol: mutate the running
+        gateway for the closed set of paths classified as hot-appliable (see
+        ``praisonaiagents.gateway.config.HOT_APPLIABLE_KEYS``) without
+        restarting channels or agents. Unknown paths never reach here — they
+        fall through to the restart plans in :meth:`_build_reload_plan`.
+
+        Best-effort per key: a failure applying one key is logged and does not
+        abort the others or the surrounding reload.
+        """
+        gw_cfg = new_config.get("gateway", {}) or {}
+
+        def _coerce_timeout(value: Any) -> Optional[float]:
+            """Coerce a YAML/env timeout to a finite non-negative float or None."""
+            if value is None:
+                return None
+            try:
+                import math as _math
+                coerced = float(value)
+                if not _math.isfinite(coerced) or coerced < 0:
+                    raise ValueError
+                return coerced
+            except (TypeError, ValueError):
+                logger.warning("Invalid hot-reload timeout %r; ignoring", value)
+                return None
+
+        for path in sorted(paths):
+            try:
+                if path == "gateway.logging.level" or path.startswith(
+                    "gateway.logging.level."
+                ):
+                    level = (gw_cfg.get("logging") or {}).get("level")
+                    if level is not None:
+                        logging.getLogger("praisonai_bot").setLevel(level)
+                        logger.info("Hot-applied logging level: %s", level)
+
+                elif path == "gateway.drain_timeout":
+                    self._reload_drain_timeout = _coerce_timeout(
+                        gw_cfg.get("drain_timeout")
+                    )
+                    logger.info(
+                        "Hot-applied drain_timeout: %s",
+                        self._reload_drain_timeout,
+                    )
+
+                elif path == "gateway.reload_drain_timeout":
+                    self._reload_drain_timeout = _coerce_timeout(
+                        gw_cfg.get("reload_drain_timeout")
+                    )
+                    logger.info(
+                        "Hot-applied reload_drain_timeout: %s",
+                        self._reload_drain_timeout,
+                    )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Failed to hot-apply %s: %s", path, e)
+
     async def _restart_channel(
         self,
         channel_name: str,
@@ -6352,9 +6422,9 @@ class WebSocketGateway:
                     drain_timeout=self._reload_drain_timeout,
                 )
             
-            # Apply hot-reload paths (future enhancement)
+            # Issue #3378: apply hot-reloadable paths in place — no restart.
             if plan.hot_reload_paths:
-                logger.info(f"Hot-reload paths (no-op for now): {plan.hot_reload_paths}")
+                self.apply_hot_reload(plan.hot_reload_paths, new_cfg)
 
         # Surface a concise summary of what the reload did (Issue #2533).
         if plan.full_restart:
