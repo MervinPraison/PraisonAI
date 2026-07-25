@@ -29,7 +29,6 @@ the moved package.
 from __future__ import annotations
 
 import importlib
-import pkgutil
 import sys
 from importlib.machinery import ModuleSpec
 
@@ -71,38 +70,25 @@ class _AliasFinder:
 
 
 def _register_submodules(old_name: str, new_name: str, module) -> None:
-    """Eagerly import the moved subtree and alias each submodule.
+    """Alias already-imported moved submodules under their old dotted name.
 
-    Registering each moved submodule under its old dotted name in
-    ``sys.modules`` guarantees that a later ``import old_name.sub`` finds the
-    identical object immediately, never re-executing the file (which would
-    create duplicate class/enum objects). Modules that fail to import eagerly
-    (e.g. optional heavy dependencies not installed) are skipped and resolved
-    lazily by :class:`_AliasFinder` on first successful use.
+    Registering each *already-imported* moved submodule under its old dotted
+    name in ``sys.modules`` guarantees that a later ``import old_name.sub``
+    finds the identical object immediately, never re-executing the file (which
+    would create duplicate class/enum objects). Anything not yet imported is
+    resolved on demand by :class:`_AliasFinder.find_spec`, which stamps
+    ``sys.modules[fullname]`` with the resolved-once module and preserves module
+    identity — so no eager walk of the moved subtree is required (guarantee #2,
+    laziness).
     """
     new_prefix = new_name + "."
-    old_prefix = old_name + "."
 
-    # Alias whatever is already imported first (e.g. the package __init__).
+    # Only alias what's ALREADY imported. Anything else is served on demand by
+    # _AliasFinder.find_spec, which preserves module identity.
     for mod_name, mod in list(sys.modules.items()):
         if mod_name == new_name or mod_name.startswith(new_prefix):
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)
-
-    search_path = getattr(module, "__path__", None)
-    if not search_path:
-        return
-
-    for info in pkgutil.walk_packages(search_path, prefix=new_prefix):
-        if info.name in sys.modules:
-            sub = sys.modules[info.name]
-        else:
-            try:
-                sub = importlib.import_module(info.name)
-            except Exception:
-                continue
-        old_equiv = old_name + info.name[len(new_name):]
-        sys.modules.setdefault(old_equiv, sub)
 
 
 def alias_package(old_name: str, new_name: str) -> object:
