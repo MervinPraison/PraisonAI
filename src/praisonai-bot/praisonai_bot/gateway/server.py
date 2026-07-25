@@ -339,6 +339,11 @@ class GatewaySession:
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
     _is_executing: bool = False
+    # Issue #3379: for channel-originated sessions (e.g. a Telegram user), the
+    # ``"channel:target"`` address to proactively notify if an in-flight turn is
+    # interrupted by a gateway restart. ``None`` for direct-client sessions,
+    # which resume on reconnect and need no server-initiated channel notice.
+    _channel_target: Optional[str] = None
     
     @property
     def session_id(self) -> str:
@@ -351,6 +356,11 @@ class GatewaySession:
     @property
     def client_id(self) -> Optional[str]:
         return self._client_id
+
+    @property
+    def channel_target(self) -> Optional[str]:
+        """``"channel:target"`` to notify on restart, or ``None`` (Issue #3379)."""
+        return self._channel_target
     
     @property
     def is_active(self) -> bool:
@@ -487,6 +497,7 @@ class GatewaySession:
             "events": [e.to_dict() for e in self._events[-100:]],  # Keep last 100 events
             "pending_inbox": pending_inbox,
             "is_executing": self._is_executing,
+            "channel_target": self._channel_target,
         }
     
     @classmethod
@@ -534,6 +545,9 @@ class GatewaySession:
         
         # Restore execution state
         session._is_executing = data.get("is_executing", False)
+        # Issue #3379: restore the channel origin so a boot-time resume can
+        # notify the originating channel about an interrupted turn.
+        session._channel_target = data.get("channel_target")
         
         return session
 
@@ -550,6 +564,15 @@ class GatewaySession:
     def mark_executing(self, status: bool) -> None:
         """Mark the session as currently executing an agent workflow."""
         self._is_executing = status
+
+    def set_channel_target(self, channel_target: Optional[str]) -> None:
+        """Record the ``"channel:target"`` origin for restart notification.
+
+        Issue #3379: channel-originated sessions call this so an interrupted
+        in-flight turn can be re-driven and the channel proactively notified on
+        the next boot, independent of any client reconnect.
+        """
+        self._channel_target = channel_target
 
 
 class ReloadAction(Enum):
@@ -1974,7 +1997,15 @@ class WebSocketGateway:
         # Start session cleanup task if persistence is enabled
         if self._session_store:
             await self._start_session_cleanup()
-        
+
+        # Issue #3379: re-drive any turn that was in-flight when a previous
+        # process restarted, and proactively notify the originating channel.
+        # Mirrors the durable approval rehydrate above; a no-op without a store.
+        try:
+            await self._resume_interrupted_turns()
+        except Exception:
+            logger.exception("Failed to resume interrupted turns on boot")
+
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
         
         try:
@@ -4465,6 +4496,157 @@ class WebSocketGateway:
         
         self._cleanup_task = asyncio.create_task(_cleanup())
         logger.info("Session cleanup task started (interval=1h)")
+
+    # ── Restart continuation (Issue #3379) ───────────────────────────
+
+    def _load_persisted_session_data(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the latest persisted ``session_data`` snapshot for a session.
+
+        Mirrors the snapshot lookup in :meth:`create_session`: the newest
+        ``system`` message carrying a ``session_data`` metadata blob wins.
+        Returns ``None`` when unavailable.
+        """
+        if not self._session_store:
+            return None
+        try:
+            session_obj = self._session_store.get_session(session_id)
+        except Exception:
+            return None
+        session_data = None
+        for msg in getattr(session_obj, "messages", []) or []:
+            meta = getattr(msg, "metadata", None) or {}
+            if getattr(msg, "role", None) == "system" and "session_data" in meta:
+                session_data = meta["session_data"]
+        return session_data
+
+    async def _resume_interrupted_turns(self) -> int:
+        """Re-drive turns interrupted by a restart and notify their channels.
+
+        Issue #3379: on boot — before serving new traffic — scan persisted
+        sessions for an in-flight turn (``is_executing`` or a non-empty
+        ``pending_inbox``) that a previous process lost. For each such session
+        that carries a ``channel_target`` origin, deliver an exactly-once,
+        idempotent "interrupted — resuming" notice through the existing durable
+        outbox path (:meth:`_deliver_hook_reply`, whose idempotency key survives
+        restart) and re-drive the turn when the agent is available.
+
+        Idempotency is keyed on ``(session_id, event_cursor)`` — the ``run_epoch``
+        of the interrupted turn — so a boot that repeats (crash loop) notifies at
+        most once per interruption. A no-op without a durable session store.
+        """
+        store = self._session_store
+        if not store:
+            return 0
+        lister = getattr(store, "list_sessions", None)
+        if not callable(lister):
+            return 0
+        try:
+            summaries = lister()
+        except Exception:
+            logger.exception("Failed to list sessions for restart continuation")
+            return 0
+
+        resumed = 0
+        for summary in summaries or []:
+            sid = summary.get("session_id") if isinstance(summary, dict) else summary
+            if not sid:
+                continue
+            data = self._load_persisted_session_data(sid)
+            if not data:
+                continue
+            interrupted = bool(data.get("is_executing")) or bool(
+                data.get("pending_inbox")
+            )
+            if not interrupted:
+                continue
+            channel_target = data.get("channel_target")
+            if not channel_target:
+                # Direct-client session: it resumes on reconnect (existing
+                # inbox replay). No server-initiated channel notice to emit.
+                continue
+
+            # Exactly-once notice keyed on the interrupted turn's run epoch
+            # (event_cursor). ``_deliver_hook_reply`` already folds this key into
+            # the durable outbox so a repeated boot does not re-notify.
+            run_epoch = data.get("event_cursor", 0)
+            notice = (
+                "I was interrupted by a restart - resuming your request. "
+                "If you don't get a reply shortly, please resend."
+            )
+            try:
+                await self._deliver_restart_notice(
+                    channel_target, notice, sid, run_epoch,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to deliver restart notice for session %s", sid,
+                )
+
+            # Best-effort re-drive: rehydrate the session and restart its queue
+            # if the agent is still registered. Where re-drive is unsafe (no
+            # agent), the notice above already asked the user to resend.
+            try:
+                agent_id = data.get("agent_id")
+                agent = self._agents.get(agent_id) if agent_id else None
+                if agent is not None:
+                    session = GatewaySession.from_dict(
+                        data, self.config.session_config.max_messages,
+                    )
+                    session._is_active = True
+                    self._sessions[sid] = session
+                    if not session._inbox.empty():
+                        if not session._is_executing:
+                            session.mark_executing(True)
+                        asyncio.create_task(
+                            self._run_session_queue(session, agent, session.client_id)
+                        )
+            except Exception:
+                logger.exception("Failed to re-drive interrupted session %s", sid)
+
+            resumed += 1
+
+        if resumed:
+            logger.info("Resumed %d interrupted turn(s) on boot", resumed)
+        return resumed
+
+    async def _deliver_restart_notice(
+        self, channel_target: str, text: str, session_id: str, run_epoch: int,
+    ) -> bool:
+        """Deliver a restart-continuation notice exactly-once to a channel.
+
+        Reuses the durable delivery router with an idempotency key scoped to
+        ``(session_id, run_epoch)`` so a repeated boot (crash loop) notifies the
+        originating channel at most once per interruption.
+        """
+        if ":" not in channel_target:
+            logger.warning(
+                "channel_target '%s' must be 'channel:target'; skipping notice",
+                channel_target,
+            )
+            return False
+        channel, target = [p.strip() for p in channel_target.split(":", 1)]
+        idem = f"restart:{session_id}:{run_epoch}"
+        router = self.delivery_router
+        if router is not None:
+            return await router.deliver(
+                f"{channel}:{target}", text, idempotency_key=idem,
+            )
+        # Fallback: router unavailable — best-effort bare send (no dedup).
+        bot = self.get_channel_bot(channel)
+        if bot is None:
+            for name, b in self._channel_bots.items():
+                if name.lower() == channel.lower():
+                    bot = b
+                    break
+        if bot is None:
+            logger.warning("No channel bot '%s' for restart notice", channel)
+            return False
+        try:
+            await bot.send_message(target, text)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("Restart notice to %s:%s failed: %s", channel, target, e)
+            return False
 
     # ── Multi-bot lifecycle ───────────────────────────────────────────
 
