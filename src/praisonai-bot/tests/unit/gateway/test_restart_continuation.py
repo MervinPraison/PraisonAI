@@ -51,7 +51,9 @@ class _FakeStore:
         self._sessions = sessions
 
     def list_sessions(self, limit: int = 50):
-        return [{"session_id": sid} for sid in self._sessions]
+        # Mirror DefaultSessionStore: cap the returned window at ``limit`` so a
+        # boot scan that fails to raise the cap would miss older sessions.
+        return [{"session_id": sid} for sid in self._sessions][:limit]
 
     def get_session(self, session_id):
         data = self._sessions.get(session_id)
@@ -152,6 +154,61 @@ def test_resume_is_noop_without_store():
     gateway._session_store = None
     resumed = asyncio.run(gateway._resume_interrupted_turns())
     assert resumed == 0
+
+
+def test_channel_target_derived_from_client_id_origin():
+    """A legacy session whose ``client_id`` encodes ``channel:target`` notifies.
+
+    The explicit ``channel_target`` may be absent (session persisted before the
+    setter was wired, or ingress never called it). The boot scan falls back to
+    the ``client_id`` origin so the field is a live consumer of existing state.
+    """
+    session = GatewaySession(
+        _session_id="s6", _agent_id="agent-1", _client_id="telegram:777",
+    )
+    session.mark_executing(True)
+    data = session.to_dict()
+    assert data.get("channel_target") is None  # no explicit target set
+
+    gateway = _make_gateway_with_store(_FakeStore({"s6": data}))
+
+    sent = []
+
+    async def _fake_notice(channel_target, text, session_id, run_epoch):
+        sent.append((channel_target, session_id))
+        return True
+
+    gateway._deliver_restart_notice = _fake_notice
+
+    resumed = asyncio.run(gateway._resume_interrupted_turns())
+
+    assert resumed == 1
+    assert sent == [("telegram:777", "s6")]
+
+
+def test_boot_scan_covers_more_than_default_fifty_sessions():
+    """The boot scan must not silently stop at the store's 50-session default."""
+    sessions = {}
+    for i in range(75):
+        s = GatewaySession(_session_id=f"s{i}", _agent_id="agent-1")
+        s.set_channel_target(f"telegram:{i}")
+        s.mark_executing(True)
+        sessions[f"s{i}"] = s.to_dict()
+
+    gateway = _make_gateway_with_store(_FakeStore(sessions))
+
+    seen = []
+
+    async def _fake_notice(channel_target, text, session_id, run_epoch):
+        seen.append(session_id)
+        return True
+
+    gateway._deliver_restart_notice = _fake_notice
+
+    resumed = asyncio.run(gateway._resume_interrupted_turns())
+
+    assert resumed == 75
+    assert len(seen) == 75
 
 
 def test_restart_notice_idempotency_key_scopes_session_and_epoch():

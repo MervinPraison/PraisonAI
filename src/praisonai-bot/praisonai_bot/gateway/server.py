@@ -4519,6 +4519,30 @@ class WebSocketGateway:
                 session_data = meta["session_data"]
         return session_data
 
+    @staticmethod
+    def _channel_target_for(data: Dict[str, Any]) -> Optional[str]:
+        """Resolve the ``"channel:target"`` origin for a persisted session.
+
+        Issue #3379: prefer the explicit ``channel_target`` set via
+        :meth:`GatewaySession.set_channel_target`. When it is absent (e.g. a
+        session persisted before the origin was recorded, or one whose ingress
+        never called the setter), fall back to the already-persisted
+        ``client_id`` when it *itself* encodes a ``"channel:target"`` origin —
+        the same convention the hook/scheduled delivery path (``deliver_to``)
+        uses. This keeps the field a live consumer of existing state rather than
+        dead code, without adding a new ingress parameter. Returns ``None`` for
+        direct-client sessions (no channel origin to notify).
+        """
+        explicit = data.get("channel_target")
+        if explicit:
+            return explicit
+        client_id = data.get("client_id")
+        if isinstance(client_id, str) and ":" in client_id:
+            channel, target = (p.strip() for p in client_id.split(":", 1))
+            if channel and target:
+                return f"{channel}:{target}"
+        return None
+
     async def _resume_interrupted_turns(self) -> int:
         """Re-drive turns interrupted by a restart and notify their channels.
 
@@ -4540,8 +4564,21 @@ class WebSocketGateway:
         lister = getattr(store, "list_sessions", None)
         if not callable(lister):
             return 0
+        # The store's ``list_sessions`` defaults to the 50 most-recent sessions
+        # (see DefaultSessionStore). A boot-time continuation scan must not
+        # silently drop interrupted turns beyond that window, so request a large
+        # explicit cap. Fall back to the no-arg form for stores whose signature
+        # does not accept ``limit``.
         try:
-            summaries = lister()
+            summaries = lister(limit=1_000_000)
+        except TypeError:
+            try:
+                summaries = lister()
+            except Exception:
+                logger.exception(
+                    "Failed to list sessions for restart continuation"
+                )
+                return 0
         except Exception:
             logger.exception("Failed to list sessions for restart continuation")
             return 0
@@ -4559,7 +4596,7 @@ class WebSocketGateway:
             )
             if not interrupted:
                 continue
-            channel_target = data.get("channel_target")
+            channel_target = self._channel_target_for(data)
             if not channel_target:
                 # Direct-client session: it resumes on reconnect (existing
                 # inbox replay). No server-initiated channel notice to emit.
