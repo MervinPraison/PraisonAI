@@ -30,6 +30,29 @@ logger = logging.getLogger(__name__)
 # Constant for permanent error detection
 PERMANENT_ERROR_PREFIX = "Permanent error:"
 
+# Prefix prepended to a crash-recovered outbound message that is re-sent without
+# positive reconciliation. Such a re-send may be a duplicate, so the copy the
+# recipient receives is labelled honestly rather than delivered silently.
+RECOVERED_PREFIX = (
+    "\u267b\ufe0f Recovered reply \u2014 the gateway restarted during "
+    "delivery, so this may be a duplicate.\n\n"
+)
+
+
+def _annotate_recovered_payload(entry: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Prefix a recovered entry's textual content with ``RECOVERED_PREFIX``.
+
+    Only string ``content`` is labelled; non-text payloads are returned
+    unchanged so a media/structured send is never corrupted. Returns a new dict
+    so the persisted payload is untouched.
+    """
+    content = payload.get("content")
+    if not isinstance(content, str) or content.startswith(RECOVERED_PREFIX):
+        return payload
+    annotated = dict(payload)
+    annotated["content"] = f"{RECOVERED_PREFIX}{content}"
+    return annotated
+
 
 class _TransientDeliveryError(Exception):
     """Recoverable delivery failure carrying the underlying error text.
@@ -460,12 +483,18 @@ class DurableDelivery:
         platform: str = "",
         backoff: Optional[BackoffPolicy] = None,
         max_attempts: int = 3,
+        mark_recovered: bool = False,
     ):
         self.outbox = outbox
         self.adapter = adapter
         self.platform = platform
         self.backoff = backoff or BackoffPolicy()
         self.max_attempts = max_attempts
+        # When True, a crash-recovered entry re-sent without positive
+        # reconciliation is labelled as a possible duplicate (honest
+        # at-least-once) rather than re-delivered silently. Off by default to
+        # preserve the historic behaviour.
+        self.mark_recovered = mark_recovered
     
     async def send(
         self,
@@ -719,8 +748,12 @@ class DurableDelivery:
             
             return success
         
+        annotator = _annotate_recovered_payload if self.mark_recovered else None
         return await self.outbox.drain(
-            sender, limit=limit, reconciler=self._build_reconciler()
+            sender,
+            limit=limit,
+            reconciler=self._build_reconciler(),
+            recovery_annotator=annotator,
         )
 
 

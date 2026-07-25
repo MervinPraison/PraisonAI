@@ -189,6 +189,138 @@ def test_reconciler_failure_falls_back_to_resend(tmp_path):
     asyncio.run(run())
 
 
+def test_recovery_annotator_labels_unreconciled_resend(tmp_path):
+    """An unreconciled recovered entry is labelled by recovery_annotator."""
+    async def run():
+        path = tmp_path / "outbox.sqlite"
+        q1 = OutboundQueue(path=str(path))
+        await _seed_in_flight(q1)
+
+        q2 = OutboundQueue(path=str(path))
+
+        sent = []
+
+        async def sender(target, payload):
+            sent.append(payload)
+            return True
+
+        def annotator(entry, payload):
+            assert entry.idempotency_key == "msg-1"
+            out = dict(payload)
+            out["content"] = "[recovered] " + payload.get("content", "")
+            return out
+
+        succeeded, failed = await q2.drain(sender, recovery_annotator=annotator)
+
+        assert (succeeded, failed) == (1, 0)
+        assert len(sent) == 1
+        assert sent[0]["content"] == "[recovered] hi"
+
+    asyncio.run(run())
+
+
+def test_recovery_annotator_skipped_when_reconciled(tmp_path):
+    """A reconciled entry is not re-sent, so the annotator never fires."""
+    async def run():
+        path = tmp_path / "outbox.sqlite"
+        q1 = OutboundQueue(path=str(path))
+        await _seed_in_flight(q1)
+
+        q2 = OutboundQueue(path=str(path))
+
+        sent = []
+        annotated = []
+
+        async def sender(target, payload):
+            sent.append(payload)
+            return True
+
+        async def reconciler(entry):
+            return True  # confirmed already delivered
+
+        def annotator(entry, payload):
+            annotated.append(entry.idempotency_key)
+            return payload
+
+        succeeded, failed = await q2.drain(
+            sender, reconciler=reconciler, recovery_annotator=annotator
+        )
+
+        assert (succeeded, failed) == (1, 0)
+        assert sent == []  # no re-dispatch
+        assert annotated == []  # annotator never consulted
+
+    asyncio.run(run())
+
+
+def test_recovery_annotator_not_applied_to_fresh_entries(tmp_path):
+    """Fresh pending entries are sent verbatim, never annotated."""
+    async def run():
+        q = _new_queue(tmp_path)
+        await q.enqueue("msg-fresh", "telegram:123", {"content": "hi"})
+
+        sent = []
+
+        def annotator(entry, payload):
+            out = dict(payload)
+            out["content"] = "LABELLED " + payload.get("content", "")
+            return out
+
+        async def sender(target, payload):
+            sent.append(payload)
+            return True
+
+        succeeded, failed = await q.drain(sender, recovery_annotator=annotator)
+
+        assert (succeeded, failed) == (1, 0)
+        assert sent[0]["content"] == "hi"  # untouched
+
+    asyncio.run(run())
+
+
+def test_durable_delivery_marks_recovered_resend(tmp_path):
+    """DurableDelivery(mark_recovered=True) prefixes an unreconciled re-send."""
+    from praisonai_bot.bots._delivery import DurableDelivery, RECOVERED_PREFIX
+
+    async def run():
+        path = tmp_path / "outbox.sqlite"
+        q1 = OutboundQueue(path=str(path))
+        # Enqueue via DurableDelivery-style payload and force in-flight.
+        key = await q1.enqueue(
+            "msg-1",
+            "telegram:123",
+            {"content": "hello", "kwargs": {}, "idempotency_key": "msg-1"},
+        )
+        entry_id = int(key.split(":")[-1])
+        with q1._lock, closing(q1._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status='sending' WHERE id=?",
+                (entry_id,),
+            )
+            conn.commit()
+
+        q2 = OutboundQueue(path=str(path))
+
+        received = []
+
+        class _Adapter:
+            async def send_message(self, channel_id, content, **kwargs):
+                received.append(content)
+                return True
+
+        delivery = DurableDelivery(
+            q2, _Adapter(), platform="telegram", mark_recovered=True
+        )
+        succeeded, failed = await delivery.drain_pending()
+
+        assert (succeeded, failed) == (1, 0)
+        assert len(received) == 1
+        assert received[0].startswith(RECOVERED_PREFIX)
+        assert received[0].endswith("hello")
+
+    asyncio.run(run())
+
+
 def test_status_for_reports_entry_state(tmp_path):
     """``status_for`` returns the current status, or None for an unknown key."""
     async def run():

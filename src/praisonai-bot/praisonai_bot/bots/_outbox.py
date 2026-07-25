@@ -19,7 +19,10 @@ Design constraints (per PraisonAI principles):
     adapters that declare ``PlatformCapabilities.reconciles_unknown_send`` can),
     it is asked whether the prior attempt actually landed; if so the entry is
     marked ``sent`` without re-dispatch. Without a reconciler, ``recovered``
-    entries fall back to at-least-once re-send (current behaviour).
+    entries fall back to at-least-once re-send. Such an unreconciled re-send may
+    be a duplicate, so ``drain`` accepts an optional ``recovery_annotator`` that
+    labels that copy (e.g. a short "possible duplicate after restart" prefix)
+    instead of re-sending it silently.
 
 Storage schema::
 
@@ -354,6 +357,9 @@ class OutboundQueue:
         limit: Optional[int] = None,
         *,
         reconciler: Optional[Callable[[OutboundEntry], Awaitable[bool]]] = None,
+        recovery_annotator: Optional[
+            Callable[[OutboundEntry, Dict[str, Any]], Dict[str, Any]]
+        ] = None,
     ) -> Tuple[int, int]:
         """Process pending messages.
         
@@ -368,6 +374,15 @@ class OutboundQueue:
                 fresh ``pending``/``failed`` entries are sent normally. If no
                 reconciler is supplied, recovered entries are re-sent
                 (at-least-once).
+            recovery_annotator: Optional sync function applied ONLY on the
+                unreconciled ``recovered`` branch — i.e. a mid-send-crash entry
+                whose delivery outcome is unknown and which is about to be
+                re-dispatched at-least-once. Given ``(entry, payload)`` it
+                returns a (possibly new) payload to send, so the copy the
+                recipient receives can be visibly labelled a possible duplicate
+                produced by a gateway restart. Never applied to fresh
+                ``pending``/``failed`` entries or to entries confirmed by the
+                reconciler.
             
         Returns:
             Tuple of (succeeded, failed) counts
@@ -431,6 +446,18 @@ class OutboundQueue:
             try:
                 # Attempt delivery
                 payload = json.loads(entry.payload)
+                # Honest at-least-once: a recovered entry re-dispatched without
+                # positive reconciliation may be a duplicate, so let the caller
+                # visibly label it. Applied only on this unreconciled recovered
+                # branch — never to fresh pending/failed or reconciled entries.
+                if entry.status == "recovered" and recovery_annotator is not None:
+                    try:
+                        payload = recovery_annotator(entry, payload)
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.warning(
+                            f"recovery_annotator failed for {key}: {e}; "
+                            f"sending unlabelled"
+                        )
                 success = await sender(entry.target, payload)
                 
                 if success:
