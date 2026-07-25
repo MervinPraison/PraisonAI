@@ -16,7 +16,35 @@ import urllib.request
 from typing import Optional
 
 
-def _ollama_ready(host: str = "127.0.0.1", port: int = 11434, timeout: float = 0.2) -> bool:
+def _ollama_endpoint() -> tuple:
+    """Resolve the (host, port) Ollama listens on, honouring OLLAMA_HOST.
+
+    The `ollama serve/create/push` subprocesses all inherit OLLAMA_HOST, so the
+    readiness probe must target the same endpoint instead of a hardcoded
+    127.0.0.1:11434 — otherwise a healthy configured/remote daemon is ignored.
+    Accepts forms like `host`, `host:port`, and `http://host:port`.
+    """
+    raw = os.environ.get("OLLAMA_HOST", "").strip()
+    if not raw:
+        return "127.0.0.1", 11434
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.rstrip("/")
+    if raw.startswith("["):  # IPv6 literal e.g. [::1]:11434
+        host, _, rest = raw[1:].partition("]")
+        port = rest.lstrip(":") or "11434"
+    elif ":" in raw:
+        host, _, port = raw.rpartition(":")
+    else:
+        host, port = raw, "11434"
+    try:
+        port_num = int(port)
+    except ValueError:
+        port_num = 11434
+    return host or "127.0.0.1", port_num
+
+
+def _ollama_ready(host: Optional[str] = None, port: Optional[int] = None, timeout: float = 0.2) -> bool:
     """Check if Ollama daemon is accepting connections AND serving its HTTP API.
 
     A bare socket connect can succeed before the HTTP server is actually ready
@@ -24,13 +52,17 @@ def _ollama_ready(host: str = "127.0.0.1", port: int = 11434, timeout: float = 0
     ``GET /api/version`` before declaring the daemon usable.
 
     Args:
-        host: Ollama host (default 127.0.0.1)
-        port: Ollama port (default 11434)
+        host: Ollama host (defaults to the OLLAMA_HOST-resolved host)
+        port: Ollama port (defaults to the OLLAMA_HOST-resolved port)
         timeout: Connection timeout in seconds
 
     Returns:
         True if Ollama's API responds, False otherwise
     """
+    if host is None or port is None:
+        resolved_host, resolved_port = _ollama_endpoint()
+        host = host or resolved_host
+        port = port if port is not None else resolved_port
     # Fast socket pre-check: if the port isn't even open, skip the HTTP attempt.
     try:
         with socket.create_connection((host, port), timeout):
@@ -68,28 +100,31 @@ def ensure_ollama_running(max_wait_seconds: float = 15.0) -> Optional[subprocess
     # Capture serve stderr to a temp file so a startup failure (e.g. port in use,
     # bad OLLAMA_HOST) can be surfaced in the timeout message instead of vanishing.
     serve_err = tempfile.TemporaryFile(mode="w+")
-    proc = subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=serve_err,
-        start_new_session=True,  # Detach from parent
-    )
+    try:
+        proc = subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=serve_err,
+            start_new_session=True,  # Detach from parent
+        )
 
-    # Poll until ready or timeout
-    wait_interval = 0.25
-    max_polls = max(1, int(max_wait_seconds / wait_interval))
+        # Poll until ready or timeout
+        wait_interval = 0.25
+        max_polls = max(1, int(max_wait_seconds / wait_interval))
 
-    for _ in range(max_polls):
-        if _ollama_ready():
-            return proc
-        time.sleep(wait_interval)
+        for _ in range(max_polls):
+            if _ollama_ready():
+                return proc
+            time.sleep(wait_interval)
 
-    # If we get here, daemon didn't become ready in time — include serve's stderr.
-    proc.terminate()
-    err_text = ""
-    with contextlib.suppress(OSError, ValueError):
-        serve_err.seek(0)
-        err_text = serve_err.read().strip()
+        # If we get here, daemon didn't become ready in time — include serve's stderr.
+        proc.terminate()
+        err_text = ""
+        with contextlib.suppress(OSError, ValueError):
+            serve_err.seek(0)
+            err_text = serve_err.read().strip()
+    finally:
+        serve_err.close()
     detail = f"\nollama serve output:\n{err_text}" if err_text else ""
     raise RuntimeError(
         f"ollama serve did not become ready in {max_wait_seconds} seconds.{detail}"
@@ -191,8 +226,7 @@ def create_and_push_ollama_model(
             ``ollama create --quantize`` so the model isn't stored as huge f16.
 
     Raises:
-        RuntimeError: If ollama operations fail (with actionable guidance)
-        subprocess.CalledProcessError: If the create command fails
+        RuntimeError: If ollama create/push operations fail (with actionable guidance)
     """
     # Write Modelfile
     with open("Modelfile", "w") as f:
@@ -211,7 +245,14 @@ def create_and_push_ollama_model(
     create_cmd = ["ollama", "create", tag, "-f", "Modelfile"]
     if quantization:
         create_cmd += ["--quantize", quantization]
-    subprocess.run(create_cmd, check=True)
+    # Capture output so a create failure (the most common Ollama error) surfaces
+    # as an actionable RuntimeError instead of a raw CalledProcessError traceback.
+    create = subprocess.run(create_cmd, capture_output=True, text=True)
+    if create.returncode != 0:
+        raise RuntimeError(
+            f"`ollama create {tag}` failed:\n"
+            f"{(create.stderr or create.stdout or '').strip()}"
+        )
 
     # Push with captured output so a 401/403 becomes an actionable message rather
     # than a raw non-zero exit.

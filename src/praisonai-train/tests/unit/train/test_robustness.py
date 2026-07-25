@@ -103,11 +103,16 @@ def test_no_gpu_raises_friendly(monkeypatch):
 
 def test_missing_hf_token_raises_friendly(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    # No cached login either.
+    monkeypatch.setattr(
+        trainer_mod.TrainModel, "_has_hf_credentials", staticmethod(lambda: False)
+    )
     obj = _make_trainer(
         _valid_config(huggingface_save=True, hf_model_name="me/model"),
         monkeypatch,
     )
-    with pytest.raises(ValueError, match="HF_TOKEN is not set"):
+    with pytest.raises(ValueError, match="no credentials were found"):
         obj.validate_config()
 
 
@@ -138,8 +143,33 @@ def test_valid_quantization_passes(monkeypatch):
 
 def test_low_disk_raises_friendly(monkeypatch):
     obj = _make_trainer(_valid_config(), monkeypatch, free_gb=3)
-    with pytest.raises(ValueError, match="free space or set output_dir"):
+    with pytest.raises(ValueError, match="Free up space or set output_dir"):
         obj.validate_config()
+
+
+def test_cached_hf_login_accepted(monkeypatch):
+    """A cached `huggingface-cli login` (no env token) must NOT be rejected."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        trainer_mod.TrainModel, "_has_hf_credentials", staticmethod(lambda: True)
+    )
+    obj = _make_trainer(
+        _valid_config(huggingface_save=True, hf_model_name="me/model"),
+        monkeypatch,
+    )
+    obj.validate_config()  # must not raise despite HF_TOKEN unset
+
+
+def test_train_false_skips_gpu_check(monkeypatch):
+    """Publish/export-only (train: false) must validate on a CPU-only box."""
+    monkeypatch.setenv("HF_TOKEN", "hf_fake")
+    obj = _make_trainer(
+        _valid_config(train=False, huggingface_save=True, hf_model_name="me/model"),
+        monkeypatch,
+        gpu=False,
+    )
+    obj.validate_config()  # must not raise the no-GPU error
 
 
 def test_check_gpu_no_crash_on_cpu(monkeypatch, capsys):
@@ -196,6 +226,32 @@ def test_ollama_push_passes_quantize_flag(monkeypatch, tmp_path):
         "me/model", "latest", "FROM ./model\n", quantization="q4_k_m")
     assert "--quantize" in seen["create"]
     assert "q4_k_m" in seen["create"]
+
+
+def test_ollama_create_failure_translates(monkeypatch, tmp_path):
+    """A failing `ollama create` becomes a clean RuntimeError, not a traceback."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ollama_mod, "_check_ollama_disk", lambda *_a, **_k: None)
+    monkeypatch.setattr(ollama_mod, "ensure_ollama_running", lambda *_a, **_k: None)
+
+    def _fake_run(cmd, *a, **k):
+        if "create" in cmd:
+            return types.SimpleNamespace(
+                returncode=1, stdout="", stderr="Error: invalid Modelfile")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ollama_mod.subprocess, "run", _fake_run)
+    with pytest.raises(RuntimeError, match="ollama create"):
+        ollama_mod.create_and_push_ollama_model("me/model", "latest", "FROM ./model\n")
+
+
+def test_ollama_endpoint_honours_host_env(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "http://remote-box:12345")
+    assert ollama_mod._ollama_endpoint() == ("remote-box", 12345)
+    monkeypatch.setenv("OLLAMA_HOST", "1.2.3.4")
+    assert ollama_mod._ollama_endpoint() == ("1.2.3.4", 11434)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    assert ollama_mod._ollama_endpoint() == ("127.0.0.1", 11434)
 
 
 def test_ollama_disk_precheck_triggers(monkeypatch, tmp_path):

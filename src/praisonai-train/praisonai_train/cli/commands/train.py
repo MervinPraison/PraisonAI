@@ -333,7 +333,7 @@ def train_export(
         )
         raise typer.Exit(1)
 
-    if not Path(model_dir).exists():
+    if not Path(model_dir).is_dir():
         output.print_error(
             f"Model directory not found: {model_dir}",
             remediation="Pass --model-dir pointing at your trained model (e.g. lora_model).",
@@ -345,6 +345,12 @@ def train_export(
     if config:
         import yaml
         cfg = yaml.safe_load(Path(config).read_text()) or {}
+        if not isinstance(cfg, dict):
+            output.print_error(
+                f"Config file must be a YAML mapping: {config}",
+                remediation="Use `key: value` pairs at the top level.",
+            )
+            raise typer.Exit(1)
     cfg["final_model_dir"] = model_dir
     cfg.setdefault("model_parameters", "latest")
     if quant:
@@ -393,6 +399,8 @@ def train_export(
         )
         raise typer.Exit(1)
 
+    import subprocess
+
     try:
         trainer = TrainModel.for_export(cfg)
         model, tokenizer = trainer.load_model()
@@ -404,7 +412,7 @@ def train_export(
             trainer.push_model_gguf()
         else:
             trainer.create_and_push_ollama_model()
-    except (ValueError, RuntimeError) as exc:
+    except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
         output.print_error(str(exc))
         raise typer.Exit(1)
 

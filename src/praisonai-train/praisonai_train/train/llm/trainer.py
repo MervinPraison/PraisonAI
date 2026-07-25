@@ -12,6 +12,7 @@ import sys
 import yaml
 import shutil
 import difflib
+import contextlib
 import subprocess
 from functools import partial
 
@@ -172,6 +173,15 @@ class TrainModel:
         obj.config = dict(config or {})
         if "model" in obj.config and "model_name" not in obj.config:
             obj.config["model_name"] = obj.config["model"]
+        # Validate quantization up front here too — for_export skips the full
+        # training validate_config, so an invalid --quant would otherwise only
+        # fail deep inside Unsloth / `ollama create`.
+        q = obj.config.get("quantization_method")
+        if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
+            raise ValueError(
+                f"quantization_method '{q}' is not valid. Choose one of: "
+                f"{', '.join(sorted(VALID_QUANTIZATION_METHODS))}."
+            )
         obj.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         obj.model = None
         obj.hf_tokenizer = None
@@ -248,23 +258,27 @@ class TrainModel:
         # traceback after minutes of downloads. ---
 
         # GPU: fine-tuning cannot run on CPU. Catch it before Unsloth tries.
-        if not torch.cuda.is_available():
+        # Only enforced when training is enabled — publish/export-only runs
+        # (train: false) are valid on CPU.
+        if self._flag(self.config.get("train"), default=True) and not torch.cuda.is_available():
             raise ValueError(
                 "No CUDA GPU detected. Fine-tuning needs a GPU. On a rented box "
                 "check the driver; on CPU it cannot run."
             )
 
         # Hugging Face token: required to publish. Checked up front so a long run
-        # doesn't finish only to fail at the upload step.
+        # doesn't finish only to fail at the upload step. A cached login via
+        # `huggingface-cli login` is also accepted (downstream Hub calls use it),
+        # so only fail when NEITHER an env token NOR a cached token is present.
         publishing = (
             self._flag(self.config.get("huggingface_save"))
             or self._flag(self.config.get("huggingface_save_gguf"))
             or self._flag(self.config.get("push_to_hub"))
         )
-        if publishing and not os.getenv("HF_TOKEN"):
+        if publishing and not self._has_hf_credentials():
             raise ValueError(
-                "Publishing to Hugging Face is enabled but HF_TOKEN is not set. Run "
-                "`huggingface-cli login` or `export HF_TOKEN=hf_...`. To train "
+                "Publishing to Hugging Face is enabled but no credentials were found. "
+                "Run `huggingface-cli login` or `export HF_TOKEN=hf_...`. To train "
                 "without publishing, set huggingface_save: false."
             )
 
@@ -277,7 +291,7 @@ class TrainModel:
         if free_gb is not None and free_gb < 10:
             raise ValueError(
                 f"Low disk: only {free_gb:.1f} GB free on the training disk "
-                f"(need ~10 GB minimum). Free up free space or set output_dir to a "
+                f"(need ~10 GB minimum). Free up space or set output_dir to a "
                 f"larger disk."
             )
 
@@ -312,6 +326,19 @@ class TrainModel:
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    @staticmethod
+    def _has_hf_credentials():
+        """True if a Hugging Face token is available via env OR a cached
+        `huggingface-cli login`. The Hub client accepts a cached token when
+        ``token=None``, so preflight must not reject a valid cached login."""
+        if os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN"):
+            return True
+        with contextlib.suppress(Exception):
+            from huggingface_hub import get_token
+            if get_token():
+                return True
+        return False
 
     def _supports_assistant_mask(self):
         """True iff assistant-only loss will actually produce a usable mask for this
@@ -1221,7 +1248,7 @@ def main():
         try:
             trainer_obj = TrainModel(config_path=args.config)
             trainer_obj.run()
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
             print(f"\nERROR: {exc}\n", file=sys.stderr)
             sys.exit(1)
         except KeyboardInterrupt:
