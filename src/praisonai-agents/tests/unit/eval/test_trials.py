@@ -175,6 +175,76 @@ def test_score_attempt_no_scorer_passes_on_nonempty():
     assert empty.passed is False
 
 
+def test_original_chat_history_not_mutated():
+    # A shallow copy must not share the caller's chat_history list; running
+    # attempts should never append to (or clear) the original agent's history.
+    agent = FakeAgent(response="ok")
+    agent.chat_history.append({"role": "user", "content": "pre-existing"})
+    pkg = EvalPackage(name="p", cases=[
+        EvalCase(name="c", input="i", verify=lambda o, e: True),
+    ])
+    run_trials(agent, pkg, k=3)
+    assert agent.chat_history == [{"role": "user", "content": "pre-existing"}]
+
+
+def test_verifier_exception_does_not_abort_report():
+    # A raising verify() must be recorded as a failed score, not propagated.
+    def boom(o, e):
+        raise RuntimeError("metric blew up")
+
+    agent = FakeAgent(response="ok")
+    pkg = EvalPackage(name="p", cases=[
+        EvalCase(name="bad", input="i", verify=boom),
+        EvalCase(name="good", input="i", verify=lambda o, e: True),
+    ])
+    report = run_trials(agent, pkg, k=2)
+    assert len(report.attempts["bad"]) == 2
+    assert all(a.score is not None and a.score.passed is False
+               for a in report.attempts["bad"])
+    assert all("verify error" in a.score.reason for a in report.attempts["bad"])
+    # Other cases still run and pass.
+    assert report.pass_rates()["good"] == 1.0
+
+
+def test_duplicate_case_names_are_merged_not_overwritten():
+    agent = FakeAgent(response="ok")
+    pkg = EvalPackage(name="p", cases=[
+        EvalCase(name="dup", input="a", verify=lambda o, e: True),
+        EvalCase(name="dup", input="b", verify=lambda o, e: False),
+    ])
+    report = run_trials(agent, pkg, k=2)
+    # Both same-named cases' attempts are retained (2 + 2), not overwritten.
+    assert len(report.attempts["dup"]) == 4
+    # Re-numbered attempt indices are unique and contiguous.
+    assert sorted(a.attempt for a in report.attempts["dup"]) == [0, 1, 2, 3]
+    assert report.pass_rates()["dup"] == 0.5
+
+
+def test_timeout_bounds_runtime():
+    # A wedged agent must not make run_trials hang; the report returns promptly
+    # even though the leaked worker thread keeps running in the background.
+    import threading
+    import time as _time
+
+    release = threading.Event()
+
+    class WedgedAgent(FakeAgent):
+        def chat(self, prompt, **kwargs):
+            release.wait(timeout=5.0)
+            return "eventually"
+
+    pkg = EvalPackage(name="p", cases=[
+        EvalCase(name="c", input="i", timeout_seconds=0.05,
+                 verify=lambda o, e: True),
+    ])
+    start = _time.perf_counter()
+    report = run_trials(WedgedAgent(), pkg, k=1)
+    elapsed = _time.perf_counter() - start
+    release.set()  # let the leaked worker finish
+    assert elapsed < 2.0
+    assert report.attempts["c"][0].stop_reason == "timeout"
+
+
 def test_tool_assertion_scoring():
     class ToolAgent(FakeAgent):
         def chat(self, prompt, **kwargs):

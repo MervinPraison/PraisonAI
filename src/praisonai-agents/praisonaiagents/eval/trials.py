@@ -235,17 +235,19 @@ def _isolated_agent_copy(agent: Any) -> Any:
         except Exception:
             pass
 
-    # Independent chat history (don't share the caller's list).
+    # Independent chat history: rebind to a *new* list so appends during the
+    # attempt never mutate the caller's shared list (a shallow copy shares it).
     try:
-        clone.chat_history = []
+        clone.chat_history = list(getattr(agent, "chat_history", None) or [])
     except Exception:
         pass
 
-    # Clear any cached system prompt so per-attempt state is clean.
+    # Give the clone its own cache object rather than clearing the shared one,
+    # so wiping per-attempt state cannot evict the original agent's cache.
     cache = getattr(clone, "_system_prompt_cache", None)
     if cache is not None:
         try:
-            cache.clear()
+            clone._system_prompt_cache = {}
         except Exception:
             pass
 
@@ -288,9 +290,14 @@ def _score_attempt(case: EvalCase, output: str, agent: Any, response: Any) -> Tr
     Resolution order: ``verify`` callable -> tool assertions (metadata
     ``expected_tools``) -> ``criteria``/Judge. Runs only on completed attempts.
     """
-    # 1. Explicit verify callable.
+    # 1. Explicit verify callable. A raising verifier is recorded as a failed
+    # score (data), never propagated — one bad metric must not abort the report.
     if case.verify is not None:
-        return _coerce_score(case.verify(output, case.expected))
+        try:
+            return _coerce_score(case.verify(output, case.expected))
+        except Exception as e:
+            logger.warning("verify() raised for case %r: %s", case.name, e)
+            return TrialScore(value=0.0, passed=False, reason=f"verify error: {e}")
 
     # 2. Tool assertions from metadata (deterministic).
     expected_tools = case.metadata.get("expected_tools") if case.metadata else None
@@ -330,13 +337,23 @@ async def _run_single_attempt(
     attempt_index: int,
     *,
     capture_record: bool,
+    executor: Any = None,
 ) -> TrialAttempt:
-    """Run one isolated attempt; failures are recorded as data, never raised."""
+    """Run one isolated attempt; failures are recorded as data, never raised.
+
+    Note on ``timeout``: the attempt runs in a worker thread via
+    :func:`asyncio.to_thread`. On timeout the *awaiting* coroutine returns
+    immediately with ``stop_reason="timeout"``, but Python cannot forcibly kill
+    the underlying thread, so a wedged agent call may keep running in the
+    background until it finishes on its own. The timeout bounds when the report
+    is produced, not necessarily when every side effect stops.
+    """
     start = time.perf_counter()
     isolated = _isolated_agent_copy(agent)
+    loop = asyncio.get_running_loop()
     try:
         response = await asyncio.wait_for(
-            asyncio.to_thread(_run_agent_once, isolated, case.input),
+            loop.run_in_executor(executor, _run_agent_once, isolated, case.input),
             timeout=case.timeout_seconds,
         )
     except asyncio.TimeoutError:
@@ -356,7 +373,11 @@ async def _run_single_attempt(
 
     duration = (time.perf_counter() - start) * 1000.0
     output = _extract_output(response)
-    score = _score_attempt(case, output, isolated, response)
+    try:
+        score = _score_attempt(case, output, isolated, response)
+    except Exception as e:  # pragma: no cover - defensive last resort
+        logger.warning("Scoring failed for case %r: %s", case.name, e)
+        score = TrialScore(value=0.0, passed=False, reason=f"scoring error: {e}")
 
     record = None
     if capture_record:
@@ -401,18 +422,39 @@ async def arun_trials(
         raise ValueError("k must be >= 1")
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
+    # Dedicated executor sized to the concurrency budget. It is *not* joined on
+    # exit: a timed-out worker thread cannot be killed, and blocking on it would
+    # defeat the per-case timeout. Abandoning it lets ``arun_trials`` return
+    # promptly while the OS reclaims the leaked thread when it eventually ends.
+    import concurrent.futures
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=max(1, concurrency)
+    )
+
     async def _bounded(case: EvalCase, idx: int) -> TrialAttempt:
         async with semaphore:
             return await _run_single_attempt(
-                agent, case, idx, capture_record=capture_record
+                agent, case, idx, capture_record=capture_record, executor=executor
             )
 
     report = TrialReport(package_name=package.name, k=k)
-    for case in package.cases:
-        tasks = [_bounded(case, i) for i in range(k)]
-        results = await asyncio.gather(*tasks)
-        # Stable, deterministic assembly order by attempt index.
-        report.attempts[case.name] = sorted(results, key=lambda a: a.attempt)
+    try:
+        for case in package.cases:
+            tasks = [_bounded(case, i) for i in range(k)]
+            results = await asyncio.gather(*tasks)
+            # Stable, deterministic assembly order by attempt index.
+            results = sorted(results, key=lambda a: a.attempt)
+            # Cases can legitimately share a name (e.g. same case re-run):
+            # append instead of overwriting so no attempts are silently dropped.
+            existing = report.attempts.setdefault(case.name, [])
+            offset = len(existing)
+            for r in results:
+                r.attempt += offset
+            existing.extend(results)
+    finally:
+        # Do not wait for potentially-wedged workers (see note above).
+        executor.shutdown(wait=False)
     return report
 
 
