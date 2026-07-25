@@ -18,35 +18,35 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 45 | 14190 |
+| ✅ Agent | 21 | 45 | 14257 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2312 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 10 | 2868 |
+| ✅ Auto Generation | 5 | 10 | 2880 |
 | ✅ Autonomy | 3 | 7 | 2707 |
 | ✅ Bots | 7 | 29 | 11792 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 33888 |
+| ✅ CLI | 5 | 119 | 34078 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3970 |
+| ✅ Code Execution | 2 | 13 | 4031 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 7 | 2772 |
 | ✅ Context Management | 16 | 34 | 13204 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
-| ✅ Evaluation | 1 | 7 | 2902 |
+| ✅ Evaluation | 1 | 7 | 2905 |
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 1964 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 55 | 19560 |
+| ✅ Gateway | 7 | 55 | 19812 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
-| ✅ Hooks | 2 | 9 | 4124 |
+| ✅ Hooks | 2 | 9 | 4128 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4864 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1900 |
-| ✅ Prompts | 2 | 9 | 1910 |
+| ✅ Prompts | 2 | 9 | 1913 |
 | ✅ Providers | 1 | 55 | 7502 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
@@ -69,13 +69,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2700 |
-| ✅ Security | 1 | 3 | 2966 |
+| ✅ Security | 1 | 3 | 2970 |
 | ✅ Sessions | 4 | 13 | 5286 |
 | ✅ Skills | 6 | 13 | 4946 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
-| ✅ Tools | 12 | 133 | 37894 |
+| ✅ Tools | 12 | 133 | 37934 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
