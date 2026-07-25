@@ -1395,7 +1395,9 @@ class ToolExecutionMixin:
             # only gate the built-in DEFAULT_DANGEROUS_TOOLS and silently skip
             # registry-required tools.
             approval_registry = get_approval_registry()
-            registry_required = approval_registry.is_required(tool_name)
+            registry_required = approval_registry.is_required(
+                tool_name, getattr(self, 'name', None)
+            )
             # Check if tool needs approval based on multiple criteria
             needs_approval = (
                 approve_all 
@@ -1409,7 +1411,7 @@ class ToolExecutionMixin:
                     tool_name=tool_name,
                     arguments=tool_args,
                     risk_level=(
-                        approval_registry.get_risk_level(tool_name)
+                        approval_registry.get_risk_level(tool_name, getattr(self, 'name', None))
                         or DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium")
                     ),
                     agent_name=getattr(self, 'name', None),
@@ -1479,7 +1481,12 @@ class ToolExecutionMixin:
             # prompts instead of silently allowing.
             if manager_forces_approval:
                 try:
-                    get_approval_registry().add_requirement(tool_name)
+                    # Scope the requirement to THIS agent so a per-agent
+                    # PermissionManager ``ask`` rule never gates the same tool
+                    # for unrelated agents sharing the process.
+                    get_approval_registry().add_requirement(
+                        tool_name, agent_name=getattr(self, 'name', None)
+                    )
                 except Exception:  # noqa: BLE001
                     pass
             if is_async:
@@ -1602,7 +1609,9 @@ class ToolExecutionMixin:
             if self._permission_manager_requires_approval(function_name):
                 return True
             from ..approval import get_approval_registry
-            if get_approval_registry().is_required(function_name):
+            if get_approval_registry().is_required(
+                function_name, getattr(self, 'name', None)
+            ):
                 return True
             from ..tools import get_registry as get_tool_registry
             if get_tool_registry().get_trust_level(function_name) == "external":
