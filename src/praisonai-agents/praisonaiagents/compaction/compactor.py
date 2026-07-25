@@ -89,8 +89,8 @@ class ContextCompactor:
     
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
-        # Rough estimate: ~4 chars per token
-        return len(text) // 4
+        from ..context.tokens import estimate_tokens_heuristic
+        return estimate_tokens_heuristic(text)
     
     def count_message_tokens(self, message: Dict[str, Any]) -> int:
         """Count tokens in a message."""
