@@ -5,6 +5,8 @@
 const https = require('https');
 
 const PACKAGE_PATHS = ['src/praisonai', 'src/praisonai-agents', 'src/praisonai-code'];
+/** Minimum days between successful patch auto-releases. */
+const PATCH_RELEASE_INTERVAL_DAYS = 3;
 const ACTIVE_RELEASE_STATUSES = new Set([
   'queued', 'in_progress', 'waiting', 'pending', 'requested',
 ]);
@@ -79,8 +81,18 @@ function utcDayStart(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-async function hasSuccessfulReleaseToday(github, owner, repo, now = new Date()) {
-  const dayStart = utcDayStart(now);
+function releaseIntervalStart(now = new Date(), intervalDays = PATCH_RELEASE_INTERVAL_DAYS) {
+  return new Date(now.getTime() - intervalDays * 24 * 60 * 60 * 1000);
+}
+
+async function hasSuccessfulReleaseWithinDays(
+  github,
+  owner,
+  repo,
+  now = new Date(),
+  intervalDays = PATCH_RELEASE_INTERVAL_DAYS,
+) {
+  const windowStart = releaseIntervalStart(now, intervalDays);
   const runs = await github.rest.actions.listWorkflowRuns({
     owner,
     repo,
@@ -89,8 +101,13 @@ async function hasSuccessfulReleaseToday(github, owner, repo, now = new Date()) 
     per_page: 30,
   });
   return runs.data.workflow_runs.some(
-    (r) => r.conclusion === 'success' && new Date(r.created_at) >= dayStart
+    (r) => r.conclusion === 'success' && new Date(r.created_at) >= windowStart
   );
+}
+
+/** @deprecated Use hasSuccessfulReleaseWithinDays — kept for selftests. */
+async function hasSuccessfulReleaseToday(github, owner, repo, now = new Date()) {
+  return hasSuccessfulReleaseWithinDays(github, owner, repo, now, 1);
 }
 
 async function lastGreenCoreTestsSha(github, owner, repo) {
@@ -135,9 +152,11 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
   }
 
   const referenceTime = options.now instanceof Date ? options.now : new Date();
-  if (await hasSuccessfulReleaseToday(github, owner, repo, referenceTime)) {
-    const day = referenceTime.toISOString().slice(0, 10);
-    reasons.push(`already released today (UTC ${day}); max one patch release per day`);
+  if (await hasSuccessfulReleaseWithinDays(github, owner, repo, referenceTime)) {
+    reasons.push(
+      `already released within last ${PATCH_RELEASE_INTERVAL_DAYS} days; `
+      + `max one patch release every ${PATCH_RELEASE_INTERVAL_DAYS} days`
+    );
     return out;
   }
 
@@ -222,6 +241,9 @@ module.exports = {
   bumpPatch,
   readVersionsFromTree,
   pypiVersionExists,
+  PATCH_RELEASE_INTERVAL_DAYS,
+  releaseIntervalStart,
+  hasSuccessfulReleaseWithinDays,
   hasSuccessfulReleaseToday,
   utcDayStart,
   evaluateReleasePreflight,

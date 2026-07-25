@@ -36,8 +36,10 @@ assert.strictEqual(dayStart.toISOString(), '2026-07-08T00:00:00.000Z');
       },
     },
   };
+  assert.strictEqual(rg.PATCH_RELEASE_INTERVAL_DAYS, 3);
+
   assert.strictEqual(
-    await rg.hasSuccessfulReleaseToday(mockGithub, 'o', 'r', noonUtc),
+    await rg.hasSuccessfulReleaseWithinDays(mockGithub, 'o', 'r', noonUtc),
     true
   );
 
@@ -46,12 +48,34 @@ assert.strictEqual(dayStart.toISOString(), '2026-07-08T00:00:00.000Z');
     { headSha: 'abc', isCiTrigger: false, bump: 'patch', now: noonUtc },
     null
   );
-  assert.ok(result.reasons.some((r) => r.includes('already released today')));
+  assert.ok(result.reasons.some((r) => r.includes('every 3 days')));
+
+  const oldReleaseGithub = {
+    rest: {
+      actions: {
+        listWorkflowRuns: async () => ({
+          data: {
+            workflow_runs: [
+              {
+                conclusion: 'success',
+                created_at: '2026-07-04T09:00:00Z',
+                status: 'completed',
+              },
+            ],
+          },
+        }),
+      },
+    },
+  };
+  assert.strictEqual(
+    await rg.hasSuccessfulReleaseWithinDays(oldReleaseGithub, 'o', 'r', noonUtc),
+    false
+  );
 
   console.log('ok: bumpPatch');
   console.log('ok: readVersionsFromTree');
   console.log('ok: pypiVersionExists missing version');
   console.log('ok: utcDayStart');
-  console.log('ok: hasSuccessfulReleaseToday');
-  console.log('ok: daily dedupe blocks second release');
+  console.log('ok: hasSuccessfulReleaseWithinDays');
+  console.log('ok: 3-day dedupe blocks second release');
 })();
