@@ -83,8 +83,8 @@ def _launch_aiui_app(
                 )
                 sys.exit(1)
             default_app.write_text(
-            bundled.read_text(encoding="utf-8"), encoding="utf-8"
-             )
+                bundled.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             print(f"   ✓ Created default {ui_name} config: {default_app}")
         
         resolved = default_app
