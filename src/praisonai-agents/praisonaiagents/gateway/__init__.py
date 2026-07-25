@@ -137,6 +137,11 @@ from .protocols import (
     is_weak_secret,
     assert_gateway_secret_strong,
 )
+from .liveness import (
+    # Event-loop liveness watchdog (Issue #3385)
+    LoopWatchdogPolicy,
+    LoopWatchdog,
+)
 from .hooks import (
     HookAction,
     HookConfig,
@@ -338,6 +343,9 @@ __all__ = [
     "WeakGatewaySecretError",
     "is_weak_secret",
     "assert_gateway_secret_strong",
+    # Event-loop liveness watchdog (Issue #3385)
+    "LoopWatchdogPolicy",
+    "LoopWatchdog",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
