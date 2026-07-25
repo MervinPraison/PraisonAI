@@ -99,6 +99,12 @@ def _register_submodules(old_name: str, new_name: str, module) -> None:
 
     # Alias whatever is already imported first (e.g. the package __init__).
     for mod_name, mod in list(sys.modules.items()):
+        # ``sys.modules`` can legitimately hold ``None`` placeholders (failed
+        # optional imports). Aliasing one would poison the old dotted name so
+        # that ``import old_name.sub`` raises "None in sys.modules" even though
+        # ``_AliasFinder`` could still resolve it on demand.
+        if mod is None:
+            continue
         if mod_name == new_name or mod_name.startswith(new_prefix):
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)

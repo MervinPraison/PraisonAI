@@ -34,6 +34,9 @@ from typing import AsyncIterator, Dict, Any, Optional, List
 from .base import BaseCLIIntegration
 
 
+_UNSET = object()
+
+
 class CodexCLIIntegration(BaseCLIIntegration):
     """
     Integration with OpenAI's Codex CLI.
@@ -106,7 +109,7 @@ class CodexCLIIntegration(BaseCLIIntegration):
         *,
         json_output: Optional[bool] = None,
         output_schema: Optional[str] = None,
-        output_file: Optional[str] = None,
+        output_file: Any = _UNSET,
         **options,
     ) -> List[str]:
         """
@@ -116,7 +119,9 @@ class CodexCLIIntegration(BaseCLIIntegration):
             task: The task to execute
             json_output: JSON output override (defaults to self.json_output)
             output_schema: Output schema override (defaults to self.output_schema)
-            output_file: Output file override (defaults to self.output_file)
+            output_file: Output file override. Omit to use self.output_file;
+                pass ``None`` explicitly to disable the instance default and
+                parse stdout instead.
             **options: Additional options
             
         Returns:
@@ -124,7 +129,7 @@ class CodexCLIIntegration(BaseCLIIntegration):
         """
         json_output = self.json_output if json_output is None else json_output
         output_schema = self.output_schema if output_schema is None else output_schema
-        output_file = self.output_file if output_file is None else output_file
+        output_file = self.output_file if output_file is _UNSET else output_file
         
         cmd = ["codex", "exec", "--skip-git-repo-check"]
         
@@ -258,11 +263,13 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Returns:
             dict: Parsed structured output
         """
-        # Per-call overrides threaded through _build_command, no instance mutation
+        # Per-call overrides threaded through _build_command, no instance mutation.
+        # Pass output_path (or explicit None) so an unset path parses stdout
+        # rather than silently writing to the instance-default output file.
         cmd = self._build_command(
             prompt,
             output_schema=schema_path,
-            output_file=output_path if output_path else None,
+            output_file=output_path,
         )
         output = await self.execute_async(cmd)
         
