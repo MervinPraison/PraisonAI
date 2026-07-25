@@ -1604,6 +1604,7 @@ class BotSessionManager:
         user_id: str,
         content: str,
         sender: str = "",
+        **route: str,
     ) -> bool:
         """Append a group message as passive context without running the agent.
 
@@ -1611,11 +1612,16 @@ class BotSessionManager:
         address the bot is recorded into the session transcript as an ordinary
         ``user`` turn (optionally attributed to its sender for multi-party
         chats) so that when the bot is next mentioned it can see the preceding
-        conversation. No agent run is dispatched. Reuses the same thread-safe
-        append path as the outbound mirror (``_add_mirror_entry_sync``) so it is
-        safe to call from any sync/async context; errors are swallowed. Keyed
-        by the sender's session, mirroring the existing ``mirror_to_session``
-        contract (per_user).
+        conversation. No agent run is dispatched. Appends directly under a
+        per-key threading lock so it is safe to call from any sync/async
+        context (including inline on the inbound handler's own loop thread);
+        errors are swallowed.
+
+        Optional ``chat_id``/``thread_id``/``account``/``chat_type`` route kwargs
+        are threaded through so that with ``session_scope='per_chat'`` the
+        passive entry lands on the same shared group key that a subsequent
+        addressed turn reads from (Issue #2376 routing); without them behaviour
+        is unchanged (per_user, keyed by the sender's session).
         """
         if not content:
             return False
@@ -1626,8 +1632,28 @@ class BotSessionManager:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "passive": True,
         }
+        # A single fire-and-forget append. Unlike the outbound mirror (called
+        # from other threads / cron), ``record_passive`` runs inline on the
+        # inbound handler's own event-loop thread, so the cross-thread
+        # ``run_coroutine_threadsafe`` bridge would dead-lock waiting on the
+        # very loop that is calling it. Append directly under a per-key
+        # threading lock (no asyncio lock touched) so it is safe from any
+        # context and never blocks the loop.
         try:
-            return self._add_mirror_entry_sync(user_id, entry)
+            storage_key = self._storage_key(user_id, **route)
+            sync_locks = getattr(self, "_user_sync_locks", None)
+            if sync_locks is None:
+                self._user_sync_locks = sync_locks = {}
+            lock = sync_locks.get(storage_key)
+            if lock is None:
+                import threading
+                lock = sync_locks[storage_key] = threading.Lock()
+            with lock:
+                history = list(self._load_history(user_id, **route))
+                history.append(entry)
+                self._save_history(user_id, history, **route)
+                self._last_active[storage_key] = time.monotonic()
+            return True
         except Exception as e:  # pragma: no cover — defensive, never break inbound
             logger.warning("record_passive failed: %s", e)
             return False

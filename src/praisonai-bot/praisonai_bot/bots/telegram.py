@@ -2128,7 +2128,18 @@ def _record_passive_group_message(bot: "TelegramBot", message) -> None:
         content = message.get_text() if hasattr(message, "get_text") else str(message.content)
         user_id = message.sender.user_id if message.sender else ""
         sender = (message.sender.display_name or user_id) if message.sender else user_id
-        session_mgr.record_passive(user_id, content, sender=sender)
+        # Thread the same routing fields an addressed turn uses so that with
+        # session_scope="per_chat" the passive entry lands on the shared group
+        # key the next mentioned run reads from (Issue #3380 / #2376). With the
+        # default per_user scope these are simply ignored.
+        session_mgr.record_passive(
+            user_id,
+            content,
+            sender=sender,
+            chat_id=str(message.channel.channel_id) if message.channel and message.channel.channel_id else "",
+            thread_id=str(message.thread_id) if getattr(message, "thread_id", None) else "",
+            account=getattr(bot.config, "account", "default"),
+        )
     except Exception as e:  # pragma: no cover — defensive
         logger.debug(f"Failed to record passive group message: {e}")
 

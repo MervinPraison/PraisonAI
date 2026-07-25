@@ -183,6 +183,12 @@ async def test_group_policy_observe_records_passive_context():
     )
     args, kwargs = bot._session.record_passive.call_args
     assert "we just decided to ship on Friday" in (args[1] if len(args) > 1 else kwargs.get("content", ""))
+    # Issue #3380: the passive entry must carry the same routing an addressed
+    # turn uses so that with session_scope="per_chat" it lands on the shared
+    # group key the next mentioned run reads from (Greptile P1 / CodeRabbit).
+    assert kwargs.get("chat_id") == "-100123456789", (
+        "passive recording must thread chat_id so per_chat sessions see it"
+    )
 
     # A mention still passes through to a real run.
     bot._session.record_passive.reset_mock()
@@ -193,6 +199,41 @@ async def test_group_policy_observe_records_passive_context():
     assert mention_message is not None, "observe must still run when the bot is mentioned"
     assert not bot._session.record_passive.called, (
         "a mentioned message runs; it is not recorded as passive-only context"
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_passive_per_chat_key_visible_to_addressed_turn():
+    """Issue #3380 (Greptile P1 / CodeRabbit): passive context must use the
+    per_chat group key, not the sender's per_user key.
+
+    With ``session_scope="per_chat"`` an addressed turn reads the shared
+    ``(platform, account, chat_id, thread_id)`` key. A passive record threaded
+    with the same routing must persist under that identical key so the bot sees
+    the preceding conversation when next mentioned — and must NOT leak into the
+    sender's separate per_user history.
+    """
+    from praisonai_bot.bots._session import BotSessionManager
+
+    mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+    route = {"account": "default", "chat_id": "-100999", "thread_id": ""}
+
+    ok = mgr.record_passive("sender42", "we ship on Friday", sender="Ann", **route)
+    assert ok is True
+
+    # The addressed turn resolves this shared group key.
+    group_key = mgr._storage_key("sender42", **route)
+    history = mgr._load_history("sender42", **route)
+    assert any(
+        e.get("passive") and "we ship on Friday" in e.get("content", "")
+        for e in history
+    ), "passive entry must be visible under the shared per_chat group key"
+
+    # It must NOT have leaked into the sender's separate per_user history.
+    per_user_key = mgr._storage_key("sender42")
+    assert per_user_key != group_key, "per_chat key must differ from per_user key"
+    assert not mgr._histories.get(per_user_key), (
+        "passive entry must not leak into the sender's per_user history"
     )
 
 
