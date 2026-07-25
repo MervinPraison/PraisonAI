@@ -198,6 +198,46 @@ def dedup_data(
     typer.echo(f"  wrote {kept} unique rows -> {out_path}")
 
 
+@app.command("from-trials")
+def from_trials(
+    report: str = typer.Argument(..., help="Serialised trials report JSON"),
+    out: Optional[str] = typer.Option(None, "--out", "-o", help="Output JSONL"),
+    all_attempts: bool = typer.Option(False, "--all", help="Include failed/unscored attempts"),
+    include_saturated: bool = typer.Option(
+        False, "--include-saturated", help="Include all-pass / zero-pass cases"),
+    fmt: str = typer.Option("messages", "--format", help="messages (ShareGPT) | alpaca"),
+    qc: bool = typer.Option(False, "--qc", help="Run rows through the QC filter"),
+):
+    """Export passing agent trials to a trainer-ready SFT dataset (+ provenance).
+
+    Rejection sampling on the verifier: keeps verifier-passed attempts from
+    frontier cases (0 < pass_rate < 1) and writes ShareGPT ``conversations`` the
+    existing trainer consumes directly. A ``{out}.meta.json`` sidecar traces every
+    line to its case id, attempt index and score.
+
+    Example: praisonai-train data from-trials trials.json -o data/train.jsonl
+             praisonai-train llm --dataset data/train.jsonl
+    """
+    from praisonai_train.data import export_trials
+
+    out_path = out or f"{Path(report).stem}.jsonl"
+    summary = export_trials(
+        report, out_path,
+        only_passed=not all_attempts,
+        frontier_only=not include_saturated,
+        format=fmt,
+        qc=qc,
+    )
+    typer.echo(f"\n─── from-trials: {report} ───")
+    typer.echo(f"  {summary}")
+    typer.echo(f"  wrote {summary.written} rows -> {out_path}")
+    typer.echo(f"  provenance -> {out_path}.meta.json")
+    if summary.written == 0:
+        typer.echo("error: no rows exported — check --all/--include-saturated or "
+                   "whether the report has passing, tool-free attempts", err=True)
+        raise typer.Exit(1)
+
+
 @app.command("validate")
 def validate_data(
     dataset: Optional[str] = typer.Argument(None, help="Dataset JSONL to validate"),
