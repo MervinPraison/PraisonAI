@@ -228,7 +228,9 @@ class CodexCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Ensure JSON output is enabled for streaming (per-call override, no instance mutation)
+        # Ensure JSON output is enabled for streaming (per-call override, no
+        # instance mutation); drop caller json_output so the forced value wins.
+        options.pop("json_output", None)
         cmd = self._build_command(prompt, json_output=True, **options)
         
         async for line in self.stream_async(cmd):

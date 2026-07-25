@@ -172,7 +172,10 @@ class CursorCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming (per-call override, no instance mutation)
+        # Use stream-json format for streaming (per-call override, no instance
+        # mutation); drop caller keys so the forced values win.
+        options.pop("output_format", None)
+        options.pop("stream_partial", None)
         cmd = self._build_command(
             prompt, output_format="stream-json", stream_partial=True, **options
         )

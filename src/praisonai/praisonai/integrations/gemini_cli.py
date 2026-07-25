@@ -167,7 +167,10 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         Returns:
             Tuple[str, dict]: (result, stats) where stats contains usage information
         """
-        # Ensure JSON format for stats (per-call override, no instance mutation)
+        # Ensure JSON format for stats (per-call override, no instance mutation).
+        # Drop any caller-supplied output_format so the forced value wins without
+        # raising a duplicate-keyword TypeError.
+        options.pop("output_format", None)
         cmd = self._build_command(prompt, output_format="json", **options)
         output = await self.execute_async(cmd)
         
@@ -190,7 +193,9 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         Yields:
             dict: Parsed JSON events from the CLI
         """
-        # Use stream-json format for streaming (per-call override, no instance mutation)
+        # Use stream-json format for streaming (per-call override, no instance
+        # mutation); drop caller output_format so the forced value wins.
+        options.pop("output_format", None)
         cmd = self._build_command(prompt, output_format="stream-json", **options)
         
         async for line in self.stream_async(cmd):

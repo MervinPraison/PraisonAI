@@ -16,8 +16,12 @@ Two guarantees matter:
    executed twice, producing duplicate class/enum objects that break
    ``isinstance`` / equality checks across the old and new import paths.
 
-2. **Laziness** — submodules are only imported on demand (the CLI relies on
-   lazy imports for start-up performance), so nothing is eagerly imported here.
+2. **Laziness** — a package's *own* modules are not force-loaded before the
+   package itself is aliased; the CLI relies on lazy imports for start-up
+   performance. Guarantee #1 wins where the two conflict: when an old dotted
+   path is first aliased, its already-moved subtree is pre-registered (see
+   :func:`_register_submodules`) so a combined ``from old.sub import X`` cannot
+   re-enter the finder mid-import and double-load ``sub``.
 
 The shim package at the old path keeps its *own* ``__path__`` (the now nearly
 empty old directory). Because that directory no longer contains the moved
@@ -29,6 +33,7 @@ the moved package.
 from __future__ import annotations
 
 import importlib
+import pkgutil
 import sys
 from importlib.machinery import ModuleSpec
 
@@ -70,25 +75,48 @@ class _AliasFinder:
 
 
 def _register_submodules(old_name: str, new_name: str, module) -> None:
-    """Alias already-imported moved submodules under their old dotted name.
+    """Eagerly import the moved subtree and alias each submodule.
 
-    Registering each *already-imported* moved submodule under its old dotted
-    name in ``sys.modules`` guarantees that a later ``import old_name.sub``
-    finds the identical object immediately, never re-executing the file (which
-    would create duplicate class/enum objects). Anything not yet imported is
-    resolved on demand by :class:`_AliasFinder.find_spec`, which stamps
-    ``sys.modules[fullname]`` with the resolved-once module and preserves module
-    identity — so no eager walk of the moved subtree is required (guarantee #2,
-    laziness).
+    Registering each moved submodule under its old dotted name in
+    ``sys.modules`` guarantees that a later ``import old_name.sub`` finds the
+    identical object immediately, never re-executing the file (which would
+    create duplicate class/enum objects). Modules that fail to import eagerly
+    (e.g. optional heavy dependencies not installed) are skipped and resolved
+    lazily by :class:`_AliasFinder` on first successful use.
+
+    Eager pre-registration is required for correctness, not just startup speed:
+    if the alias for ``old_name.sub`` is *absent* when a combined statement such
+    as ``from old_name.sub import Symbol`` runs, CPython imports the parent
+    shim, then resolves ``.sub`` through :class:`_AliasFinder.find_spec`, which
+    calls ``import_module`` re-entrantly *inside* the parent's in-progress
+    import. Under the import lock that re-entrancy loads the moved file twice,
+    producing two distinct module objects (duplicate classes) and breaking
+    module identity (guarantee #1). Pre-stamping ``sys.modules[old_name.sub]``
+    here means ``_find_and_load`` returns the single canonical object directly
+    and never re-enters the finder.
     """
     new_prefix = new_name + "."
 
-    # Only alias what's ALREADY imported. Anything else is served on demand by
-    # _AliasFinder.find_spec, which preserves module identity.
+    # Alias whatever is already imported first (e.g. the package __init__).
     for mod_name, mod in list(sys.modules.items()):
         if mod_name == new_name or mod_name.startswith(new_prefix):
             old_equiv = old_name + mod_name[len(new_name):]
             sys.modules.setdefault(old_equiv, mod)
+
+    search_path = getattr(module, "__path__", None)
+    if not search_path:
+        return
+
+    for info in pkgutil.walk_packages(search_path, prefix=new_prefix):
+        if info.name in sys.modules:
+            sub = sys.modules[info.name]
+        else:
+            try:
+                sub = importlib.import_module(info.name)
+            except Exception:
+                continue
+        old_equiv = old_name + info.name[len(new_name):]
+        sys.modules.setdefault(old_equiv, sub)
 
 
 def alias_package(old_name: str, new_name: str) -> object:
