@@ -153,15 +153,36 @@ class HierarchicalSessionStore(DefaultSessionStore):
 
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
-        """Load extended session JSON from disk (caller must hold FileLock)."""
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return ExtendedSessionData.from_dict(data)
-            except (json.JSONDecodeError, IOError):
-                pass
-        return ExtendedSessionData(session_id=session_id)
+        """Load extended session JSON from disk (caller must hold FileLock).
+
+        Mirrors the base :meth:`DefaultSessionStore._load_session_from_disk`
+        contract so the write-abort protection is honoured here too:
+
+        * File does not exist → fresh empty session.
+        * Malformed JSON → treat as corrupted; start fresh (logged).
+        * Transient ``OSError`` on an existing file → re-raise so the write
+          paths (``_modify_session_locked``) abort instead of overwriting real
+          history with an empty session. Previously this override swallowed
+          ``IOError`` (an alias of ``OSError``) and returned an empty session,
+          silently bypassing the base-class read-error safeguard.
+        """
+        if not os.path.exists(filepath):
+            return ExtendedSessionData(session_id=session_id)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ExtendedSessionData.from_dict(data)
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"Session file {filepath} contains invalid JSON; starting fresh: {e}"
+            )
+            return ExtendedSessionData(session_id=session_id)
+        except OSError as e:
+            logger.error(
+                f"Transient read error loading session {filepath}; "
+                f"refusing to overwrite existing data: {e}"
+            )
+            raise
 
     def _modify_session_locked(
         self,

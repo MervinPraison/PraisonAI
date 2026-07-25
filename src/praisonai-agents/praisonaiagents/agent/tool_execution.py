@@ -1476,26 +1476,19 @@ class ToolExecutionMixin:
                     return ApprovalDecision(approved=True, reason="Not a dangerous tool")
         else:
             # No approval backend configured. An explicit PermissionManager
-            # ``ask`` rule must still gate the call, so mark it required in the
-            # approval registry (idempotent) before delegating so the registry
-            # prompts instead of silently allowing.
-            if manager_forces_approval:
-                try:
-                    # Scope the requirement to THIS agent so a per-agent
-                    # PermissionManager ``ask`` rule never gates the same tool
-                    # for unrelated agents sharing the process.
-                    get_approval_registry().add_requirement(
-                        tool_name, agent_name=getattr(self, 'name', None)
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+            # ``ask`` rule must still gate the call. Rather than mutating shared
+            # registry state (which leaked onto other agents when this agent had
+            # no stable name), pass the intent per-call via ``force`` so the
+            # registry prompts for *this* call only without side effects.
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
+                    force=manager_forces_approval,
                 )
             else:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
+                    force=manager_forces_approval,
                 )
 
     def _permission_manager_requires_approval(self, function_name) -> bool:

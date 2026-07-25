@@ -388,10 +388,17 @@ class ApprovalRegistry:
         agent_name: Optional[str],
         tool_name: str,
         arguments: Dict,
+        force: bool = False,
     ) -> ApprovalDecision:
-        """Synchronous approval — used by ``Agent._execute_tool_impl``."""
+        """Synchronous approval — used by ``Agent._execute_tool_impl``.
+
+        ``force`` gates this single call even when the tool is not otherwise
+        registered as requiring approval (e.g. a per-agent ``PermissionManager``
+        ``ask`` rule). It applies only to this call and never mutates shared
+        registry state, so it cannot leak an approval gate onto other agents.
+        """
         # Fast-path: not required (checks both global and this agent's scope)
-        if not self.is_required(tool_name, agent_name):
+        if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
         # Already approved in this context
@@ -448,10 +455,15 @@ class ApprovalRegistry:
         agent_name: Optional[str],
         tool_name: str,
         arguments: Dict,
+        force: bool = False,
     ) -> ApprovalDecision:
-        """Asynchronous approval — used by async tool execution path."""
+        """Asynchronous approval — used by async tool execution path.
+
+        See :meth:`approve_sync` for the ``force`` semantics (per-call gate,
+        no shared-state mutation).
+        """
         # Fast-path: not required (checks both global and this agent's scope)
-        if not self.is_required(tool_name, agent_name):
+        if not force and not self.is_required(tool_name, agent_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
         if self.is_already_approved(tool_name, arguments):
