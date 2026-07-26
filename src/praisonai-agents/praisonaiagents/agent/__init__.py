@@ -37,6 +37,11 @@ def __getattr__(name):
         from .interrupt import InterruptController
         _lazy_cache[name] = InterruptController
         return InterruptController
+    if name in ('RunOutcome', 'TerminalReason'):
+        from . import run_outcome as _run_outcome_module
+        value = getattr(_run_outcome_module, name)
+        _lazy_cache[name] = value
+        return value
     
     # Specialized agents - lazy loaded (import rich)
     if name == 'ImageAgent':
@@ -215,6 +220,8 @@ __all__ = [
     'Heartbeat',
     'HeartbeatConfig',
     'InterruptController',
+    'RunOutcome',
+    'TerminalReason',
     'ImageAgent',
     'VideoAgent',
     'VideoConfig',

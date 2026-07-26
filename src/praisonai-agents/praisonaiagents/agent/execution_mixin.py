@@ -125,16 +125,30 @@ class ExecutionMixin:
         
         Args:
             prompt: The input prompt to process
-            **kwargs: Additional arguments passed to achat()
+            **kwargs: Additional arguments passed to achat():
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` (completed | hard_timeout | cancelled |
+                  aborted | failed) instead of raising on error/timeout/
+                  cancellation. Default: False.
+                - timeout (float): When used with ``return_outcome=True``,
+                  a hard timeout budget for the run.
             
         Returns:
-            The agent's response as a string, or AutonomyResult if autonomy enabled
+            The agent's response as a string, or AutonomyResult if autonomy
+            enabled, or a ``RunOutcome`` when ``return_outcome=True``.
             
         Note:
             If autonomy=True was set on the agent, astart() automatically uses
             the autonomous loop (run_autonomous_async) instead of single-turn chat.
         """
         import sys
+
+        return_outcome = kwargs.pop('return_outcome', False)
+        if return_outcome:
+            outcome_timeout = kwargs.pop('timeout', None)
+            return await self._astart_with_outcome(
+                prompt, outcome_timeout, **kwargs
+            )
         
         # ─────────────────────────────────────────────────────────────────────
         # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous_async
@@ -196,6 +210,24 @@ class ExecutionMixin:
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
+    async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
+        """Run astart() and normalise its result/exception into a RunOutcome.
+
+        Optionally enforces a hard timeout. A hard timeout is sticky and is
+        not downgraded by a late-arriving partial completion.
+        """
+        import asyncio
+        from .run_outcome import RunOutcome
+        try:
+            coro = self.astart(prompt, **kwargs)
+            if timeout is not None and timeout > 0:
+                result = await asyncio.wait_for(coro, timeout=timeout)
+            else:
+                result = await coro
+        except BaseException as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
+
     def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
         
@@ -208,9 +240,14 @@ class ExecutionMixin:
             **kwargs: Additional arguments:
                 - stream (bool): Force streaming if True. Default: False
                 - output (str): Output preset override (rarely needed)
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` describing how the run ended
+                  (completed | hard_timeout | cancelled | aborted | failed)
+                  instead of raising on error. Default: False.
                 
         Returns:
-            The agent's response as a string
+            The agent's response as a string, or a ``RunOutcome`` when
+            ``return_outcome=True``.
             
         Example:
             ```python
@@ -227,8 +264,14 @@ class ExecutionMixin:
             - Background processing
             - API endpoints
         """
+        return_outcome = kwargs.pop('return_outcome', False)
+
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
+            if return_outcome:
+                return self._run_with_outcome(
+                    lambda: self._delegate_to_backend(prompt, **kwargs)
+                )
             return self._delegate_to_backend(prompt, **kwargs)
         
         # Production defaults: no streaming, no display
@@ -242,17 +285,34 @@ class ExecutionMixin:
         
         # Load history context
         self._load_history_context()
-        
-        # Check if planning mode is enabled
-        if self.planning:
-            result = self._start_with_planning(prompt, **kwargs)
-        else:
-            result = self.chat(prompt, **kwargs)
-        
-        # Auto-save session if enabled
-        self._auto_save_session()
-        
-        return result
+
+        def _execute():
+            if self.planning:
+                _result = self._start_with_planning(prompt, **kwargs)
+            else:
+                _result = self.chat(prompt, **kwargs)
+            # Auto-save session if enabled
+            self._auto_save_session()
+            return _result
+
+        if return_outcome:
+            return self._run_with_outcome(_execute)
+
+        return _execute()
+
+    def _run_with_outcome(self, executor):
+        """Run ``executor`` and normalise its result/exception into a RunOutcome.
+
+        Keeps the canonical terminal-outcome logic in one place so callers get
+        a single, closed description of how the run ended instead of inferring
+        it from exception identity.
+        """
+        from .run_outcome import RunOutcome
+        try:
+            result = executor()
+        except BaseException as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
 
     def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
         """Delegate execution to external managed backend (e.g., ManagedAgentIntegration).
