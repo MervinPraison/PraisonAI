@@ -29,8 +29,14 @@ _SIBLINGS: dict[str, str] = {
 
 def _ensure_sibling(module_name: str) -> None:
     """Make an optional monorepo sibling importable — single source of truth."""
-    if importlib.util.find_spec(module_name) is not None:
-        return
+    try:
+        if importlib.util.find_spec(module_name) is not None:
+            return
+    except (ImportError, ValueError):
+        # A discoverable-but-broken parent/package can make find_spec raise
+        # (e.g. its __init__ errors during spec resolution). Fall through to
+        # the monorepo checkout so a working sibling source can shadow it.
+        pass
 
     dir_name = _SIBLINGS.get(module_name)
     if dir_name is None:
