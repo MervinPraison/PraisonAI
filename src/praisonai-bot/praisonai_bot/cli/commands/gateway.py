@@ -78,6 +78,17 @@ def gateway_start(
         None, "--drain-marker",
         help="Path to watch for an epoch-aware external drain marker file (#3021)",
     ),
+    watchdog: bool = typer.Option(
+        False, "--watchdog",
+        help="Enable the event-loop liveness watchdog: an OS-thread backstop "
+        "that dumps stacks and hard-exits (restart code 75) if the loop freezes, "
+        "so the supervisor relaunches the process (#3410)",
+    ),
+    watchdog_timeout: Optional[float] = typer.Option(
+        None, "--watchdog-timeout",
+        help="Seconds the event loop may stall before the watchdog trips a "
+        "restart (default ~15s = 5s x 3 strikes; #3410)",
+    ),
 ):
     """Start the gateway server.
 
@@ -167,6 +178,8 @@ def gateway_start(
         scale_to_zero=True if scale_to_zero else None,
         idle_minutes=idle_minutes,
         drain_marker=drain_marker,
+        watchdog=True if watchdog else None,
+        watchdog_timeout=watchdog_timeout,
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 
@@ -1417,6 +1430,7 @@ Manage the gateway server: praisonai gateway <command>
   --reliability {production,default,off}  --max-concurrent-runs N  --queue-depth N
   --overflow-policy {reject,queue,shed_oldest}  --drain-timeout S
   --scale-to-zero --idle-minutes N  --identity-store PATH  --drain-marker PATH
+  --watchdog [--watchdog-timeout S]
 
 [bold]Multi-Bot Mode:[/bold]
   praisonai gateway start --config gateway.yaml

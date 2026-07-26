@@ -125,6 +125,64 @@ def test_disarm_after_configure_is_safe():
     assert gw._watchdog.armed is False
 
 
+# ── Active Typer CLI surface (#3410) ──
+# Guards against the flags being defined only on the legacy argparse parser
+# while the real ``praisonai gateway start`` entrypoint silently drops them.
+
+
+def test_typer_start_exposes_watchdog_flags():
+    import typer
+    from praisonai_bot.cli.commands.gateway import app
+
+    start = typer.main.get_command(app).get_command(None, "start")
+    opts = {name for p in start.params for name in p.opts}
+    assert "--watchdog" in opts
+    assert "--watchdog-timeout" in opts
+
+
+def _patch_handler(monkeypatch, captured):
+    # ``gateway_start`` imports GatewayHandler lazily from the features module,
+    # so patch it there (it is never a ``commands.gateway`` module attribute).
+    from praisonai_bot.cli.features import gateway as features_gateway
+
+    class _StubHandler:
+        def start(self, **kwargs):
+            captured.update(kwargs)
+            return 0
+
+    monkeypatch.setattr(features_gateway, "GatewayHandler", _StubHandler)
+
+
+def test_typer_start_forwards_watchdog_to_handler(monkeypatch):
+    from typer.testing import CliRunner
+    from praisonai_bot.cli.commands import gateway as gateway_cmd
+
+    captured = {}
+    _patch_handler(monkeypatch, captured)
+
+    result = CliRunner().invoke(
+        gateway_cmd.app,
+        ["start", "--watchdog", "--watchdog-timeout", "20", "--no-preflight"],
+    )
+    assert result.exit_code == 0
+    assert captured.get("watchdog") is True
+    assert captured.get("watchdog_timeout") == 20.0
+
+
+def test_typer_start_watchdog_unset_is_none(monkeypatch):
+    from typer.testing import CliRunner
+    from praisonai_bot.cli.commands import gateway as gateway_cmd
+
+    captured = {}
+    _patch_handler(monkeypatch, captured)
+
+    result = CliRunner().invoke(gateway_cmd.app, ["start", "--no-preflight"])
+    assert result.exit_code == 0
+    # Unset flag must not clobber a YAML ``gateway.watchdog.enabled: true``.
+    assert captured.get("watchdog") is None
+    assert captured.get("watchdog_timeout") is None
+
+
 if __name__ == "__main__":
     import pytest
 
