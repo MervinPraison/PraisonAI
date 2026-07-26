@@ -731,7 +731,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, RetryBackoffConfig, __version__, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, RetryBackoffConfig, RunOutcome, __version__, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
@@ -805,6 +805,9 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">wait_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
 * <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval</a>(request: ApprovalRequest) -> ApprovalDecision</code>
 * <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval_sync</a>(request: ApprovalRequest) -> ApprovalDecision</code>
+* <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">completed</a>(output: Optional[str] = None) -> 'RunOutcome'</code>
+* <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">from_exception</a>(exc: BaseException, output: Optional[str] = None) -> 'RunOutcome'</code>
+* <code title="class RunOutcome">RunOutcome.<a href="./src/praisonai-agents/praisonaiagents/agent/run_outcome.py">succeeded</a>() -> bool</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembeddings</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/dimensions.py">get_dimensions</a>(model_name: str) -> int</code>
