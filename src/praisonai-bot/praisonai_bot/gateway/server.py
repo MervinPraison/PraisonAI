@@ -837,6 +837,10 @@ class WebSocketGateway:
         self._draining = False
         self._started_at: Optional[float] = None
         self._server = None
+        # Issue #3410: opt-in event-loop liveness watchdog. Armed around the
+        # serving loop only when a ``gateway.watchdog`` block (or the CLI
+        # ``--watchdog`` flag) enables it; ``None`` means zero cost.
+        self._watchdog = None
         
         self._agents: Dict[str, "Agent"] = {}
         self._sessions: Dict[str, GatewaySession] = {}
@@ -2027,7 +2031,13 @@ class WebSocketGateway:
             logger.exception("Failed to resume interrupted turns on boot")
 
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
-        
+
+        # Issue #3410: arm the opt-in event-loop liveness watchdog around the
+        # serving loop. It runs on a dedicated OS thread, so it keeps probing
+        # precisely when the loop wedges; on repeated missed probes it dumps
+        # all-thread stacks and hard-exits with GATEWAY_RESTART_EXIT_CODE so
+        # systemd/launchd/Docker relaunch the process. No-op when unconfigured.
+        self._arm_watchdog()
         try:
             await self._server.serve()
         except Exception as e:
@@ -2037,6 +2047,88 @@ class WebSocketGateway:
                 self._pid_lock = None
             # Re-raise the original exception
             raise
+        finally:
+            self._disarm_watchdog()
+
+    # ── Event-loop liveness watchdog (Issue #3410) ──
+
+    def _configure_watchdog(self, watchdog_cfg: Optional[Dict[str, Any]]) -> None:
+        """Build the opt-in event-loop liveness watchdog from config.
+
+        Reuses the pure core primitive ``LoopWatchdog`` / ``LoopWatchdogPolicy``
+        (Issue #3385) rather than duplicating any machinery here. The watchdog
+        is only *built* here; it is armed around the serving loop in ``start()``
+        and torn down in ``stop()``. Off unless ``enabled`` is truthy, so
+        always-on gateways keep their exact current behaviour.
+
+        Config shape (``gateway.yaml`` under ``gateway:``)::
+
+            watchdog:
+              enabled: true
+              liveness_interval: 5      # seconds between loop probes
+              liveness_strikes: 3       # hard-exit after N consecutive misses
+              dump_file: /var/log/…     # optional: also write stacks here
+        """
+        self._watchdog = None
+        if not isinstance(watchdog_cfg, dict):
+            return
+
+        def _as_bool(v: Any, default: bool = False) -> bool:
+            if isinstance(v, str):
+                return v.strip().lower() in ("1", "true", "yes", "on")
+            return bool(v) if v is not None else default
+
+        if not _as_bool(watchdog_cfg.get("enabled")):
+            return
+
+        try:
+            from praisonaiagents.gateway import LoopWatchdog, LoopWatchdogPolicy
+        except Exception as exc:  # pragma: no cover - old/absent core
+            logger.warning(
+                "Event-loop watchdog requested but unavailable in core: %s", exc
+            )
+            return
+
+        try:
+            interval = float(watchdog_cfg.get("liveness_interval", 5.0))
+            strikes = int(watchdog_cfg.get("liveness_strikes", 3))
+            policy = LoopWatchdogPolicy(
+                probe_interval_s=interval,
+                missed_probes_before_wedged=strikes,
+                dump_file=watchdog_cfg.get("dump_file") or None,
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("Invalid gateway.watchdog config (%s); disabling", exc)
+            return
+
+        self._watchdog = LoopWatchdog(policy)
+        logger.info(
+            "Event-loop liveness watchdog enabled "
+            "(interval=%.1fs, strikes=%d, wedge_after≈%.0fs)",
+            policy.probe_interval_s,
+            policy.missed_probes_before_wedged,
+            policy.wedge_after_s,
+        )
+
+    def _arm_watchdog(self) -> None:
+        """Arm the liveness watchdog on the running loop (no-op when unset)."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.arm(asyncio.get_running_loop())
+        except Exception:  # pragma: no cover - fail open, never block serving
+            logger.debug("Could not arm event-loop watchdog", exc_info=True)
+
+    def _disarm_watchdog(self) -> None:
+        """Disarm the liveness watchdog (safe to call when unset/already off)."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.disarm()
+        except Exception:  # pragma: no cover - fail open
+            pass
 
     # ── Gateway lifecycle: idle/scale-to-zero + drain marker (Issue #3021) ──
 
@@ -2149,6 +2241,39 @@ class WebSocketGateway:
             drain = dict(merged.get("drain") or {})
             drain["marker_path"] = marker
             merged["drain"] = drain
+        return merged
+
+    def _merge_watchdog_overrides(
+        self, watchdog_cfg: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Fold CLI watchdog overrides into the YAML ``watchdog`` block (#3410).
+
+        ``praisonai gateway start --watchdog [--watchdog-timeout N]`` stamps
+        ``_watchdog_override`` / ``_watchdog_timeout_override`` on the instance;
+        these win over the YAML so an operator can enable the liveness backstop
+        without editing the file. ``--watchdog-timeout`` sets the wedge budget
+        by fixing 3 strikes and deriving the probe interval. Returns the merged
+        block, or the original when there are no overrides.
+        """
+        enable = getattr(self, "_watchdog_override", None)
+        timeout = getattr(self, "_watchdog_timeout_override", None)
+        if enable is None and timeout is None:
+            return watchdog_cfg
+
+        merged: Dict[str, Any] = (
+            dict(watchdog_cfg) if isinstance(watchdog_cfg, dict) else {}
+        )
+        if enable is not None:
+            merged["enabled"] = bool(enable)
+        if timeout is not None:
+            try:
+                budget = float(timeout)
+                if budget > 0:
+                    strikes = int(merged.get("liveness_strikes", 3)) or 3
+                    merged["liveness_strikes"] = strikes
+                    merged["liveness_interval"] = budget / strikes
+            except (TypeError, ValueError):
+                pass
         return merged
 
     def notify_inbound(self) -> None:
@@ -2477,7 +2602,11 @@ class WebSocketGateway:
         
         if self._server:
             self._server.should_exit = True
-        
+
+        # Issue #3410: a deliberate stop is not a wedge — disarm the liveness
+        # watchdog so it never hard-exits the process during graceful shutdown.
+        self._disarm_watchdog()
+
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
             self._pid_lock.release_lock()
@@ -4167,6 +4296,17 @@ class WebSocketGateway:
                 "scale_to_zero": self._idle_policy is not None,
                 "dormant": self._is_dormant,
                 "drain_marker_watch": self._drain_marker_policy is not None,
+            }
+
+        # Issue #3410: surface opt-in event-loop watchdog state so an operator
+        # can confirm the liveness backstop is armed. Only included when
+        # configured, so always-on gateways are unchanged.
+        watchdog = self._watchdog
+        if watchdog is not None:
+            result["watchdog"] = {
+                "enabled": True,
+                "armed": bool(getattr(watchdog, "armed", False)),
+                "wedge_after_s": watchdog.policy.wedge_after_s,
             }
 
         # Issue #3049: surface config hot-reload observability so an operator
@@ -7278,6 +7418,14 @@ class WebSocketGateway:
         # Remember the drain-timeout so a later reload can rebuild the drain
         # watcher task with the same bound (Issue #3021 lifecycle reconcile).
         self._lifecycle_drain_timeout = drain_timeout_cfg
+
+        # Issue #3410: opt-in event-loop liveness watchdog. Accepts a
+        # ``watchdog:`` block nested under ``gateway:``; a CLI ``--watchdog``
+        # override (stamped on the instance) wins over / synthesises the YAML.
+        # No-op unless enabled, so always-on gateways are unchanged.
+        watchdog_cfg = gw_cfg.get("watchdog")
+        watchdog_cfg = self._merge_watchdog_overrides(watchdog_cfg)
+        self._configure_watchdog(watchdog_cfg)
 
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})
