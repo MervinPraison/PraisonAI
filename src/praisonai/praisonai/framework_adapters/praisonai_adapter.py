@@ -353,11 +353,33 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         return agents, tasks
 
-    def _build_team(self, config, agents, tasks, model_name):
-        """Build AgentTeam from agents and tasks."""
+    @staticmethod
+    def _resolve_session_continuity(cli_config):
+        """Resolve (session_id, auto_save) session-continuity settings from cli_config.
+
+        Mirrors the single-agent CLI path: the wrapper threads
+        ``resume_session`` / ``auto_save`` (set by ``--session``/``--continue``/
+        ``--fork``) through ``cli_config`` (``vars(self.args)``). Returns a
+        ``(session_id, auto_save)`` tuple where ``session_id`` is the id to
+        restore from (may be ``None``) and ``auto_save`` is the id to persist
+        under after the run (``None`` when ``--no-save`` / no session).
+        """
+        cfg = cli_config or {}
+        resume = cfg.get('resume_session')
+        auto_save = cfg.get('auto_save')
+        return resume, auto_save
+
+    def _build_team(self, config, agents, tasks, model_name, *, session_active=False):
+        """Build AgentTeam from agents and tasks.
+
+        When ``session_active`` is set (a ``--session``/``--continue``/``--fork``
+        run), shared memory is force-enabled so the team exposes the
+        ``shared_memory`` that ``save_session_state``/``restore_session_state``
+        require to persist and rehydrate team conversation state.
+        """
         from praisonaiagents import AgentTeam
         
-        memory = config.get('memory', False)
+        memory = config.get('memory', False) or session_active
         
         if config.get('process') == 'hierarchical':
             # Use specific manager_llm or fall back to global model
@@ -455,14 +477,39 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             agents, tasks = self._build_agents_and_tasks(
                 config, topic, tools_dict, agent_callback, task_callback, model_name
             )
-            
+
+            # Resolve CLI session continuity (--continue/--session/--fork) that the
+            # wrapper threads through cli_config. When a session is active the team
+            # is given shared memory so team state can be persisted/rehydrated.
+            resume_session, auto_save = self._resolve_session_continuity(cli_config)
+            session_active = bool(resume_session or auto_save)
+
             # Create the team
-            team = self._build_team(config, agents, tasks, model_name)
-            
+            team = self._build_team(
+                config, agents, tasks, model_name, session_active=session_active
+            )
+
+            # Rehydrate prior team state before kickoff so a resumed/forked YAML
+            # run continues where it left off, using the existing core API.
+            if resume_session:
+                if team.restore_session_state(resume_session):
+                    logger.info(f"Restored session state: {resume_session}")
+                else:
+                    logger.info(f"No prior state for session: {resume_session}")
+
             # Use native async path
             response = await team.astart()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
-            
+
+            # Persist team state after kickoff so the run can be resumed later
+            # (respects --no-save, which leaves auto_save unset).
+            if auto_save:
+                try:
+                    team.save_session_state(auto_save)
+                    logger.info(f"Saved session state: {auto_save}")
+                except Exception as e:  # never fail a completed run on save
+                    logger.warning(f"Failed to save session state '{auto_save}': {e}")
+
             logger.info("PraisonAI async execution completed")
             return result
         finally:

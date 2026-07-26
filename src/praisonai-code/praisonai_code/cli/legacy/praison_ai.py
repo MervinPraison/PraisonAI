@@ -1998,12 +1998,19 @@ class PraisonAI:
 
         if getattr(self.args, 'cli_project_sessions', False):
             from ..state.project_sessions import build_cli_memory_config
-            memory_cfg = build_cli_memory_config(
-                getattr(self.args, 'resume_session', None),
-                getattr(self.args, 'auto_save', None),
-            )
+            resume_session = getattr(self.args, 'resume_session', None)
+            auto_save = getattr(self.args, 'auto_save', None)
+            memory_cfg = build_cli_memory_config(resume_session, auto_save)
             if memory_cfg is not None:
                 cli_config['memory'] = memory_cfg
+            # Thread session ids so the team adapter can rehydrate/persist team
+            # state via AgentTeam.restore_session_state/save_session_state,
+            # giving YAML/team runs the same --continue/--session/--fork/--no-save
+            # continuity as single-agent prompt runs.
+            if resume_session:
+                cli_config['resume_session'] = resume_session
+            if auto_save:
+                cli_config['auto_save'] = auto_save
             
         return cli_config
 
