@@ -125,16 +125,30 @@ class ExecutionMixin:
         
         Args:
             prompt: The input prompt to process
-            **kwargs: Additional arguments passed to achat()
+            **kwargs: Additional arguments passed to achat():
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` (completed | hard_timeout | cancelled |
+                  aborted | failed) instead of raising on error/timeout/
+                  cancellation. Default: False.
+                - timeout (float): When used with ``return_outcome=True``,
+                  a hard timeout budget for the run.
             
         Returns:
-            The agent's response as a string, or AutonomyResult if autonomy enabled
+            The agent's response as a string, or AutonomyResult if autonomy
+            enabled, or a ``RunOutcome`` when ``return_outcome=True``.
             
         Note:
             If autonomy=True was set on the agent, astart() automatically uses
             the autonomous loop (run_autonomous_async) instead of single-turn chat.
         """
         import sys
+
+        return_outcome = kwargs.pop('return_outcome', False)
+        if return_outcome:
+            outcome_timeout = kwargs.pop('timeout', None)
+            return await self._astart_with_outcome(
+                prompt, outcome_timeout, **kwargs
+            )
         
         # ─────────────────────────────────────────────────────────────────────
         # UNIFIED AUTONOMY API: If autonomy is enabled, route to run_autonomous_async
@@ -196,6 +210,57 @@ class ExecutionMixin:
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
 
+    async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
+        """Run astart() and normalise its result/exception into a RunOutcome.
+
+        Optionally enforces a hard run-level timeout budget. The budget is the
+        *authoritative* source of ``hard_timeout``: when our own
+        ``asyncio.wait_for`` fires we return ``hard_timeout`` directly, so a
+        nested operation timeout (which surfaces as a generic
+        ``asyncio.TimeoutError`` from inside the run) is never misreported as a
+        run-budget timeout — it falls through to ``failed`` via
+        ``RunOutcome.from_exception``.
+
+        External ``asyncio.CancelledError`` (e.g. the enclosing task being
+        cancelled during host shutdown) is re-raised, not swallowed, so
+        cooperative cancellation semantics are honoured.
+        """
+        import asyncio
+        from .run_outcome import RunOutcome
+
+        enforce_budget = timeout is not None and timeout > 0
+
+        # Enforce the run budget with an explicit deadline on a task we own, so
+        # that only *our* budget expiry maps to hard_timeout. This deliberately
+        # avoids ``asyncio.wait_for`` catching a bare inner ``TimeoutError``:
+        # a nested operation timeout raised inside the run must fall through to
+        # ``failed`` rather than be misreported as a run-budget ``hard_timeout``.
+        try:
+            if enforce_budget:
+                task = asyncio.ensure_future(self.astart(prompt, **kwargs))
+                try:
+                    done, _ = await asyncio.wait({task}, timeout=timeout)
+                except asyncio.CancelledError:
+                    # Enclosing task cancelled (e.g. host shutdown): cancel the
+                    # child and propagate so cooperative cancellation is honoured.
+                    task.cancel()
+                    raise
+                if task not in done:
+                    # Our budget expired first: authoritative, sticky hard_timeout.
+                    task.cancel()
+                    return RunOutcome(reason="hard_timeout")
+                result = task.result()
+            else:
+                result = await self.astart(prompt, **kwargs)
+        except asyncio.CancelledError:
+            # External cancellation of the awaiting task: honour asyncio
+            # cancellation / host shutdown by propagating instead of converting
+            # it into a benign RunOutcome.
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
+
     def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
         """Execute agent silently and return structured result.
         
@@ -208,9 +273,14 @@ class ExecutionMixin:
             **kwargs: Additional arguments:
                 - stream (bool): Force streaming if True. Default: False
                 - output (str): Output preset override (rarely needed)
+                - return_outcome (bool): If True, return a canonical
+                  ``RunOutcome`` describing how the run ended
+                  (completed | hard_timeout | cancelled | aborted | failed)
+                  instead of raising on error. Default: False.
                 
         Returns:
-            The agent's response as a string
+            The agent's response as a string, or a ``RunOutcome`` when
+            ``return_outcome=True``.
             
         Example:
             ```python
@@ -227,8 +297,14 @@ class ExecutionMixin:
             - Background processing
             - API endpoints
         """
+        return_outcome = kwargs.pop('return_outcome', False)
+
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
+            if return_outcome:
+                return self._run_with_outcome(
+                    lambda: self._delegate_to_backend(prompt, **kwargs)
+                )
             return self._delegate_to_backend(prompt, **kwargs)
         
         # Production defaults: no streaming, no display
@@ -242,17 +318,34 @@ class ExecutionMixin:
         
         # Load history context
         self._load_history_context()
-        
-        # Check if planning mode is enabled
-        if self.planning:
-            result = self._start_with_planning(prompt, **kwargs)
-        else:
-            result = self.chat(prompt, **kwargs)
-        
-        # Auto-save session if enabled
-        self._auto_save_session()
-        
-        return result
+
+        def _execute():
+            if self.planning:
+                _result = self._start_with_planning(prompt, **kwargs)
+            else:
+                _result = self.chat(prompt, **kwargs)
+            # Auto-save session if enabled
+            self._auto_save_session()
+            return _result
+
+        if return_outcome:
+            return self._run_with_outcome(_execute)
+
+        return _execute()
+
+    def _run_with_outcome(self, executor):
+        """Run ``executor`` and normalise its result/exception into a RunOutcome.
+
+        Keeps the canonical terminal-outcome logic in one place so callers get
+        a single, closed description of how the run ended instead of inferring
+        it from exception identity.
+        """
+        from .run_outcome import RunOutcome
+        try:
+            result = executor()
+        except BaseException as exc:  # noqa: BLE001 - normalised into outcome
+            return RunOutcome.from_exception(exc)
+        return RunOutcome.completed(output=str(result) if result is not None else None)
 
     def _delegate_to_backend(self, prompt: str, **kwargs) -> Optional[str]:
         """Delegate execution to external managed backend (e.g., ManagedAgentIntegration).
