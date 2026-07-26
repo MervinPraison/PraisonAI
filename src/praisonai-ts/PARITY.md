@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-07-25
+> **Version:** 1.5.87 | **Last Updated:** 2026-07-26
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 408 |
+| Python Core Features | 409 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **115** |
+| **Gap Count** | **116** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 102 |
+| P3 (Low) | 103 |
 
 ## Gap Matrix
 
@@ -159,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 102 todo)
+### P3_Advanced (180 done, 103 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -224,6 +224,7 @@
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RulesConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `RunOutcome` | ✅ | ❌ | high | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `ScopeRequiredError` | ✅ | ❌ | low | ⏳ TODO |
 | `SendResult` | ✅ | ❌ | low | ⏳ TODO |
@@ -595,7 +596,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (105 exports)</summary>
+<summary><strong>other</strong> (106 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
