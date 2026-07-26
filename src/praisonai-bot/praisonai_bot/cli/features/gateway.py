@@ -109,6 +109,7 @@ _START_FLAG_KEYS = (
     "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
     "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
     "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
+    "watchdog", "watchdog_timeout",
 )
 
 
@@ -185,6 +186,8 @@ class GatewayHandler:
         scale_to_zero: Optional[bool] = None,
         idle_minutes: Optional[float] = None,
         drain_marker: Optional[str] = None,
+        watchdog: Optional[bool] = None,
+        watchdog_timeout: Optional[float] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -264,6 +267,8 @@ class GatewayHandler:
             "scale_to_zero": scale_to_zero,
             "idle_minutes": idle_minutes,
             "drain_marker": drain_marker,
+            "watchdog": watchdog,
+            "watchdog_timeout": watchdog_timeout,
         }
 
         def _commit_start_flags() -> None:
@@ -336,6 +341,12 @@ class GatewayHandler:
                 self._gateway._idle_minutes_override = idle_minutes
             if drain_marker is not None:
                 self._gateway._drain_marker_override = drain_marker
+            # CLI --watchdog / --watchdog-timeout override gateway.watchdog.*
+            # in YAML (#3410): opt-in event-loop liveness backstop.
+            if watchdog is not None:
+                self._gateway._watchdog_override = watchdog
+            if watchdog_timeout is not None:
+                self._gateway._watchdog_timeout_override = watchdog_timeout
             print(f"Loading gateway config from {config_file}")
             # Config wiring validated; the gateway is about to bind. Persist the
             # launch posture now so a restart can replay it, but only after the
@@ -370,6 +381,15 @@ class GatewayHandler:
         self._gateway = WebSocketGateway(
             config=config, openai_api=openai_api, mcp=mcp
         )
+        # CLI --watchdog also applies in no-config mode (#3410): build the
+        # opt-in liveness watchdog directly since start_with_config's YAML
+        # wiring is skipped here. No-op unless --watchdog is passed.
+        if watchdog:
+            self._gateway._watchdog_override = watchdog
+            self._gateway._watchdog_timeout_override = watchdog_timeout
+            self._gateway._configure_watchdog(
+                self._gateway._merge_watchdog_overrides(None)
+            )
         # Resolved graceful-drain window for this no-config run. Defaults to the
         # explicit ``--drain-timeout`` (``None`` → gateway default) and is
         # replaced below by the ``--reliability`` preset's drain when a preset
@@ -872,6 +892,17 @@ def handle_gateway_command(args) -> int:
             "--drain-marker", dest="drain_marker", default=None,
             help="Path to watch for an epoch-aware external drain marker file (#3021)",
         )
+        start_parser.add_argument(
+            "--watchdog", dest="watchdog", action="store_true", default=None,
+            help="Enable the event-loop liveness watchdog: an OS-thread backstop "
+                 "that dumps stacks and hard-exits (restart code 75) if the loop "
+                 "freezes, so the supervisor relaunches the process (#3410)",
+        )
+        start_parser.add_argument(
+            "--watchdog-timeout", dest="watchdog_timeout", type=float, default=None,
+            help="Seconds the event loop may stall before the watchdog trips a "
+                 "restart (default ~15s = 5s x 3 strikes; #3410)",
+        )
 
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -944,6 +975,8 @@ def handle_gateway_command(args) -> int:
             scale_to_zero=getattr(args, "scale_to_zero", None),
             idle_minutes=getattr(args, "idle_minutes", None),
             drain_marker=getattr(args, "drain_marker", None),
+            watchdog=getattr(args, "watchdog", None),
+            watchdog_timeout=getattr(args, "watchdog_timeout", None),
         )
     elif subcommand == "status":
         handler.status(
