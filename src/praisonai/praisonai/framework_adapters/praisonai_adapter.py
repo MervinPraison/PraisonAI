@@ -558,9 +558,31 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 else:
                     logger.info(f"No prior state for session: {resume_session}")
 
-            # Use native async path
-            response = await team.astart()
+            # Bridge the team's aggregate per-step events onto the CLI
+            # structured output stream so `--output stream-json` on a YAML/team
+            # run emits the same per-agent NDJSON events as a single-agent run.
+            # Best-effort and a no-op outside stream-json (the bridge guards on
+            # its own `active`), so serve/jobs and non-CLI callers are unaffected.
+            bridge, _ = self._attach_stream_bridge(team)
+            try:
+                # Use native async path
+                response = await team.astart()
+            except Exception as run_error:
+                # Emit a terminal `run.error` so `--output stream-json`
+                # consumers can distinguish a failed team run from an
+                # incomplete/still-running one, matching the single-agent
+                # path. Best-effort; never mask the original exception.
+                if bridge is not None:
+                    try:
+                        bridge.emit_run_error(str(run_error))
+                    except Exception:
+                        logger.debug("Stream bridge run.error emit failed", exc_info=True)
+                raise
+            finally:
+                self._detach_stream_bridge(team, bridge)
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
+            if bridge is not None:
+                bridge.emit_run_result(response, ok=True)
 
             # Persist team state after kickoff so the run can be resumed later
             # (respects --no-save, which leaves auto_save unset).
@@ -586,6 +608,40 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 except Exception as e:
                     logger.error(f"Error stopping InteractiveRuntime: {e}")
     
+    @staticmethod
+    def _attach_stream_bridge(team):
+        """Attach the CLI stream-json bridge to a team's aggregate emitter.
+
+        Returns ``(bridge, output)``. Both are ``None`` when the CLI output
+        layer is unavailable (non-CLI callers) or when not in a structured
+        output mode (the bridge is inactive), so this is a safe no-op outside
+        ``praisonai run ... --output stream-json``.
+        """
+        try:
+            from praisonai_code.cli.output import get_output_controller, attach_bridge
+        except ImportError:
+            return None, None
+        try:
+            output = get_output_controller()
+            bridge = attach_bridge(team, output)
+            if bridge is not None:
+                bridge.emit_run_start()
+            return bridge, output
+        except Exception:
+            logger.debug("Stream bridge attach failed", exc_info=True)
+            return None, None
+
+    @staticmethod
+    def _detach_stream_bridge(team, bridge):
+        """Detach a previously attached stream bridge (best-effort)."""
+        if bridge is None:
+            return
+        try:
+            from praisonai_code.cli.output import detach_bridge
+            detach_bridge(team, bridge)
+        except Exception:
+            logger.debug("Stream bridge detach failed", exc_info=True)
+
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """
         Validate configuration for PraisonAI.

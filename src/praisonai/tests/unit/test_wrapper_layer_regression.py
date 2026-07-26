@@ -429,6 +429,25 @@ class TestFrameworkAdapterExceptionPaths:
         assert 'finalize_observability' not in inspect.getsource(CrewAIAdapter.run)
         assert 'finalize_observability' not in inspect.getsource(PraisonAIAdapter.arun)
 
+    def test_arun_emits_terminal_run_error_on_failure(self):
+        """A failed AgentTeam stream-json run must emit a terminal run.error.
+
+        Regression guard for #3405: without this, a raise from ``team.astart()``
+        detaches the bridge and returns without any terminal event, so
+        ``--output stream-json`` consumers cannot distinguish a failed team run
+        from an incomplete/still-running one. The single-agent path already
+        emits ``run.error`` on failure; the team path must match that contract.
+        """
+        import inspect
+
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+        src = inspect.getsource(PraisonAIAdapter.arun)
+        assert 'emit_run_error' in src, (
+            "arun must emit run.error when team.astart() raises so stream-json "
+            "consumers see a terminal failure event"
+        )
+
     def test_adapter_setup_runs_inside_observability_session(self):
         """adapter.setup() must run INSIDE the observability_session.
 
