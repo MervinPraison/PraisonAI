@@ -555,13 +555,17 @@ class ConfigResolver:
         
         # Collect paths from current directory upward
         while current != current.parent:
-            search_paths.append(current)
-            if git_root and current == git_root:
-                break  # Stop at git root if found
+            # Never treat the user's home directory as a project directory.
             if home is not None and current == home:
-                break  # Do not walk past home into shared parents
+                break
+
+            search_paths.append(current)
+
+            if git_root and current == git_root:
+                break
+
             current = current.parent
-        
+                
         # Search for config files
         for search_dir in search_paths:
             for config_name in self.PROJECT_CONFIG_NAMES:
@@ -572,7 +576,6 @@ class ConfigResolver:
                         data["_source"] = str(config_path)
                         self._validate(data, str(config_path))
                         return data
-        
         return None
     
     def _managed_source_spec(self) -> Dict[str, Any]:

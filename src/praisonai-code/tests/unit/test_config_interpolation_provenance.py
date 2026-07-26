@@ -85,10 +85,17 @@ def test_resolve_with_provenance_env_overrides_project(tmp_path, monkeypatch):
     assert prov["agent.model"]["layer"] == "environment"
 
 
-def test_resolve_with_provenance_defaults_present(tmp_path):
+def test_resolve_with_provenance_defaults_present(tmp_path, monkeypatch):
+    
+    monkeypatch.setattr(
+        ConfigResolver,
+        "_load_global_config",
+        lambda self: None,
+    )
+
     resolver = ConfigResolver(cwd=tmp_path)
     prov = resolver.resolve_with_provenance()
-    # With no config files, values come from built-in defaults.
+
     assert prov["telemetry"]["layer"] == "defaults"
 
 
