@@ -150,6 +150,40 @@ def test_find_llama_binary_from_path(monkeypatch):
     assert llamacpp.find_llama_binary("llama-server") == "/usr/local/bin/llama-server"
 
 
+def test_find_llama_binary_env_file_exact_match(monkeypatch, tmp_path):
+    # LLAMA_CPP_BIN points directly at the requested binary — honour it.
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("LLAMA_CPP_BIN", str(binary))
+    assert llamacpp.find_llama_binary("llama-server") == str(binary)
+
+
+def test_find_llama_binary_env_file_prefers_sibling(monkeypatch, tmp_path):
+    # LLAMA_CPP_BIN points at llama-cli but llama-server sits beside it — use the
+    # correctly-named sibling, not the configured file.
+    cli = tmp_path / "llama-cli"
+    cli.write_text("#!/bin/sh\n")
+    cli.chmod(0o755)
+    server = tmp_path / "llama-server"
+    server.write_text("#!/bin/sh\n")
+    server.chmod(0o755)
+    monkeypatch.setenv("LLAMA_CPP_BIN", str(cli))
+    assert llamacpp.find_llama_binary("llama-server") == str(server)
+
+
+def test_find_llama_binary_env_file_mismatch_no_sibling_raises(monkeypatch, tmp_path):
+    # LLAMA_CPP_BIN points at llama-cli, no llama-server sibling, not on PATH:
+    # must NOT return the wrong executable — it must raise instead.
+    cli = tmp_path / "llama-cli"
+    cli.write_text("#!/bin/sh\n")
+    cli.chmod(0o755)
+    monkeypatch.setenv("LLAMA_CPP_BIN", str(cli))
+    monkeypatch.setattr(llamacpp.shutil, "which", lambda _n: None)
+    with pytest.raises(RuntimeError, match="LLAMA_CPP_BIN"):
+        llamacpp.find_llama_binary("llama-server")
+
+
 # --------------------------------------------------------------------------- #
 # parse_llama_timings
 # --------------------------------------------------------------------------- #

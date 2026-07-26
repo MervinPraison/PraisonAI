@@ -48,14 +48,15 @@ def find_llama_binary(name: str = "llama-server") -> str:
             if candidate.exists() and os.access(candidate, os.X_OK):
                 return str(candidate)
         elif p.exists() and os.access(p, os.X_OK):
-            # A file was given. Honour it directly (its basename may differ), but
-            # if the caller wants a sibling binary, prefer that in the same dir.
+            # A file was given. Honour it only when it *is* the requested binary,
+            # otherwise prefer the correctly-named sibling in the same directory.
+            # Never return a differently-named executable — launching e.g.
+            # llama-cli with server flags (or vice-versa) fails cryptically.
             if p.name == name:
                 return str(p)
             sibling = p.parent / name
             if sibling.exists() and os.access(sibling, os.X_OK):
                 return str(sibling)
-            return str(p)
 
     found = shutil.which(name)
     if found:

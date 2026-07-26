@@ -321,7 +321,8 @@ def train_export(
 
     Examples:
         praisonai-train export hf     --model-dir lora_model --hf   me/my-model
-        praisonai-train export gguf   --model-dir lora_model --hf   me/my-model --quant q4_k_m
+        praisonai-train export gguf   --model-dir lora_model --quant q4_k_m            # local .gguf
+        praisonai-train export gguf   --model-dir lora_model --hf   me/my-model        # local + push
         praisonai-train export ollama --model-dir lora_model --ollama me/my-model --quant q4_k_m
     """
     from ..output.console import get_output_controller
@@ -370,12 +371,18 @@ def train_export(
     cfg["model_name"] = model_name or model_dir
 
     # Validate the destination is present for the chosen target.
-    if target in ("hf", "gguf") and not cfg.get("hf_model_name"):
+    # `hf` publishes to the Hub so a repo id is mandatory. `gguf` produces a
+    # LOCAL .gguf (so it can be served with `serve`/`--mtp-draft`) and only
+    # additionally pushes to the Hub when --hf is given; without --hf we write
+    # the GGUF under the model dir.
+    if target == "hf" and not cfg.get("hf_model_name"):
         output.print_error(
             "A Hugging Face repo id is required for this target",
             remediation="Pass --hf <your-username>/<name>.",
         )
         raise typer.Exit(1)
+    if target == "gguf" and not cfg.get("hf_model_name"):
+        cfg["hf_model_name"] = str(Path(model_dir) / "gguf")
     if target == "ollama" and not cfg.get("ollama_model"):
         output.print_error(
             "An Ollama model name is required for this target",
@@ -404,7 +411,11 @@ def train_export(
         if target == "hf":
             trainer.save_model_merged()
         elif target == "gguf":
-            trainer.push_model_gguf()
+            # Always produce a LOCAL .gguf so it can be served (and paired with an
+            # MTP drafter). Push to the Hub additionally only when --hf is set.
+            trainer.save_model_gguf()
+            if hf:
+                trainer.push_model_gguf()
         else:
             trainer.create_and_push_ollama_model()
     except (ValueError, RuntimeError) as exc:

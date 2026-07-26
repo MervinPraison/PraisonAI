@@ -199,10 +199,23 @@ def test_ollama_push_passes_quantize_flag(monkeypatch, tmp_path):
 
 
 def test_ollama_disk_precheck_triggers(monkeypatch, tmp_path):
+    # A LOCAL FROM path gives a known source size, so the 1.5x requirement is
+    # enforced and a nearly-full volume is rejected.
+    src = tmp_path / "model.gguf"
+    src.write_bytes(b"x")  # existence is enough; size is stubbed below
     monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    monkeypatch.setattr(ollama_mod, "_dir_size_bytes", lambda _p: 4 * 2 ** 30)
     monkeypatch.setattr(ollama_mod.shutil, "disk_usage", lambda *_a, **_k: _FreeDisk(1))
     with pytest.raises(RuntimeError, match="OLLAMA_MODELS"):
-        ollama_mod._check_ollama_disk("FROM some-hub-id\n")
+        ollama_mod._check_ollama_disk(f"FROM {src}\n")
+
+
+def test_ollama_disk_precheck_skips_unknown_source(monkeypatch, tmp_path):
+    # A Hub-id FROM has unknown source size; we can't estimate the requirement so
+    # the check is skipped rather than blocking a viable small-model export.
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    monkeypatch.setattr(ollama_mod.shutil, "disk_usage", lambda *_a, **_k: _FreeDisk(1))
+    ollama_mod._check_ollama_disk("FROM some-hub-id\n")  # must not raise
 
 
 # --------------------------------------------------------------------------- #
@@ -228,8 +241,12 @@ def test_export_command_dispatches_hf(monkeypatch, tmp_path):
         def save_model_merged(self):
             called["target"] = "hf"
 
-        def push_model_gguf(self):
+        def save_model_gguf(self):
+            called.setdefault("calls", []).append("save_gguf")
             called["target"] = "gguf"
+
+        def push_model_gguf(self):
+            called.setdefault("calls", []).append("push_gguf")
 
         def create_and_push_ollama_model(self):
             called["target"] = "ollama"
@@ -246,6 +263,83 @@ def test_export_command_dispatches_hf(monkeypatch, tmp_path):
         base_model="unsloth/gemma-2-2b",
     )
     assert called["target"] == "hf"
+
+
+def test_export_gguf_saves_local_without_hf(monkeypatch, tmp_path):
+    """`export gguf` without --hf must produce a LOCAL gguf (no Hub push)."""
+    import praisonai_train.cli.commands.train as cli
+
+    called = {}
+
+    class _FakeTrainer:
+        @classmethod
+        def for_export(cls, cfg):
+            obj = cls()
+            obj.config = cfg
+            obj.model = None
+            obj.hf_tokenizer = None
+            return obj
+
+        def load_model(self):
+            return ("MODEL", "TOK")
+
+        def save_model_gguf(self):
+            called.setdefault("calls", []).append("save_gguf")
+
+        def push_model_gguf(self):
+            called.setdefault("calls", []).append("push_gguf")
+
+    monkeypatch.setattr(trainer_mod, "TrainModel", _FakeTrainer)
+
+    cli.train_export(
+        target="gguf",
+        model_dir=str(tmp_path),
+        config=None,
+        ollama=None,
+        hf=None,
+        quant="q4_k_m",
+        base_model="unsloth/gemma-2-2b",
+    )
+    # Saved locally, and did NOT push to the Hub.
+    assert called.get("calls") == ["save_gguf"]
+
+
+def test_export_gguf_saves_local_and_pushes_with_hf(monkeypatch, tmp_path):
+    """`export gguf --hf` must save locally AND push to the Hub."""
+    import praisonai_train.cli.commands.train as cli
+
+    called = {}
+
+    class _FakeTrainer:
+        @classmethod
+        def for_export(cls, cfg):
+            obj = cls()
+            obj.config = cfg
+            obj.model = None
+            obj.hf_tokenizer = None
+            return obj
+
+        def load_model(self):
+            return ("MODEL", "TOK")
+
+        def save_model_gguf(self):
+            called.setdefault("calls", []).append("save_gguf")
+
+        def push_model_gguf(self):
+            called.setdefault("calls", []).append("push_gguf")
+
+    monkeypatch.setattr(trainer_mod, "TrainModel", _FakeTrainer)
+
+    cli.train_export(
+        target="gguf",
+        model_dir=str(tmp_path),
+        config=None,
+        ollama=None,
+        hf="me/model",
+        quant="q4_k_m",
+        base_model="unsloth/gemma-2-2b",
+    )
+    assert called.get("calls") == ["save_gguf", "push_gguf"]
 
 
 def test_export_command_bad_target_exits(monkeypatch, tmp_path):
