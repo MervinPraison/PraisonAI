@@ -312,6 +312,9 @@ def train_export(
         None, "--quant", help="Quantization method for gguf/ollama, e.g. q4_k_m"),
     base_model: Optional[str] = typer.Option(
         None, "--base-model", help="Base model id (for chat-template selection)"),
+    mtp_draft: bool = typer.Option(
+        False, "--mtp-draft/--no-mtp-draft",
+        help="Also download the stock MTP drafter (Gemma-4 only) for fast inference"),
 ):
     """
     Export / publish an ALREADY-trained model without re-running training.
@@ -407,6 +410,15 @@ def train_export(
     except (ValueError, RuntimeError) as exc:
         output.print_error(str(exc))
         raise typer.Exit(1)
+
+    # Optionally fetch the stock MTP drafter for fast (self-speculative) inference.
+    if mtp_draft:
+        from praisonai_train.train import _mtp
+        try:
+            drafter_path = _mtp.fetch_drafter(cfg["model_name"], model_dir)
+            output.print_success(f"Downloaded MTP drafter -> {drafter_path}")
+        except (ValueError, RuntimeError) as exc:
+            output.print_warning(f"Skipped MTP drafter: {exc}")
 
     output.print_success(f"Exported model to {target}.")
 
