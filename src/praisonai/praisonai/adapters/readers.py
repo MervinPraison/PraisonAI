@@ -391,5 +391,11 @@ def register_default_readers():
     logger.debug("Registered default readers")
 
 
-# Auto-register on import
-register_default_readers()
+# NOTE: No auto-registration at import time. Registering into the core-SDK
+# global singleton as an import side effect violates the "core stays
+# lightweight, wrapper does the heavy work at call time" principle and breaks
+# multi-tenant runtimes / tests. Callers wire these into the SDK registry
+# explicitly (see ``praisonai.adapters.register_default_adapters``), e.g.::
+#
+#     from praisonai.adapters.readers import register_default_readers
+#     register_default_readers()
