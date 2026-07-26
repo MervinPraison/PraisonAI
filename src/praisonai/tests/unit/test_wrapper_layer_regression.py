@@ -624,12 +624,83 @@ class TestIssue3402YamlTeamSessionContinuity:
 
     def test_arun_wires_restore_and_save(self):
         """arun must call restore_session_state before astart and
-        save_session_state after, keyed by the cli_config session ids."""
-        import inspect
+        save_session_state after, each keyed by the cli_config session ids."""
+        import asyncio
+        from unittest.mock import AsyncMock
         from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
 
-        src = inspect.getsource(PraisonAIAdapter.arun)
-        assert "restore_session_state" in src
-        assert "save_session_state" in src
-        assert src.index("restore_session_state") < src.index("await team.astart()")
-        assert src.index("await team.astart()") < src.index("save_session_state")
+        adapter = PraisonAIAdapter()
+        calls = []
+
+        team = MagicMock()
+        team.agents = []
+        team.restore_session_state.side_effect = (
+            lambda sid: calls.append(("restore", sid)) or True
+        )
+        team.save_session_state.side_effect = (
+            lambda sid: calls.append(("save", sid))
+        )
+
+        async def _astart():
+            calls.append(("astart", None))
+            return "done"
+
+        team.astart = AsyncMock(side_effect=_astart)
+
+        with patch.object(adapter, "_build_agents_and_tasks", return_value=({}, [])), \
+             patch.object(adapter, "_build_team", return_value=team), \
+             patch.object(adapter, "_astart_interactive_runtime",
+                          new=AsyncMock(return_value=None)):
+            asyncio.run(adapter.arun(
+                {}, [{"model": "gpt-4o-mini"}], "topic",
+                cli_config={"resume_session": "sX", "auto_save": "sY"},
+            ))
+
+        assert calls == [("restore", "sX"), ("astart", None), ("save", "sY")]
+
+    def test_capture_and_rehydrate_roundtrips_agent_chat_history(self):
+        """Per-agent chat history must survive save->restore so a resumed team
+        run continues the prior conversation (not just team._state)."""
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+        store = {}
+        agent = MagicMock()
+        agent.display_name = "researcher"
+        agent.name = "researcher"
+        agent.chat_history = [{"role": "user", "content": "hi"}]
+
+        save_team = MagicMock()
+        save_team.agents = [agent]
+        save_team.set_state.side_effect = lambda k, v: store.__setitem__(k, v)
+
+        PraisonAIAdapter._capture_team_chat_history(save_team)
+        assert store  # something was stashed
+
+        fresh_agent = MagicMock()
+        fresh_agent.display_name = "researcher"
+        fresh_agent.name = "researcher"
+        fresh_agent.chat_history = []
+
+        restore_team = MagicMock()
+        restore_team.agents = [fresh_agent]
+        restore_team.get_state.side_effect = lambda k: store.get(k)
+
+        PraisonAIAdapter._rehydrate_team_chat_history(restore_team)
+        assert {"role": "user", "content": "hi"} in fresh_agent.chat_history
+
+    def test_rehydrate_does_not_duplicate_existing_history(self):
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+
+        agent = MagicMock()
+        agent.display_name = "a"
+        agent.name = "a"
+        agent.chat_history = [{"role": "user", "content": "hi"}]
+
+        team = MagicMock()
+        team.agents = [agent]
+        team.get_state.side_effect = lambda k: {
+            "a": [{"role": "user", "content": "hi"}]
+        } if k == PraisonAIAdapter._SESSION_CHAT_HISTORY_KEY else None
+
+        PraisonAIAdapter._rehydrate_team_chat_history(team)
+        assert agent.chat_history == [{"role": "user", "content": "hi"}]

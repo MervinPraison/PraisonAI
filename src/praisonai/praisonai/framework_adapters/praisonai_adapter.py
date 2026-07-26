@@ -369,6 +369,62 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         auto_save = cfg.get('auto_save')
         return resume, auto_save
 
+    _SESSION_CHAT_HISTORY_KEY = "_cli_session_chat_history"
+
+    @classmethod
+    def _capture_team_chat_history(cls, team) -> None:
+        """Snapshot each agent's chat history into team state before saving.
+
+        Core ``AgentTeam.save_session_state`` persists ``team._state`` but not
+        per-agent ``chat_history``. To give YAML/team runs the same
+        conversation continuity as the single-agent path (which restores
+        ``agent.chat_history``), we stash a role-keyed history map into team
+        state so it rides along with the existing save/restore machinery — no
+        core change and no new params.
+        """
+        history_map: Dict[str, Any] = {}
+        for agent in getattr(team, "agents", []) or []:
+            key = getattr(agent, "display_name", None) or getattr(agent, "name", None)
+            if not key:
+                continue
+            history = getattr(agent, "chat_history", None)
+            if history:
+                history_map[key] = list(history)
+        if history_map:
+            team.set_state(cls._SESSION_CHAT_HISTORY_KEY, history_map)
+
+    @classmethod
+    def _rehydrate_team_chat_history(cls, team) -> None:
+        """Inject previously captured chat history back into team agents.
+
+        Runs after ``restore_session_state`` has merged the saved team state.
+        Only appends messages the agent does not already have so a fork/resume
+        never duplicates history.
+        """
+        history_map = team.get_state(cls._SESSION_CHAT_HISTORY_KEY)
+        if not isinstance(history_map, dict) or not history_map:
+            return
+        for agent in getattr(team, "agents", []) or []:
+            key = getattr(agent, "display_name", None) or getattr(agent, "name", None)
+            saved = history_map.get(key)
+            if not saved:
+                continue
+            current = getattr(agent, "chat_history", None)
+            if current is None:
+                continue
+            existing = {
+                (m.get("role"), m.get("content"))
+                for m in current
+                if isinstance(m, dict)
+            }
+            for msg in saved:
+                if not isinstance(msg, dict):
+                    continue
+                marker = (msg.get("role"), msg.get("content"))
+                if marker not in existing:
+                    current.append(msg)
+                    existing.add(marker)
+
     def _build_team(self, config, agents, tasks, model_name, *, session_active=False):
         """Build AgentTeam from agents and tasks.
 
@@ -493,6 +549,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # run continues where it left off, using the existing core API.
             if resume_session:
                 if team.restore_session_state(resume_session):
+                    # Core restore only merges team._state; re-inject the
+                    # per-agent chat history we stashed there so the LLM
+                    # actually continues the prior exchange (parity with the
+                    # single-agent path).
+                    self._rehydrate_team_chat_history(team)
                     logger.info(f"Restored session state: {resume_session}")
                 else:
                     logger.info(f"No prior state for session: {resume_session}")
@@ -505,6 +566,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # (respects --no-save, which leaves auto_save unset).
             if auto_save:
                 try:
+                    # Snapshot per-agent chat history into team state so the
+                    # existing save machinery persists the conversation, not
+                    # just the bookkeeping _state dict.
+                    self._capture_team_chat_history(team)
                     team.save_session_state(auto_save)
                     logger.info(f"Saved session state: {auto_save}")
                 except Exception as e:  # never fail a completed run on save
