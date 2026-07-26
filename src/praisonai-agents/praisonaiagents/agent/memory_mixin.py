@@ -240,21 +240,25 @@ class MemoryMixin:
             if hasattr(self._history_lock, 'is_async_context') and self._history_lock.is_async_context():
                 # Cannot use asyncio.Lock in sync context - use thread lock as fallback
                 import hashlib
+                import uuid
                 from datetime import datetime, timezone
                 with self._history_lock._lock._thread_lock:
                     if self._session_id is None:  # Double-check after acquiring lock
                         hour_str = datetime.now(timezone.utc).strftime("%Y%m%d%H")
                         agent_hash = hashlib.sha256((self.name or "agent").encode()).hexdigest()[:6]
-                        self._session_id = f"{hour_str}-{agent_hash}"
+                        # per-instance suffix so same-named agents can never collide
+                        self._session_id = f"{hour_str}-{agent_hash}-{uuid.uuid4().hex[:8]}"
             else:
                 # Use sync lock directly
                 import hashlib
+                import uuid
                 from datetime import datetime, timezone
                 with self._history_lock.lock():
                     if self._session_id is None:  # Double-check after acquiring lock
                         hour_str = datetime.now(timezone.utc).strftime("%Y%m%d%H")
                         agent_hash = hashlib.sha256((self.name or "agent").encode()).hexdigest()[:6]
-                        self._session_id = f"{hour_str}-{agent_hash}"
+                        # per-instance suffix so same-named agents can never collide
+                        self._session_id = f"{hour_str}-{agent_hash}-{uuid.uuid4().hex[:8]}"
         
         # Call db adapter's on_agent_start to get previous messages
         try:

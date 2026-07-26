@@ -18,6 +18,7 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import contextvars
 import threading
+import contextvars
 import time
 import json
 
@@ -170,7 +171,9 @@ from ..errors import (
 # across every coroutine running on the same event-loop thread. Concurrent
 # async handoffs (``asyncio.gather``, a server handling parallel requests, or
 # any ``max_concurrent`` workflow) would otherwise push/pop into the same list
-# and corrupt each other's cycle/depth state.
+# and corrupt each other's cycle/depth state. Combined with the copy-on-write
+# push/pop below, this fully isolates sibling handoff tasks (e.g. those spawned
+# by ``parallel_handoffs`` via ``asyncio.gather``).
 _handoff_chain_var: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar(
     "handoff_chain", default=None
 )
