@@ -1191,6 +1191,13 @@ async def parallel_handoffs(
     semaphore = asyncio.Semaphore(effective_max_concurrent) if effective_max_concurrent > 0 else None
     
     async def _run_one(agent, prompt):
+        # Each gathered task shares a copied context, but a copied ContextVar
+        # binding still points at the *same* parent list object. Rebind to a
+        # fresh, per-task copy so sibling handoffs cannot corrupt each other's
+        # cycle/depth tracking when parallel_handoffs runs inside a non-empty
+        # parent handoff chain.
+        _handoff_chain_var.set(list(_handoff_chain_var.get() or []))
+
         async def _do_handoff():
             try:
                 return await source.handoff_to_async(agent, prompt, config=config)
