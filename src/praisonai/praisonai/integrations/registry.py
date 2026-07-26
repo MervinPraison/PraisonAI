@@ -8,7 +8,6 @@ Features:
 - Dynamic registration of custom integrations
 - Availability checking for all registered integrations
 - Factory pattern for creating integrations
-- Backward compatibility with existing get_available_integrations()
 
 Usage:
     from praisonai.integrations.registry import get_default_registry
