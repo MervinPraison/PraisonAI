@@ -680,6 +680,7 @@ class WebSocketGateway:
                 max_messages=int(session_data.get("max_messages", 1000)),
                 persist=bool(session_data.get("persist", False)),
                 persist_path=_substitute(session_data.get("persist_path")),
+                store=str(session_data.get("store", "sqlite") or "sqlite"),
                 resume_window=int(session_data.get("resume_window", 86400)),
             )
         
@@ -853,10 +854,29 @@ class WebSocketGateway:
         if session_store:
             self._session_store: Optional[SessionStoreProtocol] = session_store
         elif self.config.session_config.persist:
-            # Use DefaultSessionStore when persistence is enabled
+            # Persistence enabled: default to the SQLite transcript store
+            # (WAL, concurrent readers, indexed lookups) so gateway session
+            # history shares the durability/concurrency model already used by
+            # the delivery journal, DLQ and kanban (Issue #3407). ``store:
+            # file`` selects the legacy per-session JSON store.
             persist_path = self.config.session_config.persist_path
-            self._session_store = DefaultSessionStore(session_dir=persist_path)
-            logger.info(f"Session persistence enabled, using directory: {persist_path or '~/.praisonai/sessions/'}")
+            store_kind = getattr(self.config.session_config, "store", "sqlite")
+            if store_kind == "file":
+                self._session_store = DefaultSessionStore(session_dir=persist_path)
+                logger.info(f"Session persistence enabled (file/JSON store), directory: {persist_path or '~/.praisonai/sessions/'}")
+            else:
+                try:
+                    from praisonaiagents.session.sqlite_transcript_store import (
+                        SqliteTranscriptStore,
+                    )
+                    self._session_store = SqliteTranscriptStore(session_dir=persist_path)
+                    logger.info(f"Session persistence enabled (SQLite store), directory: {persist_path or '~/.praisonai/sessions/'}")
+                except Exception as exc:
+                    logger.warning(
+                        "SQLite transcript store unavailable (%s); "
+                        "falling back to file/JSON store.", exc
+                    )
+                    self._session_store = DefaultSessionStore(session_dir=persist_path)
         else:
             self._session_store = None
             logger.info("Session persistence disabled, using in-memory sessions only")
