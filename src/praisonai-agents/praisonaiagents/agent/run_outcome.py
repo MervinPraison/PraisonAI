@@ -64,15 +64,25 @@ class RunOutcome:
 
         Maps well-known exception types to their terminal reason. Anything
         unrecognised is treated as ``failed`` with a redacted message.
+
+        Note on ``hard_timeout``: the run-level budget is the authoritative
+        source of ``hard_timeout`` and is applied explicitly by the caller
+        (see ``_astart_with_outcome``). A bare ``asyncio.TimeoutError`` reaching
+        this normaliser is a *nested* operation timeout (e.g. a handoff/tool that
+        exhausted its own budget while the run budget remained) and is therefore
+        classified as ``failed`` — not silently promoted to a run-budget
+        ``hard_timeout``, which would drive the wrong host retry/DLQ decision.
+        Real cooperative cancellation is intercepted and re-raised by the run
+        wrapper (see ``_astart_with_outcome``) *before* it reaches this
+        normaliser, so host shutdown is honoured. A supersede/interrupt named
+        error that does surface here is a domain "cancelled" outcome.
         """
         import asyncio
 
-        if isinstance(exc, asyncio.TimeoutError) or _name_matches(
-            exc, ("timeout", "hardtimeout")
-        ):
+        if _name_matches(exc, ("hardtimeout", "runtimeout", "budgettimeout")):
             return cls(reason="hard_timeout", output=output)
         if isinstance(exc, asyncio.CancelledError) or _name_matches(
-            exc, ("cancel", "supersed", "interrupt")
+            exc, ("supersed", "interrupt", "cancelled")
         ):
             return cls(reason="cancelled", output=output)
         if _name_matches(exc, ("abort", "drain", "shutdown")):

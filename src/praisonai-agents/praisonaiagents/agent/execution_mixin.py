@@ -213,18 +213,51 @@ class ExecutionMixin:
     async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
         """Run astart() and normalise its result/exception into a RunOutcome.
 
-        Optionally enforces a hard timeout. A hard timeout is sticky and is
-        not downgraded by a late-arriving partial completion.
+        Optionally enforces a hard run-level timeout budget. The budget is the
+        *authoritative* source of ``hard_timeout``: when our own
+        ``asyncio.wait_for`` fires we return ``hard_timeout`` directly, so a
+        nested operation timeout (which surfaces as a generic
+        ``asyncio.TimeoutError`` from inside the run) is never misreported as a
+        run-budget timeout — it falls through to ``failed`` via
+        ``RunOutcome.from_exception``.
+
+        External ``asyncio.CancelledError`` (e.g. the enclosing task being
+        cancelled during host shutdown) is re-raised, not swallowed, so
+        cooperative cancellation semantics are honoured.
         """
         import asyncio
         from .run_outcome import RunOutcome
+
+        enforce_budget = timeout is not None and timeout > 0
+
+        # Enforce the run budget with an explicit deadline on a task we own, so
+        # that only *our* budget expiry maps to hard_timeout. This deliberately
+        # avoids ``asyncio.wait_for`` catching a bare inner ``TimeoutError``:
+        # a nested operation timeout raised inside the run must fall through to
+        # ``failed`` rather than be misreported as a run-budget ``hard_timeout``.
         try:
-            coro = self.astart(prompt, **kwargs)
-            if timeout is not None and timeout > 0:
-                result = await asyncio.wait_for(coro, timeout=timeout)
+            if enforce_budget:
+                task = asyncio.ensure_future(self.astart(prompt, **kwargs))
+                try:
+                    done, _ = await asyncio.wait({task}, timeout=timeout)
+                except asyncio.CancelledError:
+                    # Enclosing task cancelled (e.g. host shutdown): cancel the
+                    # child and propagate so cooperative cancellation is honoured.
+                    task.cancel()
+                    raise
+                if task not in done:
+                    # Our budget expired first: authoritative, sticky hard_timeout.
+                    task.cancel()
+                    return RunOutcome(reason="hard_timeout")
+                result = task.result()
             else:
-                result = await coro
-        except BaseException as exc:  # noqa: BLE001 - normalised into outcome
+                result = await self.astart(prompt, **kwargs)
+        except asyncio.CancelledError:
+            # External cancellation of the awaiting task: honour asyncio
+            # cancellation / host shutdown by propagating instead of converting
+            # it into a benign RunOutcome.
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalised into outcome
             return RunOutcome.from_exception(exc)
         return RunOutcome.completed(output=str(result) if result is not None else None)
 

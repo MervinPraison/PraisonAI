@@ -14,8 +14,11 @@ def test_completed_factory():
     assert o.succeeded is True
 
 
-def test_from_exception_timeout():
-    assert RunOutcome.from_exception(asyncio.TimeoutError()).reason == "hard_timeout"
+def test_from_exception_timeout_is_not_hard_timeout():
+    # A bare asyncio.TimeoutError is a nested-operation timeout at this
+    # boundary. Only the run-level budget (enforced by _astart_with_outcome)
+    # owns hard_timeout, so this must NOT be promoted to hard_timeout.
+    assert RunOutcome.from_exception(asyncio.TimeoutError()).reason == "failed"
 
 
 def test_from_exception_cancelled():
@@ -23,16 +26,12 @@ def test_from_exception_cancelled():
 
 
 def test_from_exception_name_matching():
-    class BotRunTimeout(Exception):
-        pass
-
     class SupersededError(Exception):
         pass
 
     class DrainAbort(Exception):
         pass
 
-    assert RunOutcome.from_exception(BotRunTimeout()).reason == "hard_timeout"
     assert RunOutcome.from_exception(SupersededError()).reason == "cancelled"
     assert RunOutcome.from_exception(DrainAbort()).reason == "aborted"
 
@@ -80,6 +79,13 @@ class _FakeAgent(ExecutionMixin):
         if self.behavior == "slow":
             await asyncio.sleep(5)
             return "too-late"
+        if self.behavior == "nested_timeout":
+            # A nested operation exhausted its OWN budget while the run budget
+            # (if any) remained; surfaces as a bare asyncio.TimeoutError.
+            raise asyncio.TimeoutError()
+        if self.behavior == "block":
+            await asyncio.sleep(3600)
+            return "never"
         raise ValueError("async-kaboom")
 
 
@@ -110,3 +116,33 @@ def test_astart_outcome_hard_timeout():
 def test_astart_outcome_failed():
     o = asyncio.run(_FakeAgent("bad").astart("hi", return_outcome=True))
     assert o.reason == "failed" and o.error == "async-kaboom"
+
+
+def test_astart_nested_timeout_is_failed_with_budget():
+    # With a generous run budget, a nested operation TimeoutError must NOT be
+    # promoted to a run-budget hard_timeout — it is a plain failure.
+    o = asyncio.run(
+        _FakeAgent("nested_timeout").astart(
+            "hi", return_outcome=True, timeout=5
+        )
+    )
+    assert o.reason == "failed"
+
+
+def test_astart_external_cancellation_propagates():
+    # Cancelling the enclosing task must raise CancelledError (host shutdown
+    # semantics), not be swallowed into a benign RunOutcome.
+    async def scenario():
+        task = asyncio.ensure_future(
+            _FakeAgent("block").astart("hi", return_outcome=True, timeout=30)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await task
+
+    try:
+        asyncio.run(scenario())
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("external cancellation should propagate")
