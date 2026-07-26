@@ -531,9 +531,12 @@ class ConfigResolver:
     def _load_project_config(self) -> Optional[Dict[str, Any]]:
         """Load project configuration with walk-up discovery.
 
-        Walk-up stops at (and does not walk past) the user's home directory.
-        Home itself is still searched for project configs (e.g.
-        ``~/praison.yaml``). The legacy ``.praison/config.toml`` is
+        Walk-up stops before reaching the user's home directory, so home is
+        never treated as a project directory (its configs, e.g.
+        ``~/praison.yaml``, are not discovered here). This prevents a
+        profile-level file from being mislabelled as a ``project:`` source —
+        important on platforms where temporary project directories live under
+        the user's profile. The legacy ``.praison/config.toml`` is
         intentionally NOT a project config name — it is a global user config
         loaded exclusively by ``_load_global_config()`` with a ``global:``
         label. Keeping it out of ``PROJECT_CONFIG_NAMES`` prevents the walk-up

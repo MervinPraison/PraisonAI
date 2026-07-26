@@ -99,6 +99,31 @@ def test_resolve_with_provenance_defaults_present(tmp_path, monkeypatch):
     assert prov["telemetry"]["layer"] == "defaults"
 
 
+def test_project_config_ignores_home_directory(tmp_path, monkeypatch):
+    # A config at the user's home directory must not be discovered as a
+    # project config (regression for the home-directory walk-up boundary).
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=home)
+    assert resolver._load_project_config() is None
+
+
+def test_project_config_ignores_home_when_cwd_below_home(tmp_path, monkeypatch):
+    # Walking up from a sub-directory must stop before home, so a home-level
+    # config is never picked up while still allowing project-level configs.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    assert resolver._load_project_config() is None
+
+
 def test_interpolate_env_missing_no_default_preserves_directive(monkeypatch):
     # {env:VAR} with no default and unset var stays visible (like ${VAR}).
     monkeypatch.delenv("UNSET_KEY", raising=False)
