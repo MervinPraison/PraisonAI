@@ -134,13 +134,72 @@ class SqliteTranscriptStore(DefaultSessionStore):
             )
             self._conn = conn
             self._db_ready = True
+            self._migrate_legacy_json(conn)
             return self._conn
+
+    def _migrate_legacy_json(self, conn) -> None:
+        """One-time import of legacy per-session JSON files into the DB.
+
+        When an existing file/JSON deployment upgrades to the SQLite default,
+        the prior transcripts would otherwise be invisible (a fresh, empty
+        ``sessions.db`` opens beside the old ``*.json`` files) — session resume
+        would treat existing sessions as new (Issue #3407 follow-up). This
+        imports any ``*.json`` transcripts that live alongside the DB exactly
+        once, only for rows not already present, so upgrading preserves durable
+        history. It is a no-op for ``:memory:`` and for fresh installs.
+        """
+        if self.db_path == ":memory:":
+            return
+        session_dir = self.session_dir
+        if not session_dir or not os.path.isdir(session_dir):
+            return
+        try:
+            filenames = [f for f in os.listdir(session_dir) if f.endswith(".json")]
+        except OSError:
+            return
+        if not filenames:
+            return
+        try:
+            existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            if existing and existing[0]:
+                return  # DB already populated; do not re-import
+        except Exception:  # pragma: no cover - best-effort guard
+            return
+        imported = 0
+        for filename in filenames:
+            filepath = os.path.join(session_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            try:
+                session = SessionData.from_dict(data)
+            except Exception:  # pragma: no cover - tolerate malformed legacy files
+                continue
+            if self._write_row(session, conn=conn):
+                imported += 1
+        if imported:
+            logger.info(
+                "Imported %d legacy JSON session(s) from %s into SQLite store",
+                imported,
+                session_dir,
+            )
 
     # ── row read/write helpers ────────────────────────────────────────
 
-    def _read_row(self, session_id: str) -> Optional[Dict[str, Any]]:
-        conn = self._connect()
-        with self._db_lock:
+    def _read_row(self, session_id: str, conn=None) -> Optional[Dict[str, Any]]:
+        own_lock = conn is None
+        if conn is None:
+            conn = self._connect()
+        if own_lock:
+            with self._db_lock:
+                row = conn.execute(
+                    "SELECT data FROM sessions WHERE session_id = ?", (session_id,)
+                ).fetchone()
+        else:
             row = conn.execute(
                 "SELECT data FROM sessions WHERE session_id = ?", (session_id,)
             ).fetchone()
@@ -151,29 +210,35 @@ class SqliteTranscriptStore(DefaultSessionStore):
         except (json.JSONDecodeError, TypeError):
             return None
 
-    def _write_row(self, session: SessionData) -> bool:
-        conn = self._connect()
+    def _write_row(self, session: SessionData, conn=None) -> bool:
+        own_lock = conn is None
+        if conn is None:
+            conn = self._connect()
         data = session.to_dict()
         try:
             payload = json.dumps(data, ensure_ascii=False)
         except (TypeError, ValueError) as exc:
             logger.error("Failed to serialise session %s: %s", session.session_id, exc)
             return False
+        params = (
+            session.session_id,
+            payload,
+            getattr(session, "agent_name", None),
+            getattr(session, "gateway_session_id", None),
+            getattr(session, "agent_id", None),
+            getattr(session, "updated_at", None),
+        )
+        sql = (
+            "INSERT OR REPLACE INTO sessions "
+            "(session_id, data, agent_name, gateway_session_id, agent_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)"
+        )
         try:
-            with self._db_lock:
-                conn.execute(
-                    "INSERT OR REPLACE INTO sessions "
-                    "(session_id, data, agent_name, gateway_session_id, agent_id, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        session.session_id,
-                        payload,
-                        getattr(session, "agent_name", None),
-                        getattr(session, "gateway_session_id", None),
-                        getattr(session, "agent_id", None),
-                        getattr(session, "updated_at", None),
-                    ),
-                )
+            if own_lock:
+                with self._db_lock:
+                    conn.execute(sql, params)
+            else:
+                conn.execute(sql, params)
             return True
         except Exception as exc:
             logger.error("Failed to write session %s: %s", session.session_id, exc)
@@ -224,14 +289,46 @@ class SqliteTranscriptStore(DefaultSessionStore):
         *,
         error_label: str = "modify session",
     ) -> bool:
-        """Read-modify-write a session row transactionally under the DB lock."""
+        """Read-modify-write a session row atomically.
+
+        The SELECT and INSERT run inside a single ``BEGIN IMMEDIATE``
+        transaction so the whole read-modify-write is serialized *across
+        processes* (SQLite grabs the database RESERVED write lock at ``BEGIN
+        IMMEDIATE`` and holds it until COMMIT). Without this a second gateway
+        process could read the same row before this one's INSERT and silently
+        drop the earlier append — the exact multi-gateway lost-update the
+        parent's cross-process ``FileLock`` prevents. The process-local
+        ``_db_lock`` only serializes threads within one process, so it is not
+        sufficient on its own.
+        """
+        conn = self._connect()
         with self._db_lock:
-            session = self._load_session_from_disk(session_id, "")
-            mutator(session)
-            session.updated_at = datetime.now(timezone.utc).isoformat()
-            self._enforce_window(session)
-            if not self._write_row(session):
-                logger.error("Failed to %s %s", error_label, session_id)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except Exception as exc:
+                logger.error("Failed to begin %s %s: %s", error_label, session_id, exc)
+                return False
+            try:
+                data = self._read_row(session_id, conn=conn)
+                session = (
+                    SessionData.from_dict(data)
+                    if data is not None
+                    else SessionData(session_id=session_id)
+                )
+                mutator(session)
+                session.updated_at = datetime.now(timezone.utc).isoformat()
+                self._enforce_window(session)
+                if not self._write_row(session, conn=conn):
+                    conn.execute("ROLLBACK")
+                    logger.error("Failed to %s %s", error_label, session_id)
+                    return False
+                conn.execute("COMMIT")
+            except Exception as exc:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:  # pragma: no cover - rollback best-effort
+                    pass
+                logger.error("Failed to %s %s: %s", error_label, session_id, exc)
                 return False
             with self._lock:
                 self._cache[session_id] = session

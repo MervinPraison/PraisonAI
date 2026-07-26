@@ -132,3 +132,45 @@ class TestSqliteTranscriptStore:
         session = store.get_session("s1")
         assert session.messages[0].tool_calls[0]["id"] == "c1"
         assert session.messages[1].tool_call_id == "c1"
+
+    def test_concurrent_writers_no_lost_updates(self, tmp_dir):
+        """Two independent store instances (simulating two gateway processes)
+        appending to the same session concurrently must not drop any message.
+
+        Each ``add_message`` runs a BEGIN IMMEDIATE read-modify-write, so
+        SQLite serializes the appends across connections instead of both
+        reading the same row and clobbering each other.
+        """
+        import threading
+
+        db = os.path.join(tmp_dir, "sessions.db")
+        writers = 4
+        per_writer = 20
+
+        def run(idx):
+            store = SqliteTranscriptStore(session_dir=tmp_dir, db_path=db)
+            for j in range(per_writer):
+                assert store.add_message("shared", "user", f"{idx}-{j}")
+
+        threads = [threading.Thread(target=run, args=(i,)) for i in range(writers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        reader = SqliteTranscriptStore(session_dir=tmp_dir, db_path=db)
+        history = reader.get_chat_history("shared")
+        assert len(history) == writers * per_writer
+
+    def test_migrates_legacy_json_on_first_open(self, tmp_dir):
+        """Existing per-session JSON files are imported once when the SQLite
+        store first opens beside them (upgrade preserves durable history)."""
+        legacy = DefaultSessionStore(session_dir=tmp_dir)
+        legacy.add_message("old", "user", "legacy transcript")
+        assert any(f.endswith(".json") for f in os.listdir(tmp_dir))
+
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        assert store.session_exists("old")
+        assert store.get_chat_history("old") == [
+            {"role": "user", "content": "legacy transcript"}
+        ]

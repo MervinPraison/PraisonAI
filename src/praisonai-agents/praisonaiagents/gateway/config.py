@@ -694,6 +694,7 @@ class MultiChannelGatewayConfig:
                     max_messages=sc_data.get("max_messages", 1000),
                     persist=sc_data.get("persist", False),
                     persist_path=sc_data.get("persist_path"),
+                    store=sc_data.get("store", "sqlite"),
                     resume_window=sc_data.get("resume_window", 86400),
                     max_inbox=sc_data.get("max_inbox", 256),
                     metadata=sc_data.get("metadata", {}),
