@@ -8,7 +8,6 @@ Features:
 - Dynamic registration of custom integrations
 - Availability checking for all registered integrations
 - Factory pattern for creating integrations
-- Backward compatibility with existing get_available_integrations()
 
 Usage:
     from praisonai.integrations.registry import get_default_registry
@@ -196,19 +195,3 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
     """
     registry = get_default_registry()
     return registry.try_create(name, **kwargs)
-
-
-def get_available_integrations() -> Dict[str, bool]:
-    """
-    Get availability status of all registered integrations.
-    
-    Backward compatibility wrapper for the original synchronous function.
-    
-    Returns:
-        Dict[str, bool]: Mapping of integration name to availability status
-    """
-    import asyncio
-    registry = get_default_registry()
-    
-    from .._async_bridge import run_sync
-    return run_sync(registry.get_available())
