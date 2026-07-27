@@ -25,6 +25,9 @@ def _mcp_available() -> bool:
     ``praisonai_mcp.mcp_server``. A partial/incompatible install can expose the
     top-level ``praisonai_mcp`` package while lacking that submodule, so we probe
     the submodule the shim actually needs rather than just the top-level package.
+    ``find_spec`` raises ``ModuleNotFoundError`` when the parent package is
+    absent and may raise ``ValueError`` for a discoverable-but-broken parent
+    (mirroring ``praisonai._bootstrap``); treat both as "not importable".
     """
     try:
         return importlib.util.find_spec("praisonai_mcp.mcp_server") is not None
