@@ -25,7 +25,7 @@ def test_imports():
         return True
         
     except ImportError as e:
-        print(f"[FAIL] Import failed: {e}")
+        print(f"[FAIL] Import failed: {ascii(e)}")
         return False
 
 def test_agent_creation():
@@ -44,7 +44,7 @@ def test_agent_creation():
         return True
         
     except Exception as e:
-        print(f"[FAIL] Agent creation failed: {e}")
+        print(f"[FAIL] Agent creation failed: {ascii(e)}")
         return False
 
 def test_approval_system():
@@ -59,7 +59,7 @@ def test_approval_system():
         return True
         
     except Exception as e:
-        print(f"[FAIL] Approval system test failed: {e}")
+        print(f"[FAIL] Approval system test failed: {ascii(e)}")
         return False
 
 def test_external_agent_import():
@@ -84,7 +84,7 @@ def test_external_agent_import():
         return True
         
     except Exception as e:
-        print(f"[FAIL] External agent import failed: {e}")
+        print(f"[FAIL] External agent import failed: {ascii(e)}")
         return False
 
 def test_multi_agent_import():
@@ -108,7 +108,7 @@ def test_multi_agent_import():
         return True
         
     except Exception as e:
-        print(f"[FAIL] Multi-agent example import failed: {e}")
+        print(f"[FAIL] Multi-agent example import failed: {ascii(e)}")
         return False
 
 def test_wrapper_agent_import():
@@ -132,7 +132,7 @@ def test_wrapper_agent_import():
         return True
         
     except Exception as e:
-        print(f"[FAIL] Wrapper agent import failed: {e}")
+        print(f"[FAIL] Wrapper agent import failed: {ascii(e)}")
         return False
 
 if __name__ == "__main__":
@@ -157,7 +157,7 @@ if __name__ == "__main__":
             if test_func():
                 passed += 1
         except Exception as e:
-            print(f"[FAIL] Test {test_name} crashed: {e}")
+            print(f"[FAIL] Test {test_name} crashed: {ascii(e)}")
     
     print("\n" + "=" * 55)
     print(f"Results: {passed}/{total} tests passed")
