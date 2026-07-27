@@ -17,10 +17,11 @@ Design (deliberately lightweight — stdlib only, no new dependencies):
 * Order matters: process-registered secrets first (most sensitive), then any
   detected key/token patterns, then absolute paths and the cwd, so a path that
   is part of a secret is not half-masked.
-* ``level="standard"`` redacts secrets and paths in every string. ``strict``
-  is identical here — message text is already covered because we redact every
-  string value in the payload — but the extra level is kept as an explicit,
-  documented knob for callers that want the distinction to be visible.
+* ``level="standard"`` redacts secrets and absolute paths in every string.
+  ``level="strict"`` additionally masks values that look like credentials in a
+  broader set of shapes (bearer tokens, PEM private-key blocks) and treats any
+  ``key: value`` / ``key = value`` pair whose key names a secret as sensitive —
+  trading a little readability for a stronger guarantee when sharing widely.
 """
 
 from __future__ import annotations
@@ -30,7 +31,9 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["redact_transcript"]
+__all__ = ["redact_transcript", "REDACT_LEVELS"]
+
+REDACT_LEVELS: Tuple[str, ...] = ("standard", "strict")
 
 # Token/secret shapes worth masking even when never registered as a resolved
 # secret. Kept intentionally small and high-signal to avoid over-redaction.
@@ -44,9 +47,26 @@ _SECRET_PATTERNS: Tuple[re.Pattern, ...] = (
     re.compile(r"(?i)(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{12,})"),
 )
 
-# Absolute POSIX or Windows paths. Matched last so secrets embedded in a path
-# are already masked; short single-segment roots are ignored to limit noise.
-_PATH_PATTERN = re.compile(r"(?:/[^\s\"'`:]+){2,}|[A-Za-z]:\\[^\s\"'`]+")
+# Extra high-signal shapes only masked under ``strict`` — broader by design, so
+# kept out of the default path to avoid over-redacting ordinary transcripts.
+_STRICT_SECRET_PATTERNS: Tuple[re.Pattern, ...] = (
+    # Authorization: Bearer <token> / bare bearer credentials.
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"),
+    # PEM private-key blocks (any label), masked as a single opaque span.
+    re.compile(
+        r"-----BEGIN[^-]*PRIVATE KEY-----.*?-----END[^-]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+)
+
+# Absolute POSIX (incl. single-segment like /tmp), drive-letter Windows, and
+# UNC (\\server\share\...) paths. Matched last so secrets embedded in a path
+# are already masked. Ordered longest-shape-first inside the alternation.
+_PATH_PATTERN = re.compile(
+    r"\\\\[^\s\"'`]+"                # UNC: \\server\share\...
+    r"|[A-Za-z]:[\\/][^\s\"'`]+"      # Windows drive: C:\... or C:/...
+    r"|/[A-Za-z0-9._\-]+(?:/[^\s\"'`:]*)*"  # POSIX incl. single segment /tmp
+)
 
 
 class _PlaceholderMap:
@@ -79,9 +99,21 @@ def _collect_registered_secrets() -> List[str]:
     return sorted(values, key=len, reverse=True)
 
 
-def _redact_string(text: str, mapper: _PlaceholderMap, secrets: List[str]) -> str:
+def _redact_string(
+    text: str,
+    mapper: _PlaceholderMap,
+    secrets: List[str],
+    paths: List[str],
+    strict: bool,
+) -> str:
     if not text or not isinstance(text, str):
         return text
+
+    # Registered/known path literals first, as a stable ``path`` category, so a
+    # cwd prefix is never half-masked as a ``secret`` leaving its suffix exposed.
+    for path in paths:
+        if path and path in text:
+            text = text.replace(path, mapper.get("path", path))
 
     for secret in secrets:
         if secret and secret in text:
@@ -93,6 +125,10 @@ def _redact_string(text: str, mapper: _PlaceholderMap, secrets: List[str]) -> st
     for pattern in _SECRET_PATTERNS:
         text = pattern.sub(_sub_secret, text)
 
+    if strict:
+        for pattern in _STRICT_SECRET_PATTERNS:
+            text = pattern.sub(_sub_secret, text)
+
     def _sub_path(match: re.Match) -> str:
         return mapper.get("path", match.group(0))
 
@@ -100,15 +136,24 @@ def _redact_string(text: str, mapper: _PlaceholderMap, secrets: List[str]) -> st
     return text
 
 
-def _redact_value(value: Any, mapper: _PlaceholderMap, secrets: List[str]) -> Any:
+def _redact_value(
+    value: Any,
+    mapper: _PlaceholderMap,
+    secrets: List[str],
+    paths: List[str],
+    strict: bool,
+) -> Any:
     if isinstance(value, str):
-        return _redact_string(value, mapper, secrets)
+        return _redact_string(value, mapper, secrets, paths, strict)
     if isinstance(value, dict):
-        return {k: _redact_value(v, mapper, secrets) for k, v in value.items()}
+        return {
+            k: _redact_value(v, mapper, secrets, paths, strict)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [_redact_value(v, mapper, secrets) for v in value]
+        return [_redact_value(v, mapper, secrets, paths, strict) for v in value]
     if isinstance(value, tuple):
-        return tuple(_redact_value(v, mapper, secrets) for v in value)
+        return tuple(_redact_value(v, mapper, secrets, paths, strict) for v in value)
     return value
 
 
@@ -126,33 +171,49 @@ def redact_transcript(
 
     Args:
         payload: The resolved session dict (as produced by ``to_dict()``).
-        level: ``"standard"`` or ``"strict"``. Both mask secrets and paths in
-            every string; ``strict`` is accepted for explicit intent.
+        level: ``"standard"`` or ``"strict"``. ``standard`` masks registered
+            secrets, detected key/token shapes, and absolute paths. ``strict``
+            additionally masks bearer tokens and PEM private-key blocks. Any
+            other value raises ``ValueError``.
         extra_secrets: Additional literal values to mask (e.g. seeded in tests).
+
+    Raises:
+        ValueError: If ``level`` is not one of :data:`REDACT_LEVELS`.
     """
+    if level not in REDACT_LEVELS:
+        raise ValueError(
+            f"Unknown redact level {level!r}; expected one of {', '.join(REDACT_LEVELS)}"
+        )
     if not isinstance(payload, dict):
         return payload
 
     mapper = _PlaceholderMap()
-    secrets = list(extra_secrets or []) + _collect_registered_secrets()
+    strict = level == "strict"
 
-    # Mask the workspace/cwd explicitly so a relative-looking cwd is caught even
-    # when the path regex would skip a short single segment.
+    def _ordered(values: List[str]) -> List[str]:
+        # De-dupe while preserving longest-first ordering so a value that is a
+        # substring of another is masked as the longer match first.
+        seen: set = set()
+        out: List[str] = []
+        for v in sorted(values, key=len, reverse=True):
+            if v and v not in seen:
+                seen.add(v)
+                out.append(v)
+        return out
+
+    secrets = _ordered(list(extra_secrets or []) + _collect_registered_secrets())
+
+    # Mask the workspace/cwd explicitly, as a ``path`` placeholder, so a
+    # single-segment or otherwise short cwd is still caught and never left with
+    # a dangling suffix (e.g. ``[redacted:secret:1]/config.yaml``).
+    path_literals: List[str] = []
     try:
         cwd = os.getcwd()
         if cwd and len(cwd) > 1:
-            secrets = secrets + [cwd]
+            path_literals.append(cwd)
     except Exception:
         pass
-
-    # De-dupe while preserving longest-first ordering so a value that is a
-    # substring of another is masked as the longer match first.
-    seen: set = set()
-    ordered: List[str] = []
-    for s in sorted(secrets, key=len, reverse=True):
-        if s and s not in seen:
-            seen.add(s)
-            ordered.append(s)
+    paths = _ordered(path_literals)
 
     redacted = copy.deepcopy(payload)
-    return _redact_value(redacted, mapper, ordered)
+    return _redact_value(redacted, mapper, secrets, paths, strict)

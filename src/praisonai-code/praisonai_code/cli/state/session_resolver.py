@@ -184,7 +184,17 @@ def export_session(
         return None
 
     if resolved.metadata.get("__legacy_session_manager__"):
-        return _legacy_export(session_id, format)
+        content = _legacy_export(session_id, format)
+        if content is not None and redact:
+            # Legacy exports are already-rendered strings, so wrap them in a
+            # one-field payload and redact that so --sanitise never leaks a raw
+            # legacy transcript (Issue #3426).
+            from .redact import redact_transcript
+
+            content = redact_transcript(
+                {"content": content}, level=redact_level
+            )["content"]
+        return content
 
     payload = resolved.to_dict()
     if redact:

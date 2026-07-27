@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from praisonai_code.cli.state.redact import redact_transcript
+from praisonai_code.cli.state.redact import REDACT_LEVELS, redact_transcript
 
 
 def _fixture_payload():
@@ -74,6 +74,59 @@ def test_extra_secrets_are_masked():
     payload = {"chat_history": [{"role": "user", "content": "the value is HUNTER2SECRET"}]}
     out = redact_transcript(payload, extra_secrets=["HUNTER2SECRET"])
     assert "HUNTER2SECRET" not in json.dumps(out)
+
+
+def test_single_segment_posix_path_is_redacted():
+    payload = {"chat_history": [{"role": "user", "content": "logs live in /tmp"}]}
+    out = redact_transcript(payload)
+    assert "/tmp" not in json.dumps(out)
+    assert "[redacted:path:" in json.dumps(out)
+
+
+def test_cwd_is_redacted_as_path_without_dangling_suffix(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    cwd = str(tmp_path)
+    payload = {"chat_history": [{"role": "user", "content": f"open {cwd}/config.yaml"}]}
+    dumped = json.dumps(redact_transcript(payload))
+    assert cwd not in dumped
+    # The cwd must be masked as a path, never leaving a secret-prefixed suffix.
+    assert "[redacted:secret:" not in dumped
+    assert "[redacted:path:" in dumped
+
+
+def test_unc_path_is_redacted():
+    payload = {"chat_history": [{"role": "user", "content": r"copy \\server\share\secret.txt"}]}
+    dumped = json.dumps(redact_transcript(payload))
+    assert r"\\\\server\\share\\secret.txt" not in dumped
+    assert "server" not in dumped
+    assert "[redacted:path:" in dumped
+
+
+def test_strict_masks_bearer_and_pem_but_standard_does_not():
+    bearer = "Authorization: Bearer abcDEF123456ghijkl"
+    pem = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIBOgIBAAJBAKj34GkxFhD\n"
+        "-----END RSA PRIVATE KEY-----"
+    )
+    payload = {"chat_history": [{"role": "user", "content": f"{bearer}\n{pem}"}]}
+
+    standard = json.dumps(redact_transcript(payload, level="standard"))
+    assert "abcDEF123456ghijkl" in standard  # not covered by standard
+
+    strict = json.dumps(redact_transcript(payload, level="strict"))
+    assert "abcDEF123456ghijkl" not in strict
+    assert "MIIBOgIBAAJBAKj34GkxFhD" not in strict
+    assert "[redacted:secret:" in strict
+
+
+def test_invalid_level_raises():
+    with pytest.raises(ValueError):
+        redact_transcript(_fixture_payload(), level="bogus")
+
+
+def test_redact_levels_exposed():
+    assert REDACT_LEVELS == ("standard", "strict")
 
 
 def test_export_default_unchanged_and_sanitise_redacts(tmp_path, monkeypatch):

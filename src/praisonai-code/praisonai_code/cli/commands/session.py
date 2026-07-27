@@ -412,6 +412,14 @@ def session_export(
 
     # Export the same session id list/resume expose (Issue #3133).
     from ..state.session_resolver import export_session
+    from ..state.redact import REDACT_LEVELS
+
+    if redact_level not in REDACT_LEVELS:
+        output.print_error(
+            f"Invalid --redact-level '{redact_level}'. "
+            f"Choose one of: {', '.join(REDACT_LEVELS)}."
+        )
+        raise typer.Exit(1)
 
     content = export_session(
         session_id,
