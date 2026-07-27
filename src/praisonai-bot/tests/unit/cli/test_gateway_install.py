@@ -115,7 +115,7 @@ def test_gateway_status_with_daemon(mock_handler_class, mock_status):
     result = runner.invoke(app, ["status"])
     
     mock_status.assert_called_once()
-    mock_handler.status.assert_called_once_with(host="127.0.0.1", port=8765)
+    mock_handler.status.assert_called_once_with(host="127.0.0.1", port=8765, deep=False)
     assert result.exit_code == 0
 
 
