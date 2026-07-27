@@ -118,3 +118,52 @@ async def test_achat_completion_resolves_basetool_without_dunder_name():
     mock_exec.assert_awaited_once()
     assert mock_exec.await_args[0][0] == "browserbase"
     assert results is not None
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_async_runs_real_basetool_instance():
+    """Full async path must resolve AND invoke a real BaseTool instance.
+
+    Regression for issue #3450: even after dispatch resolves a BaseTool by
+    ``.name``, the downstream ``_execute_tool_async_impl`` previously matched
+    only on ``__name__`` and then called ``func(**args)`` directly, so a
+    BrowserBaseTool-style instance returned ``Function ... not found`` /
+    never ran. This test hits the real execute_tool_async (unmocked).
+    """
+    from praisonaiagents.tools.base import BaseTool
+
+    class _BrowserTool(BaseTool):
+        name = "browserbase"
+        description = "Browser-like tool"
+
+        def run(self, **kwargs):
+            return "navigated"
+
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+    tool = _BrowserTool()
+
+    result = await agent.execute_tool_async("browserbase", {}, tools_override=[tool])
+
+    assert result == "navigated"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_async_resolves_aliased_function_name():
+    """Async dispatch must resolve a tool by its advertised .name alias.
+
+    A FunctionTool-like object may expose a ``.name`` that differs from the
+    wrapped callable's ``__name__``; the model calls the advertised ``.name``,
+    so resolution must not short-circuit on ``__name__``.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def _impl(**kwargs):
+        return "aliased-ran"
+
+    _impl.name = "advertised_name"
+
+    result = await agent.execute_tool_async(
+        "advertised_name", {}, tools_override=[_impl]
+    )
+
+    assert result == "aliased-ran"
