@@ -398,34 +398,38 @@ class GatewayHandler:
         # CLI admission-control flags also apply in no-config mode (#2454):
         # build a shared gate directly so `--max-concurrent-runs` is honoured
         # even without a gateway.yaml. A ``--reliability`` preset (#2531) can
-        # supply the admission ceiling too, so build the gate whenever either
-        # is given, letting the preset fill fields the explicit flags omit.
-        if max_concurrent_runs is not None or reliability is not None:
-            try:
-                from praisonai_bot.bots._admission import build_admission_gate
-                from praisonai_bot.bots._reliability import resolve_reliability
+        # supply the admission ceiling too. As of #3438 the *unset* posture is
+        # safe by default (bind-aware admission ceiling + drain), so we always
+        # resolve reliability here — the resolver returns an admission ceiling
+        # unless the operator passes ``--reliability off``.
+        try:
+            from praisonai_bot.bots._admission import build_admission_gate
+            from praisonai_bot.bots._reliability import resolve_reliability
 
-                # Pass the explicit ``--drain-timeout`` through so it still wins
-                # over the preset; capture the resolved window for shutdown so
-                # ``--reliability production`` actually drains (#2531).
-                _resolved = resolve_reliability(
-                    reliability,
-                    drain_timeout=drain_timeout,
-                    max_concurrent_runs=max_concurrent_runs or 0,
-                    queue_depth=queue_depth or 0,
-                    overflow_policy=overflow_policy or "reject",
-                )
-                resolved_drain_timeout = _resolved.drain_timeout
-                self._gateway._admission_gate = build_admission_gate(
-                    max_concurrent_runs=_resolved.max_concurrent_runs,
-                    queue_depth=_resolved.queue_depth,
-                    overflow_policy=_resolved.overflow_policy,
-                )
-            except Exception as e:
-                # Invalid admission-control config is unrecoverable until the
-                # operator fixes it; restarting won't help (#2437).
-                print(f"Error: invalid admission-control config: {e}")
-                return GATEWAY_FATAL_CONFIG_EXIT_CODE
+            # Pass the explicit ``--drain-timeout`` through so it still wins
+            # over the preset; capture the resolved window for shutdown so
+            # ``--reliability production`` actually drains (#2531). ``host``
+            # informs the safe-by-default posture — a non-loopback bind
+            # resolves to the full production window (#3438).
+            _resolved = resolve_reliability(
+                reliability,
+                bind_host=host,
+                drain_timeout=drain_timeout,
+                max_concurrent_runs=max_concurrent_runs or 0,
+                queue_depth=queue_depth or 0,
+                overflow_policy=overflow_policy or "reject",
+            )
+            resolved_drain_timeout = _resolved.drain_timeout
+            self._gateway._admission_gate = build_admission_gate(
+                max_concurrent_runs=_resolved.max_concurrent_runs,
+                queue_depth=_resolved.queue_depth,
+                overflow_policy=_resolved.overflow_policy,
+            )
+        except Exception as e:
+            # Invalid admission-control config is unrecoverable until the
+            # operator fixes it; restarting won't help (#2437).
+            print(f"Error: invalid admission-control config: {e}")
+            return GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
         if agent_file:
