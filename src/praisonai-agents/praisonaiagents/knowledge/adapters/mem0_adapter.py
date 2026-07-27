@@ -7,7 +7,6 @@ Handles all normalization to ensure metadata is ALWAYS a dict (never None).
 LAZY IMPORT: mem0 is only imported when this adapter is instantiated.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import os
 from typing import Any, Dict, List, Optional

@@ -6,7 +6,6 @@ over HTTP Stream transport, implementing the Streamable HTTP transport protocol.
 
 import asyncio
 import atexit
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 import inspect

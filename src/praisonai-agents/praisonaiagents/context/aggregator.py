@@ -6,7 +6,6 @@ Inspired by CrewAI's ContextualMemory pattern.
 """
 
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union

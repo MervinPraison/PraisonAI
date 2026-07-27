@@ -7,7 +7,6 @@ Provides Language Server Protocol client implementation.
 import os
 import json
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 from pathlib import Path

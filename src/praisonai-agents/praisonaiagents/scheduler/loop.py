@@ -4,7 +4,6 @@ Schedule Loop for PraisonAI Agents.
 Polls ScheduleRunner for due jobs and fires a callback.
 """
 
-import logging
 import os
 import socket
 import uuid

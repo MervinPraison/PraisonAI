@@ -12,7 +12,6 @@ with support for:
 import uuid
 import re
 import yaml
-import logging
 from praisonaiagents._logging import get_logger
 from datetime import datetime
 from dataclasses import dataclass, field

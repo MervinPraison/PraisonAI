@@ -17,7 +17,6 @@ Usage:
     result = auto_rag.chat("Hello!")  # Skips retrieval
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field

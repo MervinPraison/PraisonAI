@@ -34,7 +34,6 @@ Usage:
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Set
 from enum import Enum
-import logging
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)

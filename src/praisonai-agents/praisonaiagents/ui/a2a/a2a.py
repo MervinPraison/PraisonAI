@@ -5,7 +5,6 @@ Exposes PraisonAI Agents via the A2A (Agent2Agent) protocol.
 """
 
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 from typing import List, Optional, TYPE_CHECKING
 

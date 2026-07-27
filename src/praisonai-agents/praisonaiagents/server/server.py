@@ -6,7 +6,6 @@ Provides REST API and SSE event streaming.
 
 import asyncio
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import queue
 import threading

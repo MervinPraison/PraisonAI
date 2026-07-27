@@ -34,7 +34,6 @@ Example:
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 import time
 import asyncio

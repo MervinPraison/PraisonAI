@@ -16,7 +16,6 @@ Usage:
     agent.start("Remind me to check email every morning at 7am")
 """
 
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 

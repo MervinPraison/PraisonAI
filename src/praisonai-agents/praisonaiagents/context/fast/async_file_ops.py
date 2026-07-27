@@ -12,7 +12,6 @@ Design principles:
 """
 
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, List
 

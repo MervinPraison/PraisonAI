@@ -11,7 +11,6 @@ Following the protocol-driven, agent-centric approach from AGENTS.md.
 
 import asyncio
 import functools
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Union, TypeVar, Coroutine
 

@@ -19,7 +19,6 @@ Usage:
 """
 
 import importlib.util
-import logging
 from praisonaiagents._logging import get_logger
 import sys
 from pathlib import Path

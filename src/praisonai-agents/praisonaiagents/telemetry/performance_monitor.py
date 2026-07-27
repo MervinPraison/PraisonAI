@@ -22,7 +22,6 @@ from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Callable, Union
 from contextlib import contextmanager
 from datetime import datetime
-import logging
 from praisonaiagents._logging import get_logger
 
 try:

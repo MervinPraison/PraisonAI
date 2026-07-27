@@ -12,7 +12,6 @@ import hashlib
 import threading
 from typing import Dict, Any, Optional
 from datetime import datetime
-import logging
 from praisonaiagents._logging import get_logger
 from concurrent.futures import ThreadPoolExecutor
 

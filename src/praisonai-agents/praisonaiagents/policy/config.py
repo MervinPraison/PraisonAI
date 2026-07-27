@@ -8,7 +8,6 @@ Extends the policy engine with learning capabilities:
 """
 
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 from dataclasses import dataclass, field
