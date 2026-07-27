@@ -227,6 +227,8 @@ class TrainModel:
         "dataloader_num_workers", "logging_first_step", "data_seed",
         "ddp_find_unused_parameters", "push_to_hub", "hub_model_id", "hub_strategy",
         "report_to", "run_name", "training_arguments",
+        # MTP (Multi-Token Prediction) fast-inference drafter
+        "mtp_draft", "mtp_draft_repo", "mtp_draft_file", "spec_draft_n_max",
     })
 
     def validate_config(self):

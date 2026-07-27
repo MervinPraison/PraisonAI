@@ -167,9 +167,17 @@ def _source_model_path(modelfile_content: str) -> Optional[str]:
 def _check_ollama_disk(modelfile_content: str) -> None:
     """Fail fast if the Ollama models volume lacks room for the created model.
 
-    Requires ~1.5x the source model size, with a 15GB floor when the size is
-    unknown (e.g. FROM references a Hub id rather than a local path).
+    Requires ~1.5x the *known* source model size. When the source size can't be
+    determined (e.g. FROM references a Hub id rather than a local path) we can't
+    estimate the requirement, so we skip the check rather than block with an
+    arbitrary floor — otherwise small Hub-backed exports on modest volumes are
+    rejected with a false positive.
     """
+    src = _source_model_path(modelfile_content)
+    src_size = _dir_size_bytes(src) if src else 0
+    if src_size <= 0:
+        return  # Unknown source size — can't estimate; don't block.
+
     models_dir = _ollama_models_dir()
     # disk_usage needs an existing path; walk up to the nearest existing parent.
     probe = models_dir
@@ -184,10 +192,7 @@ def _check_ollama_disk(modelfile_content: str) -> None:
         free = shutil.disk_usage(probe).free
     except OSError:
         return
-    floor = 15 * 2 ** 30
-    src = _source_model_path(modelfile_content)
-    src_size = _dir_size_bytes(src) if src else 0
-    required = max(floor, int(src_size * 1.5))
+    required = int(src_size * 1.5)
     if free < required:
         raise RuntimeError(
             f"Not enough disk for the Ollama model: {free / 2 ** 30:.1f} GB free on "
