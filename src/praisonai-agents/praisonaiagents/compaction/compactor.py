@@ -160,7 +160,8 @@ class ContextCompactor:
                 )
             except Exception:
                 pass
-        return max(1, len(text) // 4)
+        from ..context.tokens import estimate_tokens_heuristic
+        return estimate_tokens_heuristic(text)
 
     def count_message_tokens(self, message: Dict[str, Any]) -> int:
         """Count tokens in a message, including tool_calls payloads."""
