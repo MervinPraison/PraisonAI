@@ -3731,8 +3731,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                         arguments = {}
                     
-                    # Find the matching tool
-                    tool = next((t for t in tools if t.__name__ == function_name), None)
+                    # Find the matching tool by comparing every supported identifier:
+                    # __name__ (plain callables), .name (BaseTool instances like
+                    # BrowserBaseTool, or aliased FunctionTools), or the class name.
+                    # Compare all candidates (not short-circuit) so an aliased .name
+                    # that differs from __name__ still resolves and BaseTool
+                    # subclasses without __name__ do not crash dispatch.
+                    tool = next(
+                        (t for t in tools if function_name in (
+                            getattr(t, "__name__", None),
+                            getattr(t, "name", None),
+                            type(t).__name__,
+                        )),
+                        None,
+                    )
                     if not tool:
                         _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue

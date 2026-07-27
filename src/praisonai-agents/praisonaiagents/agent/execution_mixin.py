@@ -1458,11 +1458,22 @@ Write the complete compiled report:"""
                     return policy_result  # Error dict
                 _, arguments = policy_result
 
-            # Try to find the function in the override tools list first, then agent's tools list
+            # Try to find the function in the override tools list first, then agent's tools list.
+            # Resolve by BaseTool/FunctionTool ``.name`` (instances like BrowserBaseTool or
+            # aliased decorated tools), plain callable ``__name__``, or class name so async
+            # dispatch matches the robust sync resolution in _execute_tool_impl.
             func = None
             tools_to_search = tools_override if tools_override is not None else self.tools
+            from ..tools.base import BaseTool
             for tool in tools_to_search:
-                if (callable(tool) and getattr(tool, '__name__', '') == function_name):
+                if isinstance(tool, BaseTool) and getattr(tool, 'name', None) == function_name:
+                    func = tool
+                    break
+                if hasattr(tool, 'name') and getattr(tool, 'name', None) == function_name:
+                    func = tool
+                    break
+                if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
+                   (inspect.isclass(tool) and tool.__name__ == function_name):
                     func = tool
                     break
             
@@ -1471,15 +1482,18 @@ Write the complete compiled report:"""
                 return {"error": f"Function {function_name} not found in tools"}
 
             try:
-                if inspect.iscoroutinefunction(func):
+                # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
+                # directly callable — dispatch to their .run() method like the sync path.
+                call_target = func.run if isinstance(func, BaseTool) else func
+                if inspect.iscoroutinefunction(call_target):
                     logging.debug(f"Executing async function: {function_name}")
-                    result = await func(**arguments)
+                    result = await call_target(**arguments)
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
                     result = await loop.run_in_executor(
-                        None, copy_context_to_callable(lambda: func(**arguments))
+                        None, copy_context_to_callable(lambda: call_target(**arguments))
                     )
                 
                 # Ensure result is JSON serializable
