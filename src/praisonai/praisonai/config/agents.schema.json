@@ -493,11 +493,6 @@
           "title": "Response Template"
         }
       },
-      "required": [
-        "role",
-        "goal",
-        "backstory"
-      ],
       "title": "AgentConfig",
       "type": "object"
     },
@@ -1125,34 +1120,54 @@
     "roles": {
       "anyOf": [
         {
-          "additionalProperties": {
-            "$ref": "#/$defs/AgentConfig"
-          },
-          "type": "object"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/AgentConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roles"
         },
         {
-          "type": "null"
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentConfig"
+          }
         }
       ],
-      "default": null,
-      "description": "Agent roles (canonical)",
-      "title": "Roles"
+      "description": "Agent roles (canonical)"
     },
     "agents": {
       "anyOf": [
         {
-          "additionalProperties": {
-            "$ref": "#/$defs/AgentConfig"
-          },
-          "type": "object"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/AgentConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
         },
         {
-          "type": "null"
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentConfig"
+          }
         }
       ],
-      "default": null,
-      "description": "Agents (backward compat)",
-      "title": "Agents"
+      "description": "Agents (backward compat)"
     },
     "tasks": {
       "anyOf": [

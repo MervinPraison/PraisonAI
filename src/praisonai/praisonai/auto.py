@@ -1115,8 +1115,15 @@ class AutoGenerator(BaseAutoGenerator):
             try:
                 from .config.schema import AGENTS_SCHEMA_HEADER
                 f.write(AGENTS_SCHEMA_HEADER)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Non-fatal: the YAML is still valid/executable without the
+                # editor header, but surface it so a missing schema directive
+                # is diagnosable instead of silently dropped.
+                logger.debug(
+                    "Could not write yaml-language-server schema header to %s: %s",
+                    self.agent_file,
+                    exc,
+                )
             _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
         _atomic_write_text(self.agent_file, _write_with_header)

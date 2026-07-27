@@ -457,12 +457,62 @@ class ValidationResult(BaseModel):
 AgentConfig.model_rebuild()
 
 
+def _relax_agent_config_for_editor(defs: Dict[str, Any]) -> None:
+    """Loosen ``AgentConfig`` in ``$defs`` to match the runtime contract.
+
+    The strict :class:`AgentConfig` marks ``role``/``goal``/``backstory`` as
+    required, but the runtime (``agents_generator._normalize_yaml_config`` and
+    the adapter canonicalisation step) auto-fills ``role``/``goal`` from the
+    agent key and maps ``instructions`` -> ``backstory``. Publishing the strict
+    form would make editors flag valid, executable YAML as invalid, so the
+    published (authoring) schema drops those ``required`` entries. This only
+    affects the emitted artefact — the strict model used by ``ConfigValidator``
+    is untouched.
+    """
+    agent_def = defs.get("AgentConfig")
+    if isinstance(agent_def, dict):
+        agent_def.pop("required", None)
+
+
+def _allow_list_form_agents(schema: Dict[str, Any]) -> None:
+    """Allow list-form ``roles``/``agents`` in the published schema.
+
+    The runtime accepts both the canonical dict form and a list of named
+    entries (``agents_generator._list_to_dict``). The dict form remains the
+    documented default; the list form is added as an alternative so editors
+    don't reject the list variant.
+    """
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return
+    list_form = {
+        "type": "array",
+        "items": {"$ref": "#/$defs/AgentConfig"},
+    }
+    for key in ("roles", "agents"):
+        entry = props.get(key)
+        if not isinstance(entry, dict):
+            continue
+        dict_form = {k: v for k, v in entry.items() if k != "description"}
+        props[key] = {
+            "anyOf": [dict_form, list_form],
+            "description": entry.get("description", ""),
+        }
+
+
 def generate_agents_schema() -> Dict[str, Any]:
     """Generate the JSON Schema for the ``agents.yaml`` file.
 
     Derived directly from :class:`YAMLConfig` (Pydantic's ``model_json_schema``)
     and decorated with the standard ``$schema``/``$id``/``title`` metadata so the
     artefact is self-describing and mirrors the CLI-config schema convention.
+
+    The published (authoring) schema is deliberately a touch more permissive
+    than the strict validator so editors accept every YAML shape the runtime
+    accepts: list-form ``roles``/``agents`` and configs that rely on runtime
+    normalisation (``instructions`` -> ``backstory``, auto-filled ``role``/
+    ``goal``). The strict :class:`YAMLConfig` used by ``ConfigValidator`` is
+    left unchanged.
     """
     schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -474,4 +524,10 @@ def generate_agents_schema() -> Dict[str, Any]:
             "(roles/agents, tasks, tools, llm, workflow)."
         ),
     }
+
+    defs = schema.get("$defs")
+    if isinstance(defs, dict):
+        _relax_agent_config_for_editor(defs)
+    _allow_list_form_agents(schema)
+
     return schema

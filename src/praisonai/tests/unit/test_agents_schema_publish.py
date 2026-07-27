@@ -45,6 +45,42 @@ def test_committed_artefact_matches_model():
     )
 
 
+def test_published_schema_matches_runtime_contract():
+    """Editor schema must accept runtime-normalised YAML shapes (issue #3427).
+
+    The runtime (``agents_generator``) auto-fills ``role``/``goal``, maps
+    ``instructions`` -> ``backstory``, and accepts list-form ``roles``/
+    ``agents``. The published schema must not mark those forms invalid, so:
+    - ``AgentConfig`` has no ``required`` block, and
+    - ``roles``/``agents`` allow both dict and list forms.
+    """
+    schema = generate_agents_schema()
+
+    agent_def = schema["$defs"]["AgentConfig"]
+    assert "required" not in agent_def, (
+        "published AgentConfig must not force role/goal/backstory; "
+        "runtime auto-fills / accepts 'instructions'"
+    )
+
+    def _collect_types(node):
+        types = set()
+        if isinstance(node, dict):
+            if isinstance(node.get("type"), str):
+                types.add(node["type"])
+            for branch in node.get("anyOf", []):
+                types |= _collect_types(branch)
+        return types
+
+    for key in ("roles", "agents"):
+        types = _collect_types(schema["properties"][key])
+        assert "array" in types, (
+            f"'{key}' must accept list form (runtime _list_to_dict)"
+        )
+        assert "object" in types, (
+            f"'{key}' must still accept canonical dict form"
+        )
+
+
 def test_schema_header_points_at_published_url():
     assert AGENTS_SCHEMA_HEADER.startswith("# yaml-language-server: $schema=")
     assert AGENTS_SCHEMA_URL in AGENTS_SCHEMA_HEADER
