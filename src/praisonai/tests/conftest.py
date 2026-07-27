@@ -6,25 +6,25 @@ import warnings
 import gc
 from unittest.mock import Mock, patch
 
+# NOTE: pytest 9.1.1+ forbids declaring `pytest_plugins` in a non-top-level
+# conftest.py. We register the local safety plugins here instead, which is the
+# supported mechanism for nested conftest files. This preserves the test gating
+# and network guard behaviour without triggering the collection error.
 def pytest_configure(config):
-    """Register custom markers to avoid warnings."""
-    config.addinivalue_line("markers", "real: Test requires real API keys")
-    config.addinivalue_line("markers", "integration: Integration test")
-    config.addinivalue_line("markers", "network: Test requires network access")
-    config.addinivalue_line("markers", "e2e: End-to-end test")
-    config.addinivalue_line("markers", "provider_anthropic: Anthropic provider test")
-    config.addinivalue_line("markers", "provider_openai: OpenAI provider test")
-    config.addinivalue_line("markers", "provider_google: Google provider test")
-    config.addinivalue_line("markers", "local_service: Test requires local service")
-    config.addinivalue_line("markers", "allow_sleep: Allow real sleep in test")
-    config.addinivalue_line("markers", "slow: Slow running test")
-    config.addinivalue_line("markers", "xdist_group: Group for xdist parallelization")
-    config.addinivalue_line("markers", "no_session_isolation: Disable session isolation")
-    config.addinivalue_line("markers", "unit: Unit test")
-    config.addinivalue_line("markers", "flaky: Flaky test")
+    """Register local safety plugins for the PraisonAI test suite.
+
+    pytest-asyncio is loaded automatically via its entry point. The gating and
+    network-guard plugins are registered explicitly (they previously lived in a
+    module-level `pytest_plugins` tuple which is no longer allowed here).
+    """
+    for plugin_name in (
+        "tests._pytest_plugins.test_gating",
+        "tests._pytest_plugins.network_guard",
+    ):
+        if not config.pluginmanager.has_plugin(plugin_name):
+            config.pluginmanager.import_plugin(plugin_name)
 
 
-    
 # Suppress aiohttp unclosed session warnings during tests
 warnings.filterwarnings("ignore", message="Unclosed client session")
 warnings.filterwarnings("ignore", message="Unclosed connector")
@@ -56,15 +56,16 @@ def cleanup_async_resources():
     # Force garbage collection to clean up any lingering async resources
     gc.collect()
 
-# Correct paths for src/praisonai/tests/conftest.py
-# Go up 3 levels to reach root (tests -> praisonai -> src -> root)
-_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')
-if os.path.exists(_agents_path) and _agents_path not in sys.path:
+# Add the source paths to sys.path for imports.
+# Layout: <root>/src/praisonai/tests/conftest.py, with the core SDK living at
+# <root>/src/praisonai-agents. From this file, '..', '..' reaches <root>/src.
+_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', 'praisonai-agents')
+if os.path.isdir(_agents_path) and _agents_path not in sys.path:
     sys.path.insert(0, _agents_path)
 
-# Go up 2 levels to reach src, then to praisonai
+# praisonai wrapper package: '..' reaches <root>/src/praisonai.
 _wrapper_path = os.path.join(os.path.dirname(__file__), '..')
-if os.path.exists(_wrapper_path) and _wrapper_path not in sys.path:
+if os.path.isdir(_wrapper_path) and _wrapper_path not in sys.path:
     sys.path.insert(0, _wrapper_path)
 
 @pytest.fixture
