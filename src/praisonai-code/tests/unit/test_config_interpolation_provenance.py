@@ -85,11 +85,43 @@ def test_resolve_with_provenance_env_overrides_project(tmp_path, monkeypatch):
     assert prov["agent.model"]["layer"] == "environment"
 
 
-def test_resolve_with_provenance_defaults_present(tmp_path):
+def test_resolve_with_provenance_defaults_present(tmp_path, monkeypatch):
+    
+    monkeypatch.setattr(
+        ConfigResolver,
+        "_load_global_config",
+        lambda self: None,
+    )
+
     resolver = ConfigResolver(cwd=tmp_path)
     prov = resolver.resolve_with_provenance()
-    # With no config files, values come from built-in defaults.
+
     assert prov["telemetry"]["layer"] == "defaults"
+
+
+def test_project_config_ignores_home_directory(tmp_path, monkeypatch):
+    # A config at the user's home directory must not be discovered as a
+    # project config (regression for the home-directory walk-up boundary).
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=home)
+    assert resolver._load_project_config() is None
+
+
+def test_project_config_ignores_home_when_cwd_below_home(tmp_path, monkeypatch):
+    # Walking up from a sub-directory must stop before home, so a home-level
+    # config is never picked up while still allowing project-level configs.
+    home = tmp_path / "home"
+    project = home / "project"
+    project.mkdir(parents=True)
+    (home / "praison.yaml").write_text("agent:\n  model: home-model\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    resolver = ConfigResolver(cwd=project)
+    assert resolver._load_project_config() is None
 
 
 def test_interpolate_env_missing_no_default_preserves_directive(monkeypatch):
