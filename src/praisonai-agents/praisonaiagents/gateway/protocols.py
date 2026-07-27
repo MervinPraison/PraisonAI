@@ -2983,8 +2983,8 @@ class ResourcePressurePolicyProtocol(Protocol):
 class MemoryPressurePolicy:
     """Config-driven RSS-threshold resource-pressure policy.
 
-    The default referenced by the ``reliability`` / ``resource`` block in
-    ``gateway.yaml``, the ``--max-rss`` CLI flag and the
+    The default wired by the ``max_rss_mb`` gateway config key
+    (``BotOS(max_rss_mb=...)`` / ``gateway.yaml``) and the
     ``AdmissionGate(resource_policy=...)`` Python surface. It is intentionally
     minimal and dependency-free so the decision lives in core and is provable
     in isolation; the wrapper owns the live sampler and the side effects

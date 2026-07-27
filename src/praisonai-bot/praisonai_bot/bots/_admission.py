@@ -28,10 +28,16 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import resource
 import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
+
+try:
+    # ``resource`` is Unix-only; on Windows the stdlib fallback is unavailable
+    # and the sampler self-disables (psutil, if installed, still works).
+    import resource  # type: ignore
+except ImportError:  # pragma: no cover - Windows / platforms without resource
+    resource = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +86,8 @@ class _RssSampler:
                 return proc.memory_info().rss / (1024.0 * 1024.0)
             except Exception:  # pragma: no cover — defensive
                 self._psutil_proc = None
+        if resource is None:  # Windows / no stdlib ``resource`` and no psutil.
+            return None
         try:
             maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         except Exception:  # pragma: no cover — platform without getrusage
@@ -207,14 +215,26 @@ class AdmissionGate:
             "admitted": self.admitted,
             "rejected": self.rejected,
             "shed": self.shed,
+            "max_rss_mb": float(
+                getattr(self._resource_policy, "hard_rss_mb", 0.0) or 0.0
+            ),
         }
 
     def _ensure_sem(self) -> asyncio.Semaphore:
         if self._sem is None:
             # A resource-only gate (no concurrency ceiling, ``_max == 0``) still
-            # needs a working semaphore for the queue/shed backpressure path, so
-            # fall back to a large-but-finite ceiling that never blocks on
-            # concurrency alone — only the resource policy sheds/queues there.
+            # needs a working semaphore for the shed path, so fall back to a
+            # large-but-finite ceiling that never blocks on concurrency alone —
+            # only the resource policy sheds there.
+            #
+            # Note (soft pressure, resource-only): with no concurrency ceiling
+            # there is no slot to wait on, so a soft-pressure QUEUE degrades to
+            # ADMIT here (it cannot delay a turn on its own). Real wait-queue
+            # backpressure needs a concurrency ceiling (``max_concurrent_runs``)
+            # alongside ``max_rss_mb``; the OOM-critical hard threshold always
+            # REJECTs regardless. This is intentional: we do not spin a timer
+            # loop to poll RSS (scope creep) — hard shedding is what prevents the
+            # OOM kill, and soft pressure is advisory unless a ceiling exists.
             ceiling = self._max if self._max > 0 else 2**31 - 1
             self._sem = asyncio.Semaphore(ceiling)
         return self._sem
@@ -372,6 +392,34 @@ class AdmissionGate:
             AdmissionDecision.REJECT: 2,
         }
         return a if rank.get(a, 0) >= rank.get(b, 0) else b
+
+
+def build_memory_pressure_policy(
+    max_rss_mb: float = 0.0,
+    soft_ratio: float = 0.9,
+) -> Optional[object]:
+    """Build a :class:`MemoryPressurePolicy` from a single ``max_rss_mb`` knob.
+
+    Keeps the production surface to one number: the *hard* RSS ceiling above
+    which turns are shed. The soft (queue/backpressure) threshold is derived as
+    ``soft_ratio`` of the ceiling (90% by default) so a single flag/config value
+    yields the full ADMIT/QUEUE/REJECT ladder without exposing three knobs.
+
+    Returns ``None`` when no ceiling is configured (``max_rss_mb <= 0``), so
+    admission stays concurrency-only and legacy behaviour is preserved.
+    """
+    try:
+        hard = float(max_rss_mb or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if hard <= 0:
+        return None
+    try:
+        from praisonaiagents.gateway import MemoryPressurePolicy
+    except ImportError:  # pragma: no cover — core always present in wrapper
+        return None
+    soft = max(0.0, min(1.0, soft_ratio)) * hard
+    return MemoryPressurePolicy(soft_rss_mb=soft, hard_rss_mb=hard)
 
 
 def build_admission_gate(

@@ -15,6 +15,7 @@ from praisonai_bot.bots._admission import (  # noqa: E402
     AdmissionGate,
     AdmissionRejected,
     build_admission_gate,
+    build_memory_pressure_policy,
 )
 
 # BotOS may pull optional adapter deps; only a genuine optional-dependency miss
@@ -351,3 +352,51 @@ def test_resource_missing_sample_admits():
             assert gate.in_flight == 1
 
     asyncio.run(main())
+
+
+def test_build_memory_pressure_policy_from_single_knob():
+    # A single ``max_rss_mb`` ceiling derives the soft (queue) threshold at 90%.
+    pol = build_memory_pressure_policy(1000)
+    assert pol is not None
+    assert pol.hard_rss_mb == 1000
+    assert pol.soft_rss_mb == 900
+    assert pol.enabled is True
+
+
+def test_build_memory_pressure_policy_disabled_when_zero():
+    assert build_memory_pressure_policy(0) is None
+    assert build_memory_pressure_policy() is None
+    assert build_memory_pressure_policy(-5) is None
+
+
+def test_build_memory_pressure_policy_wires_into_gate_stats():
+    gate = build_admission_gate(
+        resource_policy=build_memory_pressure_policy(800)
+    )
+    assert gate is not None
+    assert gate.enabled is True
+    assert gate.stats()["max_rss_mb"] == 800
+
+
+@pytest.mark.skipif(BotOS is None, reason="BotOS optional dependency not installed")
+def test_botos_enables_memory_gate_from_max_rss():
+    botos = BotOS(max_rss_mb=1024)
+    assert botos._admission_gate is not None
+    assert botos._admission_gate.enabled is True
+    assert botos.admission_stats["max_rss_mb"] == 1024
+
+
+def test_rss_sampler_never_raises_without_resource_module():
+    # Simulate a platform without the Unix-only ``resource`` module (Windows):
+    # the sampler must self-disable and return a None sample, never raise.
+    import praisonai_bot.bots._admission as adm
+
+    original = adm.resource
+    try:
+        adm.resource = None
+        sampler = adm._RssSampler()
+        sampler._psutil_proc = None  # force the stdlib path
+        sample = sampler.read()
+        assert sample.rss_mb is None
+    finally:
+        adm.resource = original
