@@ -83,6 +83,14 @@ def apply_bot_smart_defaults(agent: Any, config: Optional[Any] = None, session_k
         workspace = Workspace.from_config(config, session_key=session_key)
         # Store workspace on agent for tool factories to use
         agent._workspace = workspace
+        # Root change-tracking (/undo) at the workspace the file tools write to,
+        # not the gateway process cwd (bug: /undo tracked the wrong directory).
+        _set_root = getattr(agent, "set_snapshot_root", None)
+        if callable(_set_root):
+            try:
+                _set_root(str(workspace.root))
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"Failed to root snapshot at workspace: {e}")
         logger.debug(f"Bot: configured workspace at {workspace.root} for agent '{getattr(agent, 'name', '?')}'")
     except Exception as e:
         logger.warning(f"Failed to setup workspace: {e}")
