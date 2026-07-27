@@ -229,6 +229,28 @@ class _BaseAgentScheduler:
     _total_cost: float
     _start_time: Optional[datetime]
 
+    def _should_suppress_delivery(self, text: str) -> bool:
+        """Return True when a run's whole output is an exact silence marker.
+
+        Honours the core intentional-silence contract (NO_REPLY / [SILENT] /
+        SILENT) on the unattended path so both sync and async schedulers stay
+        quiet instead of delivering the literal marker. Prose that merely
+        mentions the token is unaffected (exact-match).
+        """
+        try:
+            from praisonaiagents.bots.silence import is_intentional_silence_response
+            return is_intentional_silence_response(text)
+        except Exception:  # pragma: no cover - core primitive always present
+            return False
+
+    def _budget_exceeded(self) -> bool:
+        """Return True when the accumulated cost has reached ``max_cost``.
+
+        A ``max_cost`` of 0 is a real (zero) budget and must trip immediately;
+        only ``None`` means "no budget limit".
+        """
+        return self.max_cost is not None and self._total_cost >= self.max_cost
+
     def _build_stats(
         self,
         *,

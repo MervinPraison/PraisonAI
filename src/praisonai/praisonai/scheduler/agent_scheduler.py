@@ -241,7 +241,7 @@ class AgentScheduler(_BaseAgentScheduler):
         """Internal method to run scheduled agent executions."""
         while not self._stop_event.is_set():
             # Check budget limit
-            if self.max_cost and self._total_cost >= self.max_cost:
+            if self._budget_exceeded():
                 logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
                 logger.warning("Stopping scheduler to prevent additional costs")
                 self.stop()
@@ -396,15 +396,11 @@ class AgentScheduler(_BaseAgentScheduler):
         # run still completes and is recorded in history; only delivery is
         # suppressed. Prose that merely mentions the token is unaffected
         # (is_intentional_silence_response is exact-match).
-        try:
-            from praisonaiagents.bots.silence import is_intentional_silence_response
-            if is_intentional_silence_response(text):
-                logger.info(
-                    "Scheduled run chose intentional silence; delivery suppressed"
-                )
-                return
-        except Exception:  # pragma: no cover - core primitive always present
-            pass
+        if self._should_suppress_delivery(text):
+            logger.info(
+                "Scheduled run chose intentional silence; delivery suppressed"
+            )
+            return
         try:
             if self._delivery is None:
                 from praisonai.scheduler._delivery import SchedulerDelivery
