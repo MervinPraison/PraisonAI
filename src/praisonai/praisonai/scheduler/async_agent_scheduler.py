@@ -244,7 +244,20 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             if run_immediately:
                 logger.info("Running agent immediately before starting schedule...")
                 await self._execute_with_retry(max_retries)
-            
+                # The immediate run may have tripped the budget brake (e.g. a
+                # zero budget), which sets the stop event and clears is_running.
+                # In that case there is nothing left to schedule — don't spin up
+                # a background task that would exit on its first tick and don't
+                # report a successful start.
+                if not self.is_running or (
+                    self._stop_event is not None and self._stop_event.is_set()
+                ):
+                    logger.info(
+                        "Scheduler stopped during immediate run "
+                        "(budget limit); not starting background task"
+                    )
+                    return False
+
             # Start background task
             self._task = asyncio.create_task(
                 self._run_schedule(interval, max_retries)
