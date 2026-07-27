@@ -74,6 +74,7 @@ def schedule_add(
     channel_id: str = "",
     agent_id: str = "",
     session_id: str = "",
+    continuable: bool = True,
     accept_suggestion: str = "",
 ) -> str:
     """Add a new scheduled job.
@@ -97,6 +98,10 @@ def schedule_add(
                   executor uses its default agent.
         session_id: Optional session ID to preserve conversation context.
                     If set, the agent will have access to prior chat history.
+        continuable: When True (default), a delivered result seeds a resumable
+                    session so the user's reply in the same chat resumes the
+                    job's conversation with full context. Set False for pure
+                    fire-and-forget notifications.
         accept_suggestion: If set, accept the suggestion with this ID
             after the job is successfully added.
 
@@ -129,6 +134,7 @@ def schedule_add(
                         channel=channel,
                         channel_id=channel_id,
                         session_id=session_id or None,
+                        continuable=continuable,
                     )
                 else:
                     return (
@@ -140,6 +146,7 @@ def schedule_add(
             delivery = DeliveryTarget(
                 deliver=deliver,
                 session_id=session_id or None,
+                continuable=continuable,
             )
         elif channel or channel_id:
             # Validate both are provided together
@@ -151,6 +158,7 @@ def schedule_add(
                 channel=channel,
                 channel_id=channel_id,
                 session_id=session_id or None,
+                continuable=continuable,
             )
 
         job = ScheduleJob(

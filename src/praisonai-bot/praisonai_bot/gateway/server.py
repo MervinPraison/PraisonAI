@@ -4532,6 +4532,9 @@ class WebSocketGateway:
                 logger.info(
                     "Delivered scheduled result to %s:%s", channel, channel_id,
                 )
+                # Seed a resumable session so the user's reply in this chat
+                # resumes the job's conversation with full context (#3444).
+                self._seed_continuable_session(delivery, text)
             else:
                 logger.error(
                     "Failed to deliver scheduled result to %s:%s", channel, channel_id,
@@ -4560,10 +4563,76 @@ class WebSocketGateway:
             logger.info(
                 "Delivered scheduled result to %s:%s", channel, channel_id,
             )
+            # Seed a resumable session so the user's reply resumes context (#3444).
+            self._seed_continuable_session(delivery, text)
         except Exception as e:
             logger.error(
                 "Failed to deliver to %s:%s: %s", channel, channel_id, e,
             )
+
+    def _seed_continuable_session(self, delivery: Any, text: str) -> None:
+        """Seed a resumable session so a reply to a delivered brief has context.
+
+        Issue #3444: a scheduled/automated delivery is one-way by default — the
+        gateway sends the text and stops, so when the user replies in the same
+        chat ("dig into item 3") the reply lands as a brand-new, contextless
+        turn. Here we mirror the just-delivered text into the destination
+        channel bot's session — keyed by the same chat id an inbound reply
+        reproduces — so the reply resumes the conversation with the brief in
+        context. Reuses the existing ``mirror_to_session`` outbound-mirror path
+        (the same mechanism ``send_message`` already uses), so this adds no new
+        session machinery. Opt-out via ``DeliveryTarget.continuable=False``.
+
+        Best-effort and side-effect-free on failure: seeding must never break
+        the delivery that already succeeded.
+        """
+        if not getattr(delivery, "continuable", True):
+            return
+        channel = getattr(delivery, "channel", "") or ""
+        channel_id = getattr(delivery, "channel_id", "") or ""
+        if not channel or not channel_id:
+            return
+        bot = self.get_channel_bot(channel)
+        if bot is None:
+            for name, b in self._channel_bots.items():
+                if name.lower() == channel.lower():
+                    bot = b
+                    break
+        if bot is None:
+            return
+        # Locate the bot's BotSessionManager across the adapter variants
+        # (adapters expose it as ``_session``/``_session_mgr``, sometimes behind
+        # an inner ``_adapter``) — same discovery the outbound-messenger wiring
+        # uses so seeding reaches every shipped transport.
+        session = None
+        for holder in (bot, getattr(bot, "_adapter", None)):
+            if holder is None:
+                continue
+            for attr in ("_session", "_session_mgr"):
+                candidate = getattr(holder, attr, None)
+                if candidate is not None:
+                    session = candidate
+                    break
+            if session is not None:
+                break
+        if session is None:
+            return
+        try:
+            from praisonai_bot.bots._mirror import mirror_to_session
+            # An inbound reply from this chat resolves its session by the chat
+            # id, so mirror under ``channel_id`` — byte-identical to the key the
+            # reply will mint — with the delivered brief as the assistant turn.
+            mirror_to_session(
+                session,
+                user_id=channel_id,
+                message_text=text,
+                source_label="cron",
+            )
+            logger.info(
+                "Seeded continuable session for %s:%s", channel, channel_id,
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("continuable seed failed for %s:%s: %s", channel, channel_id, e)
 
     async def _deliver_via_outbox(
         self, outbox: Any, router: Any, route: str, text: str, idem: str,
