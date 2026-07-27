@@ -391,14 +391,42 @@ def session_export(
         "-o",
         help="Output file path",
     ),
+    sanitise: bool = typer.Option(
+        False,
+        "--sanitise",
+        "--sanitize",
+        help=(
+            "Redact secrets, absolute paths, the working directory, and "
+            "embedded file contents with stable placeholders before export "
+            "(opt-in; default export is unchanged)."
+        ),
+    ),
+    redact_level: str = typer.Option(
+        "standard",
+        "--redact-level",
+        help="Redaction level when --sanitise is set: 'standard' or 'strict'.",
+    ),
 ):
     """Export a session."""
     output = get_output_controller()
 
     # Export the same session id list/resume expose (Issue #3133).
     from ..state.session_resolver import export_session
+    from ..state.redact import REDACT_LEVELS
 
-    content = export_session(session_id, format=format)
+    if redact_level not in REDACT_LEVELS:
+        output.print_error(
+            f"Invalid --redact-level '{redact_level}'. "
+            f"Choose one of: {', '.join(REDACT_LEVELS)}."
+        )
+        raise typer.Exit(1)
+
+    content = export_session(
+        session_id,
+        format=format,
+        redact=sanitise,
+        redact_level=redact_level,
+    )
 
     if content is None:
         output.print_error(f"Session not found: {session_id}")
