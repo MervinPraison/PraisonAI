@@ -16,6 +16,12 @@ from praisonai_bot.bots._outbound_resilience import OutboundResilienceMixin
 from praisonai_bot.bots._resilience import BackoffPolicy
 
 
+@pytest.fixture(autouse=True)
+def _isolate_praisonai_home(monkeypatch, tmp_path):
+    """Keep the default outbound DLQ (#3446) off the real ``~/.praisonai``."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+
+
 class _FakeAdapter(OutboundResilienceMixin):
     _outbound_platform = "slack"
 
@@ -124,8 +130,9 @@ async def test_exhausted_retries_parked_in_dlq(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_no_config_still_retries_without_dlq():
-    """Without resilience config, sends still retry (just no DLQ park)."""
+async def test_no_config_still_retries(monkeypatch, tmp_path):
+    """Without resilience config, sends still retry with the default DLQ on."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     adapter = _FakeAdapter()
 
     async def fails_once():
@@ -138,7 +145,101 @@ async def test_no_config_still_retries_without_dlq():
         fails_once, channel_id="c1", reply_text="hi"
     )
     assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_default_dlq_on_without_config(monkeypatch, tmp_path):
+    """Safe by default (#3446): a permanent failure parks even with no config.
+
+    Mirrors the durable inbound journal — the outbound reply is a durable
+    delivery obligation by default, so a permanently-failed send is parked at
+    the canonical per-platform store path rather than silently dropped.
+    """
+    from praisonai_bot.bots._dlq import OutboundDLQ
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    adapter = _FakeAdapter()
+
+    async def always_fails():
+        raise ValueError("invalid channel")
+
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(
+            always_fails, channel_id="c1", reply_text="paid-for reply"
+        )
+
+    assert adapter._outbound_dlq is not None
+    dlq_path = tmp_path / "state" / "slack" / "outbound_dlq.sqlite"
+    assert dlq_path.exists()
+    entries = OutboundDLQ(path=dlq_path).list()
+    assert len(entries) == 1
+    assert entries[0].reply_text == "paid-for reply"
+
+
+@pytest.mark.asyncio
+async def test_enabled_false_disables_default_dlq(monkeypatch, tmp_path):
+    """Escape hatch: ``enabled=false`` turns the durable park off entirely."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    disabled = SimpleNamespace(outbound_resilience=SimpleNamespace(enabled=False))
+    adapter = _FakeAdapter(config=disabled)
+
+    async def fails_once():
+        if not getattr(fails_once, "called", False):
+            fails_once.called = True
+            raise ValueError("invalid channel")
+        return "ok"
+
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(
+            fails_once, channel_id="c1", reply_text="hi"
+        )
     assert adapter._outbound_dlq is None
+
+
+@pytest.mark.asyncio
+async def test_transient_dlq_init_failure_recovers(monkeypatch, tmp_path):
+    """A transient DLQ-init failure must not permanently disable parking (#3446).
+
+    Regression: the first send fails to build the default DLQ (storage briefly
+    unavailable) and degrades to retry-only, but the resilience state must NOT
+    latch as ``ready``. Once storage recovers, a later send re-attempts init,
+    parks the permanent failure, and the reply is durable again.
+    """
+    import praisonai_bot.bots._dlq as dlq_mod
+    from praisonai_bot.bots._dlq import OutboundDLQ
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    adapter = _FakeAdapter()
+
+    calls = {"n": 0}
+    real_cls = dlq_mod.OutboundDLQ
+
+    def flaky_dlq(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("storage temporarily unavailable")
+        return real_cls(*args, **kwargs)
+
+    monkeypatch.setattr(dlq_mod, "OutboundDLQ", flaky_dlq)
+
+    async def always_fails():
+        raise ValueError("invalid channel")
+
+    # First send: DLQ init fails -> retry-only, reply lost this turn, but state
+    # must stay un-latched so it can recover.
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(always_fails, channel_id="c1", reply_text="first")
+    assert adapter._outbound_dlq is None
+    assert getattr(adapter, "_outbound_resilience_ready", False) is False
+
+    # Second send: storage recovered -> DLQ init succeeds and reply is parked.
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(always_fails, channel_id="c1", reply_text="second")
+    assert adapter._outbound_dlq is not None
+
+    dlq_path = tmp_path / "state" / "slack" / "outbound_dlq.sqlite"
+    entries = OutboundDLQ(path=dlq_path).list()
+    assert [e.reply_text for e in entries] == ["second"]
 
 
 @pytest.mark.asyncio
