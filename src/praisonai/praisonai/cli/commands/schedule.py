@@ -47,6 +47,7 @@ def schedule_add_cmd(
     channel: str = typer.Option("", "--channel", help="[Legacy] Delivery platform: telegram, discord, slack, whatsapp"),
     channel_id: str = typer.Option("", "--channel-id", help="[Legacy] Target chat/channel ID on the platform"),
     session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
+    continuable: bool = typer.Option(True, "--continuable/--no-continuable", help="Seed a resumable session on delivery so a reply resumes the job with context (default); --no-continuable for fire-and-forget notices"),
     pre_run: str = typer.Option("", "--pre-run", help="Cheap pre-run gate command: exit 0 + output => run (output seeds the prompt); non-zero => skip (no model tokens, no delivery)"),
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
@@ -76,7 +77,12 @@ def schedule_add_cmd(
         
         if session_id:
             delivery_kwargs["session_id"] = session_id
-        
+
+        # Opt-out only: True is the default, so pass it through solely when a
+        # delivery target exists and the user asked for fire-and-forget.
+        if delivery_kwargs and not continuable:
+            delivery_kwargs["continuable"] = False
+
         result = _schedule_add(
             name=name,
             schedule=schedule,
