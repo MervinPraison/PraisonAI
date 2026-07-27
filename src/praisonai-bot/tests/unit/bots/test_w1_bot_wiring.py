@@ -7,6 +7,8 @@ underlying ``BotSessionManager``.
 
 from __future__ import annotations
 
+import builtins
+
 import pytest
 
 from praisonai_bot.bots import Bot, BotOS
@@ -207,3 +209,76 @@ class TestBotOSTurnLockWiring:
         os._wire_turn_locks()
 
         assert bot._turn_lock_map is os._turn_lock_map
+
+
+class _SpliceSession:
+    """A BotSessionManager-shaped session exposing only the private seam attrs.
+
+    Deliberately does NOT implement ``attach_gateway_runtime`` so it models a
+    session from a ``praisonaiagents`` release predating the typed contract.
+    """
+
+    def __init__(self):
+        self._identity_resolver = None
+        self._delivery_router = None
+        self._admission_gate = None
+        self._locks = object()
+
+
+class _SpliceAdapter:
+    def __init__(self):
+        self._session = _SpliceSession()
+
+
+class TestGatewayRuntimeCompatFallback:
+    """The typed contract lives in core; the wrapper allows a version range.
+
+    On a core release predating ``GatewayRuntimeSeams`` the import fails, so
+    ``_attach_gateway_runtime`` must fall back to the legacy duck-typed splices
+    rather than raising ``ImportError`` on every ``start()``/``probe()``/
+    ``health()`` (Greptile P1).
+    """
+
+    def test_no_seams_is_noop_without_touching_core(self, monkeypatch):
+        """With nothing to inject the method returns before any core import."""
+        real_import = builtins.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "praisonaiagents.bots":
+                raise AssertionError("must not import core when there are no seams")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _boom)
+
+        bot = Bot("telegram")
+        adapter = _SpliceAdapter()
+        bot._attach_gateway_runtime(adapter)  # no seams set -> pure no-op
+
+    def test_falls_back_to_legacy_splices_when_contract_missing(self, monkeypatch):
+        """An ImportError on the core contract wires seams the legacy way."""
+        real_import = builtins.__import__
+
+        def _no_contract(name, *args, **kwargs):
+            if name == "praisonaiagents.bots":
+                raise ImportError("older core without gateway contract")
+            return real_import(name, *args, **kwargs)
+
+        resolver = InMemoryIdentityResolver()
+        router = object()
+        gate = object()
+        lockmap = object()
+
+        bot = Bot("telegram", identity_resolver=resolver)
+        # The remaining seams are wired post-construction (as BotOS does).
+        bot._delivery_router = router
+        bot._admission_gate = gate
+        bot._turn_lock_map = lockmap
+        adapter = _SpliceAdapter()
+
+        monkeypatch.setattr(builtins, "__import__", _no_contract)
+        bot._attach_gateway_runtime(adapter)
+
+        assert adapter._session._identity_resolver is resolver
+        assert adapter._session._delivery_router is router
+        assert adapter._session._admission_gate is gate
+        assert adapter._session._locks is lockmap
