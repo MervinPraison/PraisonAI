@@ -330,17 +330,26 @@ async def _execute_with_agent_async(executor_agent, task_prompt, task, tools, st
         )
 
 
-def _build_execution_context(agents_instance, task_id):
+def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     """
     Build unified execution context for task execution (DRY helper).
     Eliminates duplication between sync/async execution paths.
+
+    Args:
+        skip_memory_init: When True, skip the synchronous ``initialize_memory()``
+            call. The async path (``aexecute_task``) already attempts
+            ``initialize_memory_async()`` beforehand, so this avoids blocking the
+            event loop on a synchronous ``Memory()`` construction (and a
+            duplicate backend attempt) if that async init failed.
     """
     from .protocols import ExecutionContext
     
     task = agents_instance.tasks[task_id]
     
-    # Initialize memory before task execution
-    if not task.memory:
+    # Initialize memory before task execution. The async path (aexecute_task)
+    # already attempts initialize_memory_async() and passes skip_memory_init=True
+    # so we never block the event loop on a synchronous Memory() construction.
+    if not task.memory and not skip_memory_init:
         task.memory = task.initialize_memory()
 
     executor_agent = task.agent
@@ -1116,8 +1125,17 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "not started":
             task.status = "in progress"
 
-        # Build execution context using DRY helper
-        context = _build_execution_context(self, task_id)
+        # Initialize memory asynchronously to avoid blocking the event loop on
+        # synchronous Memory() construction. The shared helper's own
+        # `if not task.memory:` guard makes this a safe no-op for the sync path.
+        if not task.memory:
+            await task.initialize_memory_async()
+
+        # Build execution context using DRY helper. skip_memory_init=True prevents
+        # the helper from falling back to the *synchronous* initialize_memory()
+        # (which would block the event loop and duplicate a failed backend attempt)
+        # when the async init above did not populate task.memory.
+        context = _build_execution_context(self, task_id, skip_memory_init=True)
 
         # Execute with agent using DRY helper
         agent_output = await _execute_with_agent_async(
