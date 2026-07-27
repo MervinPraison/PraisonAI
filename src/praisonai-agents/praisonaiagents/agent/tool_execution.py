@@ -471,6 +471,46 @@ class ToolExecutionMixin:
             self._middleware_manager = manager
         return manager if manager.has_tool_hooks else None
 
+    def _get_turn_tools_lock(self):
+        """Return the DualLock guarding the per-turn tool buffer.
+
+        Falls back to a lazily-created lock so subclasses or objects that
+        predate the lock attribute stay safe. The lock protects
+        ``_turn_tools_used`` from corruption when concurrent chat()/achat()
+        turns run on the same Agent instance (issue #3307).
+        """
+        lock = getattr(self, "_turn_tools_lock", None)
+        if lock is None:
+            from .async_safety import DualLock
+            lock = DualLock()
+            self._turn_tools_lock = lock
+        return lock
+
+    def _reset_turn_tools(self):
+        """Reset the per-turn tool buffer under lock (start of a chat turn)."""
+        if getattr(self, "_in_skill_review", False):
+            return
+        with self._get_turn_tools_lock().sync():
+            self._turn_tools_used = []
+
+    def _record_turn_tool(self, function_name):
+        """Append a tool name to the per-turn buffer under lock."""
+        if getattr(self, "_in_skill_review", False):
+            return
+        with self._get_turn_tools_lock().sync():
+            turn_tools = getattr(self, "_turn_tools_used", None)
+            if turn_tools is None:
+                turn_tools = []
+                self._turn_tools_used = turn_tools
+            turn_tools.append(function_name)
+
+    def _drain_turn_tools(self):
+        """Return a copy of the per-turn buffer and clear it, under lock."""
+        with self._get_turn_tools_lock().sync():
+            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
+            self._turn_tools_used = []
+        return tools_used
+
     def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
         """Execute tool within injection context, with optional output truncation.
         
@@ -487,13 +527,9 @@ class ToolExecutionMixin:
         
         # Record the tool name for this turn so the self-improve review policy
         # can see what ran (issue #3037). Skipped during a guarded review turn
-        # to avoid tracking the review's own tool calls or recursing.
-        if not getattr(self, "_in_skill_review", False):
-            turn_tools = getattr(self, "_turn_tools_used", None)
-            if turn_tools is None:
-                self._turn_tools_used = []
-                turn_tools = self._turn_tools_used
-            turn_tools.append(function_name)
+        # to avoid tracking the review's own tool calls or recursing. Locked so
+        # concurrent turns on the same Agent don't corrupt the buffer (#3307).
+        self._record_turn_tool(function_name)
 
         # Emit tool call start event (zero overhead when not set)
         _trace_emitter = get_context_emitter()
@@ -1132,8 +1168,9 @@ class ToolExecutionMixin:
         # tools_used, so without this the review policy always sees an empty
         # list and never runs. Consume the buffer so the next turn starts clean.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._drain_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
@@ -1189,8 +1226,9 @@ class ToolExecutionMixin:
         # Default tools_used from the per-turn buffer when the caller did not
         # pass it explicitly (issue #3037); mirrors the sync path.
         if tools_used is None:
-            tools_used = list(getattr(self, "_turn_tools_used", []) or [])
-        self._turn_tools_used = []
+            tools_used = self._drain_turn_tools()
+        else:
+            self._drain_turn_tools()
         # Trigger AFTER_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
