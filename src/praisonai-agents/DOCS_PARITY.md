@@ -25,9 +25,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 2880 |
 | ✅ Autonomy | 3 | 7 | 2707 |
-| ✅ Bots | 7 | 29 | 11897 |
+| ✅ Bots | 7 | 29 | 11901 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 34091 |
+| ✅ CLI | 5 | 119 | 34218 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 4031 |
@@ -41,16 +41,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1528 |
 | ✅ Failover | 2 | 1 | 400 |
-| ✅ Files | 2 | 6 | 1964 |
+| ✅ Files | 2 | 6 | 2066 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 57 | 20688 |
+| ✅ Gateway | 7 | 58 | 21177 |
 | ✅ Guardrails | 4 | 4 | 1673 |
 | ✅ Handoffs | 11 | 6 | 2454 |
 | ✅ Hooks | 2 | 9 | 4128 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4864 |
-| ✅ Loops | 4 | 4 | 1202 |
+| ✅ Loops | 4 | 5 | 1422 |
 | ✅ MCP | 1 | 58 | 13322 |
 | ✅ Memory | 6 | 17 | 6635 |
 | ✅ OCR | 2 | 1 | 237 |
@@ -60,7 +60,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1900 |
-| ✅ Prompts | 2 | 9 | 1913 |
+| ✅ Prompts | 2 | 9 | 1965 |
 | ✅ Providers | 1 | 55 | 7502 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
@@ -71,7 +71,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sandbox | 5 | 6 | 2700 |
 | ✅ Security | 1 | 3 | 2970 |
 | ✅ Sessions | 4 | 13 | 5302 |
-| ✅ Skills | 6 | 13 | 4946 |
+| ✅ Skills | 6 | 13 | 4998 |
 | ✅ Tasks | 2 | 6 | 2743 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1657 |
