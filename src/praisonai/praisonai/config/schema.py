@@ -11,6 +11,22 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
 
+#: Stable, published URL for the ``agents.yaml`` JSON Schema, mirroring the
+#: hosting convention used for the CLI-config schema (``config.schema.json``).
+#: Editors that speak the YAML language server use this via a leading
+#: ``# yaml-language-server: $schema=<url>`` header to provide autocomplete,
+#: inline validation, and hover docs while authoring the agent YAML.
+AGENTS_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/"
+    "src/praisonai/praisonai/config/agents.schema.json"
+)
+
+#: Leading YAML comment prepended to scaffolded ``agents.yaml`` files so editors
+#: wire up validation out of the box. A leading comment is ignored by
+#: ``yaml.safe_load``, so execution is unaffected.
+AGENTS_SCHEMA_HEADER = f"# yaml-language-server: $schema={AGENTS_SCHEMA_URL}\n"
+
+
 class ProcessType(str, Enum):
     """Process type for task execution."""
     SEQUENTIAL = "sequential"
@@ -439,3 +455,23 @@ class ValidationResult(BaseModel):
 
 # Resolve forward references for TaskConfig in AgentConfig
 AgentConfig.model_rebuild()
+
+
+def generate_agents_schema() -> Dict[str, Any]:
+    """Generate the JSON Schema for the ``agents.yaml`` file.
+
+    Derived directly from :class:`YAMLConfig` (Pydantic's ``model_json_schema``)
+    and decorated with the standard ``$schema``/``$id``/``title`` metadata so the
+    artefact is self-describing and mirrors the CLI-config schema convention.
+    """
+    schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": AGENTS_SCHEMA_URL,
+        **YAMLConfig.model_json_schema(),
+        "title": "PraisonAI Agents Configuration",
+        "description": (
+            "Schema for agents.yaml consumed by the PraisonAI agent runtime "
+            "(roles/agents, tasks, tools, llm, workflow)."
+        ),
+    }
+    return schema

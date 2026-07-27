@@ -1107,11 +1107,19 @@ class AutoGenerator(BaseAutoGenerator):
                 for task_id, task_details in role_details['tasks'].items():
                     yaml_data['roles'][role_id]['tasks'][task_id] = self._format_task(task_details)
 
-        # Save to YAML file atomically, maintaining the order
-        _atomic_write_text(
-            self.agent_file,
-            lambda f: _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False),
-        )
+        # Save to YAML file atomically, maintaining the order. Prepend the
+        # yaml-language-server header so editors give autocomplete / inline
+        # validation for the scaffolded agents.yaml out of the box. A leading
+        # YAML comment is ignored by yaml.safe_load, so execution is unaffected.
+        def _write_with_header(f):
+            try:
+                from .config.schema import AGENTS_SCHEMA_HEADER
+                f.write(AGENTS_SCHEMA_HEADER)
+            except Exception:
+                pass
+            _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+
+        _atomic_write_text(self.agent_file, _write_with_header)
 
     def merge_with_existing_agents(self, new_json_data):
         """
