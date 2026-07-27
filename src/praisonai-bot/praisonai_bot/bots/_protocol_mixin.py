@@ -733,6 +733,38 @@ def fire_session_start(
         logger.debug(f"SESSION_START hook error (non-fatal): {e}")
 
 
+def fire_prompt_prefix_invalidated(
+    runner: Any,
+    session_id: str,
+    old_sig: str,
+    new_sig: str,
+    agent_name: str = "bot",
+    reason: str = "",
+) -> None:
+    """Fire PROMPT_PREFIX_INVALIDATED when a turn's cached prefix changes.
+
+    Advisory only (Issue #3352): signals that this turn's model/tool-schema/
+    system-prompt prefix differs from the previous turn on the same session,
+    so the provider prompt cache will miss. Best-effort — never raises.
+    """
+    if runner is None:
+        return
+    try:
+        from praisonaiagents.hooks.types import HookEvent, HookInput
+
+        event_input = HookInput(
+            session_id=session_id,
+            cwd=os.getcwd(),
+            event_name=HookEvent.PROMPT_PREFIX_INVALIDATED,
+            timestamp=str(time.time()),
+            agent_name=agent_name,
+            extra={"old_sig": old_sig, "new_sig": new_sig, "reason": reason},
+        )
+        _emit(runner, HookEvent.PROMPT_PREFIX_INVALIDATED, event_input)
+    except Exception as e:
+        logger.debug(f"PROMPT_PREFIX_INVALIDATED hook error (non-fatal): {e}")
+
+
 def fire_session_end(
     runner: Any,
     session_id: str,

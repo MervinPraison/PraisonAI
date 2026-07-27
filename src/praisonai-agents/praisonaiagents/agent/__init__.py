@@ -42,6 +42,10 @@ def __getattr__(name):
         value = getattr(_run_outcome_module, name)
         _lazy_cache[name] = value
         return value
+    if name == 'prompt_prefix_signature':
+        from .prompt_cache import prompt_prefix_signature
+        _lazy_cache[name] = prompt_prefix_signature
+        return prompt_prefix_signature
     
     # Specialized agents - lazy loaded (import rich)
     if name == 'ImageAgent':
@@ -222,6 +226,7 @@ __all__ = [
     'InterruptController',
     'RunOutcome',
     'TerminalReason',
+    'prompt_prefix_signature',
     'ImageAgent',
     'VideoAgent',
     'VideoConfig',

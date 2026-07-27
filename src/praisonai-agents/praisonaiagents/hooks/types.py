@@ -36,6 +36,12 @@ class HookEvent(str, Enum):
     # LLM lifecycle
     BEFORE_LLM = "before_llm"
     AFTER_LLM = "after_llm"
+
+    # Prompt-cache stability (advisory): fired when a turn's cached prompt
+    # prefix (model + tool schemas + system-prompt fingerprint) changes from
+    # the previous turn, so a long-lived conversation's provider prompt cache
+    # will miss. Payload carries the old/new signature and a reason.
+    PROMPT_PREFIX_INVALIDATED = "prompt_prefix_invalidated"
     
     # Error handling
     ON_ERROR = "on_error"
