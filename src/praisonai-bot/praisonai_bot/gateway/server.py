@@ -6376,7 +6376,20 @@ class WebSocketGateway:
         Returns:
             ReloadPlan with actions to take
         """
-        from praisonaiagents.gateway.config import ReloadScope, classify_reload
+        try:
+            from praisonaiagents.gateway.config import ReloadScope, classify_reload
+        except ImportError:
+            # Issue #3440: the canonical classifier was added in a later core
+            # release than the bot's minimum ``praisonaiagents`` pin. On an
+            # older-but-supported core it is simply unavailable, so degrade to
+            # the fail-safe full restart rather than crashing the live reload.
+            logger.warning(
+                "praisonaiagents is too old to expose classify_reload; "
+                "falling back to full restart for this config change"
+            )
+            plan = ReloadPlan()
+            plan.requires_full_restart()
+            return plan
 
         plan = ReloadPlan()
 

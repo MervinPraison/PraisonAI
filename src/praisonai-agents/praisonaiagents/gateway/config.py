@@ -85,9 +85,10 @@ def classify_reload(path: str) -> str:
     head = parts[0] if parts else ""
 
     # A change scoped to a single channel (``channels.<name>...``) only needs
-    # that channel restarted. The bare ``channels`` section (no name) is a
-    # structural change and stays a full restart (fail-safe).
-    if head == "channels" and len(parts) >= 2:
+    # that channel restarted. The bare ``channels`` section (no name) — and a
+    # malformed empty name like ``channels.`` — is a structural change and
+    # stays a full restart (fail-safe).
+    if head == "channels" and len(parts) >= 2 and parts[1]:
         return ReloadScope.CHANNEL
 
     # Agent-affecting changes recreate agents without bouncing channels.

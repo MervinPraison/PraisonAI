@@ -389,6 +389,14 @@ class TestClassifyReload:
 
         assert classify_reload("channels") == ReloadScope.FULL
 
+    def test_channels_with_empty_name_is_full_restart(self):
+        # A malformed path with an empty channel name must not schedule a
+        # restart for channel "" — it falls back to the fail-safe full restart.
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels.") == ReloadScope.FULL
+        assert classify_reload("channels..enabled") == ReloadScope.FULL
+
     def test_agent_affecting_changes(self):
         from praisonaiagents.gateway import ReloadScope, classify_reload
 
