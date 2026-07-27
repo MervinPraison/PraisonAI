@@ -75,7 +75,6 @@ class OutboundResilienceMixin:
         """
         if getattr(self, "_outbound_resilience_ready", False):
             return
-        self._outbound_resilience_ready = True
         self._outbound_backoff: BackoffPolicy = BackoffPolicy(**_DEFAULT_BACKOFF)
         self._outbound_dlq: Optional[Any] = None
 
@@ -85,6 +84,7 @@ class OutboundResilienceMixin:
         if outbound_resilience is not None and not getattr(outbound_resilience, "enabled", True):
             # Operator explicitly opted this channel out of the durable path.
             self._outbound_backoff = BackoffPolicy(initial_ms=1000, max_ms=10000, factor=1.5, max_attempts=1)
+            self._outbound_resilience_ready = True
             return
 
         if outbound_resilience is not None:
@@ -116,7 +116,16 @@ class OutboundResilienceMixin:
                     dlq_path,
                 )
             except Exception as e:  # pragma: no cover — defensive
-                logger.warning("Failed to initialize outbound DLQ: %s", e)
+                # Storage may be transiently unavailable. Degrade this send to
+                # retry-only but do NOT latch ``_outbound_resilience_ready`` so a
+                # later delivery re-attempts DLQ init once storage recovers,
+                # rather than permanently disabling durable parking.
+                logger.warning(
+                    "Failed to initialize outbound DLQ (will retry on next send): %s", e
+                )
+                return
+
+        self._outbound_resilience_ready = True
 
     def _default_outbound_dlq_path(self) -> Optional[str]:
         """Canonical default DLQ path, mirroring the inbound journal default.

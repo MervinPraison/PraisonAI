@@ -197,6 +197,52 @@ async def test_enabled_false_disables_default_dlq(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_transient_dlq_init_failure_recovers(monkeypatch, tmp_path):
+    """A transient DLQ-init failure must not permanently disable parking (#3446).
+
+    Regression: the first send fails to build the default DLQ (storage briefly
+    unavailable) and degrades to retry-only, but the resilience state must NOT
+    latch as ``ready``. Once storage recovers, a later send re-attempts init,
+    parks the permanent failure, and the reply is durable again.
+    """
+    import praisonai_bot.bots._dlq as dlq_mod
+    from praisonai_bot.bots._dlq import OutboundDLQ
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    adapter = _FakeAdapter()
+
+    calls = {"n": 0}
+    real_cls = dlq_mod.OutboundDLQ
+
+    def flaky_dlq(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("storage temporarily unavailable")
+        return real_cls(*args, **kwargs)
+
+    monkeypatch.setattr(dlq_mod, "OutboundDLQ", flaky_dlq)
+
+    async def always_fails():
+        raise ValueError("invalid channel")
+
+    # First send: DLQ init fails -> retry-only, reply lost this turn, but state
+    # must stay un-latched so it can recover.
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(always_fails, channel_id="c1", reply_text="first")
+    assert adapter._outbound_dlq is None
+    assert getattr(adapter, "_outbound_resilience_ready", False) is False
+
+    # Second send: storage recovered -> DLQ init succeeds and reply is parked.
+    with pytest.raises(ValueError):
+        await adapter.deliver_outbound(always_fails, channel_id="c1", reply_text="second")
+    assert adapter._outbound_dlq is not None
+
+    dlq_path = tmp_path / "state" / "slack" / "outbound_dlq.sqlite"
+    entries = OutboundDLQ(path=dlq_path).list()
+    assert [e.reply_text for e in entries] == ["second"]
+
+
+@pytest.mark.asyncio
 async def test_whatsapp_send_propagates_durable_failure():
     """WhatsApp must not swallow an exhausted/permanent durable failure.
 
