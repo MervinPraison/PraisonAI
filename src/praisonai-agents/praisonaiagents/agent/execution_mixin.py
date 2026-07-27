@@ -1651,6 +1651,12 @@ Write the complete compiled report:"""
                         content={"error": f"Error processing query: {str(e)}"}
                     )
 
+            # Invalidate the cached OpenAPI schema so routes registered by later
+            # shared-port launch() calls still show up in /openapi.json and /docs.
+            # FastAPI caches app.openapi_schema on first access and does not
+            # regenerate it when new routes are added afterwards.
+            _shared_apps[port].openapi_schema = None
+
             print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
 
             # Check and mark server as started atomically to prevent race conditions
