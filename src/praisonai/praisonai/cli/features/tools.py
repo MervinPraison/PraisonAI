@@ -416,10 +416,9 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         Discover tools from installed packages.
         
         Args:
-            args: [--include <package>, --entrypoints]
+            args: [--include <package>]
         """
         include_packages = []
-        use_entrypoints = "--entrypoints" in args
         
         i = 0
         while i < len(args):
