@@ -40,6 +40,14 @@ def test_unset_loopback_bind_stays_snappy():
         assert r.max_concurrent_runs > 0
 
 
+def test_unset_noncanonical_loopback_bind_stays_snappy():
+    """Any valid loopback form is recognised, not just 127.0.0.1/::1 (#3438)."""
+    for host in ("127.0.0.2", "127.255.255.255", "0:0:0:0:0:0:0:1", "[::1]"):
+        r = resolve_reliability(None, bind_host=host)
+        assert r.drain_timeout == 5.0, host
+        assert r.max_concurrent_runs > 0, host
+
+
 def test_explicit_default_is_legacy_no_admission():
     """Explicit reliability='default' keeps the legacy no-ceiling posture."""
     r = resolve_reliability("default")

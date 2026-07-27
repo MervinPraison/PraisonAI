@@ -53,6 +53,7 @@ exactly that value; the preset only fills in the fields left unset.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -71,13 +72,11 @@ _PRODUCTION_QUEUE_DEPTH = 32
 
 _KNOWN_PROFILES = ("production", "default", "off")
 
-# Loopback / unspecified hosts that mean "not an actual external deployment".
-# A bind to any of these keeps the safe-by-default admission ceiling but with a
-# snappy drain; anything else (a real interface) resolves to the full
-# ``production`` window (Issue #3438).
-_LOOPBACK_HOSTS = frozenset(
-    {"", "127.0.0.1", "localhost", "::1", "loopback"}
-)
+# Non-IP hostnames that mean "not an actual external deployment". A bind to
+# any of these (or to any loopback IP, detected numerically below) keeps the
+# safe-by-default admission ceiling but with a snappy drain; anything else (a
+# real interface) resolves to the full ``production`` window (Issue #3438).
+_LOOPBACK_HOSTNAMES = frozenset({"", "localhost", "loopback"})
 
 
 def _is_externally_bound(bind_host: Optional[str]) -> bool:
@@ -85,14 +84,24 @@ def _is_externally_bound(bind_host: Optional[str]) -> bool:
 
     ``0.0.0.0`` / ``::`` (bind-all) and any concrete non-loopback address count
     as external; ``None`` (unknown) is treated as loopback so we never guess a
-    host is external without evidence.
+    host is external without evidence. Loopback is detected numerically via
+    :mod:`ipaddress`, so every valid loopback form — ``127.0.0.2``,
+    ``127.255.255.255``, an expanded ``0:0:0:0:0:0:0:1`` — is recognised, not
+    just the canonical ``127.0.0.1`` / ``::1`` spellings.
     """
     if bind_host is None:
         return False
     host = str(bind_host).strip().lower()
-    # Strip an IPv6 zone id / brackets for a clean comparison.
-    host = host.strip("[]").split("%", 1)[0]
-    return host not in _LOOPBACK_HOSTS
+    if host in _LOOPBACK_HOSTNAMES:
+        return False
+    # Strip an IPv6 zone id / brackets, then classify numerically. A bare
+    # hostname that isn't a literal IP (e.g. a DNS name) is treated as an
+    # external bind — we only special-case the known loopback names above.
+    candidate = host.strip("[]").split("%", 1)[0]
+    try:
+        return not ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return True
 
 
 def _cpu_scaled_ceiling() -> int:
