@@ -165,11 +165,19 @@ def export_session(
     session_id: str,
     format: str = "md",
     project_path: Optional[str] = None,
+    redact: bool = False,
+    redact_level: str = "standard",
 ) -> Optional[str]:
     """Export a session resolved from the canonical store (Issue #3133).
 
     Returns the exported content, or ``None`` when the id resolves nowhere.
     Falls back to the legacy ``SessionManager`` export for legacy-only sessions.
+
+    When ``redact`` is ``True`` the resolved payload is passed through the
+    transcript redactor first (Issue #3426), so secrets, absolute paths, the
+    working directory, and file contents embedded in the conversation are
+    replaced by stable ``[redacted:<category>:<n>]`` placeholders before
+    rendering. The default (``redact=False``) is byte-for-byte unchanged.
     """
     resolved = resolve_session(session_id, project_path)
     if not resolved.found:
@@ -178,23 +186,29 @@ def export_session(
     if resolved.metadata.get("__legacy_session_manager__"):
         return _legacy_export(session_id, format)
 
+    payload = resolved.to_dict()
+    if redact:
+        from .redact import redact_transcript
+
+        payload = redact_transcript(payload, level=redact_level)
+
     if format == "json":
-        return json.dumps(resolved.to_dict(), indent=2, default=str)
+        return json.dumps(payload, indent=2, default=str)
 
     lines = [
-        f"# Session: {resolved.agent_name or resolved.session_id}",
+        f"# Session: {payload.get('agent_name') or payload.get('session_id')}",
         "",
-        f"- **Session ID**: {resolved.session_id}",
-        f"- **Agent**: {resolved.agent_name or '-'}",
-        f"- **Model**: {resolved.model or '-'}",
-        f"- **Created**: {resolved.created_at or '-'}",
-        f"- **Updated**: {resolved.updated_at or '-'}",
-        f"- **Messages**: {resolved.message_count}",
+        f"- **Session ID**: {payload.get('session_id')}",
+        f"- **Agent**: {payload.get('agent_name') or '-'}",
+        f"- **Model**: {payload.get('model') or '-'}",
+        f"- **Created**: {payload.get('created_at') or '-'}",
+        f"- **Updated**: {payload.get('updated_at') or '-'}",
+        f"- **Messages**: {payload.get('message_count')}",
         "",
         "## Conversation",
         "",
     ]
-    for msg in resolved.chat_history:
+    for msg in payload.get("chat_history", []):
         role = msg.get("role", "?")
         content = msg.get("content", "")
         lines.append(f"### {role}")
