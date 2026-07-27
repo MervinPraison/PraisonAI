@@ -11,8 +11,18 @@ import os
 import sys
 import yaml
 import shutil
+import difflib
+import contextlib
 import subprocess
 from functools import partial
+
+# GGUF / Ollama quantization methods supported by Unsloth's exporter. Validated up
+# front so a typo (e.g. "q4km") fails fast with a clear message instead of after a
+# long training run when the export step finally rejects it.
+VALID_QUANTIZATION_METHODS = frozenset({
+    "q4_k_m", "q5_k_m", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1",
+    "q3_k_m", "q6_k", "f16", "bf16", "q2_k",
+})
 
 
 def _lazy_import_training_deps():
@@ -149,6 +159,35 @@ class TrainModel:
         self.hf_tokenizer = None   # The underlying HF tokenizer
         self.chat_tokenizer = None # Chat wrapper for formatting
 
+    @classmethod
+    def for_export(cls, config):
+        """Build a trainer for EXPORT ONLY (push an already-trained model) from a
+        config dict, skipping the training-only validation (no dataset required).
+
+        Used by the standalone `export` command so a non-developer can publish a
+        model that was trained earlier without re-running training. The caller loads
+        the model via load_model() and assigns self.model / self.hf_tokenizer.
+        """
+        obj = cls.__new__(cls)
+        _lazy_import_training_deps()
+        obj.config = dict(config or {})
+        if "model" in obj.config and "model_name" not in obj.config:
+            obj.config["model_name"] = obj.config["model"]
+        # Validate quantization up front here too — for_export skips the full
+        # training validate_config, so an invalid --quant would otherwise only
+        # fail deep inside Unsloth / `ollama create`.
+        q = obj.config.get("quantization_method")
+        if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
+            raise ValueError(
+                f"quantization_method '{q}' is not valid. Choose one of: "
+                f"{', '.join(sorted(VALID_QUANTIZATION_METHODS))}."
+            )
+        obj.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        obj.model = None
+        obj.hf_tokenizer = None
+        obj.chat_tokenizer = None
+        return obj
+
     def load_config(self, path):
         with open(path, "r") as file:
             self.config = yaml.safe_load(file) or {}
@@ -213,9 +252,69 @@ class TrainModel:
                 )
         if self._flag(self.config.get("ollama_save")) and not self.config.get("ollama_model"):
             raise ValueError("ollama_model is required when ollama_save is enabled.")
-        for key in self.config:
-            if key not in self.KNOWN_KEYS:
-                print(f"WARNING: ignoring unknown config key '{key}' (typo, or not supported).")
+
+        # --- Preflight: fail FAST with friendly messages BEFORE any model/GPU load,
+        # so a non-developer gets a clear, actionable error in seconds instead of a
+        # traceback after minutes of downloads. ---
+
+        # GPU: fine-tuning cannot run on CPU. Catch it before Unsloth tries.
+        # Only enforced when training is enabled — publish/export-only runs
+        # (train: false) are valid on CPU.
+        if self._flag(self.config.get("train"), default=True) and not torch.cuda.is_available():
+            raise ValueError(
+                "No CUDA GPU detected. Fine-tuning needs a GPU. On a rented box "
+                "check the driver; on CPU it cannot run."
+            )
+
+        # Hugging Face token: required to publish. Checked up front so a long run
+        # doesn't finish only to fail at the upload step. A cached login via
+        # `huggingface-cli login` is also accepted (downstream Hub calls use it),
+        # so only fail when NEITHER an env token NOR a cached token is present.
+        publishing = (
+            self._flag(self.config.get("huggingface_save"))
+            or self._flag(self.config.get("huggingface_save_gguf"))
+            or self._flag(self.config.get("push_to_hub"))
+        )
+        if publishing and not self._has_hf_credentials():
+            raise ValueError(
+                "Publishing to Hugging Face is enabled but no credentials were found. "
+                "Run `huggingface-cli login` or `export HF_TOKEN=hf_...`. To train "
+                "without publishing, set huggingface_save: false."
+            )
+
+        # Disk: model downloads + checkpoints + merged export need headroom. A 10GB
+        # floor catches the common "no space left on device" mid-run failure early.
+        try:
+            free_gb = shutil.disk_usage(self.config.get("output_dir") or ".").free / 2 ** 30
+        except OSError:
+            free_gb = None
+        if free_gb is not None and free_gb < 10:
+            raise ValueError(
+                f"Low disk: only {free_gb:.1f} GB free on the training disk "
+                f"(need ~10 GB minimum). Free up space or set output_dir to a "
+                f"larger disk."
+            )
+
+        # Quantization method: only relevant when a GGUF/Ollama export is requested.
+        if self._flag(self.config.get("huggingface_save_gguf")) or self._flag(
+            self.config.get("ollama_save")
+        ):
+            q = self.config.get("quantization_method")
+            if q is not None and str(q).lower() not in VALID_QUANTIZATION_METHODS:
+                raise ValueError(
+                    f"quantization_method '{q}' is not valid. Choose one of: "
+                    f"{', '.join(sorted(VALID_QUANTIZATION_METHODS))}."
+                )
+
+        # --- Unknown keys: collect ALL, suggest the closest known key, print once. ---
+        unknown = [k for k in self.config if k not in self.KNOWN_KEYS]
+        if unknown:
+            lines = ["WARNING: unrecognized config key(s) — these will be ignored:"]
+            for key in unknown:
+                match = difflib.get_close_matches(str(key), self.KNOWN_KEYS, n=1)
+                suggestion = f"  (did you mean '{match[0]}'?)" if match else ""
+                lines.append(f"  - {key}{suggestion}")
+            print("\n".join(lines))
 
     @staticmethod
     def _flag(value, default=False):
@@ -227,6 +326,19 @@ class TrainModel:
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    @staticmethod
+    def _has_hf_credentials():
+        """True if a Hugging Face token is available via env OR a cached
+        `huggingface-cli login`. The Hub client accepts a cached token when
+        ``token=None``, so preflight must not reject a valid cached login."""
+        if os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN"):
+            return True
+        with contextlib.suppress(Exception):
+            from huggingface_hub import get_token
+            if get_token():
+                return True
+        return False
 
     def _supports_assistant_mask(self):
         """True iff assistant-only loss will actually produce a usable mask for this
@@ -263,6 +375,12 @@ class TrainModel:
         print("DEBUG: Python Path:", sys.executable)
 
     def check_gpu(self):
+        # Guard the CUDA query: get_device_properties(0) raises a raw error on a
+        # CPU-only box. validate_config already fails fast for training, but this
+        # keeps other entry points (e.g. export) from crashing here.
+        if not torch.cuda.is_available():
+            print("DEBUG: No CUDA GPU available.")
+            return
         gpu_stats = torch.cuda.get_device_properties(0)
         print(f"DEBUG: GPU = {gpu_stats.name}. Max memory = {round(gpu_stats.total_memory/(1024**3),3)} GB.")
 
@@ -403,6 +521,12 @@ class TrainModel:
                 )
             dataset = dataset.select(range(min(num_samples, len(dataset))))
             print(f"DEBUG: Using {len(dataset)} samples (num_samples={num_samples}).")
+            # num_samples takes a head slice, which runs BEFORE the shuffle below —
+            # so without shuffle you always train on the first N rows (often sorted
+            # by source/topic and unrepresentative). Say so once, clearly.
+            if not self._flag(dataset_info.get("shuffle"), default=False):
+                print("NOTE: num_samples takes the FIRST N rows before shuffle; "
+                      "add shuffle: true to sample randomly.")
         print("DEBUG: Dataset columns:", dataset.column_names)
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
@@ -431,6 +555,14 @@ class TrainModel:
         datasets = []
         for dataset_info in self.config["dataset"]:
             print("DEBUG: Processing dataset info:", dataset_info)
+            # A validation/test split loaded here is CONCATENATED into training, not
+            # held out — an easy way to contaminate eval without noticing. Warn, and
+            # point at the real held-out mechanism (val_split_ratio).
+            split_type = str(dataset_info.get("split_type", "train")).strip().lower()
+            if split_type in {"validation", "valid", "test", "eval"}:
+                print(f"WARNING: dataset split_type '{split_type}' is ADDED to the "
+                      f"TRAINING data (not held out). Use val_split_ratio for a "
+                      f"held-out eval set.")
             datasets.append(self.process_dataset(dataset_info))
         combined = concatenate_datasets(datasets)
         print("DEBUG: Combined dataset has", len(combined), "examples.")
@@ -484,6 +616,12 @@ class TrainModel:
         if self.config.get("num_train_epochs") and not self.config.get("max_steps"):
             sft_params["num_train_epochs"] = self.config["num_train_epochs"]
         else:
+            if not self.config.get("num_train_epochs") and not self.config.get("max_steps"):
+                # Neither was set — the run silently defaults to 2800 steps, which is
+                # rarely what a first-time user wants. Tell them how to control it.
+                print("NOTE: neither num_train_epochs nor max_steps set; defaulting to "
+                      "max_steps: 2800. Set num_train_epochs: 1-3 (or max_steps) to "
+                      "control training length.")
             sft_params["max_steps"] = self.config.get("max_steps", 2800)
         # When both epochs and max_steps are set, max_steps silently wins — say so.
         if self.config.get("num_train_epochs") and self.config.get("max_steps"):
@@ -761,23 +899,58 @@ class TrainModel:
         model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
         return model, tokenizer
 
+    @staticmethod
+    def _raise_hf_push_error(exc, repo):
+        """Translate a Hugging Face Hub HTTP error into an actionable message."""
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 401:
+            raise RuntimeError(
+                "Hugging Face rejected the token (401). It is invalid or expired — "
+                "run `huggingface-cli login` or `export HF_TOKEN=hf_...` with a valid "
+                "write token."
+            ) from exc
+        if status == 403:
+            raise RuntimeError(
+                f"No write access to '{repo}' (403). The repo must be under your own "
+                f"username and the token must have write scope. Set hf_model_name to "
+                f"'<your-username>/<name>'."
+            ) from exc
+        raise RuntimeError(f"Hugging Face upload to '{repo}' failed: {exc}") from exc
+
+    def _clean_local_repo_dir(self):
+        """Remove a stale LOCAL output dir before an export — but only when
+        hf_model_name is a plain local directory name, never a namespaced Hub repo
+        id like 'user/model' (which must not be interpreted as a path to delete)."""
+        name = self.config["hf_model_name"]
+        if "/" not in name.strip("/") and os.path.isdir(name):
+            shutil.rmtree(name)
+
     def save_model_merged(self):
-        if os.path.exists(self.config["hf_model_name"]):
-            shutil.rmtree(self.config["hf_model_name"])
-        self.model.push_to_hub_merged(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            save_method="merged_16bit",
-            token=os.getenv("HF_TOKEN")
-        )
+        from huggingface_hub.utils import HfHubHTTPError
+        repo = self.config["hf_model_name"]
+        self._clean_local_repo_dir()
+        try:
+            self.model.push_to_hub_merged(
+                repo,
+                self.hf_tokenizer,
+                save_method="merged_16bit",
+                token=os.getenv("HF_TOKEN")
+            )
+        except HfHubHTTPError as exc:
+            self._raise_hf_push_error(exc, repo)
 
     def push_model_gguf(self):
-        self.model.push_to_hub_gguf(
-            self.config["hf_model_name"],
-            self.hf_tokenizer,
-            quantization_method=self.config.get("quantization_method", "q4_k_m"),
-            token=os.getenv("HF_TOKEN")
-        )
+        from huggingface_hub.utils import HfHubHTTPError
+        repo = self.config["hf_model_name"]
+        try:
+            self.model.push_to_hub_gguf(
+                repo,
+                self.hf_tokenizer,
+                quantization_method=self.config.get("quantization_method", "q4_k_m"),
+                token=os.getenv("HF_TOKEN")
+            )
+        except HfHubHTTPError as exc:
+            self._raise_hf_push_error(exc, repo)
 
     def save_model_gguf(self):
         self.model.save_pretrained_gguf(
@@ -908,7 +1081,9 @@ class TrainModel:
     {{- if and $last (ne .Role "assistant") }}
     {{ end }}
     {{- end }}""",
-                "stop_tokens": ["", "", "", ""]
+                # DeepSeek's end-of-sequence marker. Previously this was four empty
+                # strings, which emitted broken `PARAMETER stop` lines (no value).
+                "stop_tokens": ["<｜end▁of▁sentence｜>"]
             },
             "llava": {
                 "template": """{{- if .Suffix }}<|fim_prefix|>{{ .Prompt }}<|fim_suffix|>{{ .Suffix }}<|fim_middle|>
@@ -980,6 +1155,13 @@ class TrainModel:
                 chosen = settings
                 break
         if chosen is None:
+            # No known family matched the model name — the generic Llama-style
+            # template below may format prompts or stop tokens incorrectly for this
+            # model. Warn so a garbled Ollama model isn't a silent surprise.
+            print(f"WARNING: no known chat template matched model '{model_name}'; "
+                  f"using a generic template — stop tokens may be wrong. Verify the "
+                  f"Ollama output, or set model_name to a recognized family "
+                  f"(llama/qwen/gemma/mistral/phi/deepseek).")
             # Fallback default
             chosen = {
                 "template": """{{ if .System }}<|start_header_id|>system<|end_header_id|>
@@ -988,8 +1170,13 @@ class TrainModel:
     {{ .Response }}<|eot_id|>""",
                 "stop_tokens": ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
             }
-        # Build the stop parameter lines.
-        stop_params = "\n".join([f"PARAMETER stop {token}" for token in chosen["stop_tokens"]])
+        # Build the stop parameter lines. Skip empty/whitespace tokens so we never
+        # emit a broken `PARAMETER stop` line with no value.
+        stop_params = "\n".join(
+            f"PARAMETER stop {token}"
+            for token in chosen["stop_tokens"]
+            if str(token).strip()
+        )
         # Optionally include a SYSTEM line and num_ctx if defined in the mapping.
         system_line = ""
         if "system" in chosen:
@@ -1006,10 +1193,13 @@ class TrainModel:
     def create_and_push_ollama_model(self):
         from .._ollama import create_and_push_ollama_model
         modelfile_content = self.prepare_modelfile_content()
+        # Pass the configured quantization so `ollama create` quantizes on the way in
+        # (an unquantized f16 model can be many GB larger). None -> no --quantize.
         create_and_push_ollama_model(
-            self.config['ollama_model'], 
-            self.config['model_parameters'], 
-            modelfile_content
+            self.config['ollama_model'],
+            self.config.get('model_parameters', 'latest'),
+            modelfile_content,
+            quantization=self.config.get('quantization_method'),
         )
 
     def run(self):
@@ -1051,8 +1241,19 @@ def main():
     args = parser.parse_args()
 
     if args.command == "train":
-        trainer_obj = TrainModel(config_path=args.config)
-        trainer_obj.run()
+        # Wrap construction + run so config/preflight/runtime errors reach a
+        # non-developer as a single clean line, not a scary traceback. ValueError /
+        # RuntimeError are the "expected, actionable" failures we raise deliberately;
+        # anything else (a real bug) re-raises with its full traceback.
+        try:
+            trainer_obj = TrainModel(config_path=args.config)
+            trainer_obj.run()
+        except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+            print(f"\nERROR: {exc}\n", file=sys.stderr)
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            sys.exit(130)
 
 if __name__ == "__main__":
     main()
