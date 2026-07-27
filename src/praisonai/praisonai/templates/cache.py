@@ -7,8 +7,12 @@ Pinned versions are cached indefinitely, 'latest' has configurable TTL.
 
 import hashlib
 import json
+import os
 import shutil
+import tempfile
+import threading
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -106,8 +110,18 @@ class TemplateCache:
         """
         self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self.default_ttl = default_ttl
+        # Per-key locks serialise the destructive part of put/invalidate/clear
+        # so concurrent writers in the same process can't tear down a cache
+        # entry another writer is installing (or a reader is walking).
+        self._key_locks_guard = threading.Lock()
+        self._key_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
         self._ensure_cache_dir()
-    
+
+    def _lock_for(self, cache_path: Path) -> threading.Lock:
+        """Return the process-local lock guarding a single cache key."""
+        with self._key_locks_guard:
+            return self._key_locks[str(cache_path)]
+
     def _ensure_cache_dir(self) -> None:
         """Ensure the cache directory exists."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -224,25 +238,10 @@ class TemplateCache:
             )
         
         cache_path = self._get_cache_path(resolved)
-        
-        # Remove existing cache entry
-        if cache_path.exists():
-            shutil.rmtree(cache_path)
-        
-        # Copy content to cache
-        cache_path.mkdir(parents=True, exist_ok=True)
-        
-        if content_dir.is_dir():
-            for item in content_dir.iterdir():
-                if item.is_file():
-                    shutil.copy2(item, cache_path / item.name)
-                elif item.is_dir():
-                    shutil.copytree(item, cache_path / item.name)
-        else:
-            # Single file
-            shutil.copy2(content_dir, cache_path / content_dir.name)
-        
-        # Create metadata
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create metadata up front so it can be written into the staging dir
+        # before the atomic install (readers never see a dir without metadata).
         metadata = CacheMetadata(
             fetched_at=time.time(),
             etag=etag,
@@ -252,12 +251,39 @@ class TemplateCache:
             version=resolved.ref,
             is_pinned=resolved.is_pinned
         )
-        
-        # Save metadata
-        meta_path = cache_path / self.METADATA_FILE
-        with open(meta_path, "w") as f:
-            json.dump(metadata.to_dict(), f, indent=2)
-        
+
+        # Stage the write into a sibling temp dir, then atomically swap it into
+        # place. Readers keep seeing the old cache_path until os.replace() runs,
+        # so a concurrent reader can never observe a half-populated directory or
+        # a partially written metadata file.
+        staging = Path(tempfile.mkdtemp(prefix=".stage_", dir=str(cache_path.parent)))
+        try:
+            if content_dir.is_dir():
+                for item in content_dir.iterdir():
+                    if item.is_file():
+                        shutil.copy2(item, staging / item.name)
+                    elif item.is_dir():
+                        shutil.copytree(item, staging / item.name)
+            else:
+                # Single file
+                shutil.copy2(content_dir, staging / content_dir.name)
+
+            with open(staging / self.METADATA_FILE, "w") as f:
+                json.dump(metadata.to_dict(), f, indent=2)
+
+            with self._lock_for(cache_path):
+                if cache_path.exists():
+                    # Pivot the old entry out of the read path atomically, then
+                    # delete it out-of-band so readers never race the rmtree.
+                    trash = cache_path.with_name(cache_path.name + ".old")
+                    shutil.rmtree(trash, ignore_errors=True)
+                    os.replace(cache_path, trash)
+                    shutil.rmtree(trash, ignore_errors=True)
+                os.replace(staging, cache_path)  # atomic install
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
         return CachedTemplate(
             path=cache_path,
             metadata=metadata
@@ -274,9 +300,15 @@ class TemplateCache:
             True if cache was invalidated, False if not found
         """
         cache_path = self._get_cache_path(resolved)
-        if cache_path.exists():
-            shutil.rmtree(cache_path)
-            return True
+        with self._lock_for(cache_path):
+            if cache_path.exists():
+                # Pivot out of the read path before deleting so a concurrent
+                # reader never races the rmtree on the live cache_path.
+                trash = cache_path.with_name(cache_path.name + ".old")
+                shutil.rmtree(trash, ignore_errors=True)
+                os.replace(cache_path, trash)
+                shutil.rmtree(trash, ignore_errors=True)
+                return True
         return False
     
     def clear(self, source: Optional[TemplateSource] = None) -> int:

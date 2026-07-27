@@ -134,24 +134,33 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     instructions = agent_config.get('instructions', agent_config.get('backstory', ''))
     verbose = agent_config.get('verbose', False)
     
-    # Handle tools
+    # Handle tools through the wrapper's canonical ToolResolver — the same code
+    # path AgentsGenerator._build_tools_dict uses for `praisonai run`. This keeps
+    # the 3-way surface (CLI + YAML + Python) consistent: a scheduled agents.yaml
+    # resolves its tools identically to running the same file directly, instead
+    # of silently dropping everything but a hardcoded name.
     tools = []
-    tool_names = agent_config.get('tools', [])
-    
-    if tool_names:
-        # Try to import tools
-        for tool_name in tool_names:
+    if agent_config.get('tools'):
+        try:
+            from praisonai.tool_resolver import _get_default_resolver
+        except ImportError:
+            _get_default_resolver = None
+
+        if _get_default_resolver is not None:
             try:
-                # Try common tool imports
-                if tool_name == 'search_tool' or tool_name == 'InternetSearchTool':
-                    try:
-                        from tools import search_tool
-                        tools.append(search_tool)
-                    except ImportError:
-                        logger.warning(f"Could not import {tool_name}, skipping")
-                # Add more tool imports as needed
+                resolver = _get_default_resolver()
+                # Reuse the same YAML shape resolve_all_from_yaml expects so a
+                # scheduled agents.yaml behaves like `praisonai run agents.yaml`.
+                resolved = resolver.resolve_all_from_yaml(
+                    {"roles": {name: agent_config}}
+                )
+                tools = list(resolved.values())
             except Exception as e:
-                logger.warning(f"Error loading tool {tool_name}: {e}")
+                logger.warning(f"Tool resolution failed for scheduled agent: {e}")
+        else:
+            logger.warning(
+                "tool_resolver unavailable; scheduled agent will have no tools"
+            )
     
     # Create agent
     agent = Agent(

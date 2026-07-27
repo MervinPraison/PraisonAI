@@ -166,6 +166,15 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         """
         if not self.deliver:
             return
+        text = str(result)
+        # Honour the core intentional-silence contract on the unattended path:
+        # a run whose whole output is an exact silence marker means "nothing
+        # worth sending — stay quiet". Mirrors the sync scheduler.
+        if self._should_suppress_delivery(text):
+            logger.info(
+                "Scheduled run chose intentional silence; delivery suppressed"
+            )
+            return
         try:
             if self._delivery is None:
                 from praisonai.scheduler._delivery import SchedulerDelivery
@@ -177,7 +186,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 self._delivery = SchedulerDelivery(
                     self.deliver, job_id=job_id, origin=origin
                 )
-            self._delivery.deliver(str(result))
+            self._delivery.deliver(text)
         except Exception as e:
             logger.error(f"Scheduler delivery error: {e}")
 
@@ -392,24 +401,20 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         """Execute agent with retry logic."""
         self._ensure_async_primitives()  # guarantees _stats_lock is bound to current loop
 
-        # Check budget limit before incrementing execution count
-        if self.max_cost and self._total_cost >= self.max_cost:
+        # Check budget limit before incrementing execution count. Nothing
+        # mutates _total_cost between here and the run, so a single guard is
+        # sufficient (the previous duplicate check was redundant).
+        if self._budget_exceeded():
             logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
             logger.warning("Stopping scheduler to prevent additional costs")
-            self._stop_event.set()  # Actually stop the scheduler
+            if self._stop_event is not None:
+                self._stop_event.set()  # Actually stop the scheduler
+            self.is_running = False
             return
 
         async with self._stats_lock:
             self._execution_count += 1
-        
-        # Check budget limit before execution
-        if self.max_cost is not None and self._total_cost >= self.max_cost:
-            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
-            if self._stop_event is not None:
-                self._stop_event.set()
-            self.is_running = False
-            return
-        
+
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
