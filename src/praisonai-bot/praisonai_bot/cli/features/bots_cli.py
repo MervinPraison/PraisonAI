@@ -979,9 +979,6 @@ class BotHandler:
             try:
                 from praisonai_tools import BrowserBaseTool
                 browser_tool = BrowserBaseTool()
-                # Agent/LLM tool schema expects callables with __name__ (#E2E browser bot).
-                if not hasattr(browser_tool, "__name__"):
-                    browser_tool.__name__ = getattr(browser_tool, "name", "browserbase")
                 tools.append(browser_tool)
                 logger.info("Browser tool enabled")
             except ImportError:

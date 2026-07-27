@@ -82,3 +82,39 @@ async def test_unified_achat_completion_uses_execute_tool_async():
     tool_fn = call_kwargs.get("execute_tool_fn")
     assert tool_fn is not None
     assert getattr(tool_fn, "__name__", "") == "execute_tool_async"
+
+
+@pytest.mark.asyncio
+async def test_achat_completion_resolves_basetool_without_dunder_name():
+    """BaseTool instances expose .name but no __name__; dispatch must not crash.
+
+    Regression for issue #3450 where bot ``--browser`` wired ``BrowserBaseTool``
+    (a BaseTool instance) and async dispatch raised
+    ``'BrowserBaseTool' object has no attribute '__name__'``.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    class _BrowserLikeTool:
+        name = "browserbase"
+
+        def run(self, **kwargs):
+            return "ran"
+
+    browser_tool = _BrowserLikeTool()
+    assert not hasattr(browser_tool, "__name__")
+
+    tool_call = SimpleNamespace(
+        function=SimpleNamespace(name="browserbase", arguments="{}")
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+
+    with patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="ran"
+    ) as mock_exec:
+        results = await agent._achat_completion(response, tools=[browser_tool])
+
+    mock_exec.assert_awaited_once()
+    assert mock_exec.await_args[0][0] == "browserbase"
+    assert results is not None
