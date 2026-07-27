@@ -302,6 +302,79 @@ class WebhookVerifierProtocol(Protocol):
         ...
 
 
+class GatewayAdapterContractError(TypeError):
+    """Raised when a channel adapter cannot receive the gateway runtime seams.
+
+    The gateway wires four reliability seams into every channel adapter —
+    the cross-platform identity resolver, the delivery router, the admission
+    gate, and the shared per-turn lock map. When the gateway has these seams
+    to inject but the adapter neither implements
+    :class:`SupportsGatewayRuntime` nor exposes a compatible session, the wiring
+    would silently no-op and the adapter would run without admission control,
+    durable delivery routing, or cross-platform turn locking. Failing loudly
+    with this error surfaces the missing contract instead.
+    """
+
+
+@dataclass
+class GatewayRuntimeSeams:
+    """The gateway reliability seams handed to a channel adapter at build time.
+
+    A single, typed carrier for the four runtime seams the gateway injects so
+    an adapter wires them up in one place instead of via four duck-typed
+    private-attribute splices:
+
+    Attributes:
+        identity_resolver: Cross-platform identity resolver; unifies the same
+            human across platforms onto one session key.
+        delivery_router: Backing router for the built-in ``send_message`` tool,
+            so an agent turn can proactively reach the user mid-task.
+        admission_gate: Gateway-wide admission control (concurrency ceiling /
+            fair queue / backpressure) applied to inbound runs.
+        turn_lock_map: Shared per-turn lock map for cross-platform turn
+            serialisation on the resolved session id.
+
+    A seam left ``None`` means the gateway has nothing to inject for it and the
+    adapter should keep whatever it already has.
+    """
+
+    identity_resolver: Optional[Any] = None
+    delivery_router: Optional[Any] = None
+    admission_gate: Optional[Any] = None
+    turn_lock_map: Optional[Any] = None
+
+
+@runtime_checkable
+class SupportsGatewayRuntime(Protocol):
+    """Contract for channel adapters that accept the gateway runtime seams.
+
+    Instead of the gateway reaching into an adapter's private session and
+    splicing ``_identity_resolver`` / ``_delivery_router`` / ``_admission_gate``
+    / ``_locks`` via ``getattr``/``hasattr`` (which silently no-ops on any
+    adapter whose session does not match the built-in shape), an adapter — in
+    tree or ``pip``-installed — implements this one method. The gateway calls it
+    once with a :class:`GatewayRuntimeSeams`, so the same reliability guarantees
+    (admission/backpressure, delivery routing, cross-platform turn locking)
+    hold for *every* adapter.
+
+    Adapters whose ``__init__`` creates a ``BotSessionManager`` get this for
+    free — the session manager implements ``attach_gateway_runtime`` and the
+    adapter can simply delegate to ``self._session.attach_gateway_runtime(...)``.
+    """
+
+    def attach_gateway_runtime(self, runtime: "GatewayRuntimeSeams") -> None:
+        """Wire the gateway runtime seams into this adapter.
+
+        Only seams present (non-``None``) on ``runtime`` should be applied;
+        seams left ``None`` mean the gateway has nothing to inject and the
+        adapter must keep its existing value.
+
+        Args:
+            runtime: The gateway reliability seams to attach.
+        """
+        ...
+
+
 class MessageType(str, Enum):
     """Types of bot messages."""
     

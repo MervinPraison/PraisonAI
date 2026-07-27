@@ -281,6 +281,33 @@ class BotSessionManager:
         except Exception:
             pass
 
+    def attach_gateway_runtime(self, runtime: Any) -> None:
+        """Wire the gateway reliability seams into this session manager.
+
+        Implements the core ``SupportsGatewayRuntime`` contract so the gateway
+        injects the identity resolver, delivery router, admission gate, and
+        shared per-turn lock map through one typed call instead of four
+        duck-typed private-attribute splices. Only seams present (non-``None``)
+        on ``runtime`` are applied; a ``None`` seam leaves the existing value
+        untouched.
+
+        Args:
+            runtime: A ``GatewayRuntimeSeams`` carrier (or any object exposing
+                the same optional attributes).
+        """
+        identity_resolver = getattr(runtime, "identity_resolver", None)
+        if identity_resolver is not None:
+            self._identity_resolver = identity_resolver
+        delivery_router = getattr(runtime, "delivery_router", None)
+        if delivery_router is not None:
+            self._delivery_router = delivery_router
+        admission_gate = getattr(runtime, "admission_gate", None)
+        if admission_gate is not None:
+            self._admission_gate = admission_gate
+        turn_lock_map = getattr(runtime, "turn_lock_map", None)
+        if turn_lock_map is not None:
+            self._locks = turn_lock_map
+
     @staticmethod
     def _build_compactor(compaction: Optional[Any]) -> Optional[Any]:
         """Lazily construct a ``ContextCompactor`` from a compaction config.

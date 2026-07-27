@@ -255,56 +255,111 @@ class Bot:
 
         adapter = adapter_cls(**init_kwargs)
 
-        # W1: post-construction wire-up for the identity resolver.
-        # Adapters create their own BotSessionManager during __init__;
-        # we splice the resolver in here so existing adapters need no
-        # signature change.
-        if self._identity_resolver is not None:
-            session = getattr(adapter, "_session", None)
-            if session is not None and hasattr(session, "_identity_resolver"):
-                session._identity_resolver = self._identity_resolver
-            else:
-                logger.warning(
-                    "Bot(%s): adapter has no BotSessionManager-compatible "
-                    "_session; identity_resolver ignored.",
-                    self._platform,
-                )
-
-        # Issue #2372: splice the delivery router into the adapter's session so
-        # each agent turn can register a concrete ``BotOutboundMessenger`` for
-        # the built-in ``send_message`` tool. Same duck-typed post-construction
-        # wire-up as the identity resolver above; adapters expose the session
-        # under ``_session`` or ``_session_mgr``.
-        if self._delivery_router is not None:
-            session = getattr(adapter, "_session", None) or getattr(
-                adapter, "_session_mgr", None
-            )
-            if session is not None and hasattr(session, "_delivery_router"):
-                session._delivery_router = self._delivery_router
-
-        # Issue #2454: splice the gateway-wide admission gate into the adapter's
-        # session so inbound runs are admitted through the global concurrency
-        # ceiling / fair queue. Same duck-typed post-construction wire-up.
-        if self._admission_gate is not None:
-            session = getattr(adapter, "_session", None) or getattr(
-                adapter, "_session_mgr", None
-            )
-            if session is not None and hasattr(session, "_admission_gate"):
-                session._admission_gate = self._admission_gate
-
-        # Issue #3232: splice the shared per-turn ``LockMap`` into the adapter's
-        # session so turns are serialised on the resolved session id across every
-        # adapter that resolves to the same unified user. Same duck-typed
-        # post-construction wire-up; a session that already exposes ``_locks``
-        # (BotSessionManager-compatible) has it replaced with the shared map.
-        if self._turn_lock_map is not None:
-            session = getattr(adapter, "_session", None) or getattr(
-                adapter, "_session_mgr", None
-            )
-            if session is not None and hasattr(session, "_locks"):
-                session._locks = self._turn_lock_map
+        self._attach_gateway_runtime(adapter)
 
         return adapter
+
+    def _attach_gateway_runtime(self, adapter: Any) -> None:
+        """Wire the gateway reliability seams into a freshly-built adapter.
+
+        Replaces the previous four duck-typed private-attribute splices
+        (identity resolver, delivery router, admission gate, per-turn lock map)
+        with the core ``SupportsGatewayRuntime`` contract: the gateway hands the
+        seams over in one typed :class:`GatewayRuntimeSeams` call. Built-in
+        adapters satisfy this via their ``BotSessionManager`` session, which
+        implements ``attach_gateway_runtime``.
+
+        When the gateway has seams to inject but the adapter exposes no way to
+        receive them, this fails loudly with ``GatewayAdapterContractError``
+        rather than silently dropping admission control, delivery routing, and
+        cross-platform turn locking.
+        """
+        # Nothing to inject — leave the adapter exactly as constructed. Checked
+        # first (before any import) so the no-seams path stays a pure no-op and
+        # never depends on the core version.
+        if (
+            self._identity_resolver is None
+            and self._delivery_router is None
+            and self._admission_gate is None
+            and self._turn_lock_map is None
+        ):
+            return
+
+        # The typed ``SupportsGatewayRuntime`` contract lives in the core SDK.
+        # The wrapper permits a range of ``praisonaiagents`` versions
+        # (``>=1.6.152``); on a core release predating this contract the import
+        # fails. Fall back to the legacy duck-typed splices in that case so an
+        # older-but-supported install keeps wiring the seams instead of raising
+        # ``ImportError`` on every ``start()``/``probe()``/``health()``.
+        try:
+            from praisonaiagents.bots import (
+                GatewayRuntimeSeams,
+                GatewayAdapterContractError,
+            )
+        except ImportError:
+            self._attach_gateway_runtime_legacy(adapter)
+            return
+
+        seams = GatewayRuntimeSeams(
+            identity_resolver=self._identity_resolver,
+            delivery_router=self._delivery_router,
+            admission_gate=self._admission_gate,
+            turn_lock_map=self._turn_lock_map,
+        )
+
+        # Preferred path: the adapter itself implements the contract.
+        attach = getattr(adapter, "attach_gateway_runtime", None)
+        if callable(attach):
+            attach(seams)
+            return
+
+        # Built-in adapters delegate to their BotSessionManager session, which
+        # implements ``attach_gateway_runtime``. Adapters expose it under
+        # ``_session`` or ``_session_mgr``.
+        session = getattr(adapter, "_session", None) or getattr(
+            adapter, "_session_mgr", None
+        )
+        session_attach = getattr(session, "attach_gateway_runtime", None)
+        if callable(session_attach):
+            session_attach(seams)
+            return
+
+        raise GatewayAdapterContractError(
+            f"{type(adapter).__name__} does not implement SupportsGatewayRuntime "
+            "(nor expose a compatible session); admission control, delivery "
+            "routing and cross-platform turn locking would be silently lost."
+        )
+
+    def _attach_gateway_runtime_legacy(self, adapter: Any) -> None:
+        """Wire the gateway seams via the pre-contract duck-typed splices.
+
+        Compatibility fallback for a ``praisonaiagents`` release that predates
+        the :class:`SupportsGatewayRuntime` contract. Applies each seam directly
+        onto the adapter's ``BotSessionManager``-compatible session attribute —
+        exactly the behaviour before the typed contract existed — so an
+        older-but-supported core keeps its admission control, delivery routing,
+        identity resolution, and cross-platform turn locking.
+        """
+        session = getattr(adapter, "_session", None) or getattr(
+            adapter, "_session_mgr", None
+        )
+        if session is None:
+            logger.warning(
+                "Bot(%s): adapter exposes no BotSessionManager-compatible "
+                "session; gateway runtime seams ignored.",
+                self._platform,
+            )
+            return
+        if self._identity_resolver is not None and hasattr(
+            session, "_identity_resolver"
+        ):
+            session._identity_resolver = self._identity_resolver
+        if self._delivery_router is not None and hasattr(session, "_delivery_router"):
+            session._delivery_router = self._delivery_router
+        if self._admission_gate is not None and hasattr(session, "_admission_gate"):
+            session._admission_gate = self._admission_gate
+        if self._turn_lock_map is not None and hasattr(session, "_locks"):
+            session._locks = self._turn_lock_map
 
     def _supervision_enabled(self) -> bool:
         """Whether inbound supervision should wrap the adapter run loop.
