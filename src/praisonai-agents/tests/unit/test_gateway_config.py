@@ -364,3 +364,52 @@ class TestChatCommandInfo:
             content = f.read()
         for dep in ["chromadb", "fastapi", "uvicorn", "litellm"]:
             assert f"import {dep}" not in content, f"Found heavy dep '{dep}' in protocols.py"
+
+
+class TestClassifyReload:
+    """Tests for the canonical reload-scope classifier (Issue #3440)."""
+
+    def test_hot_appliable_paths_are_hot(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("gateway.logging.level") == ReloadScope.HOT
+        assert classify_reload("gateway.drain_timeout") == ReloadScope.HOT
+        assert classify_reload("gateway.reload_drain_timeout") == ReloadScope.HOT
+        # A leaf under a hot key is still hot.
+        assert classify_reload("gateway.logging.level.extra") == ReloadScope.HOT
+
+    def test_channel_scoped_change(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels.telegram.enabled") == ReloadScope.CHANNEL
+        assert classify_reload("channels.discord.routing.default") == ReloadScope.CHANNEL
+
+    def test_bare_channels_section_is_full_restart(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("channels") == ReloadScope.FULL
+
+    def test_agent_affecting_changes(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("agents") == ReloadScope.AGENTS
+        assert classify_reload("agents.support.instructions") == ReloadScope.AGENTS
+        assert classify_reload("provider") == ReloadScope.AGENTS
+        assert classify_reload("guardrails") == ReloadScope.AGENTS
+
+    def test_unknown_and_structural_are_full_restart(self):
+        from praisonaiagents.gateway import ReloadScope, classify_reload
+
+        assert classify_reload("gateway.some_unknown_knob") == ReloadScope.FULL
+        assert classify_reload("routing") == ReloadScope.FULL
+        assert classify_reload("routes") == ReloadScope.FULL
+        assert classify_reload("scheduler") == ReloadScope.FULL
+        assert classify_reload("totally_unknown") == ReloadScope.FULL
+
+    def test_scope_values_are_plain_strings(self):
+        from praisonaiagents.gateway import ReloadScope
+
+        assert ReloadScope.HOT == "hot"
+        assert ReloadScope.CHANNEL == "channel"
+        assert ReloadScope.AGENTS == "agents"
+        assert ReloadScope.FULL == "full"

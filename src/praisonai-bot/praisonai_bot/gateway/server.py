@@ -6376,59 +6376,44 @@ class WebSocketGateway:
         Returns:
             ReloadPlan with actions to take
         """
-        from praisonaiagents.gateway.config import is_hot_appliable
+        from praisonaiagents.gateway.config import ReloadScope, classify_reload
 
         plan = ReloadPlan()
-        
+
         for path in changed_paths:
             parts = path.split(".")
-            
-            if not parts:
+
+            if not parts or not parts[0]:
                 continue
 
-            # Issue #3378: a closed set of paths (core registry) is safe to
-            # apply in place without restarting channels or agents. Everything
-            # else keeps falling through to the restart plans below, so restart
-            # stays the fail-safe default for unknown/structural changes.
-            if is_hot_appliable(path):
+            # Issue #3440: the *rules* for hot vs channel-scoped vs full live
+            # canonically in core (``classify_reload``) so every runtime builds
+            # an identical plan. The wrapper only implements the effects here;
+            # anything core cannot classify falls through to ``FULL`` (the
+            # fail-safe default for unknown/structural changes).
+            scope = classify_reload(path)
+
+            if scope == ReloadScope.HOT:
+                # Issue #3378: apply in place without restarting anything.
                 plan.hot_reload_paths.add(path)
-                continue
 
-            # Top-level section changes
-            if parts[0] == "agents":
-                if len(parts) == 1:
-                    # Entire agents section changed
-                    plan.reload_agents = True
-                elif len(parts) >= 2:
-                    # Specific agent or agent property changed
-                    plan.reload_agents = True
-                    
-            elif parts[0] == "channels":
-                if len(parts) == 1:
-                    # Entire channels section changed - need full restart
-                    plan.requires_full_restart()
-                elif len(parts) >= 2:
-                    # Specific channel changed
-                    channel_name = parts[1]
-                    plan.add_channel_restart(channel_name)
-                    
-            elif parts[0] == "provider":
-                # Provider changes affect agents if they use default model
+            elif scope == ReloadScope.CHANNEL:
+                # Restart only the affected channel; others keep their
+                # connections and in-flight turns.
+                plan.add_channel_restart(parts[1])
+
+            elif scope == ReloadScope.AGENTS:
+                # Recreate agents only, without bouncing channels.
                 plan.reload_agents = True
-                
-            elif parts[0] == "guardrails":
-                # Guardrails changes affect agents
-                plan.reload_agents = True
-                
-            elif parts[0] in ["scheduler", "routes", "routing"]:
-                # These are structural changes requiring full restart
+
+            else:  # ReloadScope.FULL
+                if parts[0] not in ("channels", "scheduler", "routes", "routing"):
+                    logger.warning(
+                        "Unknown config section changed: %s - triggering full restart",
+                        parts[0],
+                    )
                 plan.requires_full_restart()
-                
-            else:
-                # Unknown section - be safe and do full restart
-                logger.warning(f"Unknown config section changed: {parts[0]} - triggering full restart")
-                plan.requires_full_restart()
-        
+
         return plan
 
     def apply_hot_reload(

@@ -39,6 +39,64 @@ def is_hot_appliable(path: str) -> bool:
     return any(path.startswith(key + ".") for key in HOT_APPLIABLE_KEYS)
 
 
+# ---------------------------------------------------------------------------
+# Reload scope classification (Issue #3440)
+# ---------------------------------------------------------------------------
+#
+# The wrapper/bot gateway builds a concrete reload plan (which channels to
+# bounce, whether to recreate agents, whether to full-restart). The *rules*
+# for that plan — hot-appliable vs channel-scoped vs full — must stay
+# canonical in core so every runtime reloads identically, rather than being
+# duplicated ad-hoc per runtime. This is a pure string classification with no
+# heavy imports; the wrapper consumes it and only implements the effects.
+class ReloadScope:
+    """Canonical classification of a changed config ``path``'s reload scope.
+
+    Values are plain strings so wrapper/runtime code can compare without
+    importing this class. ``FULL`` is the fail-safe default for unknown or
+    structural changes.
+
+    - ``HOT``: apply in place, no restart (see :func:`is_hot_appliable`).
+    - ``CHANNEL``: a change under ``channels.<name>`` — restart only that one
+      channel; other channels keep their connections and in-flight turns.
+    - ``AGENTS``: an agent/provider/guardrails change — recreate agents only,
+      without bouncing channels.
+    - ``FULL``: unknown or structural change — full restart (fail-safe).
+    """
+
+    HOT = "hot"
+    CHANNEL = "channel"
+    AGENTS = "agents"
+    FULL = "full"
+
+
+def classify_reload(path: str) -> str:
+    """Classify a changed dotted config ``path`` into a :class:`ReloadScope`.
+
+    Canonical, side-effect-free classification shared by every runtime so a
+    hot-reload plan is built identically regardless of who loads the config.
+    Anything not explicitly recognised falls through to ``ReloadScope.FULL``,
+    keeping full restart the fail-safe default for structural changes.
+    """
+    if is_hot_appliable(path):
+        return ReloadScope.HOT
+
+    parts = path.split(".")
+    head = parts[0] if parts else ""
+
+    # A change scoped to a single channel (``channels.<name>...``) only needs
+    # that channel restarted. The bare ``channels`` section (no name) is a
+    # structural change and stays a full restart (fail-safe).
+    if head == "channels" and len(parts) >= 2:
+        return ReloadScope.CHANNEL
+
+    # Agent-affecting changes recreate agents without bouncing channels.
+    if head in ("agents", "provider", "guardrails"):
+        return ReloadScope.AGENTS
+
+    return ReloadScope.FULL
+
+
 @runtime_checkable
 class SupportsHotReload(Protocol):
     """Protocol a gateway implements to apply hot-reloadable config in place.

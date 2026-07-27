@@ -167,6 +167,9 @@ from .config import (
     HOT_APPLIABLE_KEYS,
     SupportsHotReload,
     is_hot_appliable,
+    # Reload scope classification (Issue #3440)
+    ReloadScope,
+    classify_reload,
 )
 
 # Lazy loading cache
@@ -369,6 +372,8 @@ __all__ = [
     "HOT_APPLIABLE_KEYS",
     "SupportsHotReload",
     "is_hot_appliable",
+    "ReloadScope",
+    "classify_reload",
     # Implementations (lazy loaded from praisonai wrapper)
     "WebSocketGateway",
     "GatewaySession",
