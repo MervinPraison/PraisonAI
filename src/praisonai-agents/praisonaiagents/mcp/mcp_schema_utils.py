@@ -38,6 +38,34 @@ def fix_array_schemas(schema: Any) -> Any:
     return _fix_array_schemas(schema)
 
 
+def build_openai_tool_dict(name: str, description: str, input_schema: Any) -> Dict[str, Any]:
+    """
+    Build an OpenAI function-calling tool dict for an MCP tool.
+
+    DRY: This centralizes the OpenAI tool-dict construction (including the
+    ``__praisonai_deferrable__`` marker) that was previously duplicated across
+    ``mcp_sse``, ``mcp_http_stream``, and ``mcp_websocket``.
+
+    Args:
+        name: The tool name
+        description: The tool description
+        input_schema: JSON Schema for the tool input
+
+    Returns:
+        dict: OpenAI function-calling tool dict with array schemas fixed and
+        the MCP deferrable marker set.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": fix_array_schemas(input_schema),
+        },
+        "__praisonai_deferrable__": True,  # Mark MCP tools as deferrable for tool search
+    }
+
+
 class ThreadLocalEventLoop:
     """
     Thread-local event loop storage for MCP transports.
