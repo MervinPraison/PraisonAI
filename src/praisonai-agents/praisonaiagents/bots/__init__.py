@@ -33,6 +33,9 @@ from .protocols import (
     WebhookVerifierProtocol,
     CallbackPayloadStoreProtocol,
     InMemoryCallbackPayloadStore,
+    GatewayRuntimeSeams,
+    SupportsGatewayRuntime,
+    GatewayAdapterContractError,
 )
 from .base import (
     BasePlatformAdapter,
@@ -122,6 +125,9 @@ __all__ = [
     "WebhookVerifierProtocol",
     "CallbackPayloadStoreProtocol",
     "InMemoryCallbackPayloadStore",
+    "GatewayRuntimeSeams",
+    "SupportsGatewayRuntime",
+    "GatewayAdapterContractError",
     "BasePlatformAdapter",
     "SendResult",
     "InteractiveContext",
