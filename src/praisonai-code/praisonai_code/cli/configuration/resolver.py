@@ -388,10 +388,15 @@ class ConfigResolver:
     Implements walk-up discovery and deep-merge semantics.
     """
     
-    # Config file names to search for (in order of preference)
+    # Config file names to search for (in order of preference).
+    # ``praisonai.yaml`` is the canonical project-root name, matching the
+    # agents SDK loader (``praisonaiagents/config/loader.py``). The legacy
+    # ``praison.yaml`` spelling is kept for backward compatibility.
     PROJECT_CONFIG_NAMES = [
         ".praisonai/config.yaml",
         ".praisonai/config.yml",
+        "praisonai.yaml",
+        "praisonai.yml",
         "praison.yaml",
         "praison.yml",
     ]
@@ -533,7 +538,7 @@ class ConfigResolver:
 
         Walk-up stops before reaching the user's home directory, so home is
         never treated as a project directory (its configs, e.g.
-        ``~/praison.yaml``, are not discovered here). This prevents a
+        ``~/praisonai.yaml``, are not discovered here). This prevents a
         profile-level file from being mislabelled as a ``project:`` source —
         important on platforms where temporary project directories live under
         the user's profile. The legacy ``.praison/config.toml`` is
