@@ -1116,6 +1116,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "not started":
             task.status = "in progress"
 
+        # Initialize memory asynchronously to avoid blocking the event loop on
+        # synchronous Memory() construction. The shared helper's own
+        # `if not task.memory:` guard makes this a safe no-op for the sync path.
+        if not task.memory:
+            await task.initialize_memory_async()
+
         # Build execution context using DRY helper
         context = _build_execution_context(self, task_id)
 
