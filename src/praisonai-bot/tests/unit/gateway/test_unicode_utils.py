@@ -35,6 +35,16 @@ class TestSafeErrorMessage:
         result = safe_error_message("error\u2014details")
         assert result == "error--details"
 
+    def test_box_drawing_playwright_hint_survives(self):
+        # Playwright's "playwright install" banner uses box-drawing frame
+        # characters (U+2551 etc.). They must not crash cp1252 output and the
+        # actionable hint must remain readable (no '?' clutter over the frame).
+        raw = "\u2551 Please run: playwright install \u2551"
+        result = safe_error_message(raw)
+        result.encode("ascii")  # must not raise
+        assert "?" not in result
+        assert "playwright install" in result
+
     def test_accented_chars_mapped(self):
         result = safe_error_message("caf\u00e9")   # café
         assert result == "cafe"

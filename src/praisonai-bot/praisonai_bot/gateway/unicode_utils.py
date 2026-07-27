@@ -30,6 +30,17 @@ _SYMBOL_MAP: dict = {
     '\u2019': "'",      # RIGHT SINGLE QUOTATION MARK -> '
     '\u2013': '-',      # EN DASH -> -
     '\u2014': '--',     # EM DASH -> --
+    # Box-drawing frame characters (used by tools like Playwright's
+    # "playwright install" banner). Map to spaces so the actionable hint
+    # stays readable instead of being littered with '?' placeholders on
+    # Windows cp1252 consoles.
+    '\u2500': ' ', '\u2501': ' ',   # HORIZONTAL LINES -> space
+    '\u2502': ' ', '\u2503': ' ',   # VERTICAL LINES -> space
+    '\u2550': ' ', '\u2551': ' ',   # DOUBLE HORIZONTAL/VERTICAL -> space
+    '\u2554': ' ', '\u2557': ' ',   # DOUBLE CORNERS (top) -> space
+    '\u255a': ' ', '\u255d': ' ',   # DOUBLE CORNERS (bottom) -> space
+    '\u250c': ' ', '\u2510': ' ',   # LIGHT CORNERS (top) -> space
+    '\u2514': ' ', '\u2518': ' ',   # LIGHT CORNERS (bottom) -> space
 }
 
 _LATIN1_MAP: dict = {
