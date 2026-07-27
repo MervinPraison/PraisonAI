@@ -67,6 +67,7 @@ agents_system = AgentTeam(
 print("Starting graph memory demonstration...")
 result = agents_system.start()
 
-print(f"\nGraph Memory Result: {result[:200]}...")
+result_text = str(result) if result is not None else ""
+print(f"\nGraph Memory Result: {result_text[:200]}...")
 print("\n✅ Graph memory integration complete!")
 print("Agent built knowledge graph and performed relationship-aware queries.")
