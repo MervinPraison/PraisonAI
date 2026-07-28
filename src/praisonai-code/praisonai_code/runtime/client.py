@@ -64,8 +64,15 @@ class RuntimeClient:
         *,
         model: Optional[str] = None,
         session_id: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> str:
         """Forward a prompt to the warm runtime and return the result text.
+
+        ``session_id`` is the persistence/conversation identity (drives the warm
+        stateful path); ``event_id`` is the event-stream identity used only to
+        fan out live events to ``praisonai attach`` clients. They are sent as
+        separate fields so an ``--attach <id>`` label never selects or persists
+        a conversation.
 
         Raises:
             RuntimeUnavailable: if the runtime is unreachable or errors out.
@@ -75,6 +82,8 @@ class RuntimeClient:
             payload["model"] = model
         if session_id:
             payload["session_id"] = session_id
+        if event_id:
+            payload["event_id"] = event_id
         result = self._post("/run", payload)
         if not result.get("ok", False):
             raise RuntimeUnavailable(result.get("error", "runtime run failed"))
