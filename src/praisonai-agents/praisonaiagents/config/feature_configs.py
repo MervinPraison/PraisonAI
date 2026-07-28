@@ -950,7 +950,16 @@ class ExecutionConfig:
         if isinstance(context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
             context_compaction = ContextCompactionPolicy.from_dict(context_compaction)
-        
+
+        # Handle compaction_strategy restoration (serialised as a string value in to_dict)
+        compaction_strategy = data.get("compaction_strategy")
+        if isinstance(compaction_strategy, str):
+            from ..compaction.strategy import CompactionStrategy
+            try:
+                compaction_strategy = CompactionStrategy(compaction_strategy)
+            except ValueError:
+                compaction_strategy = None
+
         return cls(
             max_iter=data.get("max_iter", 20),
             max_steps=data.get("max_steps", None),
@@ -958,13 +967,17 @@ class ExecutionConfig:
             max_rpm=data.get("max_rpm", None),
             max_execution_time=data.get("max_execution_time", None),
             max_retry_limit=data.get("max_retry_limit", 2),
+            retry_initial_delay=data.get("retry_initial_delay", 1.0),
+            retry_backoff_factor=data.get("retry_backoff_factor", 2.0),
+            retry_jitter=data.get("retry_jitter", 0.1),
             code_execution=data.get("code_execution", False),
             code_mode=data.get("code_mode", "safe"),
-            code_sandbox_mode=data.get("code_sandbox_mode", "docker"),
+            code_sandbox_mode=data.get("code_sandbox_mode", "sandbox"),
             code_tools=data.get("code_tools", False),
             code_tools_allow=data.get("code_tools_allow", None),
             context_compaction=context_compaction,
             max_context_tokens=data.get("max_context_tokens", None),
+            compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),
             parallel_tool_calls=data.get("parallel_tool_calls", False),
         )
