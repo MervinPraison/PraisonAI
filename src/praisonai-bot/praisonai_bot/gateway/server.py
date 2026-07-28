@@ -848,6 +848,11 @@ class WebSocketGateway:
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
+        # Issue #3467: in-flight turn registry so a running turn can be aborted
+        # (by a WS ``abort`` frame or a portable ``/stop`` chat command) and so
+        # a per-turn timeout can cancel a runaway turn. Maps session_id ->
+        # (driving asyncio.Task, InterruptController).
+        self._active_turns: Dict[str, Tuple[Any, Any]] = {}
         # Issue #2661: fingerprint of the shared secret each authenticated
         # client connected under, so rotating ``auth_token`` can force-close
         # every session stamped with a stale secret (instant credential
@@ -2738,10 +2743,13 @@ class WebSocketGateway:
             
             # Build features list - only advertise implemented features
             features = {
-                "methods": ["message", "leave"],  # abort not implemented
+                # Issue #3467: an in-flight turn can now be aborted via the
+                # ``abort`` method (or the ``message_abort`` event alias).
+                "methods": ["message", "leave", "abort"],
                 "events": [
                     EventType.MESSAGE.value,
                     EventType.ERROR.value,
+                    EventType.MESSAGE_ABORT.value,
                 ],
             }
             
@@ -2961,6 +2969,16 @@ class WebSocketGateway:
                 session = self._sessions.get(session_id)
                 if session:
                     content = data.get("content", "")
+                    # Issue #3467: portable stop command. A chat/operator client
+                    # can abort the in-flight turn by sending "/stop" (or "stop")
+                    # instead of a dedicated abort frame.
+                    if isinstance(content, str) and content.strip().lower() in ("/stop", "stop"):
+                        aborted = self._abort_active_turn(session_id, reason="user")
+                        await self._send_to_client(client_id, {
+                            "type": "aborted" if aborted else "no_active_turn",
+                            "session_id": session_id,
+                        })
+                        return True
                     message = GatewayMessage(
                         content=content,
                         sender_id=client_id,
@@ -2981,6 +2999,31 @@ class WebSocketGateway:
                     "message": "Not joined to any session",
                 })
         
+        elif msg_type in ("abort", EventType.MESSAGE_ABORT.value):
+            # Issue #3467: cancel the in-flight turn for this client's session.
+            # Requires the WRITE scope (same as sending a message as the agent).
+            if not self._client_has_scope(client_id, OperatorScope.WRITE):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": OperatorScope.WRITE.value,
+                })
+                return True
+            session_id = self._client_sessions.get(client_id)
+            if not session_id:
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "message": "Not joined to any session",
+                })
+                return True
+            reason = data.get("reason") or "user"
+            aborted = self._abort_active_turn(session_id, reason=str(reason))
+            await self._send_to_client(client_id, {
+                "type": "aborted" if aborted else "no_active_turn",
+                "session_id": session_id,
+            })
+
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
             if session_id:
@@ -3031,7 +3074,9 @@ class WebSocketGateway:
         return "Started processing."
 
     @staticmethod
-    async def _dispatch_agent_turn(agent: Any, content: str) -> Any:
+    async def _dispatch_agent_turn(
+        agent: Any, content: str, interrupt: Any = None
+    ) -> Any:
         """Execute a single agent turn.
 
         Prefers the agent's native async entry point (``arun``/``achat``) so
@@ -3039,13 +3084,92 @@ class WebSocketGateway:
         cleaner cancellation/timeout and true async streaming. Falls back to
         offloading the synchronous ``chat`` onto the default thread pool only
         when no async entry point is available (sync-only agents).
+
+        Issue #3467: when ``interrupt`` is supplied it is stamped onto the agent
+        (``agent.interrupt_controller``) so the agent's run loop cooperatively
+        stops on the next checkpoint; the caller also cancels the driving task
+        for a hard stop when the agent does not yield promptly.
         """
+        if interrupt is not None and hasattr(agent, "interrupt_controller"):
+            agent.interrupt_controller = interrupt
         for _name in ("arun", "achat"):
             _fn = getattr(agent, _name, None)
             if _fn is not None and asyncio.iscoroutinefunction(_fn):
                 return await _fn(content)
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, agent.chat, content)
+
+    def _abort_active_turn(self, session_id: str, reason: str = "user") -> bool:
+        """Signal and cancel the in-flight turn for ``session_id``, if any.
+
+        Cooperatively requests interruption via the turn's ``InterruptController``
+        (so the agent stops at its next checkpoint and preserves partial output)
+        and cancels the driving ``asyncio.Task`` so a stuck turn is torn down.
+        Returns ``True`` when a turn was active and an abort was signalled.
+        """
+        entry = self._active_turns.get(session_id)
+        if entry is None:
+            return False
+        task, controller = entry
+        try:
+            if controller is not None:
+                controller.request(reason)
+        except Exception:
+            pass
+        try:
+            if task is not None and not task.done():
+                task.cancel()
+        except Exception:
+            pass
+        return True
+
+    async def _drive_turn(
+        self,
+        session: GatewaySession,
+        agent: Any,
+        content: str,
+        controller: Any,
+        timeout: float,
+    ) -> Any:
+        """Run one agent turn cancellably and under an optional per-turn timeout.
+
+        Registers the driving task in ``_active_turns`` so ``_abort_active_turn``
+        can interrupt it, then awaits it with ``asyncio.wait_for`` when a
+        positive ``timeout`` is configured. A cancelled or timed-out turn is
+        normalised to a terminal string rather than left hanging or surfaced as
+        a raw traceback.
+        """
+        sid = session.session_id
+        task = asyncio.ensure_future(
+            self._dispatch_agent_turn(agent, content, interrupt=controller)
+        )
+        self._active_turns[sid] = (task, controller)
+        try:
+            if timeout and timeout > 0:
+                try:
+                    return await asyncio.wait_for(task, timeout=timeout)
+                except asyncio.TimeoutError:
+                    controller.request("timeout")
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    return self._finalise_aborted_turn(controller, "timeout")
+            return await task
+        except asyncio.CancelledError:
+            reason = controller.reason or "user"
+            return self._finalise_aborted_turn(controller, reason)
+        finally:
+            existing = self._active_turns.get(sid)
+            if existing is not None and existing[0] is task:
+                self._active_turns.pop(sid, None)
+
+    def _finalise_aborted_turn(self, controller: Any, reason: str) -> str:
+        """Return a typed terminal message for an interrupted/timed-out turn."""
+        if reason == "timeout":
+            return "Turn cancelled: exceeded per-turn timeout."
+        return f"Turn cancelled: {reason}."
 
     async def _run_session_queue(self, session: GatewaySession, agent: Any, client_id: str) -> None:
         """Background task loop that constantly pulls from `_inbox` and executes the agent task."""
@@ -3062,6 +3186,13 @@ class WebSocketGateway:
                     relay_callback = self._make_stream_relay(client_id, session)
                     emitter.add_callback(relay_callback)
                 
+                # Issue #3467: run the turn under a cancel scope so it can be
+                # aborted (WS ``abort`` / ``/stop``) and time-bounded. The
+                # controller is checked by the agent's run loop; cancelling the
+                # task tears down a turn that does not yield promptly.
+                from praisonaiagents.agent.interrupt import InterruptController
+                controller = InterruptController()
+                timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 try:
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
@@ -3071,13 +3202,15 @@ class WebSocketGateway:
                         from ..bots._admission import AdmissionRejected
                         try:
                             async with gate.admit(session_id=session.session_id):
-                                response = await self._dispatch_agent_turn(
-                                    agent, content
+                                response = await self._drive_turn(
+                                    session, agent, content, controller, timeout
                                 )
                         except AdmissionRejected as rej:
                             response = rej.message
                     else:
-                        response = await self._dispatch_agent_turn(agent, content)
+                        response = await self._drive_turn(
+                            session, agent, content, controller, timeout
+                        )
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"

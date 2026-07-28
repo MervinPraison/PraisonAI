@@ -419,6 +419,12 @@ class GatewayConfig:
     session_config: SessionConfig = field(default_factory=SessionConfig)
     heartbeat_interval: int = 30
     reconnect_timeout: int = 60
+    # Issue #3467: per-turn wall-clock ceiling. When > 0, a single agent turn
+    # that runs longer than this many seconds is cancelled (cooperatively via
+    # the agent's interrupt controller and by cancelling the driving task) so a
+    # runaway turn cannot wedge the serial per-session queue. 0 = no timeout
+    # (today's behaviour: a turn runs to completion).
+    per_turn_timeout: float = 0.0
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     max_buffered_bytes: int = 1024 * 1024  # 1MB default
@@ -464,6 +470,10 @@ class GatewayConfig:
             raise ValueError("heartbeat_interval must be >= 0")
         if self.reconnect_timeout < 0:
             raise ValueError("reconnect_timeout must be >= 0")
+        if self.per_turn_timeout < 0:
+            raise ValueError(
+                "per_turn_timeout must be >= 0 (use 0 to disable the per-turn timeout)"
+            )
         if self.max_concurrent_runs < 0:
             raise ValueError(
                 "max_concurrent_runs must be >= 0 (use 0 to disable admission control)"
@@ -549,6 +559,7 @@ class GatewayConfig:
             "session_config": self.session_config.to_dict(),
             "heartbeat_interval": self.heartbeat_interval,
             "reconnect_timeout": self.reconnect_timeout,
+            "per_turn_timeout": self.per_turn_timeout,
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
             "max_buffered_bytes": self.max_buffered_bytes,
             "max_queued_frames": self.max_queued_frames,
@@ -734,6 +745,7 @@ class MultiChannelGatewayConfig:
             session_config=session_config,
             heartbeat_interval=gw_data.get("heartbeat_interval", 30),
             reconnect_timeout=gw_data.get("reconnect_timeout", 60),
+            per_turn_timeout=float(gw_data.get("per_turn_timeout", 0.0) or 0.0),
             ssl_cert=gw_data.get("ssl_cert"),
             ssl_key=gw_data.get("ssl_key"),
             max_buffered_bytes=int(gw_data.get("max_buffered_bytes", 1024 * 1024)),
