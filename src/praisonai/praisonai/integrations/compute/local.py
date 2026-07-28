@@ -8,11 +8,17 @@ Auto-shutdown is handled by process exit.
 import asyncio
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
+# Strict allowlist for pip requirement specifiers. Only characters that appear
+# in valid PEP 508 specifiers are permitted; leading dashes (pip options such
+# as ``--upgrade`` or ``-r``) are rejected separately at the call site.
+_PIP_SPECIFIER_RE = re.compile(r'^[A-Za-z0-9._\-\[\]<>=,~!+ ]+$')
 
 
 class LocalCompute:
@@ -158,11 +164,29 @@ class LocalCompute:
         return result
 
     async def _install_packages(self, instance_id: str, packages: Dict[str, list]) -> None:
+        import shlex
         import sys
 
         pip_pkgs = packages.get("pip", [])
         if pip_pkgs:
-            cmd = f"{sys.executable} -m pip install -q {' '.join(pip_pkgs)}"
+            # Validate each specifier against a strict allowlist and reject pip
+            # options (leading dash) before shell-quoting. LocalCompute.execute
+            # runs on the host via create_subprocess_shell, so unsanitised
+            # package names would otherwise allow host command injection.
+            for pkg in pip_pkgs:
+                if (
+                    not isinstance(pkg, str)
+                    or pkg.lstrip().startswith("-")
+                    or not _PIP_SPECIFIER_RE.fullmatch(pkg)
+                ):
+                    raise ValueError(
+                        f"Invalid pip package specifier: {pkg!r}. Only pip "
+                        "requirement specifiers are allowed."
+                    )
+            cmd = (
+                f"{shlex.quote(sys.executable)} -m pip install -q "
+                + " ".join(shlex.quote(pkg) for pkg in pip_pkgs)
+            )
             result = await self.execute(instance_id, cmd, timeout=120)
             if result["exit_code"] != 0:
                 logger.warning("[local_compute] pip install failed: %s", result["stderr"])
