@@ -24,9 +24,18 @@ def _ensure_praisonai_browser() -> None:
 
 
 def browser_available() -> bool:
+    """Return True only when local Playwright automation can actually run.
+
+    Both ``praisonai_browser`` *and* its Playwright runtime must be importable;
+    Playwright is lazily imported inside ``PlaywrightBrowserAgent._launch``, so a
+    base install without the Playwright extra would otherwise select the local
+    tool and fail at invocation instead of using the cloud ``BrowserBaseTool``
+    fallback.
+    """
     _ensure_praisonai_browser()
     try:
         import praisonai_browser  # noqa: F401
+        import playwright  # noqa: F401
         return True
     except ImportError:
         return False

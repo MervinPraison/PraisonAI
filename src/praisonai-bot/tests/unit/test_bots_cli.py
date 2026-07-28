@@ -260,3 +260,21 @@ class TestBrowserToolWiring:
 
         assert fake_tool in tools
         assert "browser_automate" not in self._tool_names(tools)
+
+    def test_browser_available_requires_playwright(self):
+        """browser_available() is False when the Playwright runtime is missing."""
+        import builtins
+
+        from praisonai_bot import _browser_bridge
+
+        real_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "playwright" or name.startswith("playwright."):
+                raise ImportError("no playwright")
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(_browser_bridge, "_ensure_praisonai_browser", return_value=None), \
+                patch.dict("sys.modules", {"praisonai_browser": MagicMock()}), \
+                patch.object(builtins, "__import__", side_effect=_fake_import):
+            assert _browser_bridge.browser_available() is False

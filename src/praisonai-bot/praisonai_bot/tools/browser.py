@@ -24,12 +24,22 @@ def create_browser_tool(
     Args:
         model: LLM model used by the browser agent.
         headless: Run the Playwright browser headless (``--browser-headless``).
-        profile: Browser profile name (``--browser-profile``).
+        profile: Browser profile name (``--browser-profile``). Note: the
+            underlying ``PlaywrightBrowserAgent`` launches a fresh ephemeral
+            context and does not yet honour named profiles, so this value is
+            currently informational only.
 
     Returns:
         A callable ``browser_automate`` tool.
     """
     from .._browser_bridge import import_browser_attr
+
+    if profile and profile != "default":
+        logger.info(
+            "Browser profile %r requested but local PlaywrightBrowserAgent uses a "
+            "fresh context; profile is not yet applied.",
+            profile,
+        )
 
     def browser_automate(goal: str, start_url: str = "https://www.google.com") -> Dict[str, Any]:
         """Automate a local browser to accomplish a goal.
@@ -71,6 +81,6 @@ def create_browser_tool(
             return {"success": False, "error": str(exc)}
 
     browser_automate.__doc__ = (
-        f"{browser_automate.__doc__}\n\n(profile={profile}, headless={headless})"
+        f"{browser_automate.__doc__}\n\n(headless={headless})"
     )
     return browser_automate
