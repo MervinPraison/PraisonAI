@@ -4,11 +4,28 @@ Unit tests for unicode_utils.py — ASCII-safe error message helpers.
 
 import pytest
 
+import io
+
 from praisonai_bot.gateway.unicode_utils import (
     safe_error_message,
     safe_log_message,
     extract_root_cause_from_error,
+    safe_print,
 )
+
+
+class _Cp1252Stream:
+    """Minimal text stream that rejects non-cp1252 chars, like a Windows console."""
+
+    def __init__(self):
+        self.buffer = []
+
+    def write(self, text):
+        text.encode("cp1252")  # raises UnicodeEncodeError on U+2551 etc.
+        self.buffer.append(text)
+
+    def getvalue(self):
+        return "".join(self.buffer)
 
 
 class TestSafeErrorMessage:
@@ -111,6 +128,42 @@ class TestSafeLogMessage:
         text = "bad\ud800char"
         result = safe_log_message(text)
         assert "\ud800" not in result
+
+
+class TestSafePrint:
+    """Tests for safe_print()."""
+
+    def test_plain_ascii_written_unchanged(self):
+        out = io.StringIO()
+        safe_print("hello world", file=out)
+        assert out.getvalue() == "hello world\n"
+
+    def test_utf8_stream_preserves_unicode(self):
+        out = io.StringIO()  # StringIO accepts any unicode -> no sanitization
+        safe_print("caf\u00e9", file=out)
+        assert out.getvalue() == "caf\u00e9\n"
+
+    def test_cp1252_stream_does_not_crash_on_box_char(self):
+        # The core regression: U+2551 in a Playwright banner must not raise.
+        stream = _Cp1252Stream()
+        safe_print("\u2551 Please run: playwright install \u2551", file=stream)
+        result = stream.getvalue()
+        result.encode("cp1252")  # must not raise
+        assert "playwright install" in result
+        assert "\u2551" not in result
+
+    def test_cp1252_multiline_banner_preserves_line_breaks(self):
+        stream = _Cp1252Stream()
+        banner = "updated.\n\u2551 run: playwright install \u2551\ndone"
+        safe_print(banner, file=stream)
+        result = stream.getvalue()
+        assert result.count("\n") >= 2
+        assert "playwright install" in result
+
+    def test_sep_and_end_respected(self):
+        out = io.StringIO()
+        safe_print("a", "b", sep="-", end="!", file=out)
+        assert out.getvalue() == "a-b!"
 
 
 class TestExtractRootCause:
