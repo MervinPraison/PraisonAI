@@ -75,10 +75,17 @@ class TestFindFirstCommand(unittest.TestCase):
 class TestLooksLikeBarePrompt(unittest.TestCase):
     """``_looks_like_bare_prompt`` gates the modern `run` forwarder.
 
-    True only for a flagless, non-YAML first positional token — so a bare
-    ``praisonai "hello"`` reaches Typer `run` while ``.yaml`` workflows and any
-    flag-bearing (legacy) invocation stay on the legacy dispatcher.
+    True for a non-YAML first positional token whose flags (if any) are all
+    accepted by the modern ``run`` command — so ``praisonai "hello"`` and
+    ``praisonai "fix bug" --model x`` reach Typer `run`, while ``.yaml``
+    workflows and invocations bearing a legacy-only flag stay on legacy.
     """
+
+    def setUp(self):
+        dispatcher._run_option_names_cache = None
+
+    def tearDown(self):
+        dispatcher._run_option_names_cache = None
 
     def test_plain_prompt_is_bare(self):
         argv = ["Build a weather agent"]
@@ -99,20 +106,159 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
                 f"{token!r} should not be treated as a bare prompt",
             )
 
-    def test_any_flag_is_not_bare(self):
-        argv = ["Do something", "--framework", "crewai"]
-        first = dispatcher._find_first_command(argv)
-        self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+    def test_run_supported_flag_is_bare(self):
+        # A prompt combined with a flag ``run`` accepts reaches the modern
+        # engine (the core fix for issue #3462).
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m", "--continue", "-c", "--output", "-o"},
+                          {"--model", "-m", "--output", "-o"}),
+        ):
+            for argv in (
+                ["fix the auth bug", "--model", "gpt-4o"],
+                ["summarise this", "--continue"],
+                ["diagnose", "--output", "json"],
+                ["do it", "--model=gpt-4o"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_bare_prompt(argv, first),
+                    f"{argv!r} should route to the modern run engine",
+                )
 
-    def test_leading_flag_is_not_bare(self):
-        # A leading flag means the first positional was discovered past a flag;
-        # such invocations belong to legacy, not the bare `run` forwarder.
-        argv = ["--verbose", "hello"]
-        first = dispatcher._find_first_command(argv)
-        self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+    def test_legacy_only_flag_is_not_bare(self):
+        # A flag ``run`` does not implement keeps the invocation on legacy.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ):
+            argv = ["Do something", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_mixed_flags_with_one_legacy_is_not_bare(self):
+        # All flags must be run-supported; a single unrecognised one → legacy.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ):
+            argv = ["Do something", "--model", "x", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_flag_with_failed_discovery_is_not_bare(self):
+        # If run option discovery fails, fall back to the conservative rule:
+        # any flag routes to legacy.
+        with mock.patch.object(
+            dispatcher, "_get_run_option_names", return_value=None
+        ):
+            argv = ["Do something", "--model", "x"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_leading_run_supported_flag_is_bare(self):
+        # A leading run-supported flag (e.g. ``--verbose``) followed by a bare
+        # prompt now reaches the modern run engine.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--verbose", "-v"}, set()),
+        ):
+            argv = ["--verbose", "hello"]
+            first = dispatcher._find_first_command(argv)
+            self.assertTrue(dispatcher._looks_like_bare_prompt(argv, first))
+
+    def test_leading_legacy_flag_is_not_bare(self):
+        # A leading legacy-only flag keeps the invocation on legacy.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ):
+            argv = ["--serve", "hello"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
 
     def test_no_positional_is_not_bare(self):
         self.assertFalse(dispatcher._looks_like_bare_prompt([], None))
+
+    def test_value_taking_flag_with_dash_prefixed_value_is_bare(self):
+        # Regression guard for the Greptile P1: a value-taking run option whose
+        # separated value begins with ``-`` (e.g. ``--session -abc``,
+        # ``--output -json``) must NOT be mis-classified as an unsupported flag.
+        # The whole invocation is run-supported and must reach the modern engine.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--output", "-o"},
+                {"--session", "-s", "--output", "-o"},
+            ),
+        ):
+            for argv in (
+                ["fix the bug", "--session", "-abc"],
+                ["diagnose", "--output", "-json"],
+                ["summarise", "-s", "-weird-id"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_bare_prompt(argv, first),
+                    f"{argv!r} is fully run-supported and should reach the "
+                    f"modern engine even though the value starts with '-'",
+                )
+
+    def test_dash_value_then_unsupported_flag_is_not_bare(self):
+        # The value is skipped, but a genuinely unsupported *following* flag
+        # still forces legacy — the value-awareness must not swallow real flags.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ):
+            argv = ["fix the bug", "--session", "-abc", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+
+class TestFlagNames(unittest.TestCase):
+    """``_flag_names`` extracts option names, value-aware when told which
+    options consume a following value."""
+
+    def test_bare_dash_tokens_are_all_flags_without_value_opts(self):
+        # Conservative default: every dash-prefixed token is an option name.
+        self.assertEqual(
+            dispatcher._flag_names(["p", "--model", "gpt-4o", "--verbose"]),
+            ["--model", "--verbose"],
+        )
+
+    def test_equals_form_split_to_name(self):
+        self.assertEqual(
+            dispatcher._flag_names(["p", "--model=gpt-4o"]),
+            ["--model"],
+        )
+
+    def test_value_opt_skips_dash_prefixed_value(self):
+        # The value of a value-taking option is skipped even when it starts
+        # with a dash, so it is not reported as a separate flag.
+        self.assertEqual(
+            dispatcher._flag_names(
+                ["p", "--session", "-abc", "--model", "-x"],
+                {"--session", "--model"},
+            ),
+            ["--session", "--model"],
+        )
+
+    def test_value_opt_equals_form_needs_no_lookahead(self):
+        # ``--session=-abc`` carries its value inline; the next token is a flag.
+        self.assertEqual(
+            dispatcher._flag_names(
+                ["p", "--session=-abc", "--stream"], {"--session"}
+            ),
+            ["--session", "--stream"],
+        )
 
 
 class TestGetTyperCommandsCache(unittest.TestCase):
@@ -229,10 +375,12 @@ class TestMainRouting(unittest.TestCase):
     def setUp(self):
         self._saved_argv = sys.argv
         dispatcher._typer_commands_cache = None
+        dispatcher._run_option_names_cache = None
 
     def tearDown(self):
         sys.argv = self._saved_argv
         dispatcher._typer_commands_cache = None
+        dispatcher._run_option_names_cache = None
 
     def test_help_flag_routes_to_typer(self):
         sys.argv = ["praisonai", "--help"]
@@ -307,17 +455,98 @@ class TestMainRouting(unittest.TestCase):
         run_typer.assert_called_once_with(["run", "build a weather agent"])
         run_legacy.assert_not_called()
 
-    def test_bare_prompt_with_legacy_flag_routes_to_legacy(self):
-        # A prompt combined with any flag stays on legacy: the legacy argparse
-        # surface owns the large deprecated/legacy flag set that `run` lacks.
-        sys.argv = ["praisonai", "Create a weather app", "--framework", "crewai"]
+    def test_bare_prompt_with_run_flag_routes_to_typer_run(self):
+        # A prompt combined with a run-supported flag reaches the modern engine,
+        # forwarded as ``run "<prompt>" <flag> <value>`` (issue #3462 core fix).
+        sys.argv = ["praisonai", "fix the auth bug", "--model", "gpt-4o"]
         with mock.patch.object(
             dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
         ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
              mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
             dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "fix the auth bug", "--model", "gpt-4o"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_multi_token_prompt_with_run_flag_preserves_value(self):
+        # An unquoted multi-word prompt with a value-taking run flag: the
+        # positional tokens join into the target and the flag's value stays
+        # with the flag rather than leaking into the prompt.
+        sys.argv = ["praisonai", "build", "a", "weather", "agent", "-m", "gpt-4o"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "build a weather agent", "-m", "gpt-4o"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_bare_prompt_with_dash_prefixed_value_routes_to_typer_run(self):
+        # A value-taking run flag whose value begins with ``-`` must reach the
+        # modern engine intact — the value is not mistaken for an unsupported
+        # flag (Greptile P1 regression guard, full main() path).
+        sys.argv = ["praisonai", "resume", "work", "--session", "-abc"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "resume work", "--session", "-abc"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_bare_prompt_with_boolean_run_flag_routes_to_typer_run(self):
+        # A boolean run flag (no value) is forwarded intact.
+        sys.argv = ["praisonai", "summarise this", "--continue"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--continue", "-c"}, set()),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "summarise this", "--continue"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_bare_prompt_with_legacy_flag_routes_to_legacy_with_notice(self):
+        # A prompt combined with a legacy-only flag stays on legacy — but now
+        # prints a one-line notice so the fallback is never silent (#3462).
+        sys.argv = ["praisonai", "Create a weather app", "--serve"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy, \
+             mock.patch("builtins.print") as mock_print:
+            dispatcher.main()
         run_legacy.assert_called_once()
         run_typer.assert_not_called()
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("legacy engine", printed)
+        self.assertIn("praisonai run", printed)
 
     def test_yaml_path_routes_to_legacy(self):
         # Routing decision is by command-set membership, NOT by file
@@ -344,6 +573,99 @@ class TestMainRouting(unittest.TestCase):
             dispatcher.main()
         run_typer.assert_called_once_with(["run", "totally-unknown"])
         run_legacy.assert_not_called()
+
+
+class TestBuildRunArgv(unittest.TestCase):
+    """``_build_run_argv`` partitions a bare-prompt argv into a ``run`` call.
+
+    Positional tokens join into a single ``target``; run flags (and the values
+    of value-taking options) are appended after it.
+    """
+
+    VALUE_OPTS = {"--model", "-m", "--output", "-o"}
+
+    def test_flagless_prompt(self):
+        self.assertEqual(
+            dispatcher._build_run_argv(["build", "a", "weather", "agent"], self.VALUE_OPTS),
+            ["run", "build a weather agent"],
+        )
+
+    def test_value_flag_keeps_its_value(self):
+        self.assertEqual(
+            dispatcher._build_run_argv(
+                ["fix", "the", "bug", "--model", "gpt-4o"], self.VALUE_OPTS
+            ),
+            ["run", "fix the bug", "--model", "gpt-4o"],
+        )
+
+    def test_boolean_flag_has_no_value(self):
+        # ``--continue`` is not in VALUE_OPTS → the following positional is part
+        # of the prompt, not the flag's value.
+        self.assertEqual(
+            dispatcher._build_run_argv(
+                ["summarise", "--continue", "extra"], self.VALUE_OPTS
+            ),
+            ["run", "summarise extra", "--continue"],
+        )
+
+    def test_equals_form_needs_no_lookahead(self):
+        self.assertEqual(
+            dispatcher._build_run_argv(
+                ["do", "it", "--model=gpt-4o"], self.VALUE_OPTS
+            ),
+            ["run", "do it", "--model=gpt-4o"],
+        )
+
+    def test_leading_flag_before_prompt(self):
+        self.assertEqual(
+            dispatcher._build_run_argv(
+                ["-m", "gpt-4o", "fix", "bug"], self.VALUE_OPTS
+            ),
+            ["run", "fix bug", "-m", "gpt-4o"],
+        )
+
+
+class TestGetRunOptionNames(unittest.TestCase):
+    """``_get_run_option_names`` introspects the real ``run`` command.
+
+    The set must include the flags the issue lists (``--model``/``-m``,
+    ``--continue``/``-c``, ``--session``/``-s``, ``--output``/``-o``,
+    ``--stream``), so free-text prompts with those flags reach the modern
+    engine. Value-taking options (``--model``) are distinguished from boolean
+    flags (``--stream``).
+    """
+
+    def setUp(self):
+        dispatcher._run_option_names_cache = None
+
+    def tearDown(self):
+        dispatcher._run_option_names_cache = None
+
+    def test_includes_key_run_flags(self):
+        result = dispatcher._get_run_option_names()
+        self.assertIsNotNone(result)
+        supported, value_opts = result
+        for flag in ("--model", "-m", "--continue", "-c", "--session", "-s",
+                     "--output", "-o", "--stream"):
+            self.assertIn(flag, supported, f"{flag} missing from run option set")
+        # Value-taking vs boolean discrimination.
+        self.assertIn("--model", value_opts)
+        self.assertNotIn("--stream", value_opts)
+
+    def test_cached_after_first_call(self):
+        first = dispatcher._get_run_option_names()
+        self.assertIsNotNone(dispatcher._run_option_names_cache)
+        second = dispatcher._get_run_option_names()
+        self.assertEqual(first, second)
+
+    def test_discovery_failure_returns_none_and_caches(self):
+        with mock.patch(
+            "typer.main.get_command", side_effect=RuntimeError("boom")
+        ):
+            result = dispatcher._get_run_option_names()
+        self.assertIsNone(result)
+        # Failure is cached as False so it isn't retried every dispatch.
+        self.assertIs(dispatcher._run_option_names_cache, False)
 
 
 class TestRunLegacyArgvRestoration(unittest.TestCase):
