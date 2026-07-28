@@ -200,6 +200,7 @@ class AsyncTUI:
         self._running = False
         self._agent = None
         self._interrupt_controller = None  # Cooperative cancellation for in-flight turns
+        self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
         self._status_text = ""
         self._last_error: Optional[Exception] = None
@@ -1029,6 +1030,20 @@ Example: /handoff code "refactor the auth module" """
             # original blocking behaviour.
             return self._execute_prompt(prompt)
 
+        # Guard against an abandoned prior worker (user pressed Ctrl-C twice and
+        # started a new turn before the old daemon thread reached an interrupt
+        # check). Clearing the shared controller here would un-cancel it and let
+        # it resume concurrently against the warm session. If such a worker is
+        # still alive, keep the cancellation request set and refuse to start a
+        # new turn until it observes the interrupt and exits.
+        prior = getattr(self, "_interrupt_worker", None)
+        if prior is not None and prior.is_alive():
+            print(
+                "\n  ⏹ Previous turn is still cancelling; please wait a moment "
+                "and try again."
+            )
+            return None
+
         controller.clear()
         result = {}
 
@@ -1040,6 +1055,7 @@ Example: /handoff code "refactor the auth module" """
                 result["response"] = None
 
         worker = threading.Thread(target=_worker, daemon=True)
+        self._interrupt_worker = worker
         worker.start()
 
         interrupted = False
@@ -1094,6 +1110,10 @@ Example: /handoff code "refactor the auth module" """
             pass
         
         def run():
+            # Clear any stale cancellation request from a previous turn so a
+            # fresh turn is not immediately interrupted.
+            if self._interrupt_controller is not None:
+                self._interrupt_controller.clear()
             self._processing = True
             self._status_text = "Praison AI is thinking..."
             self._update_output()
@@ -1353,7 +1373,15 @@ Example: /handoff code "refactor the auth module" """
         
         @kb.add("c-c")
         def handle_ctrl_c(event):
-            input_buffer.reset()
+            # If a turn is in flight, request cooperative cancellation so the
+            # core chat loop stops at its next step boundary while keeping the
+            # warm agent and session intact. Otherwise just clear the input.
+            if self._processing and self._interrupt_controller is not None:
+                self._interrupt_controller.request("user")
+                self._status_text = "⏹ Interrupting… (finishing current step)"
+                self._update_output()
+            else:
+                input_buffer.reset()
         
         @kb.add("c-d")
         def handle_ctrl_d(event):

@@ -947,3 +947,40 @@ class TestInterruptibleTurn:
         assert controller.is_set() is True
         assert any(m.role == "system" and "interrupted" in m.content.lower()
                    for m in app.messages)
+
+    def test_abandoned_worker_blocks_new_turn(self):
+        """A still-alive prior worker must not have its controller cleared.
+
+        If the user pressed Ctrl-C twice and abandoned a worker that has not yet
+        reached an interrupt check, starting a new turn must NOT clear the shared
+        controller (which would un-cancel the abandoned worker and let it resume
+        against the warm session). Instead the new turn is refused until the old
+        worker exits.
+        """
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        controller.request("user")
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        class _AliveWorker:
+            def is_alive(self):
+                return True
+
+        app._interrupt_worker = _AliveWorker()
+
+        called = {"exec": False}
+
+        def _exec(prompt):
+            called["exec"] = True
+            return "should not run"
+
+        app._execute_prompt = _exec
+        result = app._execute_prompt_interruptible("new turn")
+
+        assert result is None
+        assert called["exec"] is False
+        # Controller must remain set so the abandoned worker still cancels.
+        assert controller.is_set() is True
