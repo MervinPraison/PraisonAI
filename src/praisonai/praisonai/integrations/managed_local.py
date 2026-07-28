@@ -457,8 +457,15 @@ class LocalManagedAgent:
             content = args[1] if len(args) > 1 else kwargs.get("content", "")
             if not filepath:
                 return "Error: No filepath specified"
+            import base64
             import shlex
-            command = f'cat > {shlex.quote(filepath)} << "EOF"\n{content}\nEOF'
+            if not isinstance(content, (str, bytes)):
+                content = str(content)
+            payload = content.encode() if isinstance(content, str) else content
+            b64 = base64.b64encode(payload).decode("ascii")
+            command = (
+                f"printf '%s' {shlex.quote(b64)} | base64 -d > {shlex.quote(filepath)}"
+            )
             
         elif tool_name == "list_files":
             directory = args[0] if args else kwargs.get("directory", ".")
@@ -720,11 +727,14 @@ class LocalManagedAgent:
             "tools": tools,
         }
 
-        # Pass API key and base if provided
+        # Pass API key and base directly to the inner agent instead of mutating
+        # the process-global environment. os.environ.setdefault() would let the
+        # first agent's credentials win for the whole process and leak into every
+        # subprocess spawned thereafter, cross-contaminating other tenants.
         if self.api_key:
-            os.environ.setdefault("OPENAI_API_KEY", self.api_key)
+            agent_kwargs["api_key"] = self.api_key
         if self.api_base:
-            os.environ.setdefault("OPENAI_API_BASE", self.api_base)
+            agent_kwargs["base_url"] = self.api_base
 
         self._inner_agent = Agent(**agent_kwargs)
         self.agent_id = self.agent_id or f"agent_{uuid.uuid4().hex[:12]}"
