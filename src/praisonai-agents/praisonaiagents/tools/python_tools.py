@@ -394,17 +394,25 @@ def execute_code_with_tools(
     registry: Optional[Any] = None,
     timeout: int = 30,
     max_output_size: int = 10000,
+    bridge: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Execute model-generated code that may call the agent's registered tools.
 
-    This is the *code-execution-with-tools* (code mode) bridge. Unlike the
-    subprocess sandbox (which runs in a clean process and therefore cannot see
-    the agent's tools), this runs in-process with restricted builtins and
-    injects thin proxies for the tools on ``allowed_tools``. Each proxy call
-    resolves against the :class:`ToolRegistry`, enforces the allow-list, and
-    passes through the existing ``require_approval`` gate. Only the script's
-    stdout / last-expression value is returned — intermediate tool results stay
-    out of the caller's context.
+    This is the *code-execution-with-tools* (code mode) bridge. By default it
+    runs in-process with restricted builtins and injects thin proxies for the
+    tools on ``allowed_tools``. Each proxy call resolves against the
+    :class:`ToolRegistry`, enforces the allow-list, and passes through the
+    existing ``require_approval`` gate. Only the script's stdout /
+    last-expression value is returned — intermediate tool results stay out of
+    the caller's context.
+
+    When a ``bridge`` implementing :class:`~.tool_proxy.CodeToolBridge` is
+    supplied, the code instead runs under that bridge's isolation (e.g. a
+    subprocess/Docker sandbox) and its tool calls are serviced in the parent
+    over the bridge's transport via :func:`~.tool_proxy.serve_tool_call` — same
+    allow-list and approval gate, but with real process isolation. This is the
+    opt-in *isolated-and-tool-capable* path; omitting ``bridge`` preserves the
+    original in-process behaviour so existing callers are unaffected.
 
     Args:
         code: Python code to execute. May call allowed tools by bare name
@@ -414,6 +422,9 @@ def execute_code_with_tools(
         registry: Optional ToolRegistry; defaults to the global registry.
         timeout: Maximum execution time in seconds.
         max_output_size: Maximum output size in characters.
+        bridge: Optional :class:`~.tool_proxy.CodeToolBridge` transport. When
+            given, the code runs under isolation and reaches tools over the
+            bridge instead of in-process.
 
     Returns:
         Dictionary with result, stdout, stderr, and success status.
@@ -426,6 +437,23 @@ def execute_code_with_tools(
             "'tools' is a reserved name in code mode and cannot be an "
             "allow-listed tool; rename the tool."
         )
+
+    if bridge is not None:
+        # Isolated-and-tool-capable path: the bridge runs the code under real
+        # isolation and calls back into serve_tool_call (same allow-list +
+        # approval gate) for each tool request. Core only defines the contract;
+        # the transport is supplied by the caller. The invocation policy
+        # (allow-list, registry) and limits are forwarded explicitly so the
+        # isolated path is gated by exactly what this caller authorised — never
+        # the transport's own defaults, and never a weaker path.
+        return bridge.run_code(
+            code,
+            allowed_tools=allowed,
+            registry=registry,
+            timeout=timeout,
+            max_output_size=max_output_size,
+        )
+
     injected: Dict[str, Any] = {}
     if allowed:
         injected.update(build_tool_namespace(allowed, registry=registry))

@@ -290,14 +290,26 @@ _PROFILE_EXPORTS = frozenset({
 
 # Code-tools bridge exports (lazy loaded to keep import-time cost off the
 # default path; only resolved when the opt-in code mode is used).
-_TOOL_PROXY_EXPORTS = frozenset({'ToolProxy', 'build_tool_namespace'})
+_TOOL_PROXY_EXPORTS = frozenset({
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
+})
 
 def __getattr__(name: str) -> Any:
     """Smart lazy loading of tools and profiles."""
     # Handle code-tools bridge exports
     if name in _TOOL_PROXY_EXPORTS:
-        from .tool_proxy import ToolProxy, build_tool_namespace
-        return {'ToolProxy': ToolProxy, 'build_tool_namespace': build_tool_namespace}[name]
+        from .tool_proxy import (
+            ToolProxy,
+            build_tool_namespace,
+            CodeToolBridge,
+            serve_tool_call,
+        )
+        return {
+            'ToolProxy': ToolProxy,
+            'build_tool_namespace': build_tool_namespace,
+            'CodeToolBridge': CodeToolBridge,
+            'serve_tool_call': serve_tool_call,
+        }[name]
 
     # Handle circuit breaker imports first
     if name in _CIRCUIT_BREAKER_EXPORTS:
@@ -411,7 +423,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
-    'ToolProxy', 'build_tool_namespace',
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',

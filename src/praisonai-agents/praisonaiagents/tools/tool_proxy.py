@@ -26,9 +26,75 @@ attribute is found in ``__dict__`` first) and the sandbox's ``getattr`` guard
 therefore keep all state in a closure that is unreachable from any attribute.
 """
 
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, Protocol, runtime_checkable
 
 from .registry import ToolRegistry, get_registry
+
+
+@runtime_checkable
+class CodeToolBridge(Protocol):
+    """Transport-agnostic contract for calling tools from *isolated* code.
+
+    The in-process code executor injects :class:`ToolProxy` so a script can call
+    tools directly.  When the script instead runs under real isolation (a
+    subprocess/Docker/E2B/… sandbox) it cannot see the registry, so tool calls
+    must cross a process boundary.  This protocol is that boundary: an
+    implementation carries a single ``(name, args, kwargs)`` request from the
+    isolated child to the parent, where :func:`serve_tool_call` runs the real
+    tool under the existing allow-list + approval gate, and returns the result.
+
+    Core defines only the contract (and the parent-side :func:`serve_tool_call`
+    helper).  Concrete transports — a Unix socket for local subprocess, a mounted
+    request/response dir for Docker, etc. — live in the sandbox/wrapper layer so
+    core stays lightweight and dependency-free.
+    """
+
+    def run_code(
+        self,
+        code: str,
+        *,
+        allowed_tools: Iterable[str] = (),
+        registry: Optional[ToolRegistry] = None,
+        timeout: int = 30,
+        max_output_size: int = 10000,
+    ) -> Dict[str, Any]:
+        """Run *code* under isolation, servicing tool calls over the transport.
+
+        The caller's *invocation policy* is passed explicitly so the transport
+        never has to rely on bridge-owned defaults: ``allowed_tools`` /
+        ``registry`` are forwarded to :func:`serve_tool_call` in the parent for
+        every tool request (so an isolated call is gated by the same allow-list
+        and approval framework as the in-process path — never a weaker one), and
+        ``timeout`` / ``max_output_size`` bound the isolated run.
+
+        Returns the same ``{result, stdout, stderr, success}`` dict shape as the
+        in-process executor so callers are transport-agnostic.
+        """
+        ...
+
+
+def serve_tool_call(
+    name: str,
+    args: Iterable[Any],
+    kwargs: Dict[str, Any],
+    allowed: Iterable[str],
+    registry: Optional[ToolRegistry] = None,
+) -> Any:
+    """Parent-side handler for a single bridged tool call.
+
+    A :class:`CodeToolBridge` transport calls this for every tool request it
+    receives from isolated code.  It reuses the exact allow-list resolution and
+    ``require_approval`` gate as the in-process proxy, so an isolated call is
+    subject to the same policy as an in-process one — never a weaker path.
+    """
+    allowed_set = frozenset(allowed)
+    resolved_registry = registry or get_registry()
+    if name not in allowed_set:
+        raise PermissionError(f"tool '{name}' is not allowed from code")
+    tool = resolved_registry.get(name)
+    if tool is None:
+        raise NameError(f"tool '{name}' is not registered")
+    return _invoke_with_approval(name, tool, tuple(args), dict(kwargs))
 
 
 def _resolve_callable(tool: Any) -> Callable[..., Any]:
