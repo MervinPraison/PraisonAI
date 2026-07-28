@@ -714,30 +714,6 @@ Respond with ONLY a valid JSON tool call in this format:
 
         return any(indicator in error_str or indicator in error_type for indicator in indicators)
 
-    def _classify_error_and_should_retry_legacy(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
-        """Legacy error classification - deprecated, use resolve_failover_decision() instead.
-        
-        Args:
-            error: Exception to classify
-            attempt: Current attempt number (1-based)
-            
-        Returns:
-            Tuple of (category, should_retry, retry_delay)
-        """
-        import warnings
-        warnings.warn(
-            "_classify_error_and_should_retry is deprecated, use resolve_failover_decision() instead",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        
-        # Delegate to new typed classification system
-        decision = self.resolve_failover_decision(error, {"attempt": attempt, "max_retries": self._max_retries})
-        return decision.reason, decision.is_retryable, decision.backoff_ms / 1000.0
-    
-    # Backward compatibility alias for existing code
-    _classify_error_and_should_retry = _classify_error_and_should_retry_legacy
-    
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
         Classify error into typed AgentErrorKind instead of freeform strings.
