@@ -199,6 +199,8 @@ class AsyncTUI:
         self.messages: List[ChatMessage] = []
         self._running = False
         self._agent = None
+        self._interrupt_controller = None  # Cooperative cancellation for in-flight turns
+        self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
         self._status_text = ""
         self._last_error: Optional[Exception] = None
@@ -326,6 +328,16 @@ class AsyncTUI:
                     agent_config["autonomy"] = True
                     logger.debug("Autonomy mode enabled")
                 
+                # Wire cooperative cancellation so Ctrl-C during a turn can stop
+                # an in-flight generation / tool call at the next step boundary
+                # while keeping the warm agent and session intact.
+                try:
+                    from praisonaiagents.agent.interrupt import InterruptController
+                    self._interrupt_controller = InterruptController()
+                    agent_config["interrupt_controller"] = self._interrupt_controller
+                except ImportError:
+                    self._interrupt_controller = None
+
                 logger.debug(f"Agent config: model={self.config.model}, tools={len(tools) if tools else 0}")
                 self._agent = Agent(**agent_config)
                 logger.debug("Agent created successfully")
@@ -999,6 +1011,74 @@ Example: /handoff code "refactor the auth module" """
             self._last_error = e
             return f"Error: {e}"
     
+    def _execute_prompt_interruptible(self, prompt: str) -> Optional[str]:
+        """Run a turn while keeping the main thread responsive to Ctrl-C.
+
+        The blocking ``_execute_prompt`` runs in a worker thread so the main
+        thread can catch ``KeyboardInterrupt``. On Ctrl-C we request cooperative
+        cancellation via the agent's ``InterruptController``; the core chat loop
+        honours it at the next step boundary and returns the partial output,
+        leaving the warm agent and session intact. Ensure the agent (and its
+        controller) exist before the turn starts.
+        """
+        import threading
+
+        self._get_agent()
+        controller = self._interrupt_controller
+        if controller is None:
+            # No cooperative-cancellation primitive available: fall back to the
+            # original blocking behaviour.
+            return self._execute_prompt(prompt)
+
+        # Guard against an abandoned prior worker (user pressed Ctrl-C twice and
+        # started a new turn before the old daemon thread reached an interrupt
+        # check). Clearing the shared controller here would un-cancel it and let
+        # it resume concurrently against the warm session. If such a worker is
+        # still alive, keep the cancellation request set and refuse to start a
+        # new turn until it observes the interrupt and exits.
+        prior = getattr(self, "_interrupt_worker", None)
+        if prior is not None and prior.is_alive():
+            print(
+                "\n  ⏹ Previous turn is still cancelling; please wait a moment "
+                "and try again."
+            )
+            return None
+
+        controller.clear()
+        result = {}
+
+        def _worker():
+            try:
+                result["response"] = self._execute_prompt(prompt)
+            except BaseException as exc:  # noqa: BLE001 - surface via _last_error
+                self._last_error = exc
+                result["response"] = None
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        self._interrupt_worker = worker
+        worker.start()
+
+        interrupted = False
+        while worker.is_alive():
+            try:
+                worker.join(timeout=0.1)
+            except KeyboardInterrupt:
+                if not interrupted:
+                    interrupted = True
+                    controller.request("user")
+                    print("\n  ⏹ Interrupting… (finishing current step)")
+                else:
+                    # Second Ctrl-C: stop waiting; worker is daemon and the
+                    # cooperative request has already been sent.
+                    break
+
+        if interrupted:
+            self.messages.append(ChatMessage(
+                role="system", content="Turn interrupted by user."
+            ))
+
+        return result.get("response")
+
     def _execute_in_background(self, prompt: str):
         """Execute prompt in background thread (non-blocking)."""
         # Track tool calls for visibility
@@ -1030,6 +1110,10 @@ Example: /handoff code "refactor the auth module" """
             pass
         
         def run():
+            # Clear any stale cancellation request from a previous turn so a
+            # fresh turn is not immediately interrupted.
+            if self._interrupt_controller is not None:
+                self._interrupt_controller.clear()
             self._processing = True
             self._status_text = "Praison AI is thinking..."
             self._update_output()
@@ -1168,8 +1252,8 @@ Example: /handoff code "refactor the auth module" """
                     continue
                 
                 self.messages.append(ChatMessage(role="user", content=user_input))
-                print("  ⏳ Praison AI is thinking...")
-                response = self._execute_prompt(user_input)
+                print("  ⏳ Praison AI is thinking... (Ctrl-C to interrupt)")
+                response = self._execute_prompt_interruptible(user_input)
                 
                 if response:
                     self.messages.append(ChatMessage(role="assistant", content=response))
@@ -1289,7 +1373,15 @@ Example: /handoff code "refactor the auth module" """
         
         @kb.add("c-c")
         def handle_ctrl_c(event):
-            input_buffer.reset()
+            # If a turn is in flight, request cooperative cancellation so the
+            # core chat loop stops at its next step boundary while keeping the
+            # warm agent and session intact. Otherwise just clear the input.
+            if self._processing and self._interrupt_controller is not None:
+                self._interrupt_controller.request("user")
+                self._status_text = "⏹ Interrupting… (finishing current step)"
+                self._update_output()
+            else:
+                input_buffer.reset()
         
         @kb.add("c-d")
         def handle_ctrl_d(event):
