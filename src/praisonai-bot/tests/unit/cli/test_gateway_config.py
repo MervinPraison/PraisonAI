@@ -178,6 +178,84 @@ def test_gateway_server_block_rejects_typos_and_bad_types():
     print("✓ Gateway server block rejects typos, bad types, and bad ranges")
 
 
+def test_route_target_typo_fails_fast_with_hint():
+    """A route/binding naming an undeclared agent fails at load time (#3468).
+
+    Previously a typo'd target was only a runtime ``logger.warning`` followed
+    by a silent fallback to some other agent. Now it fails closed at schema
+    validation (the same seam ``gateway doctor``/``gateway start`` load
+    through) with the channel, the bad target, and the closest valid agent.
+    """
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return
+
+    import pytest
+
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    agents = {
+        "personal": {"name": "personal", "instructions": "Help"},
+        "support": {"name": "support", "instructions": "Support"},
+    }
+
+    # Typo in a routing slot -> rejected, names channel/slot/target + hint.
+    with pytest.raises(Exception) as excinfo:
+        GatewayConfigSchema(
+            agents=agents,
+            channels={"telegram": {"token": "x", "routing": {"dm": "personl"}}},
+        )
+    msg = str(excinfo.value)
+    assert "telegram" in msg and "personl" in msg
+    assert "did you mean 'personal'" in msg
+
+    # Typo in the default slot -> also rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(
+            agents=agents,
+            channels={"slack": {"token": "x", "routes": {"default": "nope"}}},
+        )
+
+    # Typo in a binding's agent -> also rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(
+            agents=agents,
+            channels={
+                "discord": {
+                    "token": "x",
+                    "bindings": [{"agent": "suport", "priority": 1}],
+                }
+            },
+        )
+
+    print("✓ Route/binding typos fail fast with a closest-agent hint")
+
+
+def test_valid_route_targets_and_single_bot_unaffected():
+    """Valid targets pass; single-bot (no ``agents:``) stays unchecked (#3468)."""
+    try:
+        import pydantic  # noqa: F401
+    except ImportError:
+        return
+
+    from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+    # Correct targets validate cleanly.
+    cfg = GatewayConfigSchema(
+        agents={"personal": {"name": "personal", "instructions": "Help"}},
+        channels={"telegram": {"token": "x", "routing": {"default": "personal"}}},
+    )
+    assert "telegram" in cfg.channels
+
+    # No ``agents:`` map -> nothing to cross-check; must not raise.
+    cfg2 = GatewayConfigSchema(
+        channels={"telegram": {"token": "x", "routing": {"default": "whatever"}}},
+    )
+    assert "telegram" in cfg2.channels
+    print("✓ Valid targets pass and single-bot configs are unaffected")
+
+
 def test_gateway_server_block_accepts_full_valid_config():
     """A complete, correct ``gateway:`` block validates and stays dict-accessible.
 
