@@ -2472,7 +2472,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-train"
-version = "0.0.12"
+version = "0.0.13"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -2558,7 +2558,7 @@ provides-extras = ["llm", "vision", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.160"
+version = "1.6.161"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
