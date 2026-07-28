@@ -221,3 +221,42 @@ class TestBuildCapabilitiesFromArgs:
         assert caps.skills == ["web_search"]
         assert caps.thinking == "medium"
         assert caps.model == "gpt-4o"
+
+
+class TestBrowserToolWiring:
+    """Test that --browser wires local praisonai-browser automation."""
+
+    def _tool_names(self, tools):
+        return [getattr(t, "__name__", type(t).__name__) for t in tools]
+
+    def test_browser_uses_local_automation(self):
+        """--browser attaches local browser_automate when praisonai-browser is available."""
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+
+        handler = BotHandler()
+        caps = BotCapabilities(model="gpt-4o-mini", browser=True, browser_headless=True)
+
+        with patch("praisonai_bot._browser_bridge.browser_available", return_value=True):
+            tools = handler._build_tools(caps)
+
+        names = self._tool_names(tools)
+        assert "browser_automate" in names
+        assert "BrowserBaseTool" not in [type(t).__name__ for t in tools]
+
+    def test_browser_falls_back_to_browserbase(self):
+        """When praisonai-browser is unavailable, fall back to BrowserBaseTool."""
+        from praisonai_bot.cli.features.bots_cli import BotHandler, BotCapabilities
+
+        handler = BotHandler()
+        caps = BotCapabilities(model="gpt-4o-mini", browser=True)
+
+        fake_tool = Mock()
+        fake_module = MagicMock()
+        fake_module.BrowserBaseTool.return_value = fake_tool
+
+        with patch("praisonai_bot._browser_bridge.browser_available", return_value=False), \
+                patch.dict("sys.modules", {"praisonai_tools": fake_module}):
+            tools = handler._build_tools(caps)
+
+        assert fake_tool in tools
+        assert "browser_automate" not in self._tool_names(tools)
