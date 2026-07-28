@@ -394,8 +394,12 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     extra_context = getattr(task, '_execution_context', None)
     if extra_context:
         context_text = extra_context
-        # Clear after consumption so it doesn't leak into a later run of this task
-        task._execution_context = ""
+        # NOTE: We intentionally do NOT clear _execution_context here. Task
+        # retries (guardrail/completion failures) re-enter this helper via the
+        # run_task/arun_task retry loops, and clearing would strip the upstream
+        # output + validation feedback the retry needs. The Process engine owns
+        # this field's lifecycle: it re-sets it before each task yield and resets
+        # every task's _execution_context to None before selecting the next task.
     if task.context:
         context_results = []  # Collect contexts then de-duplicate
         for context_item in task.context:
