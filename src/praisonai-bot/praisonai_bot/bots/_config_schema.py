@@ -837,14 +837,14 @@ class GatewayConfigSchema(BaseModel):
             if channel.routing:
                 routes.update(channel.routing)
             for slot, target in routes.items():
-                if target and target not in agent_ids:
+                if target is not None and target not in agent_ids:
                     raise ValueError(
                         f"channel '{ch_name}' route '{slot}' -> unknown agent "
                         f"'{target}'; {_hint(target)}"
                     )
             for binding in channel.bindings or []:
                 target = binding.get("agent") if isinstance(binding, dict) else None
-                if target and target not in agent_ids:
+                if target is not None and target not in agent_ids:
                     raise ValueError(
                         f"channel '{ch_name}' binding -> unknown agent "
                         f"'{target}'; {_hint(target)}"

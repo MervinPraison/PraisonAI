@@ -229,6 +229,13 @@ def test_route_target_typo_fails_fast_with_hint():
             },
         )
 
+    # Blank (empty-string) target -> supplied-but-invalid, also rejected.
+    with pytest.raises(Exception):
+        GatewayConfigSchema(
+            agents=agents,
+            channels={"telegram": {"token": "x", "routing": {"dm": ""}}},
+        )
+
     print("✓ Route/binding typos fail fast with a closest-agent hint")
 
 
