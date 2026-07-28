@@ -90,7 +90,7 @@ def test_try_attach_runtime_exits_nonzero_on_empty_runtime_result(monkeypatch):
         def __init__(self, descriptor):
             pass
 
-        def run(self, prompt, model=None, session_id=None):
+        def run(self, prompt, model=None, session_id=None, event_id=None):
             return None
 
     import sys

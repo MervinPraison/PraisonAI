@@ -663,6 +663,7 @@ def _try_attach_runtime(
     model: Optional[str],
     output_mode: Optional[str],
     session_id: Optional[str],
+    event_id: Optional[str] = None,
 ) -> bool:
     """Forward a plain prompt to a warm runtime when one is running.
 
@@ -692,7 +693,9 @@ def _try_attach_runtime(
     output = get_output_controller()
     try:
         client = RuntimeClient(descriptor)
-        result = client.run(prompt, model=model, session_id=session_id)
+        result = client.run(
+            prompt, model=model, session_id=session_id, event_id=event_id
+        )
     except RuntimeUnavailable:
         # Runtime went away mid-flight; fall back to in-process execution.
         return False
@@ -1542,14 +1545,22 @@ def _run_prompt(
                 memory, permissions_config, fork,
             ])
         )
-        # When --attach <id> is given, tag the warm-runtime run with that id so
-        # other terminals (`praisonai attach <id>`) observe its live events.
-        runtime_session_id = attach_session or session_id
+        # Keep the two identities separate:
+        #  - session_id is the persistence/conversation identity that drives the
+        #    warm stateful path (history rehydrate + per-turn persist). A
+        #    --no-save run has session_id=None, so it stays on the isolated,
+        #    non-persisted anonymous path.
+        #  - --attach <id> is only an event-stream label so other terminals
+        #    (`praisonai attach <id>`) observe live events; it must NEVER select
+        #    or persist a conversation. Passed as event_id, falling back to the
+        #    session id so a plain --session run is still observable under its id.
+        runtime_event_id = attach_session or session_id
         if runtime_eligible and _try_attach_runtime(
             prompt,
             model=model,
             output_mode=output_mode,
-            session_id=runtime_session_id,
+            session_id=session_id,
+            event_id=runtime_event_id,
         ):
             return
 

@@ -92,3 +92,72 @@ def test_failed_session_turn_evicts_warm_agent():
             pass
 
     assert "s1" not in runtime._session_agents
+    assert "s1" not in runtime._session_models
+
+
+def test_model_override_rebuilds_session_agent():
+    """A later turn with a different model must not reuse the old warm agent."""
+    runtime = WarmRuntime(model="test-model")
+
+    class _ModelAgent(_FakeAgent):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.llm = kwargs.get("llm")
+
+    with patch("praisonaiagents.Agent", _ModelAgent), patch(
+        "praisonai_code.cli.state.project_sessions.apply_cli_session_continuity",
+        lambda *a, **k: None,
+    ):
+        runtime.run("a", session_id="s1", model="model-a")
+        first = runtime._session_agents["s1"]
+        runtime.run("b", session_id="s1", model="model-b")
+        second = runtime._session_agents["s1"]
+
+    assert first is not second
+    assert first.llm == "model-a"
+    assert second.llm == "model-b"
+    assert runtime._session_models["s1"] == "model-b"
+
+
+def test_continuity_wiring_failure_is_not_cached():
+    """If continuity wiring fails, the unwired agent must NOT be cached.
+
+    The turn still runs (one-shot), but a later turn retries wiring instead of
+    serving a permanently uncoupled agent that never persists or rehydrates.
+    """
+    runtime = WarmRuntime(model="test-model")
+
+    def _boom(*a, **k):
+        raise OSError("store locked")
+
+    with patch("praisonaiagents.Agent", _FakeAgent), patch(
+        "praisonai_code.cli.state.project_sessions.apply_cli_session_continuity",
+        _boom,
+    ):
+        result = runtime.run("x", session_id="s1")
+
+    assert result == "re: x"
+    # The uncoupled agent is not retained; next turn will retry wiring.
+    assert "s1" not in runtime._session_agents
+    assert "s1" not in runtime._session_models
+
+
+def test_event_id_does_not_persist_or_select_session():
+    """--attach id (event_id) must not drive the stateful/persistence path.
+
+    A --no-save --attach run has session_id=None: it streams events to the
+    attach id but stays on the isolated anonymous path (no session agent, no
+    retained history).
+    """
+    runtime = WarmRuntime(model="test-model")
+
+    with patch("praisonaiagents.Agent", _FakeAgent):
+        runtime.run("first", session_id=None, event_id="attach-1")
+        runtime.run("second", session_id=None, event_id="attach-1")
+
+    # No stateful session agent was created for the attach id.
+    assert "attach-1" not in runtime._session_agents
+    # Anonymous agent stays stateless (history cleared each call).
+    agent = runtime._agents[runtime._agent_key(None)]
+    assert agent.chat_history == []
+    assert agent.calls == ["first", "second"]
