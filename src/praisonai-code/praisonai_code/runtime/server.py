@@ -83,6 +83,12 @@ class WarmRuntime:
         self._agents: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._agent_locks: Dict[str, threading.Lock] = {}
+        # Per-session warm agents: keyed by session id, each holds retained
+        # conversation state so `--continue`/`--session` turns reuse a warm,
+        # stateful agent instead of cold-loading history every turn. Distinct
+        # from the per-model cache above, which stays stateless (history cleared
+        # each call) for the anonymous path.
+        self._session_agents: Dict[str, Any] = {}
         self.last_activity = time.time()
         # Event hub used to fan out live session events to attached clients.
         self.hub = hub or SessionEventHub()
@@ -124,6 +130,59 @@ class WarmRuntime:
         with self._lock:
             self._agents.pop(key, None)
 
+    def _get_session_agent(self, session_id: str, model: Optional[str]):
+        """Return a warm, stateful Agent for ``session_id``.
+
+        On first use the agent is built and its prior conversation is rehydrated
+        once from the project session store; subsequent turns reuse the same
+        agent so history and warm model/tool state are retained across turns.
+        Rehydration reuses the existing CLI store wiring
+        (``apply_cli_session_continuity``), so per-turn deltas are persisted back
+        through the same store the cold path uses — a crash/eviction resumes
+        deterministically.
+        """
+        with self._lock:
+            agent = self._session_agents.get(session_id)
+            if agent is not None:
+                return agent
+
+        from praisonaiagents import Agent
+
+        config: Dict[str, Any] = {
+            "name": "RuntimeAgent",
+            "role": "Assistant",
+            "goal": "Complete the task",
+        }
+        resolved = model or self._default_model
+        if resolved:
+            config["llm"] = resolved
+        agent = Agent(**config)
+
+        # Rehydrate prior history + wire persistence via the shared CLI helper.
+        # Imported lazily so the runtime module stays importable without the CLI
+        # state package and to keep cold-start cost off the anonymous path.
+        try:
+            from ..cli.state.project_sessions import apply_cli_session_continuity
+
+            apply_cli_session_continuity(agent, session_id, auto_save=session_id)
+        except Exception:
+            # If wiring fails, fall back to a fresh warm agent for this session
+            # rather than dropping the request; the anonymous contract (no
+            # persistence) applies until the store becomes available again.
+            pass
+
+        with self._lock:
+            existing = self._session_agents.get(session_id)
+            if existing is not None:
+                return existing
+            self._session_agents[session_id] = agent
+            return agent
+
+    def _evict_session_agent(self, session_id: str) -> None:
+        """Drop the warm agent for ``session_id`` (e.g. after a failed turn)."""
+        with self._lock:
+            self._session_agents.pop(session_id, None)
+
     def run(
         self,
         prompt: str,
@@ -140,30 +199,56 @@ class WarmRuntime:
         left with partial conversation state (e.g. an unmatched user turn), so
         it is evicted from the cache and the next call rebuilds a clean agent.
 
-        When ``session_id`` is given, live events (start/result/error) are
-        published to the hub so attached clients can observe the session in real
-        time.
+        When ``session_id`` is given the run attaches to a warm, *stateful*
+        per-session agent: history is rehydrated once and then retained across
+        turns, so an iterative ``--continue``/``--session`` loop reuses the warm
+        agent instead of cold-loading history every turn. Live events
+        (start/result/error) are also published to the hub so attached clients
+        can observe the session in real time. The anonymous (no-session) path is
+        unchanged: it clears history each call to stay isolated.
         """
         self.last_activity = time.time()
-        key = self._agent_key(model)
         if session_id:
             self.hub.publish(session_id, {
                 "type": "run.start",
                 "session_id": session_id,
                 "prompt": prompt,
             })
-        with self._lock_for(key):
-            agent = self._get_agent(key)
-            try:
-                result = agent.start(prompt)
-            except Exception as e:
-                self._evict_agent(key)
-                if session_id:
+            # Serialize per session id (not per model) so concurrent turns of the
+            # same session queue on one live agent and no cross-session state
+            # leaks between distinct ids.
+            with self._lock_for(f"__session__:{session_id}"):
+                agent = self._get_session_agent(session_id, model)
+                try:
+                    result = agent.start(prompt)
+                except Exception as e:
+                    # A failed turn can leave partial state; drop the warm agent
+                    # so the next turn rehydrates cleanly from the store.
+                    self._evict_session_agent(session_id)
                     self.hub.publish(session_id, {
                         "type": "run.error",
                         "session_id": session_id,
                         "error": str(e),
                     })
+                    raise
+                # History is intentionally retained here (stateful session).
+            self.last_activity = time.time()
+            text = str(result) if result is not None else ""
+            self.hub.publish(session_id, {
+                "type": "run.result",
+                "session_id": session_id,
+                "ok": True,
+                "result": text,
+            })
+            return text
+
+        key = self._agent_key(model)
+        with self._lock_for(key):
+            agent = self._get_agent(key)
+            try:
+                result = agent.start(prompt)
+            except Exception:
+                self._evict_agent(key)
                 raise
             # Each /run call must be isolated: clear in-memory history so prior
             # prompts cannot leak into the next invocation (the warm agent is
@@ -173,15 +258,7 @@ class WarmRuntime:
             elif hasattr(agent, "chat_history"):
                 agent.chat_history = []
         self.last_activity = time.time()
-        text = str(result) if result is not None else ""
-        if session_id:
-            self.hub.publish(session_id, {
-                "type": "run.result",
-                "session_id": session_id,
-                "ok": True,
-                "result": text,
-            })
-        return text
+        return str(result) if result is not None else ""
 
 
 def _make_handler(token: str, runtime: WarmRuntime):

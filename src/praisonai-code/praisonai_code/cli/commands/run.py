@@ -1517,10 +1517,14 @@ def _run_prompt(
         # in-process execution otherwise. Only the simple text path attaches;
         # per-invocation tool/approval/memory overrides stay in-process so their
         # behaviour is preserved exactly.
-        # Session continuity/forking is handled in-process; the warm runtime does
-        # not carry session state, so any explicit session flag stays local.
-        # Default auto-save also stays in-process until the warm path can persist
-        # sessions the same way as the normal run path.
+        # Session continuity now attaches to a warm, per-session agent in the
+        # runtime: a `--continue`/`--session` run rehydrates history once into a
+        # warm agent held per session id and reuses it across turns, so the
+        # iterative coding loop no longer pays cold-start every turn. The runtime
+        # persists per-turn deltas through the same project session store, so a
+        # crash/eviction resumes deterministically.
+        # A fresh fork (`--fork`) is created in-process because the fork id is
+        # minted here; subsequent turns against that id then attach warm.
         # An explicit --thinking budget is a per-invocation override (like tools/
         # approval/memory), so it stays in-process: the warm runtime reuses a
         # cached agent and does not carry a per-call thinking budget, so attaching
@@ -1528,10 +1532,16 @@ def _run_prompt(
         # Isolated (--worktree) runs must stay in-process: the warm runtime is a
         # separate process whose cwd we can't redirect into the worktree, so
         # attaching would run the task outside the isolated branch.
-        runtime_eligible = no_save and thinking_budget is None and not isolated and not any([
-            mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
-            memory, permissions_config, continue_session, session, fork,
-        ])
+        stateful_attach = bool(session_id) and not fork
+        runtime_eligible = (
+            (no_save or stateful_attach)
+            and thinking_budget is None
+            and not isolated
+            and not any([
+                mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
+                memory, permissions_config, fork,
+            ])
+        )
         # When --attach <id> is given, tag the warm-runtime run with that id so
         # other terminals (`praisonai attach <id>`) observe its live events.
         runtime_session_id = attach_session or session_id
