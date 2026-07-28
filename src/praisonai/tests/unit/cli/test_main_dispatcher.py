@@ -185,6 +185,81 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
     def test_no_positional_is_not_bare(self):
         self.assertFalse(dispatcher._looks_like_bare_prompt([], None))
 
+    def test_value_taking_flag_with_dash_prefixed_value_is_bare(self):
+        # Regression guard for the Greptile P1: a value-taking run option whose
+        # separated value begins with ``-`` (e.g. ``--session -abc``,
+        # ``--output -json``) must NOT be mis-classified as an unsupported flag.
+        # The whole invocation is run-supported and must reach the modern engine.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--session", "-s", "--output", "-o"},
+                {"--session", "-s", "--output", "-o"},
+            ),
+        ):
+            for argv in (
+                ["fix the bug", "--session", "-abc"],
+                ["diagnose", "--output", "-json"],
+                ["summarise", "-s", "-weird-id"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_bare_prompt(argv, first),
+                    f"{argv!r} is fully run-supported and should reach the "
+                    f"modern engine even though the value starts with '-'",
+                )
+
+    def test_dash_value_then_unsupported_flag_is_not_bare(self):
+        # The value is skipped, but a genuinely unsupported *following* flag
+        # still forces legacy — the value-awareness must not swallow real flags.
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ):
+            argv = ["fix the bug", "--session", "-abc", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
+
+
+class TestFlagNames(unittest.TestCase):
+    """``_flag_names`` extracts option names, value-aware when told which
+    options consume a following value."""
+
+    def test_bare_dash_tokens_are_all_flags_without_value_opts(self):
+        # Conservative default: every dash-prefixed token is an option name.
+        self.assertEqual(
+            dispatcher._flag_names(["p", "--model", "gpt-4o", "--verbose"]),
+            ["--model", "--verbose"],
+        )
+
+    def test_equals_form_split_to_name(self):
+        self.assertEqual(
+            dispatcher._flag_names(["p", "--model=gpt-4o"]),
+            ["--model"],
+        )
+
+    def test_value_opt_skips_dash_prefixed_value(self):
+        # The value of a value-taking option is skipped even when it starts
+        # with a dash, so it is not reported as a separate flag.
+        self.assertEqual(
+            dispatcher._flag_names(
+                ["p", "--session", "-abc", "--model", "-x"],
+                {"--session", "--model"},
+            ),
+            ["--session", "--model"],
+        )
+
+    def test_value_opt_equals_form_needs_no_lookahead(self):
+        # ``--session=-abc`` carries its value inline; the next token is a flag.
+        self.assertEqual(
+            dispatcher._flag_names(
+                ["p", "--session=-abc", "--stream"], {"--session"}
+            ),
+            ["--session", "--stream"],
+        )
+
 
 class TestGetTyperCommandsCache(unittest.TestCase):
     """``_get_typer_commands`` caches its result under a lock and does
@@ -414,6 +489,25 @@ class TestMainRouting(unittest.TestCase):
             dispatcher.main()
         run_typer.assert_called_once_with(
             ["run", "build a weather agent", "-m", "gpt-4o"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_bare_prompt_with_dash_prefixed_value_routes_to_typer_run(self):
+        # A value-taking run flag whose value begins with ``-`` must reach the
+        # modern engine intact — the value is not mistaken for an unsupported
+        # flag (Greptile P1 regression guard, full main() path).
+        sys.argv = ["praisonai", "resume", "work", "--session", "-abc"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--session", "-s"}, {"--session", "-s"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "resume work", "--session", "-abc"]
         )
         run_legacy.assert_not_called()
 

@@ -134,9 +134,30 @@ def _find_first_command(argv):
     return None
 
 
-def _flag_names(argv):
-    """Return the option *names* present in ``argv`` (``--foo=bar`` → ``--foo``)."""
-    return [arg.split("=", 1)[0] for arg in argv if arg.startswith("-")]
+def _flag_names(argv, value_opts=None):
+    """Return the option *names* present in ``argv`` (``--foo=bar`` → ``--foo``).
+
+    ``value_opts`` is the set of option names that consume a following value
+    (e.g. ``--model gpt-4o``). When supplied, the token following such an option
+    is treated as that option's *value* and skipped, so a value beginning with a
+    dash (``--session -abc``, ``--output -json``) is not mis-classified as a
+    separate flag. ``--opt=value`` forms carry their value inline and need no
+    lookahead. Without ``value_opts`` the original conservative behaviour holds:
+    every dash-prefixed token is reported as an option name.
+    """
+    value_opts = value_opts or set()
+    names = []
+    expect_value = False
+    for arg in argv:
+        if expect_value:
+            expect_value = False
+            continue
+        if arg.startswith("-"):
+            name = arg.split("=", 1)[0]
+            names.append(name)
+            if "=" not in arg and name in value_opts:
+                expect_value = True
+    return names
 
 
 def _looks_like_bare_prompt(argv, first_cmd):
@@ -167,15 +188,20 @@ def _looks_like_bare_prompt(argv, first_cmd):
     if first_cmd.lower().endswith((".yaml", ".yml")):
         return False
 
-    flags = _flag_names(argv)
-    if not flags:
+    # A quick, value-unaware scan first: if there are no dash-prefixed tokens at
+    # all, this is a plain prompt and we can skip the (potentially heavy) run
+    # option introspection entirely.
+    if not any(arg.startswith("-") for arg in argv):
         return True
 
     run_opts = _get_run_option_names()
     if run_opts is None:
         # Discovery failed → conservative: any flag means legacy owns it.
         return False
-    supported, _value_opts = run_opts
+    supported, value_opts = run_opts
+    # Classify flags value-aware so a value-taking option's dash-prefixed value
+    # (``--session -abc``, ``--output -json``) is not mistaken for a flag.
+    flags = _flag_names(argv, value_opts)
     # All flags must be run-supported; a single unrecognised flag → legacy.
     return all(flag in supported for flag in flags)
 
