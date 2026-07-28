@@ -6,8 +6,12 @@ import warnings
 import gc
 from unittest.mock import Mock, patch
 
+
+
 def pytest_configure(config):
     """Register custom markers to avoid warnings."""
+    config.pluginmanager.import_plugin("tests._pytest_plugins.test_gating")
+    config.pluginmanager.import_plugin("tests._pytest_plugins.network_guard")
     config.addinivalue_line("markers", "real: Test requires real API keys")
     config.addinivalue_line("markers", "integration: Integration test")
     config.addinivalue_line("markers", "network: Test requires network access")
