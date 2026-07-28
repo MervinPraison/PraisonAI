@@ -974,15 +974,42 @@ class BotHandler:
         except ImportError:
             logger.warning("Schedule tools not available from praisonaiagents.tools")
         
-        # Browser tool
+        # Browser tool: prefer praisonai-browser local (Playwright) automation
+        # so navigate/snapshot/click work without cloud credentials. Fall back to
+        # BrowserBaseTool (cloud scrape) only if praisonai-browser is unavailable.
         if capabilities.browser:
             try:
-                from praisonai_tools import BrowserBaseTool
-                browser_tool = BrowserBaseTool()
-                tools.append(browser_tool)
-                logger.info("Browser tool enabled")
+                from ..._browser_bridge import browser_available
+                from ...tools.browser import create_browser_tool
+
+                if browser_available():
+                    tools.append(
+                        create_browser_tool(
+                            model=capabilities.model or "gpt-4o-mini",
+                            headless=capabilities.browser_headless,
+                            profile=capabilities.browser_profile,
+                        )
+                    )
+                    logger.info(
+                        "Local browser automation enabled "
+                        f"(headless={capabilities.browser_headless}, "
+                        f"profile={capabilities.browser_profile})"
+                    )
+                else:
+                    raise ImportError("praisonai-browser not installed")
             except ImportError:
-                logger.warning("Browser tool not available. Install praisonai-tools.")
+                try:
+                    from praisonai_tools import BrowserBaseTool
+                    tools.append(BrowserBaseTool())
+                    logger.info(
+                        "Browser tool enabled via BrowserBaseTool (cloud fallback). "
+                        "Install praisonai-browser for local automation."
+                    )
+                except ImportError:
+                    logger.warning(
+                        "Browser tool not available. "
+                        "Install praisonai-browser (local) or praisonai-tools (cloud)."
+                    )
         
         # Web search (additional provider-specific tool)
         if capabilities.web_search:
