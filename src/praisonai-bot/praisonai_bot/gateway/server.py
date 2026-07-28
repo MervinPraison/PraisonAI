@@ -2991,9 +2991,22 @@ class WebSocketGateway:
                         session_id=session_id,
                     )
                     session.add_message(message)
-                    
+
+                    # A missing agent never enqueues a turn, so it must resolve
+                    # terminally here — otherwise an "accepted" ack would leave
+                    # the client waiting forever for a "final" that never comes.
+                    if self._agents.get(session.agent_id) is None:
+                        await self._send_to_client(client_id, {
+                            "type": "response",
+                            "status": "final",
+                            "content": "Agent not available",
+                            "outcome": {"status": "error"},
+                            "session_id": session_id,
+                        })
+                        return True
+
                     response = await self._process_agent_message(session, message)
-                    
+
                     # Provisional acknowledgement: the turn was accepted/enqueued
                     # but is not yet resolved. A distinct status lets clients tell
                     # "accepted" from the "final" answer (sent later by
@@ -3280,11 +3293,17 @@ class WebSocketGateway:
                 if not content:
                     break  # Queue is empty, exit loop
                 
-                # Wire streaming relay if agent has a stream_emitter
+                # Wire streaming relay if agent has a stream_emitter.
+                # ``relay_futures`` collects the cross-thread sends the relay
+                # schedules so we can drain them before the final frame,
+                # guaranteeing "final" never overtakes trailing stream events.
                 relay_callback = None
+                relay_futures: List[Any] = []
                 emitter = getattr(agent, 'stream_emitter', None)
                 if emitter is not None and client_id:
-                    relay_callback = self._make_stream_relay(client_id, session)
+                    relay_callback = self._make_stream_relay(
+                        client_id, session, relay_futures
+                    )
                     emitter.add_callback(relay_callback)
                 
                 # Issue #3467: run the turn under a cancel scope so it can be
@@ -3326,6 +3345,15 @@ class WebSocketGateway:
                         except (ValueError, AttributeError):
                             pass
                 
+                # Drain any stream sends the relay scheduled cross-thread so the
+                # final frame is enqueued strictly after every trailing stream
+                # event (token/reasoning/tool-progress/STREAM_END).
+                if relay_futures:
+                    await asyncio.gather(
+                        *[asyncio.wrap_future(f) for f in relay_futures],
+                        return_exceptions=True,
+                    )
+
                 response_message = GatewayMessage(
                     content=response,
                     sender_id=session.agent_id,
@@ -3347,9 +3375,17 @@ class WebSocketGateway:
             session.mark_executing(False)
 
     def _make_stream_relay(
-        self, client_id: str, session: "GatewaySession"
+        self,
+        client_id: str,
+        session: "GatewaySession",
+        pending: Optional[List[Any]] = None,
     ) -> Callable:
-        """Create a StreamCallback that relays events to a WS client."""
+        """Create a StreamCallback that relays events to a WS client.
+
+        When ``pending`` is provided, every cross-thread send future is
+        appended to it so the caller can await them before emitting a
+        terminal frame (ordering guarantee: final never precedes stream).
+        """
         gateway = self
         # Capture the running loop while we are still on it.
         loop = asyncio.get_running_loop()
@@ -3411,10 +3447,12 @@ class WebSocketGateway:
                 )
                 
                 # No get_event_loop() in the threaded callback.
-                asyncio.run_coroutine_threadsafe(
+                fut = asyncio.run_coroutine_threadsafe(
                     gateway._send_to_client(client_id, gw_event.to_dict()),
                     loop,
                 )
+                if pending is not None:
+                    pending.append(fut)
             except Exception:
                 logger.warning("Stream relay error (non-fatal)", exc_info=True)
 
@@ -3558,6 +3596,9 @@ class WebSocketGateway:
                     "error",
                     "token_stream",
                     "tool_call_stream",
+                    "reasoning_stream",
+                    "tool_progress_stream",
+                    "stream_error",
                 ]:
                     session_id = self._client_sessions.get(client_id)
                     if session_id:
