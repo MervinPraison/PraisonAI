@@ -8,7 +8,12 @@ that disallowed/unregistered tools are rejected.
 import pytest
 
 from praisonaiagents.tools.registry import ToolRegistry
-from praisonaiagents.tools.tool_proxy import ToolProxy, build_tool_namespace
+from praisonaiagents.tools.tool_proxy import (
+    ToolProxy,
+    build_tool_namespace,
+    CodeToolBridge,
+    serve_tool_call,
+)
 from praisonaiagents.tools.python_tools import execute_code_with_tools
 
 
@@ -243,3 +248,100 @@ def test_execution_config_flags():
     restored = ExecutionConfig.from_dict(d)
     assert restored.code_tools is True
     assert restored.code_tools_allow == ["fetch"]
+
+
+# ---------------------------------------------------------------------------
+# Isolated (bridged) tool-calling path — CodeToolBridge + serve_tool_call
+# ---------------------------------------------------------------------------
+
+
+class _RecordingBridge:
+    """Minimal CodeToolBridge that services calls via serve_tool_call.
+
+    Stands in for a real sandbox transport (subprocess/Docker): instead of
+    crossing a process boundary it invokes serve_tool_call directly, which is
+    exactly what a transport's parent-side handler must do.
+    """
+
+    def __init__(self, allowed, registry):
+        self._allowed = allowed
+        self._registry = registry
+        self.ran = None
+
+    def run_code(self, code):
+        self.ran = code
+        # Emulate one tool call the "child" would have marshalled across.
+        value = serve_tool_call(
+            "fetch", ["a"], {}, allowed=self._allowed, registry=self._registry
+        )
+        return {
+            "result": value,
+            "stdout": str(value),
+            "stderr": "",
+            "success": True,
+        }
+
+
+def test_bridge_satisfies_protocol(registry):
+    bridge = _RecordingBridge(["fetch"], registry)
+    assert isinstance(bridge, CodeToolBridge)
+
+
+def test_execute_with_tools_dispatches_to_bridge(registry):
+    bridge = _RecordingBridge(["fetch"], registry)
+    result = execute_code_with_tools(
+        "print(fetch('a'))",
+        allowed_tools=["fetch"],
+        registry=registry,
+        bridge=bridge,
+    )
+    assert bridge.ran == "print(fetch('a'))"
+    assert result["success"] is True
+    assert result["result"] == 1
+
+
+def test_bridge_none_uses_in_process_path(registry):
+    # Sanity: omitting bridge keeps the original in-process behaviour.
+    result = execute_code_with_tools(
+        "fetch('a')\n", allowed_tools=["fetch"], registry=registry
+    )
+    assert result["success"] is True
+    assert result["result"] == 1
+
+
+def test_serve_tool_call_runs_allowed_tool(registry):
+    assert serve_tool_call("fetch", ["a"], {}, allowed=["fetch"], registry=registry) == 1
+
+
+def test_serve_tool_call_rejects_disallowed(registry):
+    with pytest.raises(PermissionError):
+        serve_tool_call("double", [2], {}, allowed=["fetch"], registry=registry)
+
+
+def test_serve_tool_call_rejects_unregistered(registry):
+    with pytest.raises(NameError):
+        serve_tool_call("ghost", [], {}, allowed=["ghost"], registry=registry)
+
+
+def test_serve_tool_call_honours_approval_gate(registry):
+    from praisonaiagents.approval import (
+        add_approval_requirement,
+        remove_approval_requirement,
+        set_approval_callback,
+        ApprovalDecision,
+    )
+
+    add_approval_requirement("fetch", "high")
+    set_approval_callback(
+        lambda function_name, arguments, risk_level: ApprovalDecision(
+            approved=False, reason="denied by test"
+        )
+    )
+    try:
+        with pytest.raises(PermissionError):
+            serve_tool_call(
+                "fetch", ["a"], {}, allowed=["fetch"], registry=registry
+            )
+    finally:
+        set_approval_callback(None)
+        remove_approval_requirement("fetch")
