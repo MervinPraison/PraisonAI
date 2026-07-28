@@ -8,8 +8,9 @@ with Windows cp1252 default encoding.
 
 import logging
 import re
+import sys
 import unicodedata
-from typing import Union, Any
+from typing import Union, Any, IO, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -176,3 +177,45 @@ def extract_root_cause_from_error(error_text: str) -> str:
 
     # Return raw error text - caller will sanitize with safe_error_message
     return error_text
+
+
+def safe_print(*values: Any, sep: str = " ", end: str = "\n",
+               file: Optional[IO[str]] = None, flush: bool = False) -> None:
+    """Print to a stream without crashing on Windows cp1252 consoles.
+
+    A drop-in replacement for :func:`print` for E2E harnesses and console
+    reporters that may echo subprocess output (e.g. Playwright's
+    ``playwright install`` banner drawn with box characters like U+2551).
+
+    On a UTF-8 stream the text is written unchanged. If the target stream's
+    encoding cannot represent the text (the classic ``'charmap' codec can't
+    encode character '\\u2551'`` failure), the text is ASCII-sanitized via
+    :func:`safe_error_message` so the actionable hint stays readable instead
+    of masking the real error behind a secondary ``UnicodeEncodeError``.
+
+    Args:
+        *values: Objects to print, joined by ``sep`` (like :func:`print`).
+        sep: Separator between values.
+        end: String appended after the last value.
+        file: Target stream; defaults to ``sys.stdout``.
+        flush: Whether to forcibly flush the stream (like :func:`print`).
+    """
+    stream = file if file is not None else sys.stdout
+    text = sep.join(str(v) for v in values) + end
+
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        # Sanitize the whole line but preserve intended line breaks so
+        # multi-line banners (e.g. "playwright install") remain readable.
+        safe = "\n".join(
+            safe_error_message(line, max_len=len(line) + 16) if line else ""
+            for line in text.split("\n")
+        )
+        stream.write(safe)
+
+    if flush:
+        try:
+            stream.flush()
+        except (AttributeError, ValueError):
+            pass
