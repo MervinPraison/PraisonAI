@@ -6,7 +6,6 @@ import inspect
 import logging
 import threading
 import re
-import keyword
 import difflib
 import importlib
 import importlib.util
@@ -384,43 +383,6 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
             pass
     return wrapped
 
-
-def noop(*args, **kwargs):
-    pass
-
-def sanitize_agent_name_for_autogen_v4(name):
-    """
-    Sanitize agent name to be a valid Python identifier for AutoGen v0.4.
-    
-    Args:
-        name (str): The original agent name
-        
-    Returns:
-        str: A valid Python identifier
-    """
-    # Convert to string and replace invalid characters with underscores
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
-    
-    # Collapse only very excessive underscores (5 or more) to reduce extreme cases
-    sanitized = re.sub(r'_{5,}', '_', sanitized)
-    
-    # Remove trailing underscores only if not part of a dunder pattern and only if singular
-    if sanitized.endswith('_') and not sanitized.endswith('__') and sanitized != '_':
-        sanitized = sanitized.rstrip('_')
-    
-    # Ensure it starts with a letter or underscore (not a digit)
-    if sanitized and sanitized[0].isdigit():
-        sanitized = 'agent_' + sanitized
-    
-    # Handle empty string or only invalid characters (including single underscore from all invalid chars)
-    if not sanitized or sanitized == '_':
-        sanitized = 'agent'
-    
-    # Check if it's a Python keyword and append underscore if so
-    if keyword.iskeyword(sanitized):
-        sanitized += '_'
-    
-    return sanitized
 
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance."""
