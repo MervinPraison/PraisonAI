@@ -2761,6 +2761,9 @@ class WebSocketGateway:
                 features["events"].extend([
                     EventType.TOKEN_STREAM.value,
                     EventType.TOOL_CALL_STREAM.value,
+                    EventType.REASONING_STREAM.value,
+                    EventType.TOOL_PROGRESS_STREAM.value,
+                    EventType.STREAM_ERROR.value,
                     EventType.STREAM_END.value,
                 ])
             
@@ -2991,8 +2994,13 @@ class WebSocketGateway:
                     
                     response = await self._process_agent_message(session, message)
                     
+                    # Provisional acknowledgement: the turn was accepted/enqueued
+                    # but is not yet resolved. A distinct status lets clients tell
+                    # "accepted" from the "final" answer (sent later by
+                    # _run_session_queue) instead of string-sniffing the content.
                     await self._send_to_client(client_id, {
                         "type": "response",
+                        "status": "accepted",
                         "content": response,
                         "session_id": session_id,
                     })
@@ -3045,8 +3053,9 @@ class WebSocketGateway:
         """Process a message through the agent.
         
         If the agent has a stream_emitter, registers a callback that relays
-        token deltas to the connected WebSocket client in real-time via
-        TOKEN_STREAM / TOOL_CALL_STREAM / STREAM_END events.
+        live progress to the connected WebSocket client in real-time via
+        TOKEN_STREAM / TOOL_CALL_STREAM / REASONING_STREAM /
+        TOOL_PROGRESS_STREAM / STREAM_ERROR / STREAM_END events.
         """
         agent = self._agents.get(session.agent_id)
         if not agent:
@@ -3285,6 +3294,7 @@ class WebSocketGateway:
                 from praisonaiagents.agent.interrupt import InterruptController
                 controller = InterruptController()
                 timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
+                outcome_status = "ok"
                 try:
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
@@ -3299,6 +3309,7 @@ class WebSocketGateway:
                                 )
                         except AdmissionRejected as rej:
                             response = rej.message
+                            outcome_status = "rejected"
                     else:
                         response = await self._drive_turn(
                             session, agent, content, controller, timeout
@@ -3306,6 +3317,7 @@ class WebSocketGateway:
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
+                    outcome_status = "error"
                 finally:
                     # Always clean up the relay callback
                     if relay_callback and emitter is not None:
@@ -3321,9 +3333,14 @@ class WebSocketGateway:
                 )
                 session.add_message(response_message)
                 
+                # Final frame: distinct "final" status resolves the pending turn
+                # that the "accepted" ack opened, and carries a structured
+                # terminal outcome alongside the text (not just a bare string).
                 await self._send_to_client(client_id, {
                     "type": "response",
+                    "status": "final",
                     "content": response,
+                    "outcome": {"status": outcome_status},
                     "session_id": session.session_id,
                 })
         finally:
@@ -3340,30 +3357,52 @@ class WebSocketGateway:
         def _relay(event) -> None:
             try:
                 from praisonaiagents.streaming.events import StreamEventType
-                
+
                 event_type = getattr(event, 'type', None)
                 if event_type is None:
                     return
-                
-                # Map StreamEventType -> gateway EventType
+
+                sid = session.session_id
+                # Map a *closed* set of StreamEventTypes -> gateway EventType so a
+                # WS UI can render live progress (thinking, tool progress) and
+                # streamed failures without sniffing message text. Unmapped
+                # events are dropped.
                 if event_type == StreamEventType.DELTA_TEXT:
-                    gw_type = EventType.TOKEN_STREAM
+                    # A reasoning/thinking delta is surfaced under its own event
+                    # so clients can show "thinking…" separately from the answer.
+                    if getattr(event, 'is_reasoning', False):
+                        gw_type = EventType.REASONING_STREAM
+                    else:
+                        gw_type = EventType.TOKEN_STREAM
                     data = {
                         "content": getattr(event, 'content', ''),
-                        "session_id": session.session_id,
+                        "session_id": sid,
                     }
                 elif event_type == StreamEventType.DELTA_TOOL_CALL:
                     gw_type = EventType.TOOL_CALL_STREAM
                     data = {
                         "tool_call": getattr(event, 'tool_call', {}),
-                        "session_id": session.session_id,
+                        "session_id": sid,
+                    }
+                elif event_type == StreamEventType.TOOL_PROGRESS:
+                    gw_type = EventType.TOOL_PROGRESS_STREAM
+                    data = {
+                        "content": getattr(event, 'content', ''),
+                        "metadata": getattr(event, 'metadata', None),
+                        "session_id": sid,
+                    }
+                elif event_type == StreamEventType.ERROR:
+                    gw_type = EventType.STREAM_ERROR
+                    data = {
+                        "error": getattr(event, 'error', None),
+                        "session_id": sid,
                     }
                 elif event_type == StreamEventType.STREAM_END:
                     gw_type = EventType.STREAM_END
-                    data = {"session_id": session.session_id}
+                    data = {"session_id": sid}
                 else:
-                    return  # Skip non-essential events
-                
+                    return  # Skip non-forwarded events
+
                 gw_event = GatewayEvent(
                     type=gw_type,
                     data=data,
