@@ -165,6 +165,21 @@ class TestSafePrint:
         safe_print("a", "b", sep="-", end="!", file=out)
         assert out.getvalue() == "a-b!"
 
+    def test_flush_kwarg_flushes_stream(self):
+        # A drop-in print replacement must accept flush=True without crashing
+        # and forward the flush to the underlying stream.
+        class _FlushTracker(io.StringIO):
+            flushed = False
+
+            def flush(self):
+                self.flushed = True
+                super().flush()
+
+        out = _FlushTracker()
+        safe_print("hello", file=out, flush=True)
+        assert out.getvalue() == "hello\n"
+        assert out.flushed is True
+
 
 class TestExtractRootCause:
     """Tests for extract_root_cause_from_error()."""

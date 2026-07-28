@@ -180,7 +180,7 @@ def extract_root_cause_from_error(error_text: str) -> str:
 
 
 def safe_print(*values: Any, sep: str = " ", end: str = "\n",
-               file: Optional[IO[str]] = None) -> None:
+               file: Optional[IO[str]] = None, flush: bool = False) -> None:
     """Print to a stream without crashing on Windows cp1252 consoles.
 
     A drop-in replacement for :func:`print` for E2E harnesses and console
@@ -198,6 +198,7 @@ def safe_print(*values: Any, sep: str = " ", end: str = "\n",
         sep: Separator between values.
         end: String appended after the last value.
         file: Target stream; defaults to ``sys.stdout``.
+        flush: Whether to forcibly flush the stream (like :func:`print`).
     """
     stream = file if file is not None else sys.stdout
     text = sep.join(str(v) for v in values) + end
@@ -212,3 +213,9 @@ def safe_print(*values: Any, sep: str = " ", end: str = "\n",
             for line in text.split("\n")
         )
         stream.write(safe)
+
+    if flush:
+        try:
+            stream.flush()
+        except (AttributeError, ValueError):
+            pass
