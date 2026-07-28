@@ -49,8 +49,23 @@ class CodeToolBridge(Protocol):
     core stays lightweight and dependency-free.
     """
 
-    def run_code(self, code: str) -> Dict[str, Any]:
+    def run_code(
+        self,
+        code: str,
+        *,
+        allowed_tools: Iterable[str] = (),
+        registry: Optional[ToolRegistry] = None,
+        timeout: int = 30,
+        max_output_size: int = 10000,
+    ) -> Dict[str, Any]:
         """Run *code* under isolation, servicing tool calls over the transport.
+
+        The caller's *invocation policy* is passed explicitly so the transport
+        never has to rely on bridge-owned defaults: ``allowed_tools`` /
+        ``registry`` are forwarded to :func:`serve_tool_call` in the parent for
+        every tool request (so an isolated call is gated by the same allow-list
+        and approval framework as the in-process path — never a weaker one), and
+        ``timeout`` / ``max_output_size`` bound the isolated run.
 
         Returns the same ``{result, stdout, stderr, success}`` dict shape as the
         in-process executor so callers are transport-agnostic.

@@ -260,19 +260,36 @@ class _RecordingBridge:
 
     Stands in for a real sandbox transport (subprocess/Docker): instead of
     crossing a process boundary it invokes serve_tool_call directly, which is
-    exactly what a transport's parent-side handler must do.
+    exactly what a transport's parent-side handler must do. Critically, it uses
+    ONLY the caller-supplied invocation policy forwarded to ``run_code`` — it
+    keeps no allow-list/registry of its own — so the test proves the caller's
+    policy (not a bridge default) governs the isolated call.
     """
 
-    def __init__(self, allowed, registry):
-        self._allowed = allowed
-        self._registry = registry
+    def __init__(self):
         self.ran = None
+        self.seen = None
 
-    def run_code(self, code):
+    def run_code(
+        self,
+        code,
+        *,
+        allowed_tools=(),
+        registry=None,
+        timeout=30,
+        max_output_size=10000,
+    ):
         self.ran = code
-        # Emulate one tool call the "child" would have marshalled across.
+        self.seen = {
+            "allowed_tools": list(allowed_tools),
+            "registry": registry,
+            "timeout": timeout,
+            "max_output_size": max_output_size,
+        }
+        # Emulate one tool call the "child" would have marshalled across, gated
+        # by the caller's forwarded policy — never a bridge-owned default.
         value = serve_tool_call(
-            "fetch", ["a"], {}, allowed=self._allowed, registry=self._registry
+            "fetch", ["a"], {}, allowed=allowed_tools, registry=registry
         )
         return {
             "result": value,
@@ -283,12 +300,12 @@ class _RecordingBridge:
 
 
 def test_bridge_satisfies_protocol(registry):
-    bridge = _RecordingBridge(["fetch"], registry)
+    bridge = _RecordingBridge()
     assert isinstance(bridge, CodeToolBridge)
 
 
 def test_execute_with_tools_dispatches_to_bridge(registry):
-    bridge = _RecordingBridge(["fetch"], registry)
+    bridge = _RecordingBridge()
     result = execute_code_with_tools(
         "print(fetch('a'))",
         allowed_tools=["fetch"],
@@ -298,6 +315,47 @@ def test_execute_with_tools_dispatches_to_bridge(registry):
     assert bridge.ran == "print(fetch('a'))"
     assert result["success"] is True
     assert result["result"] == 1
+
+
+def test_bridge_receives_caller_invocation_policy_and_limits(registry):
+    # The caller's allow-list, registry and limits must cross the isolation
+    # boundary so the transport gates tool calls by exactly what THIS caller
+    # authorised — not a bridge-owned default. Regression guard for a bridge
+    # that would otherwise service calls under a broader/weaker policy.
+    bridge = _RecordingBridge()
+    execute_code_with_tools(
+        "fetch('a')",
+        allowed_tools=["fetch"],
+        registry=registry,
+        timeout=7,
+        max_output_size=123,
+        bridge=bridge,
+    )
+    assert bridge.seen["allowed_tools"] == ["fetch"]
+    assert bridge.seen["registry"] is registry
+    assert bridge.seen["timeout"] == 7
+    assert bridge.seen["max_output_size"] == 123
+
+
+def test_bridge_enforces_forwarded_allowlist(registry):
+    # A tool NOT on the caller's forwarded allow-list must be rejected by the
+    # parent-side gate even though the bridge itself imposes no policy.
+    class _CallsDisallowed(_RecordingBridge):
+        def run_code(self, code, *, allowed_tools=(), registry=None,
+                     timeout=30, max_output_size=10000):
+            serve_tool_call(
+                "double", [2], {}, allowed=allowed_tools, registry=registry
+            )
+            return {"result": None, "stdout": "", "stderr": "", "success": True}
+
+    bridge = _CallsDisallowed()
+    with pytest.raises(PermissionError):
+        execute_code_with_tools(
+            "double(2)",
+            allowed_tools=["fetch"],
+            registry=registry,
+            bridge=bridge,
+        )
 
 
 def test_bridge_none_uses_in_process_path(registry):

@@ -442,8 +442,17 @@ def execute_code_with_tools(
         # Isolated-and-tool-capable path: the bridge runs the code under real
         # isolation and calls back into serve_tool_call (same allow-list +
         # approval gate) for each tool request. Core only defines the contract;
-        # the transport is supplied by the caller.
-        return bridge.run_code(code)
+        # the transport is supplied by the caller. The invocation policy
+        # (allow-list, registry) and limits are forwarded explicitly so the
+        # isolated path is gated by exactly what this caller authorised — never
+        # the transport's own defaults, and never a weaker path.
+        return bridge.run_code(
+            code,
+            allowed_tools=allowed,
+            registry=registry,
+            timeout=timeout,
+            max_output_size=max_output_size,
+        )
 
     injected: Dict[str, Any] = {}
     if allowed:
