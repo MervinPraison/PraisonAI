@@ -404,11 +404,11 @@ class UnifiedSessionStore:
         
         try:
             with open(path, "r+b") as f:
-                self._acquire_exclusive_lock(f)
+                lock_length = self._acquire_exclusive_lock(f)
                 try:
                     data = self._read_json_locked(f)
                 finally:
-                    self._release_exclusive_lock(f)
+                    self._release_exclusive_lock(f, lock_length)
             if data is None:
                 return None
 

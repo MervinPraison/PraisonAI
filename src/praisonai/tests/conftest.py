@@ -61,12 +61,12 @@ def cleanup_async_resources():
     gc.collect()
 
 # Correct paths for src/praisonai/tests/conftest.py
-# Go up 3 levels to reach root (tests -> praisonai -> src -> root)
-_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')
+# Go up 2 levels (tests -> praisonai -> src), then to praisonai-agents
+_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', 'praisonai-agents')
 if os.path.exists(_agents_path) and _agents_path not in sys.path:
     sys.path.insert(0, _agents_path)
 
-# Go up 2 levels to reach src, then to praisonai
+# Go up 1 level from tests to the wrapper root (src/praisonai)
 _wrapper_path = os.path.join(os.path.dirname(__file__), '..')
 if os.path.exists(_wrapper_path) and _wrapper_path not in sys.path:
     sys.path.insert(0, _wrapper_path)
