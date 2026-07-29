@@ -11,16 +11,49 @@ from praisonai_bot.bots._reliability import (
 )
 
 
-def test_default_posture_applies_small_drain_no_admission():
-    """Unset reliability gives a sane small drain window but no ceiling."""
+def test_unset_posture_is_safe_by_default():
+    """Unset reliability is safe by default: admission ceiling + drain (#3438)."""
     r = resolve_reliability(None)
+    # Snappy drain on the (unknown → loopback) bind, but a real admission
+    # ceiling and bounded fair queue so a burst can't fan out unboundedly.
+    assert r.drain_timeout == 5.0
+    assert r.max_concurrent_runs > 0
+    assert r.queue_depth > 0
+    assert r.overflow_policy == "queue"
+
+
+def test_unset_externally_bound_is_full_production():
+    """An unset posture on a non-loopback bind resolves to production (#3438)."""
+    r = resolve_reliability(None, bind_host="0.0.0.0")
+    assert r.drain_timeout == 15.0
+    assert r.max_concurrent_runs > 0
+    assert r.queue_depth > 0
+    assert r.overflow_policy == "queue"
+    assert r.outbound_ordering == "strict"
+
+
+def test_unset_loopback_bind_stays_snappy():
+    """Loopback binds keep the ceiling but a snappy drain window (#3438)."""
+    for host in ("127.0.0.1", "localhost", "::1", None):
+        r = resolve_reliability(None, bind_host=host)
+        assert r.drain_timeout == 5.0
+        assert r.max_concurrent_runs > 0
+
+
+def test_unset_noncanonical_loopback_bind_stays_snappy():
+    """Any valid loopback form is recognised, not just 127.0.0.1/::1 (#3438)."""
+    for host in ("127.0.0.2", "127.255.255.255", "0:0:0:0:0:0:0:1", "[::1]"):
+        r = resolve_reliability(None, bind_host=host)
+        assert r.drain_timeout == 5.0, host
+        assert r.max_concurrent_runs > 0, host
+
+
+def test_explicit_default_is_legacy_no_admission():
+    """Explicit reliability='default' keeps the legacy no-ceiling posture."""
+    r = resolve_reliability("default")
     assert r.drain_timeout == 5.0
     assert r.max_concurrent_runs == 0
     assert r.queue_depth == 0
-
-
-def test_default_alias_matches_none():
-    assert resolve_reliability("default") == resolve_reliability(None)
 
 
 def test_production_enables_drain_admission_bounded_queue():
@@ -101,6 +134,16 @@ def test_botos_reliability_off_no_drain_no_gate():
     assert os_._admission_gate is None
 
 
+def test_botos_unset_reliability_is_safe_by_default():
+    """BotOS() with no reliability arg is backpressured by default (#3438)."""
+    from praisonai_bot.bots.botos import BotOS
+
+    os_ = BotOS(bots=[])
+    assert os_._drain_timeout == 5.0
+    assert os_._admission_gate is not None
+    assert os_._admission_gate.enabled
+
+
 def test_botos_explicit_drain_overrides_reliability():
     from praisonai_bot.bots.botos import BotOS
 
@@ -159,3 +202,13 @@ def test_cli_no_config_explicit_drain_overrides_reliability():
 def test_cli_no_config_reliability_off_immediate_teardown():
     """`--reliability off` (no config) tears down immediately (drain 0)."""
     assert _run_no_config_gateway_start(reliability="off") == 0.0
+
+
+def test_cli_no_config_unset_loopback_safe_default_drains():
+    """No reliability + loopback bind (no config) drains with the safe window."""
+    assert _run_no_config_gateway_start(host="127.0.0.1") == 5.0
+
+
+def test_cli_no_config_unset_external_bind_full_production_drain():
+    """No reliability + a non-loopback bind gets the full production drain."""
+    assert _run_no_config_gateway_start(host="0.0.0.0") == 15.0
