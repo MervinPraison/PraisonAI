@@ -385,8 +385,11 @@ class MCP:
         
         # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
-            # Determine transport type based on URL or kwargs
-            if command_or_string.endswith('/sse') and 'transport_type' not in kwargs:
+            # Determine transport type based on URL or kwargs. Delegate the
+            # URL->transport classification to the shared helper so there is a
+            # single source of truth (see mcp_transport.get_transport_type).
+            from .mcp_transport import get_transport_type
+            if get_transport_type(command_or_string) == "sse" and 'transport_type' not in kwargs:
                 # Legacy SSE URL - use SSE transport for backward compatibility
                 from .mcp_sse import SSEMCPClient
                 self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
