@@ -188,6 +188,36 @@ class TestFileSnapshot:
         
         assert restored_content == original_content
     
+    def test_restore_preserves_ignored_files(self):
+        """Restore-all must not delete ignored/excluded files (e.g. .env)."""
+        env_path = os.path.join(self.project_dir, ".env")
+        with open(env_path, "w") as f:
+            f.write("SECRET=keep-me\n")
+
+        snapshot = FileSnapshot(
+            self.project_dir,
+            snapshot_dir=self.snapshot_dir,
+        )
+
+        # Snapshot the project (the ignored .env is never tracked).
+        info1 = snapshot.track(message="Initial")
+
+        # Add a tracked file after the snapshot, then restore back.
+        with open(os.path.join(self.project_dir, "extra.py"), "w") as f:
+            f.write("print('added later')\n")
+        snapshot.track(message="Added extra")
+
+        result = snapshot.restore(info1.commit_hash)
+        assert result is True
+
+        # The ignored .env must survive the restore untouched.
+        assert os.path.exists(env_path), ".env was deleted by restore"
+        with open(env_path, "r") as f:
+            assert f.read() == "SECRET=keep-me\n"
+
+        # The later-added tracked file is correctly pruned.
+        assert not os.path.exists(os.path.join(self.project_dir, "extra.py"))
+
     def test_restore_specific_files(self):
         """Test restoring specific files."""
         snapshot = FileSnapshot(

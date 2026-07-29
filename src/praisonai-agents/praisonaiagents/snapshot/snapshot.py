@@ -181,22 +181,23 @@ class FileSnapshot:
         
         self._initialized = True
     
-    def _sync_files(self):
-        """Sync project files to shadow repository."""
-        self._ensure_initialized()
-        
-        # Get list of files to track (respecting .gitignore if exists)
-        files_to_track = []
+    def _build_ignore_patterns(self) -> set:
+        """Build the set of ignore patterns (.gitignore + built-in defaults).
+
+        Shared by :meth:`_sync_files` and :meth:`restore` so both apply the
+        exact same exclusion rules — a file the sync never tracks (e.g. an
+        ignored ``.env``) must also never be pruned on restore.
+        """
         gitignore_path = os.path.join(self.project_path, ".gitignore")
         ignore_patterns = set()
-        
+
         if os.path.exists(gitignore_path):
             with open(gitignore_path, "r") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#"):
                         ignore_patterns.add(line)
-        
+
         # Always ignore common patterns
         ignore_patterns.update([
             ".git",
@@ -208,6 +209,15 @@ class FileSnapshot:
             "venv",
             ".venv",
         ])
+        return ignore_patterns
+
+    def _sync_files(self):
+        """Sync project files to shadow repository."""
+        self._ensure_initialized()
+        
+        # Get list of files to track (respecting .gitignore if exists)
+        files_to_track = []
+        ignore_patterns = self._build_ignore_patterns()
         
         # Walk project and copy files
         for root, dirs, files in os.walk(self.project_path):
@@ -237,6 +247,22 @@ class FileSnapshot:
                     files_to_track.append(rel_path)
                 except (IOError, OSError) as e:
                     logger.warning(f"Failed to copy {src_path}: {e}")
+        
+        # Prune shadow files whose source has been removed from the project,
+        # so a later commit can record the deletion (the shadow tree must
+        # mirror the project, not be append-only).
+        tracked_now = set(files_to_track)
+        for root, dirs, files in os.walk(self.shadow_path):
+            if ".git" in root.split(os.sep):
+                continue
+            rel_root = os.path.relpath(root, self.shadow_path)
+            for file in files:
+                rel_path = file if rel_root == "." else os.path.join(rel_root, file)
+                if rel_path not in tracked_now:
+                    try:
+                        os.remove(os.path.join(root, file))
+                    except OSError:
+                        pass
         
         return files_to_track
     
@@ -414,26 +440,48 @@ class FileSnapshot:
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
                         shutil.copy2(src, dst)
             else:
-                # Restore all files
+                # Restore all files: only those actually part of the target
+                # commit's tree, and remove project files that aren't, so undo
+                # cannot resurrect or leak files from a later snapshot.
+                ls = self._run_git(
+                    "ls-tree", "-r", "--name-only", commit_hash, check=False
+                )
+                committed = (
+                    set(ls.stdout.strip().split("\n"))
+                    if ls.stdout.strip()
+                    else set()
+                )
                 self._run_git("checkout", commit_hash, "--", ".")
                 
-                # Copy all files back to project
-                for root, dirs, files_list in os.walk(self.shadow_path):
-                    # Skip .git directory
-                    if ".git" in root:
+                # Remove project files not present in the target commit, but
+                # ONLY files the snapshot would have tracked. Ignored/excluded
+                # files (e.g. .env, venv, node_modules) are never part of any
+                # commit, so pruning them here would silently destroy user data
+                # the snapshot never managed. Mirror _sync_files()'s exclusions.
+                ignore_patterns = self._build_ignore_patterns()
+                for root, dirs, files_list in os.walk(self.project_path):
+                    if ".git" in root.split(os.sep):
                         continue
-                    
-                    rel_root = os.path.relpath(root, self.shadow_path)
-                    
+                    dirs[:] = [
+                        d for d in dirs
+                        if not self._should_ignore(d, ignore_patterns)
+                    ]
+                    rel_root = os.path.relpath(root, self.project_path)
                     for file in files_list:
-                        if rel_root == ".":
-                            rel_path = file
-                        else:
-                            rel_path = os.path.join(rel_root, file)
-                        
-                        src = os.path.join(root, file)
+                        if self._should_ignore(file, ignore_patterns):
+                            continue
+                        rel_path = file if rel_root == "." else os.path.join(rel_root, file)
+                        if rel_path not in committed:
+                            try:
+                                os.remove(os.path.join(root, file))
+                            except OSError:
+                                pass
+                
+                # Copy the committed files back to the project.
+                for rel_path in committed:
+                    src = os.path.join(self.shadow_path, rel_path)
+                    if os.path.exists(src):
                         dst = os.path.join(self.project_path, rel_path)
-                        
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
                         shutil.copy2(src, dst)
             
