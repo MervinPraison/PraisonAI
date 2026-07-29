@@ -86,22 +86,30 @@ def markdown_to_slack(text: str) -> str:
 
 # Markdown constructs to drop when falling back to plain text.
 _STRIP_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:https?://[^\s)]+)\)")
-_STRIP_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|`)")
 _STRIP_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+# Only unwrap *paired* emphasis/code delimiters so literal characters
+# (e.g. ``svc_1``, ``*.py``, ``a*b``) are preserved rather than deleted.
+_STRIP_BOLD_RE = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+_STRIP_ITALIC_RE = re.compile(r"(?<![*_\w])([*_])(?=\S)(.+?)(?<=\S)\1(?![*_\w])")
+_STRIP_CODE_RE = re.compile(r"`([^`]+)`")
 
 
 def strip_markdown(text: str) -> str:
     """Reduce markdown to readable plain text (safe fallback).
 
-    Removes emphasis markers and heading hashes and unwraps links to their
-    label, so a reply reads cleanly on a platform whose dialect we don't
-    specifically target.
+    Unwraps *paired* emphasis/code spans and heading hashes and unwraps links
+    to their label, so a reply reads cleanly on a platform whose dialect we
+    don't specifically target. Unpaired or literal delimiters (``svc_1``,
+    ``*.py``, ``a*b``) are left untouched so identifiers and code are never
+    corrupted.
     """
     if not text:
         return ""
     text = _STRIP_LINK_RE.sub(r"\1", text)
     text = _STRIP_HEADING_RE.sub("", text)
-    text = _STRIP_EMPHASIS_RE.sub("", text)
+    text = _STRIP_CODE_RE.sub(r"\1", text)
+    text = _STRIP_BOLD_RE.sub(r"\2", text)
+    text = _STRIP_ITALIC_RE.sub(r"\2", text)
     return text
 
 

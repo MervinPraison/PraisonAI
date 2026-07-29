@@ -403,3 +403,59 @@ class TestFormatForDialect:
     def test_markdown_to_slack_plain_passthrough(self):
         """Plain text without markup is unchanged for Slack."""
         assert markdown_to_slack("just plain text") == "just plain text"
+
+    def test_strip_markdown_preserves_literal_delimiters(self):
+        """Lone/literal *_` are NOT deleted (no svc_1 -> svc1 corruption)."""
+        # Identifiers, globs and arithmetic must survive the plain-text fallback.
+        assert strip_markdown("restart svc_1 now") == "restart svc_1 now"
+        assert strip_markdown("match *.py files") == "match *.py files"
+        assert strip_markdown("compute a*b + c") == "compute a*b + c"
+        assert strip_markdown("path a_b_c_d") == "path a_b_c_d"
+
+    def test_strip_markdown_unwraps_code_and_paired(self):
+        """Paired emphasis/code spans are unwrapped, contents kept."""
+        assert strip_markdown("run `deploy` twice") == "run deploy twice"
+        assert strip_markdown("**bold** text") == "bold text"
+
+
+class TestFormatMessageConsumesCapability:
+    """The BasePlatformAdapter default send seam consumes markdown_dialect."""
+
+    def _adapter(self, dialect):
+        from praisonaiagents.bots import (
+            BasePlatformAdapter,
+            PlatformCapabilities,
+            SendResult,
+        )
+
+        class _Adapter(BasePlatformAdapter):
+            capabilities = PlatformCapabilities(markdown_dialect=dialect)
+
+            async def connect(self, *, is_reconnect=False):
+                return True
+
+            async def disconnect(self):
+                return None
+
+            async def send(self, chat_id, content, *, reply_to=None, metadata=None):
+                return SendResult(ok=True, chat_id=chat_id)
+
+            async def get_chat_info(self, chat_id):
+                return {"id": chat_id}
+
+        return _Adapter()
+
+    def test_default_format_message_applies_slack_dialect(self):
+        """A Slack adapter's default format_message yields mrkdwn."""
+        out = self._adapter("slack").format_message("**bold**")
+        assert out == "*bold*"
+
+    def test_default_format_message_escapes_for_telegram(self):
+        """A Telegram adapter escapes specials so replies are never dropped."""
+        out = self._adapter("telegram_markdown_v2").format_message("svc_1.")
+        assert out == r"svc\_1\."
+
+    def test_default_format_message_markdown_is_backward_compatible(self):
+        """Default 'markdown' dialect keeps literals intact (no regression)."""
+        out = self._adapter("markdown").format_message("restart svc_1")
+        assert out == "restart svc_1"
