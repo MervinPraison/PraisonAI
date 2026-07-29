@@ -8,6 +8,7 @@ Environment: ``TENKI_API_KEY`` (optionally ``TENKI_WORKSPACE_ID``, ``TENKI_PROJE
 """
 
 import base64
+import dataclasses
 import logging
 import os
 import shlex
@@ -131,11 +132,21 @@ class TenkiCompute:
             # Outbound is on unless the caller restricts networking.
             "allow_outbound": (config.networking or {}).get("type") != "restricted",
         }
-        # Prefer an explicit Tenki registry image via metadata; otherwise honour a
-        # non-default ComputeConfig.image; else fall back to Tenki's stock image.
+        # metadata["tenki_image"] wins; otherwise honour an explicit
+        # ComputeConfig.image. Its default is a Docker-style ref, but Tenki's
+        # registry is a snapshot store (no Docker pull-through), so an unchanged
+        # default means "use Tenki's stock image." Read that default off the
+        # dataclass field rather than hardcoding it, so this can't silently
+        # drift if ComputeConfig's default ever changes.
         image = (config.metadata or {}).get("tenki_image")
-        if not image and getattr(config, "image", None) and config.image != "python:3.12-slim":
-            image = config.image
+        if not image:
+            configured = getattr(config, "image", None)
+            default_image = next(
+                (f.default for f in dataclasses.fields(config) if f.name == "image"),
+                None,
+            ) if dataclasses.is_dataclass(config) else None
+            if configured and configured != default_image:
+                image = configured
         if image:
             create_kwargs["image"] = image
         if config.auto_shutdown:
