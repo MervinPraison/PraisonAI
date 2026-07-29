@@ -32,8 +32,7 @@ class TenkiCompute:
 
         compute = TenkiCompute()
         config = ComputeConfig(
-            image="python:3.12-slim",
-            packages={"pip": ["pandas"]},
+            packages={"pip": ["pandas"]},  # installed on Tenki's stock image
         )
         info = await compute.provision(config)
         result = await compute.execute(info.instance_id, "python -c 'print(1+1)'")
@@ -56,10 +55,10 @@ class TenkiCompute:
         if self._client is None:
             try:
                 from tenki_sandbox import Client
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "Tenki SDK required. Install with: pip install tenki-sandbox"
-                )
+                ) from e
             # Falls back to TENKI_API_KEY / TENKI_AUTH_TOKEN in the environment.
             self._client = Client(auth_token=self._api_key) if self._api_key else Client()
         return self._client
@@ -192,7 +191,28 @@ class TenkiCompute:
         self._sandboxes.pop(instance_id, None)
         logger.info("[tenki_compute] shutdown: %s", instance_id)
 
+    @staticmethod
+    def _is_running(info: Dict[str, Any]) -> bool:
+        """Reconcile against live Tenki state instead of trusting the local map.
+
+        Tenki can terminate a sandbox server-side (e.g. the configured idle
+        timeout); without a refresh, get_status/list_instances would keep
+        reporting RUNNING for a dead sandbox while execute() hits it and fails.
+        Mirrors the E2B provider's is_running() check. On a transient fetch
+        failure, report not-running rather than a false RUNNING.
+        """
+        try:
+            info["sandbox"].refresh()
+            return info["sandbox"].state == "RUNNING"
+        except Exception:
+            return False
+
     async def get_status(self, instance_id: str) -> Any:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._get_status_sync, instance_id)
+
+    def _get_status_sync(self, instance_id: str) -> Any:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
         info = self._sandboxes.get(instance_id)
@@ -202,9 +222,10 @@ class TenkiCompute:
                 status=InstanceStatus.STOPPED,
                 provider="tenki",
             )
+        running = self._is_running(info)
         return InstanceInfo(
             instance_id=instance_id,
-            status=InstanceStatus.RUNNING,
+            status=InstanceStatus.RUNNING if running else InstanceStatus.STOPPED,
             endpoint=f"tenki://{info['sandbox_id']}",
             provider="tenki",
             created_at=info.get("created_at", 0),
@@ -293,10 +314,20 @@ class TenkiCompute:
             return False
 
     async def list_instances(self) -> List[Any]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._list_instances_sync)
+
+    def _list_instances_sync(self) -> List[Any]:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
         result = []
         for iid, info in self._sandboxes.items():
+            # Only surface sandboxes that are actually alive remotely, matching
+            # the E2B provider (a server-side idle timeout can kill one without
+            # our local map knowing).
+            if not self._is_running(info):
+                continue
             result.append(InstanceInfo(
                 instance_id=iid,
                 status=InstanceStatus.RUNNING,
