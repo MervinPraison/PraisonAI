@@ -95,8 +95,12 @@ class PersistenceOrchestrator:
         we pass the value through unchanged for genuinely sync stores.
         """
         if inspect.iscoroutine(value):
-            from .._async_bridge import run_sync
-            return run_sync(value)
+            from .._async_bridge import run_sync_or_offload
+            # ``run_sync_or_offload`` works from a plain sync caller *and* from
+            # inside a running loop (FastAPI handler, Jupyter, async test); a
+            # bare ``run_sync`` would raise in the latter, silently breaking sync
+            # persistence hooks that ride an async store under a running loop.
+            return run_sync_or_offload(value, thread_name="praisonai-persistence-sync")
         return value
     
     @classmethod

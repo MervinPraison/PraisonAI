@@ -308,6 +308,49 @@ def get_install_hint(name: str, *, registry: Optional[FrameworkAdapterRegistry] 
     return f"pip install 'praisonai-frameworks[{extra_name}]'"
 
 
+_CAP_CACHE: Dict[tuple, bool] = {}
+_CAP_LOCK = threading.Lock()
+
+
+def adapter_capability(
+    name: str,
+    flag: str,
+    *,
+    registry: Optional[FrameworkAdapterRegistry] = None,
+) -> Optional[bool]:
+    """Return the value of capability ``flag`` on adapter ``name``.
+
+    Reads the capability from the adapter class attribute (e.g.
+    ``SUPPORTS_WORKFLOW`` / ``SUPPORTS_RUNTIME_FEATURES``) instead of hardcoding
+    a framework-name check, so third-party adapters are first-class citizens.
+
+    Returns ``None`` when the adapter cannot currently be resolved (missing
+    optional dependency, lazy-loader race, ``is_available`` probe raising, ...).
+    Callers decide whether ``None`` means "refuse the operation" or "fall back",
+    but they should never fall back to a hardcoded framework-name check.
+
+    Successful probes are memoised, so an adapter that reported ``True`` once is
+    not silently downgraded if its next construction attempt transiently raises.
+    """
+    key = (name.lower(), flag)
+    with _CAP_LOCK:
+        cached = _CAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    if registry is None:
+        registry = get_default_registry()
+
+    try:
+        adapter = registry.create(name)
+    except Exception:
+        return None
+    value = bool(getattr(adapter, flag, False))
+    with _CAP_LOCK:
+        _CAP_CACHE[key] = value
+    return value
+
+
 def framework_option_help() -> str:
     """Help text for CLI --framework options (registry-driven)."""
     try:

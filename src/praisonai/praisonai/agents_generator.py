@@ -877,47 +877,38 @@ class AgentsGenerator:
         
         # Ask the adapter whether it supports runtime features instead of
         # hardcoding a framework-name check. Third-party adapters can opt in by
-        # setting ``SUPPORTS_RUNTIME_FEATURES = True``. Fall back to resolving
-        # the adapter from the registry for callers that pass only a name.
-        if adapter is None:
-            try:
-                adapter = self._get_framework_adapter(framework)
-            except (
-                ImportError,
-                KeyError,
-                LookupError,
-                ValueError,
-                TypeError,
-                AttributeError,
-            ) as exc:
-                # Adapter could not be resolved. This is expected when:
-                #  - an optional adapter dependency is missing (ImportError),
-                #  - the framework is unknown/unavailable in the registry, whose
-                #    create()/is_available() surface (Value|Type|Import)Error, or
-                #  - a minimal/mock generator has no _adapter_registry attribute
-                #    (AttributeError).
-                # In all cases we fall back to native-only behaviour below and
-                # log a warning instead of aborting generator setup or silently
-                # swallowing the failure.
-                logger = getattr(self, "logger", None)
-                if logger is not None:
-                    logger.warning(
-                        "Could not resolve framework adapter for %r: %r",
-                        framework,
-                        exc,
-                    )
-                adapter = None
+        # setting ``SUPPORTS_RUNTIME_FEATURES = True``.
+        supports_runtime_features: Optional[bool]
         if adapter is not None:
+            # A concrete adapter object was supplied: read its flag directly.
             supports_runtime_features = bool(
                 getattr(adapter, "SUPPORTS_RUNTIME_FEATURES", False)
             )
         else:
-            # Adapter could not be resolved (e.g. minimal/mock generator without a
-            # registry): preserve the historical native-only behaviour.
-            supports_runtime_features = str(framework).lower() == "praisonai"
+            # Only a name was supplied: resolve the capability through the
+            # protocol (memoised) rather than voting for "praisonai" by name.
+            from .framework_adapters.registry import adapter_capability
+            supports_runtime_features = adapter_capability(
+                str(framework),
+                "SUPPORTS_RUNTIME_FEATURES",
+                registry=getattr(self, "_adapter_registry", None),
+            )
 
-        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) \
-                and not supports_runtime_features:
+        uses_runtime_features = (
+            has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime
+        )
+
+        if uses_runtime_features and supports_runtime_features is None:
+            # The adapter is not resolvable, so we cannot verify the capability.
+            # Refuse instead of silently downgrading a third-party adapter to
+            # unsupported by a hardcoded name check.
+            raise ValueError(
+                f"Cannot verify runtime-feature support for framework='{framework}': "
+                "the adapter is not resolvable. Install its extra or register it via "
+                "the 'praisonai.framework_adapters' entry-point group."
+            )
+
+        if uses_runtime_features and not supports_runtime_features:
             runtime_features = []
             if has_cli_backend:
                 runtime_features.append('cli_backend')

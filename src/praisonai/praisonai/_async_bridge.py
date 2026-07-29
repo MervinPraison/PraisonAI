@@ -277,3 +277,52 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
         Any exception raised by the coroutine
     """
     return _default_bridge().run_sync(coro, timeout=timeout)
+
+
+def run_sync_or_offload(
+    coro: Awaitable[T],
+    *,
+    timeout: float | None = _DEFAULT_TIMEOUT,
+    thread_name: str = "praisonai-sync-offload",
+) -> T:
+    """Run ``coro`` to completion from *any* calling context.
+
+    - Plain sync caller (no running loop): dispatches to the active
+      :class:`AsyncBridge` via :func:`run_sync`, sharing its background loop and
+      connection pools.
+    - Called from inside a running loop (FastAPI handler, Jupyter, async test):
+      copies the caller's ContextVars onto a worker thread that hands the
+      coroutine to the SAME bridge (never a fresh ``asyncio.new_event_loop()``),
+      so a caller-installed :func:`scoped_bridge` binding still wins and
+      LiteLLM/HTTPX per-loop connection pools are preserved. Exceptions are
+      re-raised on the caller thread.
+
+    Callers who *know* they are on a sync-only path should use :func:`run_sync`
+    (it fails loudly inside a loop). Everything that participates in the 3-way
+    surface (CLI + YAML + Python) should use this helper so the correct
+    running-loop handling lives in one place instead of being re-implemented.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run_sync(coro, timeout=timeout)
+
+    result: list[T] = []
+    error: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            result.append(run_sync(coro, timeout=timeout))
+        except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
+            error.append(e)
+
+    thread = threading.Thread(
+        target=contextvars.copy_context().run,
+        args=(_runner,),
+        name=thread_name,
+    )
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+    return result[0]

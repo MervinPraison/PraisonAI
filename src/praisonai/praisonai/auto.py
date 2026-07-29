@@ -14,7 +14,6 @@ from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import asyncio
-import contextvars
 import threading
 from praisonai._logging import get_logger
 
@@ -26,7 +25,7 @@ T = TypeVar('T')
 # =============================================================================
 
 from ._lazy_cache import lazy_get
-from ._async_bridge import run_sync
+from ._async_bridge import run_sync, run_sync_or_offload
 import inspect as _inspect
 
 
@@ -636,54 +635,13 @@ class BaseAutoGenerator:
         """
         # Backward compatibility: the historical sync path called the blocking
         # provider clients directly, so it worked even when invoked from inside a
-        # running event loop (FastAPI handler, Jupyter, async test). run_sync()
-        # rejects that case, so when a loop is already running we drive the sync
-        # ladder on a dedicated worker thread (with its own loop) instead of
-        # raising. The provider calls still execute off the caller's loop.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = False
-        else:
-            running_loop = True
-
-        if not running_loop:
-            return run_sync(
-                self._completion_impl(response_model, messages, is_async=False, **kwargs)
-            )
-
-        result: List[Any] = []
-        error: List[BaseException] = []
-
-        def _runner() -> None:
-            try:
-                # The runner thread has no running loop, so run_sync() is legal
-                # here and dispatches to the shared background loop (one loop for
-                # the whole process) instead of standing up a fresh event loop
-                # per call — preserving LiteLLM/HTTPX per-loop connection pools.
-                result.append(
-                    run_sync(
-                        self._completion_impl(
-                            response_model, messages, is_async=False, **kwargs
-                        )
-                    )
-                )
-            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
-                error.append(e)
-
-        # Run the worker under a copy of the caller's context so run_sync()
-        # resolves the SAME AsyncBridge the caller would (a scoped_bridge()
-        # override, else the shared default). A bare Thread does not inherit
-        # contextvars, which would otherwise leak this fallback onto the global
-        # bridge and bypass a caller's per-session loop isolation.
-        thread = threading.Thread(
-            target=contextvars.copy_context().run, args=(_runner,),
-            name="praisonai-sync-completion")
-        thread.start()
-        thread.join()
-        if error:
-            raise error[0]
-        return result[0]
+        # running event loop (FastAPI handler, Jupyter, async test). Delegate the
+        # sync-or-offload handling to the shared async bridge so the correct
+        # running-loop logic lives in one place.
+        return run_sync_or_offload(
+            self._completion_impl(response_model, messages, is_async=False, **kwargs),
+            thread_name="praisonai-sync-completion",
+        )
 
     async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
@@ -728,47 +686,13 @@ class BaseAutoGenerator:
         Single source of truth so the sync ``generate()`` twins can delegate to
         their ``agenerate()`` implementation instead of duplicating the body.
 
-        Mirrors the running-loop handling in ``_structured_completion``: when no
-        event loop is running we use the shared async bridge; when a loop is
-        already running (FastAPI handler, Jupyter, async test) ``run_sync``
-        would raise, so we drive the coroutine on a dedicated worker thread with
-        its own loop instead.
+        Delegates the running-loop handling to the shared async bridge's
+        ``run_sync_or_offload``: when no event loop is running it uses the shared
+        bridge; when a loop is already running (FastAPI handler, Jupyter, async
+        test) it drives the coroutine on a dedicated worker thread that shares
+        the same bridge.
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = False
-        else:
-            running_loop = True
-
-        if not running_loop:
-            return run_sync(coro)
-
-        result: List[Any] = []
-        error: List[BaseException] = []
-
-        def _runner() -> None:
-            try:
-                # The runner thread has no running loop, so run_sync() is legal
-                # here and dispatches to the shared background loop (one loop for
-                # the whole process) instead of standing up a fresh event loop
-                # per call — preserving LiteLLM/HTTPX per-loop connection pools.
-                result.append(run_sync(coro))
-            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
-                error.append(e)
-
-        # Run under a copy of the caller's context so run_sync() resolves the
-        # same AsyncBridge (scoped_bridge() override, else shared default); a
-        # bare Thread does not inherit contextvars and would otherwise bypass a
-        # caller's per-session loop isolation.
-        thread = threading.Thread(
-            target=contextvars.copy_context().run, args=(_runner,),
-            name="praisonai-sync-generate")
-        thread.start()
-        thread.join()
-        if error:
-            raise error[0]
-        return result[0]
+        return run_sync_or_offload(coro, thread_name="praisonai-sync-generate")
 
     def _get_tool_resolver(self):
         """Lazily construct the canonical ToolResolver (single source of truth).
