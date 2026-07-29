@@ -23,16 +23,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2312 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 10 | 2880 |
+| ✅ Auto Generation | 5 | 10 | 2958 |
 | ✅ Autonomy | 3 | 7 | 2707 |
-| ✅ Bots | 7 | 31 | 12353 |
+| ✅ Bots | 7 | 31 | 12500 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 34543 |
+| ✅ CLI | 5 | 119 | 34562 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 4031 |
 | ✅ Conditions | 1 | 3 | 1179 |
-| ✅ Configuration | 3 | 7 | 2773 |
+| ✅ Configuration | 3 | 7 | 2809 |
 | ✅ Context Management | 16 | 34 | 13206 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -43,15 +43,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 59 | 21584 |
-| ✅ Guardrails | 4 | 4 | 1673 |
-| ✅ Handoffs | 11 | 6 | 2454 |
+| ✅ Gateway | 7 | 60 | 22005 |
+| ✅ Guardrails | 4 | 4 | 1731 |
+| ✅ Handoffs | 11 | 6 | 2502 |
 | ✅ Hooks | 2 | 9 | 4128 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4871 |
 | ✅ Loops | 4 | 5 | 1422 |
-| ✅ MCP | 1 | 58 | 13322 |
+| ✅ MCP | 1 | 59 | 13497 |
 | ✅ Memory | 6 | 17 | 6635 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2800 |
@@ -72,10 +72,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Security | 1 | 3 | 2970 |
 | ✅ Sessions | 4 | 13 | 5302 |
 | ✅ Skills | 6 | 13 | 5043 |
-| ✅ Tasks | 2 | 6 | 2809 |
+| ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 133 | 38149 |
+| ✅ Tools | 12 | 133 | 38174 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
@@ -87,7 +87,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (41 docs, 6478 lines)
+- ℹ️ Database (41 docs, 6485 lines)
 - ℹ️ Documents (1 docs, 787 lines)
 
 ---
