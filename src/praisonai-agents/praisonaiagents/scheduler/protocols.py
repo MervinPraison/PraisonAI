@@ -137,12 +137,26 @@ class ScheduleStoreProtocol(Protocol):
         """Remove a job by ID. Returns True if found and removed."""
         ...
 
-    def get_by_name(self, name: str) -> Optional[Any]:
-        """Get a job by its human-readable name."""
+    def get_by_name(
+        self,
+        name: str,
+        principal: Optional[str] = None,
+    ) -> Optional[Any]:
+        """Get a job by its human-readable name.
+
+        ``principal`` scopes the lookup to the resolved end-user identity: a
+        job owned by a different principal is treated as not found. ``None``
+        returns any match (global / single-tenant behaviour).
+        """
         ...
 
-    def remove_by_name(self, name: str) -> bool:
-        """Remove a job by name. Returns True if found and removed."""
+    def remove_by_name(self, name: str, principal: Optional[str] = None) -> bool:
+        """Remove a job by name. Returns True if found and removed.
+
+        ``principal`` scopes the removal to the resolved end-user identity so
+        one gateway user cannot delete another's automation by name. ``None``
+        removes any match (global / single-tenant behaviour).
+        """
         ...
 
     # ── Atomic claim / lease (optional) ──────────────────────────────

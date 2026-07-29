@@ -155,19 +155,30 @@ class SuggestionStore:
     def add(self, suggestion: Suggestion) -> bool:
         """Add a suggestion to the store.
 
+        The pending cap and dedup window are evaluated *within the
+        suggestion's ``principal``* so one gateway user's pending queue
+        cannot exhaust the cap or collide with another's. A suggestion with
+        ``principal=None`` is measured against the global pool (pre-scoping
+        single-tenant behaviour).
+
         Returns:
             ``True`` if the suggestion was added, ``False`` if it was
-            rejected due to the pending cap or dedup window.
+            rejected due to the (per-principal) pending cap or dedup window.
         """
         with self._lock:
             now = time.time()
 
             # Only count active (non-dismissed, non-accepted, non-expired)
-            # suggestions toward the cap and dedup window.
+            # suggestions toward the cap and dedup window. Scope both to the
+            # incoming suggestion's owner so one tenant's pending queue cannot
+            # exhaust the cap (or its dedup window collide) for another —
+            # ``principal is None`` keeps the pre-scoping global pool.
+            owner = suggestion.principal
             active = [
                 s for s in self._suggestions.values()
                 if not s.dismissed and not s.accepted
                 and (s.expires_at == 0 or s.expires_at > now)
+                and (owner is None or s.principal == owner)
             ]
             if len(active) >= MAX_PENDING_CAP:
                 return False

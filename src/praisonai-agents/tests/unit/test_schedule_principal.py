@@ -79,6 +79,44 @@ class TestSuggestionPrincipal:
         reloaded = SuggestionStore(path=store._path)
         assert reloaded.get("a").principal == "alice"
 
+    def test_pending_cap_is_per_principal(self):
+        """One tenant filling the cap must not block another tenant's add."""
+        from praisonaiagents.scheduler.suggestion_store import (
+            MAX_PENDING_CAP,
+            Suggestion,
+        )
+
+        store = self._store()
+        for i in range(MAX_PENDING_CAP):
+            assert store.add(
+                Suggestion(id=f"a{i}", blueprint_name=f"bp{i}", principal="alice")
+            ) is True
+        # Alice is now at the cap → her next add is rejected …
+        assert store.add(
+            Suggestion(id="a_over", blueprint_name="bp-over", principal="alice")
+        ) is False
+        # … but Bob (a different principal) is unaffected.
+        assert store.add(
+            Suggestion(id="b0", blueprint_name="bp-b", principal="bob")
+        ) is True
+
+    def test_dedup_window_is_per_principal(self):
+        """Identical blueprint+slots from different owners are not deduped."""
+        from praisonaiagents.scheduler.suggestion_store import Suggestion
+
+        store = self._store()
+        assert store.add(
+            Suggestion(id="a", blueprint_name="brief", slots={"hour": 8}, principal="alice")
+        ) is True
+        # Same blueprint+slots, same owner → deduped.
+        assert store.add(
+            Suggestion(id="a2", blueprint_name="brief", slots={"hour": 8}, principal="alice")
+        ) is False
+        # Same blueprint+slots, different owner → allowed.
+        assert store.add(
+            Suggestion(id="b", blueprint_name="brief", slots={"hour": 8}, principal="bob")
+        ) is True
+
 
 class TestScheduleJobPrincipal:
     """Per-identity scoping for the schedule stores."""
@@ -129,3 +167,52 @@ class TestScheduleJobPrincipal:
             bob = [j.name for j in store.list(principal="bob")]
             assert bob == ["jb"]
             assert len(store.list()) == 2
+
+    def test_file_store_remove_by_name_scoped(self):
+        """A user cannot delete another user's job by guessing its name."""
+        from praisonaiagents.scheduler.store import FileScheduleStore
+
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            store.add(self._job("shared-name", principal="alice"))
+
+            # Cross-owner removal is refused and leaves the job intact.
+            assert store.remove_by_name("shared-name", principal="bob") is False
+            assert store.get_by_name("shared-name") is not None
+            # Owner removal succeeds.
+            assert store.remove_by_name("shared-name", principal="alice") is True
+            assert store.get_by_name("shared-name") is None
+
+    def test_file_store_get_by_name_scoped(self):
+        from praisonaiagents.scheduler.store import FileScheduleStore
+
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            store.add(self._job("j", principal="alice"))
+
+            assert store.get_by_name("j", principal="bob") is None
+            assert store.get_by_name("j", principal="alice") is not None
+            # None (global) still finds it — backward compatible.
+            assert store.get_by_name("j") is not None
+
+    def test_config_store_remove_by_name_scoped(self):
+        from praisonaiagents.scheduler.config_store import ConfigYamlScheduleStore
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.yaml")
+            store = ConfigYamlScheduleStore(config_path=path)
+            store.add(self._job("shared-name", principal="alice"))
+
+            assert store.remove_by_name("shared-name", principal="bob") is False
+            assert store.get_by_name("shared-name") is not None
+            assert store.remove_by_name("shared-name", principal="alice") is True
+            assert store.get_by_name("shared-name") is None
+
+    def test_remove_by_name_none_is_backward_compatible(self):
+        """Default (principal=None) removal is unscoped as before."""
+        from praisonaiagents.scheduler.store import FileScheduleStore
+
+        with tempfile.TemporaryDirectory() as d:
+            store = FileScheduleStore(store_dir=d)
+            store.add(self._job("j", principal="alice"))
+            assert store.remove_by_name("j") is True
