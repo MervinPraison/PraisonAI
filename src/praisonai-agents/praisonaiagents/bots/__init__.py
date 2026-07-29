@@ -74,6 +74,12 @@ from .agent_reply import (
     extract_completion,
     append_completion_note,
 )
+from .format import (
+    format_for_dialect,
+    escape_markdown_v2,
+    markdown_to_slack,
+    strip_markdown,
+)
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
 from .silence import (
     SILENT_REPLY_TOKEN,
@@ -147,6 +153,10 @@ __all__ = [
     "extract_presentation",
     "extract_completion",
     "append_completion_note",
+    "format_for_dialect",
+    "escape_markdown_v2",
+    "markdown_to_slack",
+    "strip_markdown",
     "SILENT_REPLY_TOKEN",
     "is_intentional_silence_response",
     "BotLoopPolicy",
