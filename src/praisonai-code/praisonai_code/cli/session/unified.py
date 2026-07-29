@@ -272,35 +272,35 @@ class UnifiedSessionStore:
 
         return merged
     
-    def _acquire_exclusive_lock(self, file_obj) -> None:
+    def _acquire_exclusive_lock(self, file_obj):
         if sys.platform == "win32":
             import msvcrt
-            # Lock entire file by using file size (or large value for empty files)
+
             file_obj.seek(0, os.SEEK_END)
             file_size = file_obj.tell()
             lock_length = max(file_size, 1)
             file_obj.seek(0)
+
             msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, lock_length)
+            return lock_length
+
         elif _HAS_FCNTL:
             fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
-        else:
-            global _WARNED_NO_FCNTL
-            if not _WARNED_NO_FCNTL:
-                logger.warning(
-                    "File locking unavailable on this platform (fcntl not available); "
-                    "concurrent writers may corrupt session files."
-                )
-                _WARNED_NO_FCNTL = True
+            return None
 
-    def _release_exclusive_lock(self, file_obj) -> None:
+        return None
+
+    def _release_exclusive_lock(self, file_obj, lock_length=None) -> None:
         if sys.platform == "win32":
             import msvcrt
-            # Use the same lock length as acquisition
-            file_obj.seek(0, os.SEEK_END)
-            file_size = file_obj.tell()
-            lock_length = max(file_size, 1)
+
             file_obj.seek(0)
+
+            if lock_length is None:
+                lock_length = 1
+
             msvcrt.locking(file_obj.fileno(), msvcrt.LK_UNLCK, lock_length)
+
         elif _HAS_FCNTL:
             fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
@@ -340,7 +340,7 @@ class UnifiedSessionStore:
             
             to_save = session
             with open(path, "r+b") as f:
-                self._acquire_exclusive_lock(f)
+                lock_length = self._acquire_exclusive_lock(f)
                 try:
                     existing_data = self._read_json_locked(f)
                     if existing_data:
@@ -349,8 +349,7 @@ class UnifiedSessionStore:
                     to_save.updated_at = datetime.now().isoformat()
                     self._write_json_locked(f, to_save.to_dict())
                 finally:
-                    self._release_exclusive_lock(f)
-
+                    self._release_exclusive_lock(f, lock_length)
             # Safely update mtime cache with error handling
             try:
                 mtime = path.stat().st_mtime
@@ -405,11 +404,11 @@ class UnifiedSessionStore:
         
         try:
             with open(path, "r+b") as f:
-                self._acquire_exclusive_lock(f)
+                lock_length = self._acquire_exclusive_lock(f)
                 try:
                     data = self._read_json_locked(f)
                 finally:
-                    self._release_exclusive_lock(f)
+                    self._release_exclusive_lock(f, lock_length)
             if data is None:
                 return None
 
