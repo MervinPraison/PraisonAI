@@ -14,9 +14,9 @@ from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Li
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-import logging
 from praisonaiagents._logging import get_logger
 import asyncio
+import contextvars
 import threading
 import time
 import json
@@ -163,33 +163,50 @@ from ..errors import (
     HandoffValidationError
 )
 
-# Thread-local storage for tracking handoff chains
-_handoff_context = threading.local()
+# Per-task/per-thread storage for tracking handoff chains.
+#
+# ``contextvars.ContextVar`` isolates the chain per :class:`asyncio.Task`
+# (and per OS thread), unlike ``threading.local()`` which shares one list
+# across every coroutine running on the same event-loop thread. Concurrent
+# async handoffs (``asyncio.gather``, a server handling parallel requests, or
+# any ``max_concurrent`` workflow) would otherwise push/pop into the same list
+# and corrupt each other's cycle/depth state.
+_handoff_chain_var: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar(
+    "handoff_chain", default=None
+)
 
 def _get_handoff_chain() -> List[str]:
-    """Get current handoff chain from thread-local storage."""
-    if not hasattr(_handoff_context, 'chain'):
-        _handoff_context.chain = []
-    return _handoff_context.chain
+    """Get current handoff chain for this task/thread."""
+    chain = _handoff_chain_var.get()
+    if chain is None:
+        chain = []
+        _handoff_chain_var.set(chain)
+    return chain
 
 def _get_handoff_depth() -> int:
     """Get current handoff depth."""
     return len(_get_handoff_chain())
 
 def _push_handoff(agent_name: str) -> None:
-    """Push agent to handoff chain."""
-    chain = _get_handoff_chain()
+    """Push agent to handoff chain.
+
+    Uses copy-on-write so a push made inside a child task does not leak back
+    into the parent task's chain once the child completes.
+    """
+    chain = list(_get_handoff_chain())
     chain.append(agent_name)
+    _handoff_chain_var.set(chain)
 
 def _pop_handoff() -> Optional[str]:
     """Pop agent from handoff chain."""
-    chain = _get_handoff_chain()
-    return chain.pop() if chain else None
+    chain = list(_get_handoff_chain())
+    popped = chain.pop() if chain else None
+    _handoff_chain_var.set(chain)
+    return popped
 
 def _clear_handoff_chain() -> None:
     """Clear the handoff chain."""
-    if hasattr(_handoff_context, 'chain'):
-        _handoff_context.chain = []
+    _handoff_chain_var.set([])
 
 @dataclass
 class HandoffInputData:

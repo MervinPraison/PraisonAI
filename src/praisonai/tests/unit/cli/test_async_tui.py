@@ -851,3 +851,136 @@ class TestInteractiveRuntimeReadOnly:
         finally:
             if old_val is not None:
                 os.environ["PRAISON_APPROVAL_MODE"] = old_val
+
+
+class TestInterruptibleTurn:
+    """Tests for cooperative Ctrl-C interruption of an in-flight turn."""
+
+    def _make_app(self):
+        from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+        return AsyncTUI(AsyncTUIConfig())
+
+    def test_falls_back_when_no_controller(self):
+        """Without a controller, behaviour matches the blocking path."""
+        app = self._make_app()
+        app._interrupt_controller = None
+        app._get_agent = lambda: None
+        app._execute_prompt = lambda prompt: f"echo:{prompt}"
+
+        assert app._execute_prompt_interruptible("hi") == "echo:hi"
+
+    def test_returns_response_without_interrupt(self):
+        """A normal (uninterrupted) turn returns the full response."""
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+        app._execute_prompt = lambda prompt: f"done:{prompt}"
+
+        assert app._execute_prompt_interruptible("task") == "done:task"
+        assert controller.is_set() is False
+
+    def test_controller_cleared_each_turn(self):
+        """Each turn clears a previously-set interrupt so it starts clean."""
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        controller.request("stale")
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        seen = {}
+
+        def _exec(prompt):
+            seen["was_set"] = controller.is_set()
+            return "ok"
+
+        app._execute_prompt = _exec
+        app._execute_prompt_interruptible("go")
+        assert seen["was_set"] is False
+
+    def test_ctrl_c_requests_cooperative_cancellation(self):
+        """Ctrl-C during a turn requests cancellation and keeps partial output."""
+        import threading
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        started = threading.Event()
+
+        def _exec(prompt):
+            started.set()
+            # Simulate a cooperative worker that yields partial output once the
+            # interrupt has been requested from the main thread.
+            for _ in range(200):
+                if controller.is_set():
+                    return "partial output"
+                threading.Event().wait(0.01)
+            return "full output"
+
+        app._execute_prompt = _exec
+
+        real_join = threading.Thread.join
+        raised = {"done": False}
+
+        def _fake_join(self, timeout=None):
+            # On the first join after the worker has started, raise
+            # KeyboardInterrupt to mimic a Ctrl-C from the user.
+            if started.is_set() and not raised["done"]:
+                raised["done"] = True
+                raise KeyboardInterrupt
+            return real_join(self, timeout)
+
+        threading.Thread.join = _fake_join
+        try:
+            result = app._execute_prompt_interruptible("slow task")
+        finally:
+            threading.Thread.join = real_join
+
+        assert result == "partial output"
+        assert controller.is_set() is True
+        assert any(m.role == "system" and "interrupted" in m.content.lower()
+                   for m in app.messages)
+
+    def test_abandoned_worker_blocks_new_turn(self):
+        """A still-alive prior worker must not have its controller cleared.
+
+        If the user pressed Ctrl-C twice and abandoned a worker that has not yet
+        reached an interrupt check, starting a new turn must NOT clear the shared
+        controller (which would un-cancel the abandoned worker and let it resume
+        against the warm session). Instead the new turn is refused until the old
+        worker exits.
+        """
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        app = self._make_app()
+        controller = InterruptController()
+        controller.request("user")
+        app._interrupt_controller = controller
+        app._get_agent = lambda: None
+
+        class _AliveWorker:
+            def is_alive(self):
+                return True
+
+        app._interrupt_worker = _AliveWorker()
+
+        called = {"exec": False}
+
+        def _exec(prompt):
+            called["exec"] = True
+            return "should not run"
+
+        app._execute_prompt = _exec
+        result = app._execute_prompt_interruptible("new turn")
+
+        assert result is None
+        assert called["exec"] is False
+        # Controller must remain set so the abandoned worker still cancels.
+        assert controller.is_set() is True

@@ -7,6 +7,7 @@ Provides concrete implementations of RerankerProtocol:
 - CohereReranker: Uses Cohere rerank API
 """
 
+import asyncio
 import logging
 from typing import Any, List, Optional
 
@@ -95,8 +96,17 @@ class LLMReranker:
         top_k: Optional[int] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.rerank(query, documents, top_k, **kwargs)
+        """Async rerank — never blocks the caller's event loop.
+
+        The underlying rerank() makes synchronous blocking calls (Cohere
+        HTTP / torch inference / LLM call), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API (e.g. cohere.AsyncClient) should override
+        this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.rerank, query, documents, top_k, **kwargs
+        )
     
     def _score_batch(self, query: str, documents: List[str], start_idx: int = 0) -> List[Any]:
         """Score a batch of documents."""
@@ -220,8 +230,17 @@ class CrossEncoderReranker:
         top_k: Optional[int] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.rerank(query, documents, top_k, **kwargs)
+        """Async rerank — never blocks the caller's event loop.
+
+        The underlying rerank() makes synchronous blocking calls (Cohere
+        HTTP / torch inference / LLM call), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API (e.g. cohere.AsyncClient) should override
+        this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.rerank, query, documents, top_k, **kwargs
+        )
 
 
 class CohereReranker:
@@ -287,8 +306,17 @@ class CohereReranker:
         top_k: Optional[int] = None,
         **kwargs
     ) -> List[Any]:
-        """Async version (just calls sync)."""
-        return self.rerank(query, documents, top_k, **kwargs)
+        """Async rerank — never blocks the caller's event loop.
+
+        The underlying rerank() makes synchronous blocking calls (Cohere
+        HTTP / torch inference / LLM call), so it is handed to
+        asyncio.to_thread rather than run on the loop thread. Providers
+        with a native async API (e.g. cohere.AsyncClient) should override
+        this to await it directly.
+        """
+        return await asyncio.to_thread(
+            self.rerank, query, documents, top_k, **kwargs
+        )
 
 
 def register_default_rerankers():
@@ -311,5 +339,12 @@ def register_default_rerankers():
     logger.debug("Registered default rerankers")
 
 
-# Auto-register on import
-register_default_rerankers()
+# NOTE: No auto-registration at import time. Probing for sentence-transformers
+# / cohere on disk and registering into the core-SDK global singleton as an
+# import side effect violates the "core stays lightweight, wrapper does the
+# heavy work at call time" principle and breaks multi-tenant runtimes / tests.
+# Callers wire these into the SDK registry explicitly (see
+# ``praisonai.adapters.register_default_adapters``), e.g.::
+#
+#     from praisonai.adapters.rerankers import register_default_rerankers
+#     register_default_rerankers()

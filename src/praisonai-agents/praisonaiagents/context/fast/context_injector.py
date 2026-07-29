@@ -7,7 +7,6 @@ Injects FastContext results into the main agent with:
 - Precision over recall (avoid context pollution)
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass

@@ -5,7 +5,6 @@ Provides delegation primitives for spawning subagents with scoped permissions
 and context. Inspired by Gemini CLI's delegate-to-agent pattern.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import asyncio
 import warnings

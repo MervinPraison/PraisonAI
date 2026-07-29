@@ -297,6 +297,151 @@ def train_agents(
         raise typer.Exit(0)
 
 
+@app.command("export")
+def train_export(
+    target: str = typer.Argument(..., help="Export target: ollama | gguf | hf"),
+    model_dir: str = typer.Option(
+        ..., "--model-dir", "-d", help="Directory of the already-trained model"),
+    config: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Optional config.yaml (for extra export knobs)"),
+    ollama: Optional[str] = typer.Option(
+        None, "--ollama", help="Ollama model name, e.g. myuser/mymodel"),
+    hf: Optional[str] = typer.Option(
+        None, "--hf", help="Hugging Face repo id, e.g. myuser/mymodel"),
+    quant: Optional[str] = typer.Option(
+        None, "--quant", help="Quantization method for gguf/ollama, e.g. q4_k_m"),
+    base_model: Optional[str] = typer.Option(
+        None, "--base-model", help="Base model id (for chat-template selection)"),
+    mtp_draft: bool = typer.Option(
+        False, "--mtp-draft/--no-mtp-draft",
+        help="Also download the stock MTP drafter (Gemma-4 only) for fast inference"),
+):
+    """
+    Export / publish an ALREADY-trained model without re-running training.
+
+    Examples:
+        praisonai-train export hf     --model-dir lora_model --hf   me/my-model
+        praisonai-train export gguf   --model-dir lora_model --quant q4_k_m            # local .gguf
+        praisonai-train export gguf   --model-dir lora_model --hf   me/my-model        # local + push
+        praisonai-train export ollama --model-dir lora_model --ollama me/my-model --quant q4_k_m
+    """
+    from ..output.console import get_output_controller
+
+    output = get_output_controller()
+
+    target = target.lower()
+    if target not in ("ollama", "gguf", "hf"):
+        output.print_error(
+            f"Unknown export target: {target}",
+            remediation="Use one of: ollama, gguf, hf",
+        )
+        raise typer.Exit(1)
+
+    if not Path(model_dir).is_dir():
+        output.print_error(
+            f"Model directory not found: {model_dir}",
+            remediation="Pass --model-dir pointing at your trained model (e.g. lora_model).",
+        )
+        raise typer.Exit(1)
+
+    # Build an export-only config, merging an optional YAML file with CLI flags.
+    cfg: dict = {}
+    if config:
+        import yaml
+        cfg = yaml.safe_load(Path(config).read_text()) or {}
+        if not isinstance(cfg, dict):
+            output.print_error(
+                f"Config file must be a YAML mapping: {config}",
+                remediation="Use `key: value` pairs at the top level.",
+            )
+            raise typer.Exit(1)
+    cfg["final_model_dir"] = model_dir
+    cfg.setdefault("model_parameters", "latest")
+    if quant:
+        cfg["quantization_method"] = quant
+    if hf:
+        cfg["hf_model_name"] = hf
+    if ollama:
+        cfg["ollama_model"] = ollama
+
+    # Recover the model name (drives chat-template selection) from --base-model or
+    # the trained model's config.json (_name_or_path), falling back to the dir name.
+    model_name = base_model or cfg.get("model_name")
+    if not model_name:
+        cfg_json = Path(model_dir) / "config.json"
+        if cfg_json.exists():
+            try:
+                model_name = json.loads(cfg_json.read_text()).get("_name_or_path")
+            except (json.JSONDecodeError, OSError):
+                model_name = None
+    cfg["model_name"] = model_name or model_dir
+
+    # Validate the destination is present for the chosen target.
+    # `hf` publishes to the Hub so a repo id is mandatory. `gguf` produces a
+    # LOCAL .gguf (so it can be served with `serve`/`--mtp-draft`) and only
+    # additionally pushes to the Hub when --hf is given; without --hf we write
+    # the GGUF under the model dir.
+    if target == "hf" and not cfg.get("hf_model_name"):
+        output.print_error(
+            "A Hugging Face repo id is required for this target",
+            remediation="Pass --hf <your-username>/<name>.",
+        )
+        raise typer.Exit(1)
+    if target == "gguf" and not cfg.get("hf_model_name"):
+        cfg["hf_model_name"] = str(Path(model_dir) / "gguf")
+    if target == "ollama" and not cfg.get("ollama_model"):
+        output.print_error(
+            "An Ollama model name is required for this target",
+            remediation="Pass --ollama <your-username>/<name>.",
+        )
+        raise typer.Exit(1)
+    # For an Ollama modelfile the FROM line uses hf_model_name; default it to the
+    # local model dir so `ollama create` reads the trained model on disk.
+    if target == "ollama":
+        cfg.setdefault("hf_model_name", model_dir)
+
+    try:
+        from praisonai_train.train.llm.trainer import TrainModel
+    except ImportError as exc:
+        output.print_error(
+            f"LLM export dependencies not installed: {exc}",
+            remediation='pip install "praisonai-train[llm]"',
+        )
+        raise typer.Exit(1)
+
+    import subprocess
+
+    try:
+        trainer = TrainModel.for_export(cfg)
+        model, tokenizer = trainer.load_model()
+        trainer.model = model
+        trainer.hf_tokenizer = tokenizer
+        if target == "hf":
+            trainer.save_model_merged()
+        elif target == "gguf":
+            # Always produce a LOCAL .gguf so it can be served (and paired with an
+            # MTP drafter). Push to the Hub additionally only when --hf is set.
+            trainer.save_model_gguf()
+            if hf:
+                trainer.push_model_gguf()
+        else:
+            trainer.create_and_push_ollama_model()
+    except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        output.print_error(str(exc))
+        raise typer.Exit(1)
+
+    # Optionally fetch the stock MTP drafter for fast (self-speculative) inference.
+    if mtp_draft:
+        from praisonai_train.train import _mtp
+        try:
+            drafter_path = _mtp.fetch_drafter(cfg["model_name"], model_dir)
+            output.print_success(f"Downloaded MTP drafter -> {drafter_path}")
+        except (ValueError, RuntimeError) as exc:
+            output.print_warning(f"Skipped MTP drafter: {exc}")
+
+    output.print_success(f"Exported model to {target}.")
+
+
 @app.command("list")
 def train_list(
     limit: int = typer.Option(20, "--limit", "-n", help="Max sessions to show"),

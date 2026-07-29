@@ -63,6 +63,9 @@ class SessionConfig:
         max_messages: Maximum messages to keep in history (0 = unlimited)
         persist: Whether to persist session state
         persist_path: Path for session persistence
+        store: Persistence backend when ``persist`` is set — ``"sqlite"``
+            (default: transcripts in a WAL SQLite DB with concurrent readers
+            and indexed lookups) or ``"file"`` (legacy per-session JSON files)
         resume_window: How long (seconds) a session stays resumable after disconnect
         max_inbox: Maximum queued messages per session (0 = unlimited, default 256)
         metadata: Additional session metadata
@@ -73,6 +76,7 @@ class SessionConfig:
     max_messages: int = 1000
     persist: bool = False
     persist_path: Optional[str] = None
+    store: str = "sqlite"  # "sqlite" (concurrent, indexed) | "file" (legacy JSON)
     resume_window: int = 86400  # 24 hours default
     max_inbox: int = 256  # Default bounded queue size
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -90,6 +94,10 @@ class SessionConfig:
             raise ValueError("max_messages must be >= 0")
         if self.resume_window < 0:
             raise ValueError("resume_window must be >= 0")
+        if self.store not in ("sqlite", "file"):
+            raise ValueError(
+                f"Invalid session store {self.store!r}; expected 'sqlite' or 'file'"
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -98,6 +106,7 @@ class SessionConfig:
             "max_messages": self.max_messages,
             "persist": self.persist,
             "persist_path": self.persist_path,
+            "store": self.store,
             "resume_window": self.resume_window,
             "max_inbox": self.max_inbox,
             "metadata": self.metadata,
@@ -685,6 +694,7 @@ class MultiChannelGatewayConfig:
                     max_messages=sc_data.get("max_messages", 1000),
                     persist=sc_data.get("persist", False),
                     persist_path=sc_data.get("persist_path"),
+                    store=sc_data.get("store", "sqlite"),
                     resume_window=sc_data.get("resume_window", 86400),
                     max_inbox=sc_data.get("max_inbox", 256),
                     metadata=sc_data.get("metadata", {}),

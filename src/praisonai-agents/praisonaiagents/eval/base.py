@@ -7,7 +7,6 @@ This module provides the abstract base class that all evaluators inherit from.
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Union, TYPE_CHECKING
 import uuid
-import logging
 from praisonaiagents._logging import get_logger
 
 if TYPE_CHECKING:

@@ -16,7 +16,6 @@ import os
 import time
 import threading
 import tempfile
-import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional

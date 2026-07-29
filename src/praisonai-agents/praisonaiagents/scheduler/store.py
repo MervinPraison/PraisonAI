@@ -7,7 +7,6 @@ Thread-safe, no external dependencies.
 
 import contextlib
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import threading

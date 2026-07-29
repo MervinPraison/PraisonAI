@@ -115,6 +115,7 @@ class BotOS:
         queue_depth: int = 0,
         overflow_policy: str = "reject",
         admission_policy: Optional[Any] = None,
+        max_rss_mb: float = 0.0,
         reliability: Optional[str] = None,
     ):
         self._bots: Dict[str, Bot] = {}
@@ -174,13 +175,18 @@ class BotOS:
         # users/channels, with a bounded fair wait queue and a declared
         # overflow policy, and is wired into every bot's session manager so
         # enforcement happens in the run-dispatch path itself.
-        from ._admission import build_admission_gate
+        from ._admission import build_admission_gate, build_memory_pressure_policy
 
+        # Issue #3445: opt-in memory-aware admission. When a hard RSS ceiling is
+        # configured the gate queues under soft pressure (90% of the ceiling by
+        # default) and sheds under hard pressure before the OOM killer fires.
+        # Default off (``max_rss_mb <= 0``) preserves legacy behaviour.
         self._admission_gate = build_admission_gate(
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
             policy=admission_policy,
+            resource_policy=build_memory_pressure_policy(max_rss_mb),
         )
         self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
@@ -1496,6 +1502,11 @@ class BotOS:
             raw.get("overflow_policy", gateway_cfg.get("overflow_policy", "reject"))
             or "reject"
         )
+        # Issue #3445: opt-in memory-aware admission (hard RSS ceiling in MiB).
+        # Default 0 disables it, preserving concurrency-only admission.
+        max_rss_mb = float(
+            raw.get("max_rss_mb", gateway_cfg.get("max_rss_mb", 0)) or 0
+        )
 
         # Issue #2531: single reliability posture. Accept a top-level
         # ``reliability`` or ``gateway.reliability``; the preset composes drain
@@ -1510,6 +1521,7 @@ class BotOS:
             max_concurrent_runs=max_concurrent_runs,
             queue_depth=queue_depth,
             overflow_policy=overflow_policy,
+            max_rss_mb=max_rss_mb,
             reliability=reliability,
         )
 

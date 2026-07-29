@@ -663,6 +663,7 @@ def _try_attach_runtime(
     model: Optional[str],
     output_mode: Optional[str],
     session_id: Optional[str],
+    event_id: Optional[str] = None,
 ) -> bool:
     """Forward a plain prompt to a warm runtime when one is running.
 
@@ -692,7 +693,9 @@ def _try_attach_runtime(
     output = get_output_controller()
     try:
         client = RuntimeClient(descriptor)
-        result = client.run(prompt, model=model, session_id=session_id)
+        result = client.run(
+            prompt, model=model, session_id=session_id, event_id=event_id
+        )
     except RuntimeUnavailable:
         # Runtime went away mid-flight; fall back to in-process execution.
         return False
@@ -1517,10 +1520,14 @@ def _run_prompt(
         # in-process execution otherwise. Only the simple text path attaches;
         # per-invocation tool/approval/memory overrides stay in-process so their
         # behaviour is preserved exactly.
-        # Session continuity/forking is handled in-process; the warm runtime does
-        # not carry session state, so any explicit session flag stays local.
-        # Default auto-save also stays in-process until the warm path can persist
-        # sessions the same way as the normal run path.
+        # Session continuity now attaches to a warm, per-session agent in the
+        # runtime: a `--continue`/`--session` run rehydrates history once into a
+        # warm agent held per session id and reuses it across turns, so the
+        # iterative coding loop no longer pays cold-start every turn. The runtime
+        # persists per-turn deltas through the same project session store, so a
+        # crash/eviction resumes deterministically.
+        # A fresh fork (`--fork`) is created in-process because the fork id is
+        # minted here; subsequent turns against that id then attach warm.
         # An explicit --thinking budget is a per-invocation override (like tools/
         # approval/memory), so it stays in-process: the warm runtime reuses a
         # cached agent and does not carry a per-call thinking budget, so attaching
@@ -1528,18 +1535,32 @@ def _run_prompt(
         # Isolated (--worktree) runs must stay in-process: the warm runtime is a
         # separate process whose cwd we can't redirect into the worktree, so
         # attaching would run the task outside the isolated branch.
-        runtime_eligible = no_save and thinking_budget is None and not isolated and not any([
-            mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
-            memory, permissions_config, continue_session, session, fork,
-        ])
-        # When --attach <id> is given, tag the warm-runtime run with that id so
-        # other terminals (`praisonai attach <id>`) observe its live events.
-        runtime_session_id = attach_session or session_id
+        stateful_attach = bool(session_id) and not fork
+        runtime_eligible = (
+            (no_save or stateful_attach)
+            and thinking_budget is None
+            and not isolated
+            and not any([
+                mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
+                memory, permissions_config, fork,
+            ])
+        )
+        # Keep the two identities separate:
+        #  - session_id is the persistence/conversation identity that drives the
+        #    warm stateful path (history rehydrate + per-turn persist). A
+        #    --no-save run has session_id=None, so it stays on the isolated,
+        #    non-persisted anonymous path.
+        #  - --attach <id> is only an event-stream label so other terminals
+        #    (`praisonai attach <id>`) observe live events; it must NEVER select
+        #    or persist a conversation. Passed as event_id, falling back to the
+        #    session id so a plain --session run is still observable under its id.
+        runtime_event_id = attach_session or session_id
         if runtime_eligible and _try_attach_runtime(
             prompt,
             model=model,
             output_mode=output_mode,
-            session_id=runtime_session_id,
+            session_id=session_id,
+            event_id=runtime_event_id,
         ):
             return
 

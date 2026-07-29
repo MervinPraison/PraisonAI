@@ -364,15 +364,61 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             self.print_status(f"Error resolving tool: {e}", "error")
             return {}
     
+    def _legacy_manual_scan(self) -> Dict[str, List[str]]:
+        """Fallback discovery when the canonical resolver is unavailable.
+
+        Directly scans ``praisonai_tools`` and ``praisonaiagents.tools``.
+        Kept as an explicit offline fallback (e.g. a standalone
+        ``pip install praisonai-code``-less environment) — this is the
+        original ``action_discover`` scan, demoted from primary to fallback.
+        """
+        discovered: Dict[str, List[str]] = {}
+
+        # Try praisonai_tools package
+        try:
+            import praisonai_tools  # noqa: F401
+            pkg_tools = []
+
+            # Check for video module
+            try:
+                from praisonai_tools import video  # noqa: F401
+                pkg_tools.append("praisonai_tools.video")
+            except ImportError:
+                pass
+
+            # Check for tools module
+            try:
+                import praisonai_tools.tools as ext_tools
+                for name in dir(ext_tools):
+                    if not name.startswith('_'):
+                        obj = getattr(ext_tools, name, None)
+                        if callable(obj):
+                            pkg_tools.append(name)
+            except ImportError:
+                pass
+
+            if pkg_tools:
+                discovered["praisonai_tools"] = pkg_tools
+        except ImportError:
+            pass
+
+        # Try praisonaiagents built-in tools
+        try:
+            from praisonaiagents.tools import TOOL_MAPPINGS
+            discovered["praisonaiagents.tools"] = list(TOOL_MAPPINGS.keys())[:20]  # Limit
+        except ImportError:
+            pass
+
+        return discovered
+
     def action_discover(self, args: List[str], **kwargs) -> Dict[str, Any]:
         """
         Discover tools from installed packages.
         
         Args:
-            args: [--include <package>, --entrypoints]
+            args: [--include <package>]
         """
         include_packages = []
-        use_entrypoints = "--entrypoints" in args
         
         i = 0
         while i < len(args):
@@ -384,55 +430,26 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         
         discovered = {}
         
-        # Try praisonai_tools package
-        try:
-            import praisonai_tools
-            pkg_tools = []
-            
-            # Check for video module
-            try:
-                from praisonai_tools import video
-                pkg_tools.append("praisonai_tools.video")
-            except ImportError:
-                pass
-            
-            # Check for tools module
-            try:
-                import praisonai_tools.tools as ext_tools
-                for name in dir(ext_tools):
-                    if not name.startswith('_'):
-                        obj = getattr(ext_tools, name, None)
-                        if callable(obj):
-                            pkg_tools.append(name)
-            except ImportError:
-                pass
-            
-            if pkg_tools:
-                discovered["praisonai_tools"] = pkg_tools
-        except ImportError:
-            pass
-        
-        # Try praisonaiagents built-in tools
-        try:
-            from praisonaiagents.tools import TOOL_MAPPINGS
-            discovered["praisonaiagents.tools"] = list(TOOL_MAPPINGS.keys())[:20]  # Limit
-        except ImportError:
-            pass
-        
-        # Surface registered / entry-point plugin tools via the canonical
-        # resolver so discovery matches the full runtime resolution chain
-        # instead of only the two partial sources scanned above.
+        # Prefer the canonical ToolResolver so discovery matches the full
+        # runtime resolution chain (local / built-in / external / registered)
+        # in a single authoritative walk. Fall back to the manual
+        # praisonai_tools + TOOL_MAPPINGS scan only when the resolver (i.e.
+        # praisonai-code) is unavailable, mirroring the pattern used by
+        # `_get_builtin_tools` and `templates/tools_doctor.py`.
         resolver = self._get_resolver()
+        resolved = False
         if resolver is not None:
             try:
-                registered = [
-                    name for name, src in resolver.list_available_sources().items()
-                    if src == "registered"
-                ]
-                if registered:
-                    discovered["registered"] = registered[:20]
+                by_source: Dict[str, List[str]] = {}
+                for name, src in resolver.list_available_sources().items():
+                    by_source.setdefault(src, []).append(name)
+                if by_source:
+                    discovered.update(by_source)
+                    resolved = True
             except Exception:
                 pass
+        if not resolved:
+            discovered.update(self._legacy_manual_scan())
         
         # Additional packages from --include
         for pkg in include_packages:

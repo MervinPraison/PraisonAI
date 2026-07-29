@@ -5,7 +5,6 @@ Manages background task execution.
 """
 
 import asyncio
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 from typing import Optional, List, Dict, Any, Callable, Union

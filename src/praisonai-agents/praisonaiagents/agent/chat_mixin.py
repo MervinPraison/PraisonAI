@@ -2462,8 +2462,7 @@ Your Goal: {self.goal}"""
         """Internal chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -3064,8 +3063,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Internal async chat implementation (extracted for trace wrapping)."""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
-        if not getattr(self, "_in_skill_review", False):
-            self._turn_tools_used = []
+        self._reset_turn_tools()
         # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
@@ -3733,8 +3731,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
                         arguments = {}
                     
-                    # Find the matching tool
-                    tool = next((t for t in tools if t.__name__ == function_name), None)
+                    # Find the matching tool by comparing every supported identifier:
+                    # __name__ (plain callables), .name (BaseTool instances like
+                    # BrowserBaseTool, or aliased FunctionTools), or the class name.
+                    # Compare all candidates (not short-circuit) so an aliased .name
+                    # that differs from __name__ still resolves and BaseTool
+                    # subclasses without __name__ do not crash dispatch.
+                    tool = next(
+                        (t for t in tools if function_name in (
+                            getattr(t, "__name__", None),
+                            getattr(t, "name", None),
+                            type(t).__name__,
+                        )),
+                        None,
+                    )
                     if not tool:
                         _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue

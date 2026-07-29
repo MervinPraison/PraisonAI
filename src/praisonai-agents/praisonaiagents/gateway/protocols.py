@@ -2929,6 +2929,135 @@ GatewayConcurrencyPolicy = GatewayConcurrencyPolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway resource-pressure admission (Issue #3445)
+#
+# Admission today is concurrency/CPU-scaled and blind to memory; on a small
+# always-on host a burst of concurrent turns drives RSS up until the OOM
+# killer fires — the failure a $5 box hits first. This adds a pure, import-
+# free decision that maps a resource *sample* (current RSS) onto the existing
+# :class:`AdmissionDecision` so the gate can queue under soft pressure and
+# shed under hard pressure *before* the process is killed. It reuses the
+# admission seam (no new subsystem) and sits beside the concurrency / rate-
+# limit / scale-to-zero policy family. The live sampler (reading
+# ``resource.getrusage`` / optional ``psutil``) and the wiring into the gate
+# live in the wrapper; this contract keeps the decision testable in isolation.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResourceSample:
+    """A point-in-time snapshot of the gateway process's resource usage.
+
+    Attributes:
+        rss_mb: Resident set size in mebibytes, or ``None`` when the platform
+            cannot report it (the policy then admits and self-disables so the
+            monitor never crashes the gateway it protects).
+    """
+
+    rss_mb: Optional[float] = None
+
+
+@runtime_checkable
+class ResourcePressurePolicyProtocol(Protocol):
+    """Protocol for memory/resource-aware admission decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's admission
+    gate. The wrapper samples its own resource usage on a lightweight cadence
+    and hands the policy a :class:`ResourceSample`; the policy returns an
+    :class:`AdmissionDecision` — ``ADMIT`` below the soft threshold, ``QUEUE``
+    to apply backpressure above it, and ``REJECT`` above the hard threshold so
+    the process sheds load before the OOM killer fires. Sampling and
+    enforcement (the ``asyncio.Semaphore`` ceiling and bounded wait queue)
+    live in the wrapper; this keeps the *decision* provable in isolation,
+    symmetric with :class:`GatewayConcurrencyPolicyProtocol`.
+
+    A config-driven default (:class:`MemoryPressurePolicy`) is provided for
+    the common "soft/hard RSS threshold" case.
+    """
+
+    def evaluate(self, sample: ResourceSample) -> AdmissionDecision:
+        """Return an :class:`AdmissionDecision` for the supplied sample."""
+        ...
+
+
+class MemoryPressurePolicy:
+    """Config-driven RSS-threshold resource-pressure policy.
+
+    The default wired by the ``max_rss_mb`` gateway config key
+    (``BotOS(max_rss_mb=...)`` / ``gateway.yaml``) and the
+    ``AdmissionGate(resource_policy=...)`` Python surface. It is intentionally
+    minimal and dependency-free so the decision lives in core and is provable
+    in isolation; the wrapper owns the live sampler and the side effects
+    (queue / shed / busy ack).
+
+    The decision, given a sample's ``rss_mb``:
+
+    * ``ADMIT`` while ``rss_mb < soft_rss_mb`` (or the platform can't report
+      memory, so ``rss_mb is None`` — never block on a missing signal).
+    * ``QUEUE`` (apply backpressure) while ``soft_rss_mb <= rss_mb <
+      hard_rss_mb``.
+    * ``REJECT`` (shed with a busy ack) while ``rss_mb >= hard_rss_mb``.
+
+    A ``hard_rss_mb`` of ``0`` disables pressure-based shedding entirely
+    (every sample admits) — the legacy default when no threshold is set.
+
+    Example::
+
+        MemoryPressurePolicy(soft_rss_mb=400, hard_rss_mb=550)
+    """
+
+    def __init__(
+        self,
+        soft_rss_mb: float = 0.0,
+        hard_rss_mb: float = 0.0,
+    ):
+        try:
+            soft = float(soft_rss_mb or 0.0)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"soft_rss_mb must be a number, got {soft_rss_mb!r}"
+            ) from err
+        try:
+            hard = float(hard_rss_mb or 0.0)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"hard_rss_mb must be a number, got {hard_rss_mb!r}"
+            ) from err
+        if soft < 0:
+            raise ValueError(f"soft_rss_mb must be >= 0, got {soft_rss_mb!r}")
+        if hard < 0:
+            raise ValueError(f"hard_rss_mb must be >= 0, got {hard_rss_mb!r}")
+        # A soft threshold above the hard one would queue turns that should be
+        # shed; fail fast rather than silently invert the pressure ladder.
+        if soft and hard and soft > hard:
+            raise ValueError(
+                f"soft_rss_mb ({soft_rss_mb!r}) must be <= "
+                f"hard_rss_mb ({hard_rss_mb!r})"
+            )
+        self.soft_rss_mb = soft
+        self.hard_rss_mb = hard
+
+    @property
+    def enabled(self) -> bool:
+        """Whether pressure-based admission is active (a threshold is set)."""
+        return self.soft_rss_mb > 0 or self.hard_rss_mb > 0
+
+    def evaluate(self, sample: ResourceSample) -> AdmissionDecision:
+        # Disabled, or the platform can't report memory: never block on a
+        # missing/absent signal — admit and let concurrency limits apply.
+        if not self.enabled:
+            return AdmissionDecision.ADMIT
+        rss = getattr(sample, "rss_mb", None)
+        if rss is None:
+            return AdmissionDecision.ADMIT
+        if self.hard_rss_mb and rss >= self.hard_rss_mb:
+            return AdmissionDecision.REJECT
+        if self.soft_rss_mb and rss >= self.soft_rss_mb:
+            return AdmissionDecision.QUEUE
+        return AdmissionDecision.ADMIT
+
+
+# ---------------------------------------------------------------------------
 # Gateway rate-limit admission (Issue #2532)
 #
 # Rate limiting completes the gateway's policy-protocol family (send, idle,

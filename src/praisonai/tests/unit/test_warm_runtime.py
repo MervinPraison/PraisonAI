@@ -410,7 +410,12 @@ def test_warm_runtime_publishes_session_events():
     def _fake_get_agent(key):
         return _StubAgent()
 
+    # A run with ``session_id`` routes to the stateful per-session path, so stub
+    # both the stateless per-model builder and the per-session builder to keep
+    # this unit test off the real Agent/LLM while still exercising the event
+    # fan-out contract (run.start + run.result under the session id).
     runtime._get_agent = _fake_get_agent  # type: ignore[assignment]
+    runtime._get_session_agent = lambda session_id, model: _StubAgent()  # type: ignore[assignment]
 
     q = runtime.hub.subscribe("sess-x")
     result = runtime.run("hello", session_id="sess-x")

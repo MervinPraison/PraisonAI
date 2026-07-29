@@ -12,7 +12,6 @@ Design principles:
 - Preserves most relevant content
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Protocol, Optional, List
 from dataclasses import dataclass

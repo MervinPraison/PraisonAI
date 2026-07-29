@@ -11,7 +11,39 @@ This module provides concrete implementations of:
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Optional
+
+_REGISTRATION_LOCK = threading.Lock()
+_defaults_registered = False
+
+
+def register_default_adapters() -> None:
+    """Wire the wrapper's default readers, retrievers, and rerankers into the
+    core-SDK registries — the single explicit entry point.
+
+    The adapter modules deliberately do NOT auto-register on import (that would
+    mutate process-wide core-SDK singletons as an import side effect, breaking
+    multi-tenant runtimes and tests). Callers that need the built-in adapters
+    wired in invoke this once; it is idempotent and thread-safe.
+
+    Vector stores are intentionally excluded: ``register_default_vector_stores``
+    probes chromadb/pinecone on disk and must stay opt-in.
+    """
+    global _defaults_registered
+    if _defaults_registered:
+        return
+    with _REGISTRATION_LOCK:
+        if _defaults_registered:
+            return
+        from praisonai.adapters.readers import register_default_readers
+        from praisonai.adapters.retrievers import register_default_retrievers
+        from praisonai.adapters.rerankers import register_default_rerankers
+
+        register_default_readers()
+        register_default_retrievers()
+        register_default_rerankers()
+        _defaults_registered = True
 
 # Lazy loading to avoid heavy imports at package load time
 _LAZY_IMPORTS = {
@@ -56,7 +88,7 @@ def get_template_store() -> Optional[Any]:
 
 # C8.5 CLI adapters are defined in this module (not lazy) since they are
 # lightweight and only trigger heavy wrapper imports when their methods run.
-_LOCAL_EXPORTS = {"ServeHandlerAdapter", "get_template_store"}
+_LOCAL_EXPORTS = {"ServeHandlerAdapter", "get_template_store", "register_default_adapters"}
 
 
 def __getattr__(name: str):

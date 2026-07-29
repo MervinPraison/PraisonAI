@@ -7,7 +7,6 @@ Implements shadow git repository for file-level checkpointing.
 import os
 import re
 import asyncio
-import logging
 from praisonaiagents._logging import get_logger
 import shutil
 from typing import Optional, List, Dict, Any, Callable

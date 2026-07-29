@@ -20,7 +20,7 @@ from .async_memory_mixin import AsyncMemoryMixin
 from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
-from .async_safety import AsyncSafeState
+from .async_safety import AsyncSafeState, DualLock
 # NOTE: UnifiedExecutionMixin is deprecated and unused by any production path
 # (Issue #2644). It is kept in the MRO for backward compatibility during the
 # deprecation cycle and will be removed afterwards.
@@ -2230,7 +2230,10 @@ Your Goal: {self.goal}
         # Per-turn tool-name buffer feeding the self-improve review policy.
         # Populated in _execute_tool_with_context, reset each chat turn, and
         # read by _trigger_after_agent_hook when tools_used is not passed.
+        # Guarded by a DualLock (like chat_history) so concurrent chat()/achat()
+        # turns on the same Agent instance don't corrupt each other's buffer.
         self._turn_tools_used = []
+        self._turn_tools_lock = DualLock()
 
         # Database persistence (lazy - no imports until used)
         self._db = db
@@ -3198,7 +3201,44 @@ Summary:"""
     # ================================================================
     # Filesystem tracking convenience methods (powered by FileSnapshot)
     # ================================================================
-    
+
+    def set_snapshot_root(self, project_path: str) -> bool:
+        """Root filesystem change-tracking at ``project_path``.
+
+        Bots/gateway resolve file tools against a per-chat ``Workspace`` and
+        attach it *after* construction, but the FileSnapshot backing
+        :meth:`undo`/:meth:`redo`/:meth:`diff` was created at ``__init__`` time
+        rooted at ``os.getcwd()``. Without this, ``/undo`` tracks the wrong
+        directory (never where the tools actually wrote). Call this once after
+        the workspace is known so change tracking follows the tools.
+
+        Rooting at a new directory clears the undo/redo stacks (they belong to
+        the previous root). A no-op when the root is unchanged. Returns ``True``
+        when a snapshot manager is rooted at ``project_path``.
+        """
+        import os
+        new_root = os.path.abspath(str(project_path))
+        current = self._file_snapshot
+        if current is not None and getattr(current, "project_path", None) == new_root:
+            return True
+        try:
+            from ..snapshot import FileSnapshot
+            snapshot_dir = None
+            cfg = getattr(self, "autonomy_config", None)
+            if isinstance(cfg, dict):
+                snapshot_dir = cfg.get("snapshot_dir")
+            self._file_snapshot = FileSnapshot(
+                project_path=new_root,
+                snapshot_dir=snapshot_dir,
+            )
+            with self._snapshot_lock:
+                self._snapshot_stack = []
+                self._redo_stack = []
+            return True
+        except Exception as e:  # pragma: no cover - git may be unavailable
+            logger.debug(f"Re-rooting FileSnapshot failed: {e}")
+            return False
+
     def undo(self) -> bool:
         """Undo the last set of file changes.
         

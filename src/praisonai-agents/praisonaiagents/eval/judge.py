@@ -15,7 +15,6 @@ Example:
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING

@@ -15,7 +15,6 @@ Features:
 
 import os
 import json
-import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from datetime import datetime

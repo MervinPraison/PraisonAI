@@ -15,6 +15,7 @@ from praisonai_bot.bots._admission import (  # noqa: E402
     AdmissionGate,
     AdmissionRejected,
     build_admission_gate,
+    build_memory_pressure_policy,
 )
 
 # BotOS may pull optional adapter deps; only a genuine optional-dependency miss
@@ -249,3 +250,153 @@ def test_gate_releases_slot_on_exception():
             assert gate.in_flight == 1
 
     asyncio.run(main())
+
+
+# ---------------------------------------------------------------------------
+# Memory-aware admission (Issue #3445)
+# ---------------------------------------------------------------------------
+
+
+class _FakeSampler:
+    """A deterministic RSS sampler stand-in for tests."""
+
+    def __init__(self, rss_mb):
+        self._rss_mb = rss_mb
+
+    def read(self):
+        from praisonaiagents.gateway import ResourceSample
+
+        return ResourceSample(rss_mb=self._rss_mb)
+
+
+def _mem_policy(soft, hard):
+    from praisonaiagents.gateway import MemoryPressurePolicy
+
+    return MemoryPressurePolicy(soft_rss_mb=soft, hard_rss_mb=hard)
+
+
+def test_resource_only_gate_is_enabled_and_sheds_over_hard():
+    async def main():
+        gate = AdmissionGate(
+            None,
+            resource_policy=_mem_policy(400, 550),
+            resource_sampler=_FakeSampler(600),  # over hard threshold
+        )
+        assert gate.enabled is True
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="u"):
+                pass
+        assert gate.stats()["rejected"] == 1
+
+    asyncio.run(main())
+
+
+def test_resource_gate_admits_below_soft():
+    async def main():
+        gate = AdmissionGate(
+            None,
+            resource_policy=_mem_policy(400, 550),
+            resource_sampler=_FakeSampler(100),  # well below soft
+        )
+        async with gate.admit(session_id="u"):
+            assert gate.in_flight == 1
+        assert gate.in_flight == 0
+
+    asyncio.run(main())
+
+
+def test_build_admission_gate_resource_only():
+    gate = build_admission_gate(resource_policy=_mem_policy(400, 550))
+    assert gate is not None
+    assert gate.enabled is True
+    # No concurrency policy configured.
+    assert gate.stats()["max_concurrent_runs"] == 0
+
+
+def test_build_admission_gate_none_when_resource_disabled():
+    # A resource policy with no threshold set must not force a gate on.
+    from praisonaiagents.gateway import MemoryPressurePolicy
+
+    gate = build_admission_gate(resource_policy=MemoryPressurePolicy())
+    # A gate object is built (policy supplied) but reports disabled since the
+    # policy carries no live threshold.
+    assert gate is not None
+    assert gate.enabled is False
+
+
+def test_resource_escalates_over_concurrency():
+    async def main():
+        # Concurrency admits (ceiling high) but hard RSS breach must shed.
+        gate = build_admission_gate(
+            max_concurrent_runs=8,
+            resource_policy=_mem_policy(400, 550),
+        )
+        gate._resource_sampler = _FakeSampler(600)
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="u"):
+                pass
+
+    asyncio.run(main())
+
+
+def test_resource_missing_sample_admits():
+    async def main():
+        gate = AdmissionGate(
+            None,
+            resource_policy=_mem_policy(400, 550),
+            resource_sampler=_FakeSampler(None),  # platform can't report RSS
+        )
+        # Sampler present + policy enabled -> gate active, but a None sample
+        # must admit (never block on a missing signal).
+        async with gate.admit(session_id="u"):
+            assert gate.in_flight == 1
+
+    asyncio.run(main())
+
+
+def test_build_memory_pressure_policy_from_single_knob():
+    # A single ``max_rss_mb`` ceiling derives the soft (queue) threshold at 90%.
+    pol = build_memory_pressure_policy(1000)
+    assert pol is not None
+    assert pol.hard_rss_mb == 1000
+    assert pol.soft_rss_mb == 900
+    assert pol.enabled is True
+
+
+def test_build_memory_pressure_policy_disabled_when_zero():
+    assert build_memory_pressure_policy(0) is None
+    assert build_memory_pressure_policy() is None
+    assert build_memory_pressure_policy(-5) is None
+
+
+def test_build_memory_pressure_policy_wires_into_gate_stats():
+    gate = build_admission_gate(
+        resource_policy=build_memory_pressure_policy(800)
+    )
+    assert gate is not None
+    assert gate.enabled is True
+    assert gate.stats()["max_rss_mb"] == 800
+
+
+@pytest.mark.skipif(BotOS is None, reason="BotOS optional dependency not installed")
+def test_botos_enables_memory_gate_from_max_rss():
+    botos = BotOS(max_rss_mb=1024)
+    assert botos._admission_gate is not None
+    assert botos._admission_gate.enabled is True
+    assert botos.admission_stats["max_rss_mb"] == 1024
+
+
+def test_rss_sampler_never_raises_without_resource_module():
+    # Simulate a platform without the Unix-only ``resource`` module (Windows):
+    # the sampler must self-disable and return a None sample, never raise.
+    import praisonai_bot.bots._admission as adm
+
+    original = adm.resource
+    try:
+        adm.resource = None
+        sampler = adm._RssSampler()
+        sampler._psutil_proc = None  # force the stdlib path
+        sample = sampler.read()
+        assert sample.rss_mb is None
+    finally:
+        adm.resource = original

@@ -10,7 +10,6 @@ Heavy implementations live in the praisonai wrapper.
 
 from __future__ import annotations
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field

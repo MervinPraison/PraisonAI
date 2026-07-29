@@ -134,7 +134,9 @@ jobs:
         'pypi-auto' || 'pypi'
       }}
     env:
-      UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
+      # PyPI API token auth: username __token__, password = pypi-… token (see pypi.org/help/#invalid-auth)
+      UV_PUBLISH_USERNAME: __token__
+      UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout main

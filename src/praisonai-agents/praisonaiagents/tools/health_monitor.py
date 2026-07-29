@@ -8,7 +8,6 @@ Following the protocol-driven architecture from AGENTS.md.
 
 import asyncio
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 import time

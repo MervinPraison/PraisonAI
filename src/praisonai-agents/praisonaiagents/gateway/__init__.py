@@ -70,6 +70,10 @@ from .protocols import (
     GatewayConcurrencyPolicyProtocol,
     GatewayConcurrencyPolicy,  # backward-compat alias
     ConcurrencyLimitPolicy,
+    # Gateway resource-pressure admission (Issue #3445)
+    ResourceSample,
+    ResourcePressurePolicyProtocol,
+    MemoryPressurePolicy,
     # Gateway rate-limit admission (Issue #2532)
     RateLimitDecision,
     RateLimitPolicyProtocol,
@@ -277,6 +281,10 @@ __all__ = [
     "GatewayConcurrencyPolicyProtocol",
     "GatewayConcurrencyPolicy",
     "ConcurrencyLimitPolicy",
+    # Gateway resource-pressure admission (Issue #3445)
+    "ResourceSample",
+    "ResourcePressurePolicyProtocol",
+    "MemoryPressurePolicy",
     # Gateway rate-limit admission (Issue #2532)
     "RateLimitDecision",
     "RateLimitPolicyProtocol",

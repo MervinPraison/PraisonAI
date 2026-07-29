@@ -4,7 +4,6 @@ Doom Loop Detection for PraisonAI Agents.
 Detects and prevents agents from getting stuck in repetitive loops.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from collections import defaultdict

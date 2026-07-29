@@ -9,7 +9,6 @@ that was duplicated across multiple evaluators.
 """
 
 import os
-import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone

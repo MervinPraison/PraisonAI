@@ -16,7 +16,6 @@ Usage:
     agent.start("Remind me to check email every morning at 7am")
 """
 
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 
@@ -76,6 +75,7 @@ def schedule_add(
     agent_id: str = "",
     session_id: str = "",
     accept_suggestion: str = "",
+    continuable: bool = True,
 ) -> str:
     """Add a new scheduled job.
 
@@ -100,6 +100,10 @@ def schedule_add(
                     If set, the agent will have access to prior chat history.
         accept_suggestion: If set, accept the suggestion with this ID
             after the job is successfully added.
+        continuable: When True (default), a delivered result seeds a resumable
+                    session so the user's reply in the same chat resumes the
+                    job's conversation with full context. Set False for pure
+                    fire-and-forget notifications.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -130,6 +134,7 @@ def schedule_add(
                         channel=channel,
                         channel_id=channel_id,
                         session_id=session_id or None,
+                        continuable=continuable,
                     )
                 else:
                     return (
@@ -141,6 +146,7 @@ def schedule_add(
             delivery = DeliveryTarget(
                 deliver=deliver,
                 session_id=session_id or None,
+                continuable=continuable,
             )
         elif channel or channel_id:
             # Validate both are provided together
@@ -152,6 +158,7 @@ def schedule_add(
                 channel=channel,
                 channel_id=channel_id,
                 session_id=session_id or None,
+                continuable=continuable,
             )
 
         job = ScheduleJob(

@@ -7,7 +7,6 @@ Zero dependencies beyond stdlib.
 
 import copy
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import os
 import sys
@@ -632,7 +631,16 @@ class DefaultSessionStore:
         # from another DefaultSessionStore instance (or process) are visible.
         if os.path.exists(filepath):
             with FileLock(filepath, self.lock_timeout):
-                session = self._load_session_from_disk(session_id, filepath)
+                try:
+                    session = self._load_session_from_disk(session_id, filepath)
+                except OSError:
+                    # Read-only path: a transient failure must not raise into
+                    # callers. Prefer any cached copy over an empty session so
+                    # existing history stays visible; nothing is written here.
+                    with self._lock:
+                        if session_id in self._cache:
+                            return self._cache[session_id]
+                    return SessionData(session_id=session_id)
             with self._lock:
                 self._cache[session_id] = session
             return session
@@ -645,21 +653,56 @@ class DefaultSessionStore:
             return session
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> SessionData:
-        """Load session JSON from disk (caller must hold FileLock)."""
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return SessionData.from_dict(data)
-            except (json.JSONDecodeError, IOError):
-                pass
-        return SessionData(session_id=session_id)
+        """Load session JSON from disk (caller must hold FileLock).
+
+        Distinguishes three cases so a transient read error never silently
+        destroys real history on the next write:
+
+        * File does not exist yet → return a fresh empty session.
+        * File is malformed JSON → treat as corrupted; start fresh (logged).
+        * File exists but the read itself fails with an OS-level error
+          (``PermissionError``, an NFS/network hiccup, an antivirus lock,
+          disk-full-during-read, …) → re-raise ``OSError`` so the caller
+          aborts the write instead of overwriting valid data with an empty
+          session. ``json.JSONDecodeError`` is a subclass of ``ValueError``,
+          not ``OSError``, so genuine corruption is handled separately.
+        """
+        if not os.path.exists(filepath):
+            return SessionData(session_id=session_id)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return SessionData.from_dict(data)
+        except json.JSONDecodeError as e:
+            # Malformed content — the durable data is unusable, so starting
+            # fresh does not lose recoverable history.
+            logger.error(
+                f"Session file {filepath} contains invalid JSON; starting fresh: {e}"
+            )
+            return SessionData(session_id=session_id)
+        except OSError as e:
+            # Transient I/O failure on a file that *does* exist — do NOT
+            # substitute an empty session, which would cause the next write to
+            # destroy real history. Propagate so the caller aborts the write.
+            logger.error(
+                f"Transient read error loading session {filepath}; "
+                f"refusing to overwrite existing data: {e}"
+            )
+            raise
 
     def _read_session_fresh(self, session_id: str) -> SessionData:
         """Reload session from disk and refresh the in-process cache."""
         filepath = self._get_session_path(session_id)
         with FileLock(filepath, self.lock_timeout):
-            session = self._load_session_from_disk(session_id, filepath)
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                # Read-only path: fall back to any cached copy on a transient
+                # failure rather than raising or caching an empty session.
+                with self._lock:
+                    if session_id in self._cache:
+                        return self._cache[session_id]
+                return SessionData(session_id=session_id)
         with self._lock:
             self._cache[session_id] = session
         return session
@@ -702,7 +745,13 @@ class DefaultSessionStore:
         filepath = self._get_session_path(session_id)
 
         with FileLock(filepath, self.lock_timeout):
-            session = self._load_session_from_disk(session_id, filepath)
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                # Transient read failure — abort rather than overwrite the
+                # existing (still valid) session file with partial data.
+                logger.error(f"Failed to {error_label} {session_id}: could not read existing session")
+                return False
             mutator(session)
             session.updated_at = datetime.now(timezone.utc).isoformat()
 
@@ -769,17 +818,18 @@ class DefaultSessionStore:
         
         # Use file lock for atomic read-modify-write
         with FileLock(filepath, self.lock_timeout):
-            # Always reload from disk inside lock to avoid race conditions
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    session = SessionData.from_dict(data)
-                except (json.JSONDecodeError, IOError):
-                    session = SessionData(session_id=session_id)
-            else:
-                session = SessionData(session_id=session_id)
-            
+            # Always reload from disk inside lock to avoid race conditions.
+            # A transient read error must NOT be collapsed into an empty
+            # session here, or appending this one message and writing would
+            # permanently destroy all prior history while reporting success.
+            try:
+                session = self._load_session_from_disk(session_id, filepath)
+            except OSError:
+                logger.error(
+                    f"Failed to save session {session_id}: could not read existing session"
+                )
+                return False
+
             # Add message
             session.messages.append(message)
             session.updated_at = datetime.now(timezone.utc).isoformat()

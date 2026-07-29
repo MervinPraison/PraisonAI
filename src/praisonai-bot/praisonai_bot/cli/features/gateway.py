@@ -109,6 +109,7 @@ _START_FLAG_KEYS = (
     "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
     "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
     "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
+    "watchdog", "watchdog_timeout",
 )
 
 
@@ -185,6 +186,8 @@ class GatewayHandler:
         scale_to_zero: Optional[bool] = None,
         idle_minutes: Optional[float] = None,
         drain_marker: Optional[str] = None,
+        watchdog: Optional[bool] = None,
+        watchdog_timeout: Optional[float] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -264,6 +267,8 @@ class GatewayHandler:
             "scale_to_zero": scale_to_zero,
             "idle_minutes": idle_minutes,
             "drain_marker": drain_marker,
+            "watchdog": watchdog,
+            "watchdog_timeout": watchdog_timeout,
         }
 
         def _commit_start_flags() -> None:
@@ -336,6 +341,12 @@ class GatewayHandler:
                 self._gateway._idle_minutes_override = idle_minutes
             if drain_marker is not None:
                 self._gateway._drain_marker_override = drain_marker
+            # CLI --watchdog / --watchdog-timeout override gateway.watchdog.*
+            # in YAML (#3410): opt-in event-loop liveness backstop.
+            if watchdog is not None:
+                self._gateway._watchdog_override = watchdog
+            if watchdog_timeout is not None:
+                self._gateway._watchdog_timeout_override = watchdog_timeout
             print(f"Loading gateway config from {config_file}")
             # Config wiring validated; the gateway is about to bind. Persist the
             # launch posture now so a restart can replay it, but only after the
@@ -370,6 +381,15 @@ class GatewayHandler:
         self._gateway = WebSocketGateway(
             config=config, openai_api=openai_api, mcp=mcp
         )
+        # CLI --watchdog also applies in no-config mode (#3410): build the
+        # opt-in liveness watchdog directly since start_with_config's YAML
+        # wiring is skipped here. No-op unless --watchdog is passed.
+        if watchdog:
+            self._gateway._watchdog_override = watchdog
+            self._gateway._watchdog_timeout_override = watchdog_timeout
+            self._gateway._configure_watchdog(
+                self._gateway._merge_watchdog_overrides(None)
+            )
         # Resolved graceful-drain window for this no-config run. Defaults to the
         # explicit ``--drain-timeout`` (``None`` → gateway default) and is
         # replaced below by the ``--reliability`` preset's drain when a preset
@@ -703,12 +723,13 @@ class GatewayHandler:
         print("Usage: praisonai gateway hooks {add|list|remove} ...")
         return 1
 
-    def status(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def status(self, host: str = "127.0.0.1", port: int = 8765, deep: bool = False) -> None:
         """Check gateway status.
         
         Args:
             host: Gateway host
             port: Gateway port
+            deep: Print per-channel health rows from /health
         """
         import urllib.request
         import json
@@ -749,6 +770,8 @@ class GatewayHandler:
         url = f"http://{host}:{port}/health"
         
         try:
+            import time as _time
+
             with urllib.request.urlopen(url, timeout=5) as response:
                 data = json.loads(response.read().decode())
                 print(f"Gateway Status: {data.get('status', 'unknown')}")
@@ -756,10 +779,72 @@ class GatewayHandler:
                 print(f"  Agents: {data.get('agents', 0)}")
                 print(f"  Sessions: {data.get('sessions', 0)}")
                 print(f"  Clients: {data.get('clients', 0)}")
+                if data.get("last_inbound_at"):
+                    age = _time.time() - float(data["last_inbound_at"])
+                    print(
+                        f"  Last inbound: "
+                        f"{_time.strftime('%H:%M:%S', _time.localtime(data['last_inbound_at']))} "
+                        f"({age:.0f}s ago)"
+                    )
+                channels = data.get("channels") or {}
+                if channels and deep:
+                    print("  Channels:")
+                    for name, ch in channels.items():
+                        running = ch.get("running", False)
+                        state = (ch.get("supervision") or {}).get("state", "—")
+                        reason = ch.get("reason", "—")
+                        probe_ok = (ch.get("probe") or {}).get("ok")
+                        last = ch.get("last_activity")
+                        last_s = f"{_time.time() - last:.0f}s ago" if last else "—"
+                        mark = "✓" if running else "✗"
+                        probe_s = f" probe_ok={probe_ok}" if probe_ok is not None else ""
+                        print(
+                            f"    {mark} {name}: running={running} state={state} "
+                            f"reason={reason} last_activity={last_s}{probe_s}"
+                        )
+                if deep:
+                    self._print_version_skew(host, port)
                 self._print_reload_status(data)
         except Exception as e:
             print(f"Gateway not reachable at {url}")
             print(f"Error: {e}")
+
+    @staticmethod
+    def _print_version_skew(host: str, port: int) -> None:
+        """Warn when the running gateway version differs from the installed CLI."""
+        import json
+        import urllib.request
+
+        try:
+            from importlib.metadata import version as pkg_version
+        except ImportError:
+            from importlib_metadata import version as pkg_version  # type: ignore
+
+        try:
+            cli_version = pkg_version("praisonai-bot")
+        except Exception:
+            return
+
+        url = f"http://{host}:{port}/info"
+        try:
+            req = urllib.request.Request(url)
+            token = __import__("os").environ.get("GATEWAY_AUTH_TOKEN", "").strip()
+            # Only attach the bearer token where it cannot leak to a network
+            # observer: over loopback (never on the wire). A remote plaintext
+            # HTTP probe deliberately omits it rather than expose the credential.
+            if token and host in ("127.0.0.1", "localhost", "::1"):
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode())
+        except Exception:
+            return
+
+        runtime_version = data.get("version")
+        if runtime_version and runtime_version != cli_version:
+            print(
+                f"  Version skew: running gateway reports {runtime_version}, "
+                f"installed praisonai-bot is {cli_version}"
+            )
 
     @staticmethod
     def _print_reload_status(data: dict) -> None:
@@ -872,6 +957,17 @@ def handle_gateway_command(args) -> int:
             "--drain-marker", dest="drain_marker", default=None,
             help="Path to watch for an epoch-aware external drain marker file (#3021)",
         )
+        start_parser.add_argument(
+            "--watchdog", dest="watchdog", action="store_true", default=None,
+            help="Enable the event-loop liveness watchdog: an OS-thread backstop "
+                 "that dumps stacks and hard-exits (restart code 75) if the loop "
+                 "freezes, so the supervisor relaunches the process (#3410)",
+        )
+        start_parser.add_argument(
+            "--watchdog-timeout", dest="watchdog_timeout", type=float, default=None,
+            help="Seconds the event loop may stall before the watchdog trips a "
+                 "restart (default ~15s = 5s x 3 strikes; #3410)",
+        )
 
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -944,6 +1040,8 @@ def handle_gateway_command(args) -> int:
             scale_to_zero=getattr(args, "scale_to_zero", None),
             idle_minutes=getattr(args, "idle_minutes", None),
             drain_marker=getattr(args, "drain_marker", None),
+            watchdog=getattr(args, "watchdog", None),
+            watchdog_timeout=getattr(args, "watchdog_timeout", None),
         )
     elif subcommand == "status":
         handler.status(

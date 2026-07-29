@@ -5,7 +5,6 @@ Provides lightweight tracing and metrics collection for escalation execution.
 Opt-in only - no overhead when not enabled.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 import time
 from dataclasses import dataclass, field

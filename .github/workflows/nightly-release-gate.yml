@@ -1,12 +1,12 @@
 name: Nightly Release Gate
 
 # Preflight before PyPI Release (patch bump).
-# Triggers: Core Tests success on main (workflow_run) or nightly cron at 00:00 UTC.
-# Dedupe: max one successful patch release per UTC day (see release-gate.js).
+# Triggers: Core Tests success on main (workflow_run) or cron every 3 days at 00:00 UTC.
+# Dedupe: max one successful patch release every 3 days (see release-gate.js).
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 */3 * *'
   workflow_dispatch:
     inputs:
       dry_run:

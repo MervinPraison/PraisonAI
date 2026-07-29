@@ -4,7 +4,6 @@ Hook Registry for PraisonAI Agents.
 Manages registration and lookup of hooks for different events.
 """
 
-import logging
 import threading
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Callable, Union

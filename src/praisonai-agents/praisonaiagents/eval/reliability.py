@@ -4,7 +4,6 @@ Reliability evaluator for PraisonAI Agents.
 Evaluates agent reliability by verifying expected tool calls are made.
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Set, Any, TYPE_CHECKING
 

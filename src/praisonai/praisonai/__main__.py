@@ -23,6 +23,66 @@ import threading
 _typer_commands_cache = None
 _typer_commands_lock = threading.Lock()
 
+# Cache for the run command's supported option names. ``None`` means "not yet
+# computed"; a tuple ``(all_opts, value_opts)`` once derived; ``False`` marks a
+# discovery failure so the conservative legacy fallback is used without retrying
+# the (potentially heavy) introspection on every bare-prompt invocation.
+_run_option_names_cache = None
+_run_option_names_lock = threading.Lock()
+
+
+def _get_run_option_names():
+    """Return the option names accepted by the Typer ``run`` command.
+
+    Derived once, at dispatch time, by introspecting the ``run`` command's Click
+    parameters — so routing never drifts from the flags ``run`` actually
+    implements. Returns a tuple ``(all_opts, value_opts)`` where ``all_opts`` is
+    the set of every long/short option string (e.g. ``{"--model", "-m", ...}``)
+    and ``value_opts`` is the subset that consumes a following value (non-flag
+    options). Returns ``None`` if introspection fails, so callers fall back to
+    the conservative legacy path rather than mis-route.
+    """
+    global _run_option_names_cache
+
+    if _run_option_names_cache is not None:
+        return None if _run_option_names_cache is False else _run_option_names_cache
+
+    with _run_option_names_lock:
+        if _run_option_names_cache is not None:
+            return None if _run_option_names_cache is False else _run_option_names_cache
+
+        try:
+            from praisonai.cli.commands.run import app as run_app
+            from typer.main import get_command as _get_command
+
+            command = _get_command(run_app)
+            all_opts = set()
+            value_opts = set()
+            for param in command.params:
+                is_flag = getattr(param, "is_flag", False) or getattr(
+                    param, "is_bool_flag", False
+                )
+                for opt in getattr(param, "opts", []):
+                    if opt.startswith("-"):
+                        all_opts.add(opt)
+                        if not is_flag:
+                            value_opts.add(opt)
+                # Secondary opts are the negated forms of bool flags
+                # (e.g. ``--no-stream``); never value-consuming.
+                for opt in getattr(param, "secondary_opts", []):
+                    if opt.startswith("-"):
+                        all_opts.add(opt)
+        except Exception:
+            # Introspection depends only on the static command definition, so a
+            # failure here is structural — cache it (as ``False``) to avoid
+            # re-importing heavy modules on every bare-prompt dispatch. Callers
+            # fall back to the conservative any-flag→legacy rule.
+            _run_option_names_cache = False
+            return None
+
+        _run_option_names_cache = (all_opts, value_opts)
+        return _run_option_names_cache
+
 
 def _get_typer_commands():
     """Auto-discover registered Typer commands via Click introspection."""
@@ -74,29 +134,110 @@ def _find_first_command(argv):
     return None
 
 
+def _flag_names(argv, value_opts=None):
+    """Return the option *names* present in ``argv`` (``--foo=bar`` → ``--foo``).
+
+    ``value_opts`` is the set of option names that consume a following value
+    (e.g. ``--model gpt-4o``). When supplied, the token following such an option
+    is treated as that option's *value* and skipped, so a value beginning with a
+    dash (``--session -abc``, ``--output -json``) is not mis-classified as a
+    separate flag. ``--opt=value`` forms carry their value inline and need no
+    lookahead. Without ``value_opts`` the original conservative behaviour holds:
+    every dash-prefixed token is reported as an option name.
+    """
+    value_opts = value_opts or set()
+    names = []
+    expect_value = False
+    for arg in argv:
+        if expect_value:
+            expect_value = False
+            continue
+        if arg.startswith("-"):
+            name = arg.split("=", 1)[0]
+            names.append(name)
+            if "=" not in arg and name in value_opts:
+                expect_value = True
+    return names
+
+
 def _looks_like_bare_prompt(argv, first_cmd):
     """Return True when argv is a bare free-text prompt for the modern `run` path.
 
     A *bare prompt* is a first positional token that is neither a Typer command
-    (already handled upstream) nor a ``.yaml``/``.yml`` file token, invoked with
-    no ``-``/``--`` flags at all. Such an invocation expresses the same intent as
-    ``praisonai run "<prompt>"`` and should reach the modern Typer ``run`` engine
-    (session continuity, ``--output`` modes, credential gate, permissions).
+    (already handled upstream) nor a ``.yaml``/``.yml`` file token. Such an
+    invocation expresses the same intent as ``praisonai run "<prompt>"`` and
+    should reach the modern Typer ``run`` engine (session continuity,
+    ``--output`` modes, credential gate, permissions).
 
-    The rule is deliberately conservative: any flag present keeps the invocation
-    on the legacy dispatcher, because the legacy argparse surface owns a large set
-    of flags (``--framework``, ``--auto``, ``--call``, ``--serve``, ...) that
-    ``run`` does not implement. ``.yaml``/``.yml`` workflows also stay on legacy.
+    Flags are allowed *iff* every flag present is one that ``run`` itself
+    accepts — derived from ``run``'s own parameter definitions via
+    :func:`_get_run_option_names`. So ``praisonai "fix the bug" --model gpt-4o``,
+    ``--continue``, ``--session …``, ``--output …`` all reach the modern engine,
+    behaving identically to ``praisonai run "…" <flag>``.
+
+    A single genuinely legacy-only flag (``--auto``, ``--serve``, ...) keeps the
+    whole invocation on the legacy argparse dispatcher, which owns that large
+    deprecated flag surface. ``.yaml``/``.yml`` workflows also stay on legacy.
+
+    If ``run`` option discovery fails, the rule falls back to its original
+    conservative behaviour: any flag present routes to legacy.
     """
     if not first_cmd:
-        return False
-    # Any flag anywhere → legacy owns the large deprecated/legacy flag surface.
-    if any(arg.startswith("-") for arg in argv):
         return False
     # YAML workflow files stay on the legacy multi-framework path.
     if first_cmd.lower().endswith((".yaml", ".yml")):
         return False
-    return True
+
+    # A quick, value-unaware scan first: if there are no dash-prefixed tokens at
+    # all, this is a plain prompt and we can skip the (potentially heavy) run
+    # option introspection entirely.
+    if not any(arg.startswith("-") for arg in argv):
+        return True
+
+    run_opts = _get_run_option_names()
+    if run_opts is None:
+        # Discovery failed → conservative: any flag means legacy owns it.
+        return False
+    supported, value_opts = run_opts
+    # Classify flags value-aware so a value-taking option's dash-prefixed value
+    # (``--session -abc``, ``--output -json``) is not mistaken for a flag.
+    flags = _flag_names(argv, value_opts)
+    # All flags must be run-supported; a single unrecognised flag → legacy.
+    return all(flag in supported for flag in flags)
+
+
+def _build_run_argv(argv, value_opts):
+    """Rewrite a bare-prompt ``argv`` into a ``run`` invocation.
+
+    ``run`` takes a single positional ``target`` plus its options. An unquoted
+    prompt (``praisonai fix the auth bug --model gpt-4o``) arrives as multiple
+    positional tokens interleaved with flags. This joins the positional tokens
+    into one ``target`` string and appends the flags (and their values) after
+    it, yielding ``["run", "<prompt>", *flags]`` — exactly what the user would
+    have typed as ``praisonai run "<prompt>" <flags>``.
+
+    ``value_opts`` is the set of option names that consume a following value
+    (e.g. ``--model gpt-4o``); their value token is kept with the flag rather
+    than mistaken for part of the prompt. ``--opt=value`` forms are self-
+    contained and need no lookahead.
+    """
+    positionals = []
+    flags = []
+    expect_value = False
+    for arg in argv:
+        if expect_value:
+            flags.append(arg)
+            expect_value = False
+            continue
+        if arg.startswith("-"):
+            flags.append(arg)
+            name = arg.split("=", 1)[0]
+            if "=" not in arg and name in value_opts:
+                expect_value = True
+            continue
+        positionals.append(arg)
+    prompt = " ".join(positionals)
+    return ["run", prompt, *flags]
 
 
 def _run_typer(argv):
@@ -174,8 +315,11 @@ def main():
       2. --help / -h             → Typer help (global or command-level)
       3. No arguments            → Typer interactive TUI
       4. First arg is a Typer cmd→ Typer (auto-discovered from app.py)
-      5. Bare free-text prompt   → Typer `run` (modern engine)
-      6. Everything else         → Legacy (.yaml, deprecated flags)
+      5. Bare free-text prompt   → Typer `run` (modern engine), including when
+                                   accompanied only by ``run``-supported flags
+                                   (``--model``, ``--continue``, ``--output`` …)
+      6. Everything else         → Legacy (.yaml, legacy-only flags), with a
+                                   one-line notice on legacy-only-flag fallback
     """
     argv = sys.argv[1:]
 
@@ -211,16 +355,30 @@ def main():
         # `praisonai run "<prompt>"`), inheriting session continuity,
         # --output modes, the credential gate and permissions.
         #
-        # ``run`` takes a single positional ``target``. An unquoted prompt
-        # (``praisonai build a weather agent``) arrives as multiple argv
-        # tokens; join them into one argument so the whole prompt reaches
+        # ``run`` takes a single positional ``target`` plus its options. An
+        # unquoted prompt (``praisonai build a weather agent --model x``)
+        # arrives as multiple positional tokens possibly interleaved with
+        # run-supported flags; ``_build_run_argv`` joins the positionals into
+        # one ``target`` and appends the flags so the whole invocation reaches
         # ``run`` intact instead of Typer rejecting the extra positionals.
-        # This is flag-free (guarded by ``_looks_like_bare_prompt``), so a
-        # simple space-join faithfully reconstructs the user's prompt.
-        prompt = " ".join(argv)
-        _run_typer(["run", prompt])
+        run_opts = _get_run_option_names()
+        value_opts = run_opts[1] if run_opts is not None else set()
+        _run_typer(_build_run_argv(argv, value_opts))
     else:
-        # YAML workflow or legacy/deprecated-flag invocation → legacy
+        # YAML workflow or legacy/deprecated-flag invocation → legacy.
+        # When a prompt is diverted here *solely* because of an unrecognised
+        # flag, surface a one-line notice so the fallback is never silent —
+        # the modern `praisonai run` owns session continuity, --output modes,
+        # the credential gate and permissions that legacy lacks.
+        if not first_cmd.lower().endswith((".yaml", ".yml")) and _flag_names(argv):
+            print(
+                "Note: '{}' contains a flag not supported by the modern engine; "
+                "using the legacy engine. For session continuity, --output modes "
+                "and permissions, try: praisonai run \"{}\" ...".format(
+                    first_cmd, first_cmd
+                ),
+                file=sys.stderr,
+            )
         _run_legacy(argv)
 
 

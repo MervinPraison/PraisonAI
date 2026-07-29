@@ -680,6 +680,7 @@ class WebSocketGateway:
                 max_messages=int(session_data.get("max_messages", 1000)),
                 persist=bool(session_data.get("persist", False)),
                 persist_path=_substitute(session_data.get("persist_path")),
+                store=str(session_data.get("store", "sqlite") or "sqlite"),
                 resume_window=int(session_data.get("resume_window", 86400)),
             )
         
@@ -836,6 +837,10 @@ class WebSocketGateway:
         self._draining = False
         self._started_at: Optional[float] = None
         self._server = None
+        # Issue #3410: opt-in event-loop liveness watchdog. Armed around the
+        # serving loop only when a ``gateway.watchdog`` block (or the CLI
+        # ``--watchdog`` flag) enables it; ``None`` means zero cost.
+        self._watchdog = None
         
         self._agents: Dict[str, "Agent"] = {}
         self._sessions: Dict[str, GatewaySession] = {}
@@ -853,10 +858,29 @@ class WebSocketGateway:
         if session_store:
             self._session_store: Optional[SessionStoreProtocol] = session_store
         elif self.config.session_config.persist:
-            # Use DefaultSessionStore when persistence is enabled
+            # Persistence enabled: default to the SQLite transcript store
+            # (WAL, concurrent readers, indexed lookups) so gateway session
+            # history shares the durability/concurrency model already used by
+            # the delivery journal, DLQ and kanban (Issue #3407). ``store:
+            # file`` selects the legacy per-session JSON store.
             persist_path = self.config.session_config.persist_path
-            self._session_store = DefaultSessionStore(session_dir=persist_path)
-            logger.info(f"Session persistence enabled, using directory: {persist_path or '~/.praisonai/sessions/'}")
+            store_kind = getattr(self.config.session_config, "store", "sqlite")
+            if store_kind == "file":
+                self._session_store = DefaultSessionStore(session_dir=persist_path)
+                logger.info(f"Session persistence enabled (file/JSON store), directory: {persist_path or '~/.praisonai/sessions/'}")
+            else:
+                try:
+                    from praisonaiagents.session.sqlite_transcript_store import (
+                        SqliteTranscriptStore,
+                    )
+                    self._session_store = SqliteTranscriptStore(session_dir=persist_path)
+                    logger.info(f"Session persistence enabled (SQLite store), directory: {persist_path or '~/.praisonai/sessions/'}")
+                except Exception as exc:
+                    logger.warning(
+                        "SQLite transcript store unavailable (%s); "
+                        "falling back to file/JSON store.", exc
+                    )
+                    self._session_store = DefaultSessionStore(session_dir=persist_path)
         else:
             self._session_store = None
             logger.info("Session persistence disabled, using in-memory sessions only")
@@ -2007,7 +2031,13 @@ class WebSocketGateway:
             logger.exception("Failed to resume interrupted turns on boot")
 
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
-        
+
+        # Issue #3410: arm the opt-in event-loop liveness watchdog around the
+        # serving loop. It runs on a dedicated OS thread, so it keeps probing
+        # precisely when the loop wedges; on repeated missed probes it dumps
+        # all-thread stacks and hard-exits with GATEWAY_RESTART_EXIT_CODE so
+        # systemd/launchd/Docker relaunch the process. No-op when unconfigured.
+        self._arm_watchdog()
         try:
             await self._server.serve()
         except Exception as e:
@@ -2017,6 +2047,88 @@ class WebSocketGateway:
                 self._pid_lock = None
             # Re-raise the original exception
             raise
+        finally:
+            self._disarm_watchdog()
+
+    # ── Event-loop liveness watchdog (Issue #3410) ──
+
+    def _configure_watchdog(self, watchdog_cfg: Optional[Dict[str, Any]]) -> None:
+        """Build the opt-in event-loop liveness watchdog from config.
+
+        Reuses the pure core primitive ``LoopWatchdog`` / ``LoopWatchdogPolicy``
+        (Issue #3385) rather than duplicating any machinery here. The watchdog
+        is only *built* here; it is armed around the serving loop in ``start()``
+        and torn down in ``stop()``. Off unless ``enabled`` is truthy, so
+        always-on gateways keep their exact current behaviour.
+
+        Config shape (``gateway.yaml`` under ``gateway:``)::
+
+            watchdog:
+              enabled: true
+              liveness_interval: 5      # seconds between loop probes
+              liveness_strikes: 3       # hard-exit after N consecutive misses
+              dump_file: /var/log/…     # optional: also write stacks here
+        """
+        self._watchdog = None
+        if not isinstance(watchdog_cfg, dict):
+            return
+
+        def _as_bool(v: Any, default: bool = False) -> bool:
+            if isinstance(v, str):
+                return v.strip().lower() in ("1", "true", "yes", "on")
+            return bool(v) if v is not None else default
+
+        if not _as_bool(watchdog_cfg.get("enabled")):
+            return
+
+        try:
+            from praisonaiagents.gateway import LoopWatchdog, LoopWatchdogPolicy
+        except Exception as exc:  # pragma: no cover - old/absent core
+            logger.warning(
+                "Event-loop watchdog requested but unavailable in core: %s", exc
+            )
+            return
+
+        try:
+            interval = float(watchdog_cfg.get("liveness_interval", 5.0))
+            strikes = int(watchdog_cfg.get("liveness_strikes", 3))
+            policy = LoopWatchdogPolicy(
+                probe_interval_s=interval,
+                missed_probes_before_wedged=strikes,
+                dump_file=watchdog_cfg.get("dump_file") or None,
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("Invalid gateway.watchdog config (%s); disabling", exc)
+            return
+
+        self._watchdog = LoopWatchdog(policy)
+        logger.info(
+            "Event-loop liveness watchdog enabled "
+            "(interval=%.1fs, strikes=%d, wedge_after≈%.0fs)",
+            policy.probe_interval_s,
+            policy.missed_probes_before_wedged,
+            policy.wedge_after_s,
+        )
+
+    def _arm_watchdog(self) -> None:
+        """Arm the liveness watchdog on the running loop (no-op when unset)."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.arm(asyncio.get_running_loop())
+        except Exception:  # pragma: no cover - fail open, never block serving
+            logger.debug("Could not arm event-loop watchdog", exc_info=True)
+
+    def _disarm_watchdog(self) -> None:
+        """Disarm the liveness watchdog (safe to call when unset/already off)."""
+        watchdog = self._watchdog
+        if watchdog is None:
+            return
+        try:
+            watchdog.disarm()
+        except Exception:  # pragma: no cover - fail open
+            pass
 
     # ── Gateway lifecycle: idle/scale-to-zero + drain marker (Issue #3021) ──
 
@@ -2131,6 +2243,39 @@ class WebSocketGateway:
             merged["drain"] = drain
         return merged
 
+    def _merge_watchdog_overrides(
+        self, watchdog_cfg: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Fold CLI watchdog overrides into the YAML ``watchdog`` block (#3410).
+
+        ``praisonai gateway start --watchdog [--watchdog-timeout N]`` stamps
+        ``_watchdog_override`` / ``_watchdog_timeout_override`` on the instance;
+        these win over the YAML so an operator can enable the liveness backstop
+        without editing the file. ``--watchdog-timeout`` sets the wedge budget
+        by fixing 3 strikes and deriving the probe interval. Returns the merged
+        block, or the original when there are no overrides.
+        """
+        enable = getattr(self, "_watchdog_override", None)
+        timeout = getattr(self, "_watchdog_timeout_override", None)
+        if enable is None and timeout is None:
+            return watchdog_cfg
+
+        merged: Dict[str, Any] = (
+            dict(watchdog_cfg) if isinstance(watchdog_cfg, dict) else {}
+        )
+        if enable is not None:
+            merged["enabled"] = bool(enable)
+        if timeout is not None:
+            try:
+                budget = float(timeout)
+                if budget > 0:
+                    strikes = int(merged.get("liveness_strikes", 3)) or 3
+                    merged["liveness_strikes"] = strikes
+                    merged["liveness_interval"] = budget / strikes
+            except (TypeError, ValueError):
+                pass
+        return merged
+
     def notify_inbound(self) -> None:
         """Record inbound activity for idle tracking (cheap timestamp write).
 
@@ -2139,6 +2284,14 @@ class WebSocketGateway:
         state, so live traffic is reflected even without explicit calls.
         """
         self._last_inbound_ts = time.time()
+
+    def _record_channel_inbound(self, channel_name: str) -> None:
+        """Record inbound channel activity for metrics and idle tracking."""
+        self.notify_inbound()
+        self.record_metric(
+            "messages_inbound_total",
+            labels={"channel": channel_name},
+        )
 
     def _probe_idle_facts(self) -> Tuple[int, float, bool]:
         """Read live liveness facts from gateway sessions for the idle policy.
@@ -2457,7 +2610,11 @@ class WebSocketGateway:
         
         if self._server:
             self._server.should_exit = True
-        
+
+        # Issue #3410: a deliberate stop is not a wedge — disarm the liveness
+        # watchdog so it never hard-exits the process during graceful shutdown.
+        self._disarm_watchdog()
+
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
             self._pid_lock.release_lock()
@@ -4076,28 +4233,70 @@ class WebSocketGateway:
 
     def health(self) -> Dict[str, Any]:
         """Get gateway health status including per-channel bot status and supervision state."""
+        from praisonaiagents.bots.protocols import HealthReason, HealthResult, evaluate_channel_health
+
         uptime = time.time() - self._started_at if self._started_at else 0
         channel_status = {}
         supervision_status = self._channel_supervisor.get_all_status()
+        stale_after = (
+            getattr(self._health_config, "stale_after", 120.0)
+            if self._health_config is not None
+            else 120.0
+        )
+        startup_grace = (
+            getattr(self._health_config, "startup_grace", 60.0)
+            if self._health_config is not None
+            else 60.0
+        )
         
         for name, bot in self._channel_bots.items():
             running = getattr(bot, "is_running", False)
             platform = getattr(bot, "platform", "unknown")
-            
+            last_activity = getattr(bot, "_last_inbound_activity", None)
+            if last_activity is None:
+                last_activity = getattr(bot, "_started_at", None)
+            active_runs = 0
+            counter = getattr(bot, "_active_run_count", None)
+            if callable(counter):
+                try:
+                    active_runs = int(counter() or 0)
+                except Exception:
+                    active_runs = 0
+
+            health_result = HealthResult(
+                ok=running,
+                platform=platform,
+                is_running=running,
+                last_activity=last_activity,
+                active_runs=int(active_runs or 0),
+            )
+            reason = evaluate_channel_health(
+                health_result,
+                startup_grace_seconds=startup_grace,
+                stale_after_seconds=stale_after,
+            )
+            cached_probe = getattr(bot, "_last_probe_result", None)
+            probe_ok = getattr(cached_probe, "ok", None) if cached_probe is not None else None
+
             # Get supervision state
             sup_status = supervision_status.get(name)
+            entry: Dict[str, Any] = {
+                "platform": platform,
+                "running": running,
+                "last_activity": last_activity,
+                "ok": reason == HealthReason.HEALTHY,
+                "reason": reason.value,
+            }
+            if probe_ok is not None:
+                entry["probe"] = {"ok": probe_ok}
             if sup_status:
-                entry = {
-                    "platform": platform,
-                    "running": running,
-                    "supervision": {
-                        "state": sup_status.state.value,
-                        "last_error": sup_status.last_error,
-                        "last_error_time": sup_status.last_error_time,
-                        "next_retry_at": sup_status.next_retry_at,
-                        "total_recoveries": sup_status.total_recoveries,
-                        "manual_pause": sup_status.manual_pause,
-                    }
+                entry["supervision"] = {
+                    "state": sup_status.state.value,
+                    "last_error": sup_status.last_error,
+                    "last_error_time": sup_status.last_error_time,
+                    "next_retry_at": sup_status.next_retry_at,
+                    "total_recoveries": sup_status.total_recoveries,
+                    "manual_pause": sup_status.manual_pause,
                 }
                 # Issue #3348: a channel whose credential was rejected at
                 # runtime (revoked/rotated/expired token) is surfaced as the
@@ -4108,12 +4307,7 @@ class WebSocketGateway:
                 if sup_status.state == ChannelState.CREDENTIAL_UNAVAILABLE:
                     entry["status"] = "degraded"
                     entry["reason"] = "credential unavailable"
-                channel_status[name] = entry
-            else:
-                channel_status[name] = {
-                    "platform": platform,
-                    "running": running,
-                }
+            channel_status[name] = entry
 
         # Issue #3159: surface channels that were configured but skipped at
         # startup because their credential was unavailable. Without this a
@@ -4136,6 +4330,7 @@ class WebSocketGateway:
             "sessions": len(self._sessions),
             "clients": len(self._clients),
             "channels": channel_status,
+            "last_inbound_at": self._last_inbound_ts,
         }
 
         # Issue #3021: surface opt-in lifecycle state so an operator can see
@@ -4147,6 +4342,17 @@ class WebSocketGateway:
                 "scale_to_zero": self._idle_policy is not None,
                 "dormant": self._is_dormant,
                 "drain_marker_watch": self._drain_marker_policy is not None,
+            }
+
+        # Issue #3410: surface opt-in event-loop watchdog state so an operator
+        # can confirm the liveness backstop is armed. Only included when
+        # configured, so always-on gateways are unchanged.
+        watchdog = self._watchdog
+        if watchdog is not None:
+            result["watchdog"] = {
+                "enabled": True,
+                "armed": bool(getattr(watchdog, "armed", False)),
+                "wedge_after_s": watchdog.policy.wedge_after_s,
             }
 
         # Issue #3049: surface config hot-reload observability so an operator
@@ -4326,6 +4532,9 @@ class WebSocketGateway:
                 logger.info(
                     "Delivered scheduled result to %s:%s", channel, channel_id,
                 )
+                # Seed a resumable session so the user's reply in this chat
+                # resumes the job's conversation with full context (#3444).
+                self._seed_continuable_session(delivery, text)
             else:
                 logger.error(
                     "Failed to deliver scheduled result to %s:%s", channel, channel_id,
@@ -4354,10 +4563,76 @@ class WebSocketGateway:
             logger.info(
                 "Delivered scheduled result to %s:%s", channel, channel_id,
             )
+            # Seed a resumable session so the user's reply resumes context (#3444).
+            self._seed_continuable_session(delivery, text)
         except Exception as e:
             logger.error(
                 "Failed to deliver to %s:%s: %s", channel, channel_id, e,
             )
+
+    def _seed_continuable_session(self, delivery: Any, text: str) -> None:
+        """Seed a resumable session so a reply to a delivered brief has context.
+
+        Issue #3444: a scheduled/automated delivery is one-way by default — the
+        gateway sends the text and stops, so when the user replies in the same
+        chat ("dig into item 3") the reply lands as a brand-new, contextless
+        turn. Here we mirror the just-delivered text into the destination
+        channel bot's session — keyed by the same chat id an inbound reply
+        reproduces — so the reply resumes the conversation with the brief in
+        context. Reuses the existing ``mirror_to_session`` outbound-mirror path
+        (the same mechanism ``send_message`` already uses), so this adds no new
+        session machinery. Opt-out via ``DeliveryTarget.continuable=False``.
+
+        Best-effort and side-effect-free on failure: seeding must never break
+        the delivery that already succeeded.
+        """
+        if not getattr(delivery, "continuable", True):
+            return
+        channel = getattr(delivery, "channel", "") or ""
+        channel_id = getattr(delivery, "channel_id", "") or ""
+        if not channel or not channel_id:
+            return
+        bot = self.get_channel_bot(channel)
+        if bot is None:
+            for name, b in self._channel_bots.items():
+                if name.lower() == channel.lower():
+                    bot = b
+                    break
+        if bot is None:
+            return
+        # Locate the bot's BotSessionManager across the adapter variants
+        # (adapters expose it as ``_session``/``_session_mgr``, sometimes behind
+        # an inner ``_adapter``) — same discovery the outbound-messenger wiring
+        # uses so seeding reaches every shipped transport.
+        session = None
+        for holder in (bot, getattr(bot, "_adapter", None)):
+            if holder is None:
+                continue
+            for attr in ("_session", "_session_mgr"):
+                candidate = getattr(holder, attr, None)
+                if candidate is not None:
+                    session = candidate
+                    break
+            if session is not None:
+                break
+        if session is None:
+            return
+        try:
+            from praisonai_bot.bots._mirror import mirror_to_session
+            # An inbound reply from this chat resolves its session by the chat
+            # id, so mirror under ``channel_id`` — byte-identical to the key the
+            # reply will mint — with the delivered brief as the assistant turn.
+            mirror_to_session(
+                session,
+                user_id=channel_id,
+                message_text=text,
+                source_label="cron",
+            )
+            logger.info(
+                "Seeded continuable session for %s:%s", channel, channel_id,
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("continuable seed failed for %s:%s: %s", channel, channel_id, e)
 
     async def _deliver_via_outbox(
         self, outbox: Any, router: Any, route: str, text: str, idem: str,
@@ -5312,6 +5587,9 @@ class WebSocketGateway:
                 # to the same session serialise turns on the resolved id. No-op
                 # without an identity resolver (single-channel behaviour).
                 self._stamp_turn_lock_map(bot)
+                # Issue #3352: share the gateway's metrics registry so per-turn
+                # prompt-prefix drift increments ``prompt_cache_invalidations_total``.
+                self._stamp_metrics(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -5557,6 +5835,29 @@ class WebSocketGateway:
         elif hasattr(bot, "_turn_lock_map"):
             bot._turn_lock_map = lock_map
 
+    def _stamp_metrics(self, bot: Any) -> None:
+        """Share the gateway's ``GatewayMetrics`` registry with a channel bot.
+
+        Issue #3352: the concrete adapters build their own ``BotSessionManager``
+        (exposed as ``_session`` / ``_session_mgr``), which increments
+        ``prompt_cache_invalidations_total`` on per-turn prompt-prefix drift only
+        when ``session._metrics`` is set. Without this splice that reference stays
+        ``None`` for gateway-managed sessions and the counter never moves despite
+        genuine invalidations. Mirrors ``_stamp_admission_gate`` /
+        ``_stamp_identity_resolver`` and is a no-op when no registry exists
+        (``--no-metrics``), preserving today's behaviour. Called from both
+        ``start_channels`` and ``_start_single_channel`` (hot-reload).
+        """
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None:
+            return
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_metrics"):
+            sess._metrics = metrics
+
     def _register_channel_shell_cfg(
         self, channel_name: str, config: Any, ch_cfg: Dict[str, Any]
     ) -> None:
@@ -5718,6 +6019,7 @@ class WebSocketGateway:
             # its own event loop which conflicts with our gateway loop.
             # Use the lower-level API instead.
             if self._is_telegram_bot(bot):
+                self._inject_routing_handler(name, bot)
                 await self._start_telegram_bot_polling(name, bot)
             elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
                 # WhatsApp/Linear run their own aiohttp webhook servers
@@ -5775,6 +6077,7 @@ class WebSocketGateway:
         async def _routed_message_handler(message):
             if not message.sender:
                 return
+            gateway._record_channel_inbound(channel_name)
             # Determine routing context from channel type
             ch_type = message.channel.channel_type if message.channel else ""
             is_dm = ch_type in ("dm", "private")
@@ -6472,6 +6775,9 @@ class WebSocketGateway:
             # channel so a restarted channel keeps serialising turns on the
             # resolved id alongside its still-running siblings.
             self._stamp_turn_lock_map(bot)
+            # Issue #3352: re-share the metrics registry on the hot-reloaded
+            # channel so prompt-cache invalidation metering keeps working.
+            self._stamp_metrics(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
@@ -7258,6 +7564,14 @@ class WebSocketGateway:
         # Remember the drain-timeout so a later reload can rebuild the drain
         # watcher task with the same bound (Issue #3021 lifecycle reconcile).
         self._lifecycle_drain_timeout = drain_timeout_cfg
+
+        # Issue #3410: opt-in event-loop liveness watchdog. Accepts a
+        # ``watchdog:`` block nested under ``gateway:``; a CLI ``--watchdog``
+        # override (stamped on the instance) wins over / synthesises the YAML.
+        # No-op unless enabled, so always-on gateways are unchanged.
+        watchdog_cfg = gw_cfg.get("watchdog")
+        watchdog_cfg = self._merge_watchdog_overrides(watchdog_cfg)
+        self._configure_watchdog(watchdog_cfg)
 
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})

@@ -330,17 +330,26 @@ async def _execute_with_agent_async(executor_agent, task_prompt, task, tools, st
         )
 
 
-def _build_execution_context(agents_instance, task_id):
+def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     """
     Build unified execution context for task execution (DRY helper).
     Eliminates duplication between sync/async execution paths.
+
+    Args:
+        skip_memory_init: When True, skip the synchronous ``initialize_memory()``
+            call. The async path (``aexecute_task``) already attempts
+            ``initialize_memory_async()`` beforehand, so this avoids blocking the
+            event loop on a synchronous ``Memory()`` construction (and a
+            duplicate backend attempt) if that async init failed.
     """
     from .protocols import ExecutionContext
     
     task = agents_instance.tasks[task_id]
     
-    # Initialize memory before task execution
-    if not task.memory:
+    # Initialize memory before task execution. The async path (aexecute_task)
+    # already attempts initialize_memory_async() and passes skip_memory_init=True
+    # so we never block the event loop on a synchronous Memory() construction.
+    if not task.memory and not skip_memory_init:
         task.memory = task.initialize_memory()
 
     executor_agent = task.agent
@@ -842,6 +851,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         self._event_bus: Optional[EventBus] = None
         self._spawn_lock = threading.RLock()  # Thread-safe spawn operations (reentrant)
         self._team_id = str(uuid.uuid4())  # Unique team identifier
+        # Aggregate stream emitter (lazy). Fans in member agents' per-step
+        # StreamEventEmitter events, tagging each with the emitting agent's id,
+        # so a single consumer can attribute activity to a specific team member.
+        self.__stream_emitter = None
+        self.__stream_fanin_wired = False
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
@@ -960,6 +974,63 @@ class AgentTeam(SpawnAnnounceProtocol):
         except (ImportError, AttributeError):
             self._telemetry = None
 
+    @property
+    def stream_emitter(self):
+        """Aggregate ``StreamEventEmitter`` fanning in member agents' events.
+
+        Lazily created on first access. On creation it registers a forwarding
+        callback on each member agent's own ``stream_emitter`` so per-step
+        events (tool calls, text/reasoning deltas, retries, errors) surface on a
+        single team-level emitter, each tagged with the emitting agent's
+        ``agent_id``. This gives a single attach point (e.g. the CLI
+        ``--output stream-json`` bridge) parity with single-agent runs.
+
+        Zero-overhead when unused: nothing is wired unless this property is
+        accessed, and forwarding only tags ``agent_id`` when the source event
+        did not already carry one.
+        """
+        if self.__stream_emitter is None:
+            try:
+                from ..streaming.events import StreamEventEmitter
+            except ImportError:
+                return None
+            self.__stream_emitter = StreamEventEmitter()
+        if not self.__stream_fanin_wired:
+            self._wire_stream_fanin()
+        return self.__stream_emitter
+
+    def _wire_stream_fanin(self):
+        """Forward each member agent's stream events onto the team emitter.
+
+        Best-effort and idempotent: an agent whose emitter is unavailable is
+        skipped, and a forwarding callback is attached at most once per team.
+        """
+        team_emitter = self.__stream_emitter
+        if team_emitter is None:
+            return
+        self.__stream_fanin_wired = True
+        for agent in self.agents:
+            member_emitter = getattr(agent, "stream_emitter", None)
+            if member_emitter is None or not hasattr(member_emitter, "add_callback"):
+                continue
+            agent_id = getattr(agent, "agent_id", None) or getattr(agent, "display_name", None)
+            member_emitter.add_callback(self._make_fanin_callback(team_emitter, agent_id))
+
+    @staticmethod
+    def _make_fanin_callback(team_emitter, agent_id):
+        """Build a callback that re-emits an event on the team emitter."""
+        def _forward(event):
+            try:
+                if agent_id is not None and getattr(event, "agent_id", None) is None:
+                    try:
+                        event.agent_id = agent_id
+                    except (AttributeError, TypeError):
+                        pass
+                team_emitter.emit(event)
+            except Exception:
+                logger.debug("AgentTeam stream fan-in forward failed", exc_info=True)
+        return _forward
+
     def add_task(self, task):
         with self._task_id_lock:
             task_id = self.task_id_counter
@@ -1054,8 +1125,17 @@ class AgentTeam(SpawnAnnounceProtocol):
         if task.status == "not started":
             task.status = "in progress"
 
-        # Build execution context using DRY helper
-        context = _build_execution_context(self, task_id)
+        # Initialize memory asynchronously to avoid blocking the event loop on
+        # synchronous Memory() construction. The shared helper's own
+        # `if not task.memory:` guard makes this a safe no-op for the sync path.
+        if not task.memory:
+            await task.initialize_memory_async()
+
+        # Build execution context using DRY helper. skip_memory_init=True prevents
+        # the helper from falling back to the *synchronous* initialize_memory()
+        # (which would block the event loop and duplicate a failed backend attempt)
+        # when the async init above did not populate task.memory.
+        context = _build_execution_context(self, task_id, skip_memory_init=True)
 
         # Execute with agent using DRY helper
         agent_output = await _execute_with_agent_async(

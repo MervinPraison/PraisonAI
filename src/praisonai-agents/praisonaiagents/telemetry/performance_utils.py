@@ -17,7 +17,6 @@ import json
 from collections import defaultdict
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass
 

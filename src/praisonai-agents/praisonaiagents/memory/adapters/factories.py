@@ -427,8 +427,10 @@ class MongoDBMemoryAdapter:
         except Exception:
             pass  # Indexes might already exist
     
-    def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Store in MongoDB short-term collection."""
+    def _store(self, collection, text: str, memory_type: str,
+               metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Store a document in the given collection, attaching an embedding
+        when vector search is enabled (shared by short/long term tiers)."""
         from datetime import datetime, timezone
         import time
         
@@ -438,39 +440,7 @@ class MongoDBMemoryAdapter:
             "content": text,
             "metadata": metadata or {},
             "created_at": datetime.now(timezone.utc),
-            "memory_type": "short_term"
-        }
-        
-        self.short_collection.insert_one(doc)
-        return doc_id
-    
-    def search_short_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
-        """Search MongoDB short-term collection."""
-        search_filter = {"$text": {"$search": query}}
-        
-        results = []
-        for doc in self.short_collection.find(search_filter).limit(limit):
-            results.append({
-                "id": str(doc["_id"]),
-                "text": doc["content"],
-                "metadata": doc.get("metadata", {}),
-                "score": 1.0
-            })
-        
-        return results
-    
-    def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Store in MongoDB long-term collection."""
-        from datetime import datetime, timezone
-        import time
-        
-        doc_id = str(time.time_ns())
-        doc = {
-            "_id": doc_id,
-            "content": text,
-            "metadata": metadata or {},
-            "created_at": datetime.now(timezone.utc),
-            "memory_type": "long_term"
+            "memory_type": memory_type
         }
         
         # Add embedding if vector search is enabled
@@ -479,11 +449,12 @@ class MongoDBMemoryAdapter:
             if embedding:
                 doc["embedding"] = embedding
         
-        self.long_collection.insert_one(doc)
+        collection.insert_one(doc)
         return doc_id
     
-    def search_long_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
-        """Search MongoDB long-term collection."""
+    def _search(self, collection, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search a collection, preferring vector search when enabled and
+        falling back to text search (shared by short/long term tiers)."""
         results = []
         
         # Try vector search first if enabled
@@ -508,7 +479,7 @@ class MongoDBMemoryAdapter:
                 ]
                 
                 try:
-                    for doc in self.long_collection.aggregate(pipeline):
+                    for doc in collection.aggregate(pipeline):
                         results.append({
                             "id": str(doc["_id"]),
                             "text": doc["content"],
@@ -521,7 +492,7 @@ class MongoDBMemoryAdapter:
         # Fallback to text search
         if not results:
             search_filter = {"$text": {"$search": query}}
-            for doc in self.long_collection.find(search_filter).limit(limit):
+            for doc in collection.find(search_filter).limit(limit):
                 results.append({
                     "id": str(doc["_id"]),
                     "text": doc["content"],
@@ -530,6 +501,22 @@ class MongoDBMemoryAdapter:
                 })
         
         return results
+    
+    def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Store in MongoDB short-term collection."""
+        return self._store(self.short_collection, text, "short_term", metadata)
+    
+    def search_short_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
+        """Search MongoDB short-term collection."""
+        return self._search(self.short_collection, query, limit)
+    
+    def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Store in MongoDB long-term collection."""
+        return self._store(self.long_collection, text, "long_term", metadata)
+    
+    def search_long_term(self, query: str, limit: int = 5, **kwargs) -> List[Dict[str, Any]]:
+        """Search MongoDB long-term collection."""
+        return self._search(self.long_collection, query, limit)
     
     def get_all_memories(self, **kwargs) -> List[Dict[str, Any]]:
         """Get all memories from both collections."""

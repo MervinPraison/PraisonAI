@@ -10,7 +10,6 @@ LAZY IMPORT: sqlite3 is only imported when this adapter is instantiated.
 import os
 import sqlite3
 import json
-import logging
 from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Dict, List, Optional

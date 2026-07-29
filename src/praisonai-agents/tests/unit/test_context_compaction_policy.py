@@ -140,6 +140,30 @@ def test_execution_config_round_trip():
     assert config3_restored.context_compaction.preserve_last_n_turns == 7
 
 
+def test_execution_config_round_trip_preserves_retry_and_strategy():
+    """Round-trip must restore retry tuning + compaction_strategy (issue #3482)."""
+    from praisonaiagents.compaction.strategy import CompactionStrategy as ConfigCompactionStrategy
+
+    config = ExecutionConfig(
+        retry_initial_delay=3.5,
+        retry_backoff_factor=4.0,
+        retry_jitter=0.25,
+        compaction_strategy=ConfigCompactionStrategy.SUMMARIZE,
+    )
+    restored = ExecutionConfig.from_dict(config.to_dict())
+
+    assert restored.retry_initial_delay == 3.5
+    assert restored.retry_backoff_factor == 4.0
+    assert restored.retry_jitter == 0.25
+    assert restored.compaction_strategy == ConfigCompactionStrategy.SUMMARIZE
+
+
+def test_execution_config_from_dict_defaults_sandbox_mode():
+    """Omitted code_sandbox_mode should fall back to the dataclass default 'sandbox'."""
+    restored = ExecutionConfig.from_dict({})
+    assert restored.code_sandbox_mode == "sandbox"
+
+
 def test_mutable_singleton_fix():
     """Test that get_default_policy returns fresh copies."""
     policy1 = get_default_policy()

@@ -64,6 +64,13 @@ class DeliveryTarget:
                     context when the cron fires.
         deliver: Optional routing token (e.g., "origin", "telegram", "all").
                  Takes precedence over channel/channel_id when set.
+        continuable: When ``True`` (default) a delivered result seeds a
+                    resumable session so the user's reply in the same chat
+                    resumes the job's conversation with full context — the
+                    delivery is a *conversation opener*, not a dead-end.
+                    Set ``False`` for pure fire-and-forget notifications.
+                    A declarable contract only; the seeding itself is done by
+                    the gateway delivery path in the ``praisonai-bot`` layer.
     """
 
     channel: str = ""
@@ -71,6 +78,7 @@ class DeliveryTarget:
     thread_id: Optional[str] = None
     session_id: Optional[str] = None
     deliver: str = ""
+    continuable: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -83,6 +91,10 @@ class DeliveryTarget:
             d["session_id"] = self.session_id
         if self.deliver:
             d["deliver"] = self.deliver
+        # Only persist when opting out — the default (True) is implied by
+        # absence so existing serialised targets keep behaving unchanged.
+        if not self.continuable:
+            d["continuable"] = False
         return d
 
     @classmethod
@@ -93,6 +105,7 @@ class DeliveryTarget:
             thread_id=d.get("thread_id"),
             session_id=d.get("session_id"),
             deliver=d.get("deliver", ""),
+            continuable=d.get("continuable", True),
         )
 
     @classmethod

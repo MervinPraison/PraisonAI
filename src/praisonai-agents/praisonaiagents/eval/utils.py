@@ -3,7 +3,6 @@ Utility functions for PraisonAI Agents evaluation framework.
 """
 
 import json
-import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional, Union

@@ -258,6 +258,7 @@ _LAZY_IMPORTS = {
     
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'RunOutcome': ('praisonaiagents.agent.run_outcome', 'RunOutcome'),
     'RetryBackoffConfig': ('praisonaiagents.agent.retry_utils', 'RetryBackoffConfig'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
     
@@ -838,6 +839,7 @@ __all__ = [
     
     # Core classes - the essentials
     'Agent',
+    'RunOutcome',
     'RetryBackoffConfig',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
     'AgentManager',  # Silent alias for AgentTeam

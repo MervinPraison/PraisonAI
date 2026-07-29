@@ -776,6 +776,16 @@ class GatewayConfigSchema(BaseModel):
             if not channel.platform:
                 channel.platform = name
 
+        # Fail fast on route/binding targets that don't name a declared agent
+        # (Issue #3468). A one-character typo in ``routes``/``routing`` or a
+        # ``bindings`` ``agent`` key must not silently misroute to some other
+        # agent at runtime — surface it here (and in ``gateway doctor``, which
+        # loads via this schema) with the channel, the bad target, and the
+        # closest valid agent id. Only enforced when ``agents:`` is declared,
+        # so single-bot configs (top-level ``agent``/``platform``) are
+        # unaffected and stay backward-compatible.
+        self._validate_route_targets()
+
         # Wire plugin-declared config fields (Issue #2801): a channel registered
         # with a descriptor can resolve env fallbacks and enforce its required
         # fields. Descriptor lookup is best-effort — built-in platforms without
@@ -795,6 +805,50 @@ class GatewayConfigSchema(BaseModel):
                     channel.apply_channel_descriptor(descriptor)
 
         return self
+
+    def _validate_route_targets(self) -> None:
+        """Fail fast when a route/binding names an undeclared agent (#3468).
+
+        Cross-checks every channel's ``routes``/``routing`` targets (including
+        the ``default`` slot) and each ``bindings`` entry's ``agent`` against
+        the declared ``agents:`` map. A typo becomes an actionable load-time
+        error naming the channel, the bad target, and the closest valid agent
+        id — instead of a runtime ``logger.warning`` and a silent misroute.
+
+        Only runs when ``agents:`` is declared. Single-bot configs (top-level
+        ``agent``/``platform``) have no agent map to check against and are
+        left untouched for backward compatibility.
+        """
+        agent_ids = set(self.agents or {})
+        if not agent_ids:
+            return
+
+        import difflib
+
+        def _hint(target: str) -> str:
+            valid = ", ".join(sorted(agent_ids))
+            close = difflib.get_close_matches(target, agent_ids, n=1)
+            if close:
+                return f"did you mean '{close[0]}'? valid agents: {valid}"
+            return f"valid agents: {valid}"
+
+        for ch_name, channel in self.channels.items():
+            routes = dict(channel.routes or {})
+            if channel.routing:
+                routes.update(channel.routing)
+            for slot, target in routes.items():
+                if target is not None and target not in agent_ids:
+                    raise ValueError(
+                        f"channel '{ch_name}' route '{slot}' -> unknown agent "
+                        f"'{target}'; {_hint(target)}"
+                    )
+            for binding in channel.bindings or []:
+                target = binding.get("agent") if isinstance(binding, dict) else None
+                if target is not None and target not in agent_ids:
+                    raise ValueError(
+                        f"channel '{ch_name}' binding -> unknown agent "
+                        f"'{target}'; {_hint(target)}"
+                    )
 
 
 # Legacy alias for backward compatibility

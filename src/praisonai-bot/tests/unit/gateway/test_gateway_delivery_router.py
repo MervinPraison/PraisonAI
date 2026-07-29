@@ -353,6 +353,99 @@ def test_scheduled_delivery_with_backlogged_row_uses_own_key():
     assert texts == ["backlogged report", "fresh report"]
 
 
+# ─── Continuable delivery seeds a resumable session (issue #3444) ─────
+
+
+class _SeededSessionMgr:
+    """Minimal BotSessionManager stub recording mirror-seed entries."""
+
+    def __init__(self):
+        self.seeds = []
+
+    def _storage_key(self, user_id):
+        return f"key:{user_id}"
+
+    def _add_mirror_entry_sync(self, user_id, entry):
+        self.seeds.append((user_id, entry))
+        return True
+
+
+class _SessionBot(_RecordingBot):
+    """Recording bot that also exposes a session manager for seeding."""
+
+    def __init__(self, fail_times: int = 0):
+        super().__init__(fail_times=fail_times)
+        self._session = _SeededSessionMgr()
+
+
+def test_continuable_delivery_seeds_reply_session():
+    """A continuable scheduled delivery seeds the reply session with context."""
+    bot = _SessionBot()
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1", continuable=True,
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "daily report"))
+
+    assert bot.sends == [("-100123", "daily report", None)]
+    # The reply key is the chat id an inbound reply reproduces.
+    assert [uid for uid, _ in bot._session.seeds] == ["-100123"]
+    entry = bot._session.seeds[0][1]
+    assert entry["content"] == "daily report"
+    assert entry["mirror"] is True
+    assert entry["mirror_source"] == "cron"
+
+
+def test_non_continuable_delivery_does_not_seed():
+    """``continuable=False`` delivers but leaves no resumable session."""
+    bot = _SessionBot()
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1", continuable=False,
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "fire and forget"))
+
+    assert bot.sends == [("-100123", "fire and forget", None)]
+    assert bot._session.seeds == []
+
+
+def test_continuable_defaults_true_for_legacy_delivery():
+    """A delivery target without the field seeds by default (opt-out only)."""
+    bot = _SessionBot()
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1",
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "legacy report"))
+
+    assert [uid for uid, _ in bot._session.seeds] == ["-100123"]
+
+
+def test_continuable_seed_failure_never_breaks_delivery():
+    """A seed error is swallowed — the successful delivery still stands."""
+    bot = _SessionBot()
+
+    def _boom(user_id, entry):
+        raise RuntimeError("seed boom")
+
+    bot._session._add_mirror_entry_sync = _boom
+    gw = _make_gateway_with_bot(bot)
+    delivery = SimpleNamespace(
+        channel="telegram", channel_id="-100123", thread_id=None,
+        session_id="cron_job1", continuable=True,
+    )
+
+    asyncio.run(gw._deliver_scheduled_result(delivery, "report"))
+
+    assert bot.sends == [("-100123", "report", None)]
+
+
 # ─── DeliveryRouter thread routing (issue #3141) ─────────────────────
 
 

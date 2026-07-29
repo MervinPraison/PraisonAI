@@ -5,7 +5,6 @@ Provides base plugin class and hook definitions.
 PluginHook is now an alias for HookEvent (DRY compliance).
 """
 
-import logging
 from praisonaiagents._logging import get_logger
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
