@@ -2839,9 +2839,19 @@ Conversation:
 
 Summary:"""
                 
-                # Use agent's LLM to generate summary
+                # Use agent's LLM to generate summary. Route this internal,
+                # non-user-facing call through the configured auxiliary
+                # ``small_model`` when set; otherwise fall back to the primary
+                # model (unchanged behaviour).
                 client = _get_llm_functions()['get_openai_client'](self.llm, self.base_url, self.api_key)
-                model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+                primary_model = self.llm if isinstance(self.llm, str) else None
+                try:
+                    from ..config.loader import get_small_model
+                    model_name = get_small_model(
+                        primary_model=primary_model, fallback="gpt-4o-mini"
+                    ) or "gpt-4o-mini"
+                except Exception:
+                    model_name = primary_model or "gpt-4o-mini"
                 
                 response = client.chat.completions.create(
                     model=model_name,
@@ -5612,6 +5622,16 @@ Answer:"""
             # Prefer the configured LLM instance (with api_key/base_url/client
             # overrides) over the bare model-name string in self.llm.
             llm = getattr(self, 'llm_instance', None) or getattr(self, 'llm', None)
+            # Guardrail validation is an internal, non-user-facing LLM call.
+            # When it would fall back to the bare primary model-name string
+            # (no explicit LLM instance), route through the auxiliary
+            # ``small_model`` (unset -> primary model, i.e. unchanged behaviour).
+            if isinstance(llm, str):
+                try:
+                    from ..config.loader import get_small_model
+                    llm = get_small_model(primary_model=llm, fallback=llm) or llm
+                except Exception:
+                    pass
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
