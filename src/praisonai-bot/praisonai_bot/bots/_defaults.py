@@ -561,7 +561,10 @@ def enable_shell_tools(
     if "execute_command" not in instructions.lower():
         agent.instructions = (
             instructions
-            + "\n\nYou can run shell commands on the bot server using the execute_command tool."
+            + "\n\nYou can run shell commands on the bot server using the execute_command "
+            "tool. When a user asks you to run a command, actually call execute_command "
+            "and report its output back: include the command's stdout verbatim in your "
+            "reply. Do not claim there was no output when the tool returned stdout."
         ).strip()
 
     deny = set(getattr(agent, "_perm_deny", None) or frozenset())
