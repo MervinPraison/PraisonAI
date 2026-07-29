@@ -205,12 +205,13 @@ def fetch_remote_skill_dirs(sources, cache_dir: Optional[Path] = None) -> List[P
                 if not (p.exists() and p.is_dir()):
                     continue
                 # discover_skills scans the *children* of each returned dir for
-                # skill subdirectories. If the cache dir is itself a single
-                # top-level skill (SKILL.md at its root), return its parent so
-                # the existing scan finds it; otherwise return the dir as-is.
-                target = p.parent if (p / "SKILL.md").exists() else p
-                if _has_skill(p) and target not in dirs:
-                    dirs.append(target)
+                # skill subdirectories, but also treats a returned dir that is
+                # *itself* a skill (SKILL.md at its root) as a single skill.
+                # So we always return the fetched dir as-is: never its parent,
+                # which for a root-level skill would also contain the versioned
+                # cache dir and its ``current`` alias and double-count the skill.
+                if _has_skill(p) and p not in dirs:
+                    dirs.append(p)
         except Exception as exc:  # noqa: BLE001 - never break discovery
             logger.warning("Remote skill source failed: %s", exc)
     return dirs

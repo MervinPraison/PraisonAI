@@ -264,7 +264,11 @@ def skills_sync(
         praisonai skills sync           # uses skills.urls from config
     """
     try:
-        from praisonaiagents.skills import fetch_remote_skill_dirs, validate as validate_skill
+        from praisonaiagents.skills import (
+            fetch_remote_skill_dirs,
+            discover_skills,
+            validate as validate_skill,
+        )
     except ImportError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -287,43 +291,72 @@ def skills_sync(
         typer.echo("Sync produced no skills (offline or empty source).", err=True)
         raise typer.Exit(1)
 
-    from pathlib import Path
+    # Re-use the canonical scanner so both layouts (skill-per-subdir and a
+    # single root-level skill) are handled and de-duplicated identically to
+    # normal discovery, instead of re-implementing the scan and double-counting.
+    skills = discover_skills([str(d) for d in dirs], include_defaults=False)
 
     count = 0
-    for parent in dirs:
-        for child in Path(parent).iterdir():
-            if child.is_dir() and (child / "SKILL.md").exists():
-                errors = validate_skill(child)
-                if errors:
-                    typer.echo(f"  ! {child.name}: {'; '.join(errors)}", err=True)
-                else:
-                    count += 1
-                    typer.echo(f"  ✓ {child.name}")
+    for skill in skills:
+        errors = validate_skill(skill.path) if skill.path else ["missing path"]
+        if errors:
+            typer.echo(f"  ! {skill.name}: {'; '.join(errors)}", err=True)
+        else:
+            count += 1
+            typer.echo(f"  ✓ {skill.name}")
     typer.echo(f"Synced {count} skill(s) into the local cache.")
 
 
 def _load_configured_skill_sources():
-    """Read skills.urls / skills.sources from the PraisonAI config, if present."""
+    """Read skills.urls / skills.sources from PraisonAI config, if present.
+
+    Looks in both the project-level ``praisonai.yaml``/``praisonai.yml`` (so a
+    repo can declare shared skill sources) and the user-global
+    ``~/.praisonai/config.yaml``. Project entries take precedence and are
+    listed first; duplicates are removed while preserving order.
+    """
     try:
         import yaml
-        from praisonaiagents.paths import get_config_path
     except ImportError:
         return []
 
-    cfg_path = get_config_path()
-    if not cfg_path.exists():
-        return []
+    from pathlib import Path
+
+    def _extract(path: Path):
+        if not path.exists():
+            return []
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except Exception:
+            return []
+        skills_cfg = data.get("skills") or {}
+        if not isinstance(skills_cfg, dict):
+            return []
+        srcs = skills_cfg.get("urls") or skills_cfg.get("sources") or []
+        if isinstance(srcs, str):
+            srcs = [srcs]
+        return list(srcs)
+
+    candidates = []
+    cwd = Path.cwd()
+    for name in ("praisonai.yaml", "praisonai.yml"):
+        candidates.append(cwd / name)
     try:
-        data = yaml.safe_load(cfg_path.read_text()) or {}
-    except Exception:
-        return []
-    skills_cfg = data.get("skills") or {}
-    if not isinstance(skills_cfg, dict):
-        return []
-    sources = skills_cfg.get("urls") or skills_cfg.get("sources") or []
-    if isinstance(sources, str):
-        sources = [sources]
-    return list(sources)
+        from praisonaiagents.paths import get_config_path
+
+        candidates.append(get_config_path())
+    except ImportError:
+        pass
+
+    ordered = []
+    seen = set()
+    for path in candidates:
+        for src in _extract(path):
+            key = src if isinstance(src, str) else repr(src)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(src)
+    return ordered
 
 
 @app.command("search")

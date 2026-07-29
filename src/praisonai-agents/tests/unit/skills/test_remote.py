@@ -33,6 +33,19 @@ def _make_git_repo(tmp_path: Path, skill_name: str) -> Path:
     return repo
 
 
+def _make_root_skill_git_repo(tmp_path: Path, skill_name: str) -> Path:
+    """A repo whose SKILL.md sits at the repository root (single skill)."""
+    repo = tmp_path / "remote-root-repo"
+    repo.mkdir()
+    _git(["init"], repo)
+    _git(["config", "user.email", "t@t.com"], repo)
+    _git(["config", "user.name", "t"], repo)
+    _make_skill(repo, skill_name)
+    _git(["add", "-A"], repo)
+    _git(["commit", "-m", "init"], repo)
+    return repo
+
+
 class _FakeSource:
     """In-memory source that copies a fixed skill tree into the cache."""
 
@@ -127,6 +140,32 @@ class TestGitRemoteSkillSource:
         source = GitRemoteSkillSource("https://invalid.invalid/nope.git")
         dirs = source.fetch(tmp_path / "cache")
         assert dirs == []
+
+
+class TestRootLevelSkillRepo:
+    def test_root_skill_discovered_exactly_once(self, tmp_path):
+        """A repo with SKILL.md at its root must not be counted twice.
+
+        Regression: the fetched ``current`` alias lives next to its versioned
+        cache dir; returning the parent would surface both and double-count.
+        """
+        from praisonaiagents.skills.remote import (
+            GitRemoteSkillSource,
+            fetch_remote_skill_dirs,
+        )
+        from praisonaiagents.skills.discovery import discover_skills
+
+        repo = _make_root_skill_git_repo(tmp_path, "root-skill")
+        cache = tmp_path / "cache"
+
+        dirs = fetch_remote_skill_dirs([repo.as_uri()], cache_dir=cache)
+        assert dirs, "expected the root-level skill dir to be returned"
+
+        skills = discover_skills(
+            [str(d) for d in dirs], include_defaults=False
+        )
+        names = [s.name for s in skills]
+        assert names.count("root-skill") == 1, names
 
 
 class TestValidatorAppliedToFetched:

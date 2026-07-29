@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from .parser import find_skill_md, read_properties
 from .models import SkillProperties
-from ..paths import get_skills_dir, get_project_data_dir
+from ..paths import get_skills_dir, get_project_data_dir, get_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,22 @@ def get_default_skill_dirs() -> List[Path]:
     user_skills = get_skills_dir()
     if user_skills.exists() and user_skills.is_dir():
         dirs.append(user_skills)
+
+    # Remote skill cache populated by `praisonai skills sync` (declarative
+    # remote sources). Each source keeps a `current` alias pointing at its
+    # last-good versioned tree; adding those makes synced remote skills
+    # discoverable by every agent without re-running install. Cheap: a couple
+    # of `exists()` checks, no network and no YAML parsing. Lowest precedence
+    # (appended after user skills) so local always wins.
+    remote_cache = get_cache_dir() / "remote-skills"
+    if remote_cache.exists() and remote_cache.is_dir():
+        try:
+            for source_dir in remote_cache.iterdir():
+                current = source_dir / "current"
+                if current.exists() and current.is_dir() and current not in dirs:
+                    dirs.append(current)
+        except OSError:
+            pass
 
     # System-level directory (Unix-like systems)
     system_dir = Path("/etc/praison/skills")
@@ -111,34 +127,35 @@ def discover_skills(
 
     skills = []
 
+    def _add_skill(item: Path) -> None:
+        # Check if this directory contains a SKILL.md
+        if find_skill_md(item) is None:
+            return
+        try:
+            props = read_properties(item)
+        except Exception as exc:
+            logger.warning("Skipping invalid skill %s: %s", item, exc)
+            return
+        # G9: log collisions so users can see which skill won
+        if any(p.name == props.name for p in skills):
+            logger.info(
+                "Skill '%s' at %s shadowed by earlier entry (precedence).",
+                props.name, item,
+            )
+            return
+        skills.append(props)
+
     for parent_dir in unique_dirs:
-        # Each subdirectory in parent_dir might be a skill
+        # A returned dir may itself be a single skill (SKILL.md at its root,
+        # e.g. a remote repo cached as one skill) or a parent holding skill
+        # subdirectories. Handle both without double-counting.
+        if find_skill_md(parent_dir) is not None:
+            _add_skill(parent_dir)
+            continue
         try:
             for item in parent_dir.iterdir():
-                if not item.is_dir():
-                    continue
-
-                # Check if this directory contains a SKILL.md
-                skill_md = find_skill_md(item)
-                if skill_md is None:
-                    continue
-
-                try:
-                    props = read_properties(item)
-                except Exception as exc:
-                    logger.warning(
-                        "Skipping invalid skill %s: %s", item, exc,
-                    )
-                    continue
-
-                # G9: log collisions so users can see which skill won
-                if any(p.name == props.name for p in skills):
-                    logger.info(
-                        "Skill '%s' at %s shadowed by earlier entry (precedence).",
-                        props.name, item,
-                    )
-                    continue
-                skills.append(props)
+                if item.is_dir():
+                    _add_skill(item)
         except PermissionError as exc:
             logger.warning("Cannot read skills directory %s: %s", parent_dir, exc)
             continue
