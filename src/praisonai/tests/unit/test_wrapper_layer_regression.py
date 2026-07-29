@@ -288,7 +288,7 @@ class TestObservabilityFinalization:
         
         finalize_observability("test_framework", status="Success")
         
-        mock_end_agentops.assert_called_once_with("Success")
+        mock_end_agentops.assert_called_once_with("Success", None)
     
     @patch('praisonai.observability.hooks._end_agentops')
     def test_finalize_observability_failure(self, mock_end_agentops):
@@ -297,7 +297,7 @@ class TestObservabilityFinalization:
         
         finalize_observability("test_framework", status="Failure")
         
-        mock_end_agentops.assert_called_once_with("Failure")
+        mock_end_agentops.assert_called_once_with("Failure", None)
     
     @patch('praisonai.observability.hooks._end_agentops')
     def test_finalize_observability_default_status(self, mock_end_agentops):
@@ -306,7 +306,7 @@ class TestObservabilityFinalization:
         
         finalize_observability("test_framework")
         
-        mock_end_agentops.assert_called_once_with("Success")
+        mock_end_agentops.assert_called_once_with("Success", None)
     
     @patch('praisonai.observability.hooks.logger')
     def test_end_agentops_import_error_handling(self, mock_logger):
@@ -723,3 +723,160 @@ class TestIssue3402YamlTeamSessionContinuity:
 
         PraisonAIAdapter._rehydrate_team_chat_history(team)
         assert agent.chat_history == [{"role": "user", "content": "hi"}]
+
+
+class TestIssue3492WrapperGaps:
+    """Regression tests for issue #3492 (three cross-cutting wrapper gaps)."""
+
+    def test_gap1_agentops_session_scoped_per_run(self):
+        """When the AgentOps SDK exposes ``start_session``, the session handle is
+        stored on the ObservabilityRun (per-run) and ended via that handle, not
+        the process-global ``end_session``."""
+        from praisonai.observability.hooks import (
+            _init_agentops,
+            _end_agentops,
+            ObservabilityRun,
+        )
+
+        session = Mock()
+        fake_agentops = Mock()
+        fake_agentops.start_session.return_value = session
+
+        run = ObservabilityRun()
+        with patch.dict('sys.modules', {'agentops': fake_agentops}), \
+                patch.dict('os.environ', {'AGENTOPS_API_KEY': 'k'}):
+            _init_agentops("praisonai", [], run)
+            assert run.agentops_session is session
+            _end_agentops("Success", run)
+
+        session.end_session.assert_called_once_with("Success")
+        fake_agentops.end_session.assert_not_called()
+
+    def test_gap1_failed_start_session_does_not_cross_finalize(self):
+        """When ``start_session`` is available but yields no usable handle
+        (returns None / raises), teardown must NOT fall back to the package-global
+        ``end_session`` — doing so would truncate a concurrent run's live session."""
+        from praisonai.observability.hooks import (
+            _init_agentops,
+            _end_agentops,
+            ObservabilityRun,
+        )
+
+        fake_agentops = Mock()
+        fake_agentops.start_session.return_value = None  # per-session start failed
+
+        run = ObservabilityRun()
+        with patch.dict('sys.modules', {'agentops': fake_agentops}), \
+                patch.dict('os.environ', {'AGENTOPS_API_KEY': 'k'}):
+            _init_agentops("praisonai", [], run)
+            assert run._agentops_mode == "session"
+            assert run.agentops_session is None
+            _end_agentops("Success", run)
+
+        # Never touched the process-global session belonging to another run.
+        fake_agentops.end_session.assert_not_called()
+
+    def test_gap1_legacy_singleton_path_ends_global_session(self):
+        """Without ``start_session`` (legacy SDK), init uses the singleton and
+        teardown ends the package-global session for that run."""
+        from praisonai.observability.hooks import (
+            _init_agentops,
+            _end_agentops,
+            ObservabilityRun,
+        )
+
+        fake_agentops = Mock(spec=["init", "end_session"])  # no start_session
+
+        run = ObservabilityRun()
+        with patch.dict('sys.modules', {'agentops': fake_agentops}), \
+                patch.dict('os.environ', {'AGENTOPS_API_KEY': 'k'}):
+            _init_agentops("praisonai", [], run)
+            assert run._agentops_mode == "global"
+            _end_agentops("Success", run)
+
+        fake_agentops.end_session.assert_called_once_with("Success")
+
+    def test_gap3_capability_cache_isolated_per_registry(self):
+        """The capability cache is per-registry: two registries that register a
+        different adapter under the same name must not read each other's flags."""
+        from praisonai.framework_adapters.registry import (
+            FrameworkAdapterRegistry,
+            adapter_capability,
+        )
+
+        class _CapAdapter:
+            SUPPORTS_WORKFLOW = True
+
+            def is_available(self):
+                return True
+
+        class _NoCapAdapter:
+            SUPPORTS_WORKFLOW = False
+
+            def is_available(self):
+                return True
+
+        reg_a = FrameworkAdapterRegistry(discover_entry_points=False)
+        reg_b = FrameworkAdapterRegistry(discover_entry_points=False)
+        reg_a.register("shared", _CapAdapter)
+        reg_b.register("shared", _NoCapAdapter)
+
+        # Prime reg_a's cache, then confirm reg_b resolves its OWN adapter's flag.
+        assert adapter_capability("shared", "SUPPORTS_WORKFLOW", registry=reg_a) is True
+        assert adapter_capability("shared", "SUPPORTS_WORKFLOW", registry=reg_b) is False
+        # Re-read reg_a: still its own cached value, not reg_b's.
+        assert adapter_capability("shared", "SUPPORTS_WORKFLOW", registry=reg_a) is True
+
+    def test_gap2_run_sync_or_offload_from_running_loop(self):
+        """``run_sync_or_offload`` must drive a coroutine to completion even when
+        called from inside a running event loop (where ``run_sync`` raises)."""
+        import asyncio
+        from praisonai._async_bridge import run_sync_or_offload
+
+        async def _work():
+            return 42
+
+        async def _main():
+            # We are inside a running loop here; a bare run_sync would raise.
+            return run_sync_or_offload(_work())
+
+        assert asyncio.run(_main()) == 42
+
+    def test_gap2_run_sync_or_offload_plain_sync_caller(self):
+        from praisonai._async_bridge import run_sync_or_offload
+
+        async def _work():
+            return "ok"
+
+        assert run_sync_or_offload(_work()) == "ok"
+
+    def test_gap3_adapter_capability_reads_flag_not_name(self):
+        """``adapter_capability`` returns the class flag for a resolvable adapter
+        and None (not a name vote) when the adapter can't be resolved."""
+        from praisonai.framework_adapters.registry import adapter_capability
+
+        assert adapter_capability("praisonai", "SUPPORTS_WORKFLOW") is True
+        # An unregistered/unresolvable name yields None, never a name-based True.
+        assert adapter_capability("no_such_framework_xyz", "SUPPORTS_WORKFLOW") is None
+
+    def test_gap3_runtime_features_refuse_when_unresolvable(self):
+        """When only a name is supplied and the adapter is unresolvable, runtime
+        features must be refused with a clear message instead of a silent
+        name-based downgrade."""
+        from praisonai.agents_generator import AgentsGenerator
+
+        generator = AgentsGenerator(
+            agent_file=None,
+            framework='praisonai',
+            config_list=[{"model": "gpt-4o-mini"}],
+        )
+        config = {
+            'roles': {
+                'a': {
+                    'role': 'A', 'goal': 'g', 'backstory': 'b',
+                    'cli_backend': 'claude-code',
+                }
+            }
+        }
+        with pytest.raises(ValueError, match="Cannot verify runtime-feature support"):
+            generator._validate_cli_backend_compatibility(config, 'no_such_framework_xyz')

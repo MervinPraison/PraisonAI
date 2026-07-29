@@ -8,7 +8,7 @@ Uses dependency injection instead of singleton pattern.
 
 from __future__ import annotations
 
-from typing import Dict, Type, Optional
+from typing import Type, Optional
 import inspect
 import logging
 import threading
@@ -83,6 +83,14 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         self._avail_cache: dict[str, bool] = {}
         self._avail_lock = threading.Lock()
         self._validated_classes: set[type] = set()
+        # Capability probes (SUPPORTS_WORKFLOW / SUPPORTS_RUNTIME_FEATURES / ...)
+        # are memoised PER REGISTRY, not process-globally: two registries can
+        # register different adapters under the same name, so a shared cache
+        # keyed only by (name, flag) would return one registry's flag for the
+        # other's adapter. Keying on the instance keeps each registry's answers
+        # isolated while still skipping repeated construction on the hot path.
+        self._cap_cache: dict[tuple[str, str], bool] = {}
+        self._cap_lock = threading.Lock()
 
     def pick_default(self) -> str:
         """Return the name of the default framework to use.
@@ -306,6 +314,47 @@ def get_install_hint(name: str, *, registry: Optional[FrameworkAdapterRegistry] 
         "pydantic_ai": "pydantic-ai",
     }.get(name, name)
     return f"pip install 'praisonai-frameworks[{extra_name}]'"
+
+
+def adapter_capability(
+    name: str,
+    flag: str,
+    *,
+    registry: Optional[FrameworkAdapterRegistry] = None,
+) -> Optional[bool]:
+    """Return the value of capability ``flag`` on adapter ``name``.
+
+    Reads the capability from the adapter class attribute (e.g.
+    ``SUPPORTS_WORKFLOW`` / ``SUPPORTS_RUNTIME_FEATURES``) instead of hardcoding
+    a framework-name check, so third-party adapters are first-class citizens.
+
+    Returns ``None`` when the adapter cannot currently be resolved (missing
+    optional dependency, lazy-loader race, ``is_available`` probe raising, ...).
+    Callers decide whether ``None`` means "refuse the operation" or "fall back",
+    but they should never fall back to a hardcoded framework-name check.
+
+    Successful probes are memoised **on the resolving registry** (not a process
+    global) so two registries that register different adapters under the same
+    name never read each other's flags. An adapter that reported ``True`` once is
+    not silently downgraded if its next construction attempt transiently raises.
+    """
+    if registry is None:
+        registry = get_default_registry()
+
+    key = (name.lower(), flag)
+    with registry._cap_lock:
+        cached = registry._cap_cache.get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        adapter = registry.create(name)
+    except Exception:
+        return None
+    value = bool(getattr(adapter, flag, False))
+    with registry._cap_lock:
+        registry._cap_cache[key] = value
+    return value
 
 
 def framework_option_help() -> str:

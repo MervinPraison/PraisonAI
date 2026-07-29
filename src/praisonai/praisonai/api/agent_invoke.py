@@ -354,10 +354,12 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 # Async agent
                 result = await agent.astart(request.message)
             elif _supports_sync_start(agent):
-                # Sync agent - run in thread pool to avoid blocking the event loop
+                # Sync agent - run in a worker thread to avoid blocking the event
+                # loop. ``asyncio.to_thread`` is the correct primitive inside a
+                # running request coroutine (``get_event_loop()`` is deprecated
+                # there since Python 3.10).
                 import asyncio
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, agent.start, request.message)
+                result = await asyncio.to_thread(agent.start, request.message)
             else:
                 raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
             
@@ -497,10 +499,12 @@ async def invoke_agent_standalone(
         if _supports_async_start(agent):
             result = await agent.astart(message)
         elif _supports_sync_start(agent):
-            # Sync agent - run in thread pool to avoid blocking the event loop
+            # Sync agent - run in a worker thread to avoid blocking the event
+            # loop. ``asyncio.to_thread`` is the correct primitive inside a
+            # running request coroutine (``get_event_loop()`` is deprecated
+            # there since Python 3.10).
             import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, agent.start, message)
+            result = await asyncio.to_thread(agent.start, message)
         else:
             raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
         

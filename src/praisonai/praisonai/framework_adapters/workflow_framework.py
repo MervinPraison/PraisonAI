@@ -19,27 +19,22 @@ def validate_workflow_framework(
     not advertise workflow support.
 
     Instead of hardcoding ``framework == "praisonai"``, ask the adapter via its
-    ``SUPPORTS_WORKFLOW`` capability flag. Third-party adapters registered via
-    the ``praisonai.framework_adapters`` entry-point group can opt in by setting
-    ``SUPPORTS_WORKFLOW = True``. The native ``praisonai`` adapter sets it, so
-    behaviour is unchanged for existing configs.
+    ``SUPPORTS_WORKFLOW`` capability flag through ``adapter_capability``. Third-
+    party adapters registered via the ``praisonai.framework_adapters`` entry-
+    point group can opt in by setting ``SUPPORTS_WORKFLOW = True``. The native
+    ``praisonai`` adapter sets it, so behaviour is unchanged for existing
+    configs. A transient resolution failure no longer silently demotes a
+    third-party adapter to the native-only name check.
     """
     if not framework:
         return
 
-    # Consult the adapter's capability flag. If resolution fails for any reason,
-    # fall back to the historical native-only behaviour.
-    try:
-        if registry is None:
-            from .registry import get_default_registry
+    from .registry import adapter_capability
 
-            registry = get_default_registry()
-        adapter = registry.create(framework)
-        if getattr(adapter, "SUPPORTS_WORKFLOW", False):
-            return
-    except Exception:
-        if str(framework).lower() == "praisonai":
-            return
+    # Consult the adapter's capability flag (memoised). ``True`` means supported;
+    # ``False``/``None`` fall through to the guidance below.
+    if adapter_capability(framework, "SUPPORTS_WORKFLOW", registry=registry) is True:
+        return
 
     # Discover the set of frameworks whose adapters advertise workflow support,
     # so the guidance reflects capability flags rather than assuming praisonai
@@ -56,12 +51,7 @@ def validate_workflow_framework(
 
     if list_framework_choices is not None:
         for name in list_framework_choices(include_unavailable=True):
-            try:
-                candidate = registry.create(name) if registry is not None else None
-            except Exception:
-                candidate = None
-            if (candidate is not None and getattr(candidate, "SUPPORTS_WORKFLOW", False)) \
-                    or (candidate is None and str(name).lower() == "praisonai"):
+            if adapter_capability(name, "SUPPORTS_WORKFLOW", registry=registry) is True:
                 workflow_frameworks.append(name)
         if workflow_frameworks:
             supported = (
