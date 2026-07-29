@@ -80,7 +80,7 @@ class ACPSession:
         """Serialize session to dictionary."""
         return {
             "session_id": self.session_id,
-            "workspace": str(self.workspace),
+            "workspace": self.workspace.as_posix(),
             "created_at": self.created_at,
             "last_activity": self.last_activity,
             "agent_id": self.agent_id,
