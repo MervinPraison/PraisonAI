@@ -470,7 +470,11 @@ class Task:
             from ..guardrails import LLMGuardrail
             if not self.agent:
                 raise ValueError("Agent is required for string-based guardrails")
-            llm = getattr(self.agent, 'llm', None) or getattr(self.agent, 'llm_instance', None)
+            # Prefer the configured LLM instance (with api_key/base_url/client
+            # overrides) over the bare model-name string in agent.llm, matching
+            # Agent._setup_guardrail. Using the bare string would drop custom
+            # provider/endpoint settings and authenticate against the wrong backend.
+            llm = getattr(self.agent, 'llm_instance', None) or getattr(self.agent, 'llm', None)
             # Guardrail validation is an internal, non-user-facing LLM call.
             # Route a plain model-name string through the auxiliary
             # ``small_model`` when configured (unset -> primary, unchanged).

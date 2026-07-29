@@ -116,5 +116,47 @@ class TestGuardrailRouting:
         assert captured["llm"] == "primary-model"
 
 
+class TestTaskGuardrailRouting:
+    def test_task_guardrail_uses_small_model_for_string_llm(self, monkeypatch):
+        _patch_small_model(monkeypatch, "cheap-model")
+
+        from praisonaiagents.task.task import Task
+
+        captured = {}
+
+        class _StubGuardrail:
+            def __init__(self, description, llm=None):
+                captured["llm"] = llm
+
+        agent = Agent(instructions="test", llm="primary-model")
+
+        with patch("praisonaiagents.guardrails.LLMGuardrail", _StubGuardrail):
+            Task(description="d", expected_output="o", agent=agent, guardrail="be nice")
+
+        assert captured["llm"] == "cheap-model"
+
+    def test_task_guardrail_prefers_llm_instance(self, monkeypatch):
+        """A configured LLM instance (with endpoint/api-key) must win over the
+        bare model-name string and must NOT be rerouted to small_model."""
+        _patch_small_model(monkeypatch, "cheap-model")
+
+        from praisonaiagents.task.task import Task
+
+        captured = {}
+
+        class _StubGuardrail:
+            def __init__(self, description, llm=None):
+                captured["llm"] = llm
+
+        agent = Agent(instructions="test", llm="primary-model")
+        sentinel_instance = object()
+        agent.llm_instance = sentinel_instance
+
+        with patch("praisonaiagents.guardrails.LLMGuardrail", _StubGuardrail):
+            Task(description="d", expected_output="o", agent=agent, guardrail="be nice")
+
+        assert captured["llm"] is sentinel_instance
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
