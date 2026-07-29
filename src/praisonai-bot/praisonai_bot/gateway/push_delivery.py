@@ -37,8 +37,9 @@ class SqlitePushStore:
 
     Mirrors the established ``OutboundQueue`` pattern (WAL journal, stdlib
     ``sqlite3``, per-instance lock, TTL eviction) so the at-least-once push
-    guarantee survives a gateway restart without any external service. Only the
-    not-yet-acknowledged events are persisted; each is evicted on ack or once
+    guarantee survives a gateway restart without any external service. Each
+    row records the recipient ``client_id`` alongside the event so pending
+    deliveries can be reconstructed on startup; each is evicted on ack or once
     older than ``message_ttl``.
     """
 
@@ -63,20 +64,35 @@ class SqlitePushStore:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS push_delivery (
                     event_id TEXT PRIMARY KEY,
+                    client_id TEXT,
                     ts REAL NOT NULL,
                     payload TEXT NOT NULL
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_push_ts ON push_delivery(ts)")
+            # Backfill the recipient column for stores created before the
+            # durable-recipient fix so pre-existing rows still load cleanly.
+            cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(push_delivery)").fetchall()
+            }
+            if "client_id" not in cols:
+                conn.execute("ALTER TABLE push_delivery ADD COLUMN client_id TEXT")
             conn.commit()
 
-    def put(self, event_id: str, payload: Dict[str, Any], ts: float) -> None:
-        """Persist (or replace) a pending event."""
+    def put(
+        self,
+        event_id: str,
+        payload: Dict[str, Any],
+        ts: float,
+        client_id: Optional[str] = None,
+    ) -> None:
+        """Persist (or replace) a pending event and its recipient."""
         with self._lock, closing(self._connect()) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO push_delivery(event_id, ts, payload) "
-                "VALUES (?, ?, ?)",
-                (event_id, ts, json.dumps(payload)),
+                "INSERT OR REPLACE INTO push_delivery(event_id, client_id, ts, payload) "
+                "VALUES (?, ?, ?, ?)",
+                (event_id, client_id, ts, json.dumps(payload)),
             )
             conn.commit()
 
@@ -105,16 +121,20 @@ class SqlitePushStore:
             conn.commit()
             return purged
 
-    def load_all(self) -> List[GatewayEvent]:
-        """Return all persisted events (for crash replay on startup)."""
+    def load_all(self) -> List[tuple]:
+        """Return all persisted ``(client_id, GatewayEvent)`` (for crash replay).
+
+        ``client_id`` is ``None`` for rows persisted without a recipient (e.g.
+        via ``store_message`` outside a tracked delivery, or legacy rows).
+        """
         with self._lock, closing(self._connect()) as conn:
             rows = conn.execute(
-                "SELECT payload FROM push_delivery ORDER BY ts ASC"
+                "SELECT client_id, payload FROM push_delivery ORDER BY ts ASC"
             ).fetchall()
-        events: List[GatewayEvent] = []
-        for (payload,) in rows:
+        events: List[tuple] = []
+        for client_id, payload in rows:
             try:
-                events.append(GatewayEvent.from_dict(json.loads(payload)))
+                events.append((client_id, GatewayEvent.from_dict(json.loads(payload))))
             except Exception:  # pragma: no cover - defensive
                 continue
         return events
@@ -163,12 +183,30 @@ class DeliveryGuaranteeManager:
             self._replay_persisted()
 
     def _replay_persisted(self) -> None:
-        """Reload persisted pending events after a restart into the cache."""
+        """Reload persisted pending events after a restart into the cache.
+
+        Both the event cache *and* the per-client pending-ack state are
+        reconstructed so the durable at-least-once guarantee actually holds:
+        the retry sweeper and reconnect redelivery both read ``_pending_acks``,
+        so a persisted event with a known recipient is scheduled for retry
+        immediately (``next_retry_at=now``) rather than being silently dropped.
+        """
         if self._sqlite_store is None:
             return
         try:
-            for event in self._sqlite_store.load_all():
+            now = time.time()
+            for client_id, event in self._sqlite_store.load_all():
                 self._message_store[event.event_id] = event
+                if not client_id:
+                    continue
+                self._pending_acks.setdefault(client_id, {})[event.event_id] = (
+                    PendingDelivery(
+                        event=event,
+                        sent_at=event.timestamp or now,
+                        retry_count=0,
+                        next_retry_at=now,
+                    )
+                )
         except Exception as e:  # pragma: no cover - defensive
             logger.error("Failed to replay persisted push events: %s", e)
 
@@ -201,8 +239,14 @@ class DeliveryGuaranteeManager:
     # Message storage
     # ------------------------------------------------------------------
 
-    async def store_message(self, event: GatewayEvent) -> str:
-        """Persist a message to the in-memory cache and durable backend."""
+    async def store_message(
+        self, event: GatewayEvent, client_id: Optional[str] = None,
+    ) -> str:
+        """Persist a message to the in-memory cache and durable backend.
+
+        ``client_id`` is the intended recipient; it is persisted so the pending
+        delivery can be reconstructed and redelivered after a restart.
+        """
         with self._lock:
             self._message_store[event.event_id] = event
 
@@ -216,6 +260,7 @@ class DeliveryGuaranteeManager:
                     event.event_id,
                     event.to_dict(),
                     event.timestamp,
+                    client_id,
                 )
             except Exception as e:
                 logger.error("SQLite message store failed: %s", e)
@@ -243,7 +288,7 @@ class DeliveryGuaranteeManager:
         if not self._config.enabled:
             return
 
-        await self.store_message(event)
+        await self.store_message(event, client_id=client_id)
 
         now = time.time()
         pending = PendingDelivery(
@@ -264,6 +309,23 @@ class DeliveryGuaranteeManager:
             del client_pending[event_id]
             if not client_pending:
                 del self._pending_acks[client_id]
+            # Drop from the in-memory cache too, unless another client is still
+            # awaiting the same event.
+            still_pending = any(
+                event_id in pend for pend in self._pending_acks.values()
+            )
+            if not still_pending:
+                self._message_store.pop(event_id, None)
+
+        # Evict from the durable store so acked events are not reloaded and
+        # redelivered after a restart.
+        if self._sqlite_store is not None and not still_pending:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._sqlite_store.delete, event_id,
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error("SQLite push store delete failed: %s", e)
         logger.debug("ACK from %s for %s", client_id, event_id)
         return True
 
