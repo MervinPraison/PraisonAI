@@ -32,6 +32,13 @@ class ObservabilityRun:
     own_emitter: Any = None
     _emitter_swapped: bool = False
     agentops_session: Any = None
+    # Which AgentOps teardown this run owns:
+    #   "session" -> end THIS run's ``agentops_session`` handle only;
+    #   "global"  -> legacy singleton path, end the package-global session;
+    #   None      -> AgentOps was never initialised for this run (nothing to end).
+    # Prevents a run whose per-session ``start_session`` failed from falling back
+    # to the global ``end_session`` and cross-finalizing an unrelated live run.
+    _agentops_mode: Optional[str] = None
 
 
 # Thread-local LIFO stack of the runs started on the current thread. ``init``
@@ -324,11 +331,20 @@ def _init_agentops(
         with _agentops_lock:
             start_session = getattr(agentops, "start_session", None)
             if callable(start_session):
-                session = start_session(tags=all_tags)
+                # Per-session mode: this run owns exactly the handle returned
+                # here. Record the mode BEFORE the call so that even if
+                # ``start_session`` returns None/an unusable handle, teardown
+                # stays scoped to this run and never falls back to the global
+                # ``end_session`` (which would truncate a concurrent run).
                 if run is not None:
-                    run.agentops_session = session
+                    run._agentops_mode = "session"
+                    run.agentops_session = start_session(tags=all_tags)
+                else:
+                    start_session(tags=all_tags)
             else:
                 agentops.init(agentops_api_key, default_tags=all_tags)
+                if run is not None:
+                    run._agentops_mode = "global"
         logger.debug("Initialized AgentOps with tags: %s", all_tags)
     except Exception as e:
         logger.warning("Failed to initialize AgentOps: %s", e)
@@ -337,18 +353,45 @@ def _init_agentops(
 def _end_agentops(status: str, run: Optional[ObservabilityRun] = None) -> None:
     """End the AgentOps session for ``run`` if available.
 
-    Prefers this run's own session handle (per-session API); falls back to the
-    legacy package-global ``end_session`` when no handle was captured.
+    Teardown is scoped to what ``_init_agentops`` actually started for this run:
+
+    * ``_agentops_mode == "session"`` — end THIS run's own handle. If the handle
+      is missing/unusable (``start_session`` returned None or raised) we end
+      NOTHING rather than falling back to the package-global ``end_session``,
+      because that global call would truncate a *different* run's live session.
+    * ``_agentops_mode == "global"`` — legacy singleton path: end the
+      package-global session.
+    * ``run is None`` (legacy void-call with no handle) — preserve the historical
+      contract and end the package-global session once.
+    * ``_agentops_mode is None`` on a real run — AgentOps was never initialised
+      for this run; do nothing.
     """
     try:
         import agentops
     except ImportError:
         return
+
+    if run is None:
+        mode = "global"
+    else:
+        mode = run._agentops_mode
+    if mode is None:
+        return
+
     session = getattr(run, "agentops_session", None) if run is not None else None
     try:
         with _agentops_lock:
-            if session is not None and hasattr(session, "end_session"):
-                session.end_session(status)
+            if mode == "session":
+                if session is not None and hasattr(session, "end_session"):
+                    session.end_session(status)
+                else:
+                    # Per-session start failed; do NOT cross-finalize the
+                    # package-global session that may belong to another run.
+                    logger.debug(
+                        "AgentOps per-session handle unavailable; skipping "
+                        "global end_session to avoid cross-finalizing another run"
+                    )
+                    return
             else:
                 agentops.end_session(status)
         logger.debug("Ended AgentOps session: %s", status)
