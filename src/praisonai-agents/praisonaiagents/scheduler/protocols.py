@@ -116,8 +116,17 @@ class ScheduleStoreProtocol(Protocol):
         """Get a job by its unique ID."""
         ...
 
-    def list(self, agent_id: Optional[str] = None) -> List[Any]:
-        """List all jobs, optionally filtered by agent_id."""
+    def list(
+        self,
+        agent_id: Optional[str] = None,
+        principal: Optional[str] = None,
+    ) -> List[Any]:
+        """List all jobs, optionally filtered by agent_id and/or principal.
+
+        ``principal`` is the resolved end-user identity used to isolate one
+        gateway user's automations from another's. ``None`` returns
+        everything (global / single-tenant behaviour).
+        """
         ...
 
     def update(self, job: Any) -> None:

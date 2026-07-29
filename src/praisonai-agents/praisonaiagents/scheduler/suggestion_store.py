@@ -91,6 +91,11 @@ class Suggestion:
     accepted: bool = False
     """True if the user accepted this suggestion (job has been created)."""
 
+    principal: Optional[str] = None
+    """Resolved canonical identity of the owner (from the gateway's
+    identity resolver). ``None`` means the suggestion is global /
+    single-tenant — preserving pre-scoping behaviour."""
+
 
 # ── Suggestion store ─────────────────────────────────────────────────────────
 
@@ -185,39 +190,66 @@ class SuggestionStore:
         with self._lock:
             return self._suggestions.get(suggestion_id)
 
-    def list_pending(self) -> List[Suggestion]:
-        """Return all undismissed, unaccepted, non-expired suggestions."""
+    def list_pending(self, principal: Optional[str] = None) -> List[Suggestion]:
+        """Return all undismissed, unaccepted, non-expired suggestions.
+
+        Args:
+            principal: When provided, only suggestions owned by this
+                resolved identity are returned (multi-user isolation).
+                ``None`` returns everything — the pre-scoping global
+                behaviour used by single-tenant deployments.
+        """
         now = time.time()
         with self._lock:
             return [
                 s for s in self._suggestions.values()
                 if not s.dismissed and not s.accepted
                 and (s.expires_at == 0 or s.expires_at > now)
+                and (principal is None or s.principal == principal)
             ]
 
-    def accept(self, suggestion_id: str) -> bool:
+    def accept(self, suggestion_id: str, principal: Optional[str] = None) -> bool:
         """Mark a suggestion as accepted.
 
+        Args:
+            suggestion_id: The suggestion to accept.
+            principal: When provided, the call is refused (returns
+                ``False``) unless the suggestion is owned by this
+                identity — preventing one user from accepting another's.
+                ``None`` skips the ownership check (global behaviour).
+
         Returns:
-            ``False`` if the suggestion was not found.
+            ``False`` if the suggestion was not found or is owned by a
+            different principal.
         """
         with self._lock:
             s = self._suggestions.get(suggestion_id)
             if s is None:
                 return False
+            if principal is not None and s.principal != principal:
+                return False
             s.accepted = True
             self._save()
             return True
 
-    def dismiss(self, suggestion_id: str) -> bool:
+    def dismiss(self, suggestion_id: str, principal: Optional[str] = None) -> bool:
         """Mark a suggestion as dismissed (user declined).
 
+        Args:
+            suggestion_id: The suggestion to dismiss.
+            principal: When provided, the call is refused (returns
+                ``False``) unless the suggestion is owned by this
+                identity. ``None`` skips the ownership check.
+
         Returns:
-            ``False`` if the suggestion was not found.
+            ``False`` if the suggestion was not found or is owned by a
+            different principal.
         """
         with self._lock:
             s = self._suggestions.get(suggestion_id)
             if s is None:
+                return False
+            if principal is not None and s.principal != principal:
                 return False
             s.dismissed = True
             self._save()

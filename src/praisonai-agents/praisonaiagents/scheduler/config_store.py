@@ -74,11 +74,23 @@ class ConfigYamlScheduleStore:
                     return job
             return None
 
-    def list(self, agent_id: Optional[str] = None) -> List[ScheduleJob]:
+    def list(
+        self,
+        agent_id: Optional[str] = None,
+        principal: Optional[str] = None,
+    ) -> List[ScheduleJob]:
+        """List jobs, optionally filtered by owning agent and/or principal.
+
+        ``principal`` isolates a gateway end-user's automations from
+        another's. ``None`` (the default) returns everything, preserving
+        the pre-scoping global behaviour.
+        """
         with self._lock:
             jobs = list(self._jobs.values())
         if agent_id is not None:
             jobs = [j for j in jobs if j.agent_id == agent_id]
+        if principal is not None:
+            jobs = [j for j in jobs if j.principal == principal]
         return jobs
 
     def update(self, job: ScheduleJob) -> None:

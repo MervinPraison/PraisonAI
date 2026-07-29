@@ -239,6 +239,13 @@ class ScheduleJob:
                    and surfaced for readability but is NOT itself enforced; the
                    default :class:`ShellConditionGate` gates on ``pre_run``. A
                    custom ``condition_resolver`` may interpret it.
+        principal: Optional resolved canonical identity of the *end-user* who
+                   owns this job (from the gateway's identity resolver).
+                   Distinct from ``agent_id`` (the owning agent) and ``origin``
+                   (where it was created): ``principal`` is the access-control
+                   key used by ``store.list(principal=...)`` to isolate one
+                   gateway user's automations from another's. ``None`` means
+                   global / single-tenant — preserving pre-scoping behaviour.
     """
 
     name: str = ""
@@ -255,6 +262,7 @@ class ScheduleJob:
     origin: Optional[DeliveryTarget] = None
     pre_run: Optional[str] = None
     condition: Optional[str] = None
+    principal: Optional[str] = None
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -279,6 +287,8 @@ class ScheduleJob:
             d["pre_run"] = self.pre_run
         if self.condition is not None:
             d["condition"] = self.condition
+        if self.principal is not None:
+            d["principal"] = self.principal
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -308,6 +318,7 @@ class ScheduleJob:
             origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
+            principal=d.get("principal"),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
