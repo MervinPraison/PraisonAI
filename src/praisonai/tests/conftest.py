@@ -6,13 +6,29 @@ import warnings
 import gc
 from unittest.mock import Mock, patch
 
-# Register pytest plugins
-pytest_plugins = (
-    'pytest_asyncio',
-    'tests._pytest_plugins.test_gating',
-    'tests._pytest_plugins.network_guard',
-)
 
+
+def pytest_configure(config):
+    """Register custom markers to avoid warnings."""
+    config.pluginmanager.import_plugin("tests._pytest_plugins.test_gating")
+    config.pluginmanager.import_plugin("tests._pytest_plugins.network_guard")
+    config.addinivalue_line("markers", "real: Test requires real API keys")
+    config.addinivalue_line("markers", "integration: Integration test")
+    config.addinivalue_line("markers", "network: Test requires network access")
+    config.addinivalue_line("markers", "e2e: End-to-end test")
+    config.addinivalue_line("markers", "provider_anthropic: Anthropic provider test")
+    config.addinivalue_line("markers", "provider_openai: OpenAI provider test")
+    config.addinivalue_line("markers", "provider_google: Google provider test")
+    config.addinivalue_line("markers", "local_service: Test requires local service")
+    config.addinivalue_line("markers", "allow_sleep: Allow real sleep in test")
+    config.addinivalue_line("markers", "slow: Slow running test")
+    config.addinivalue_line("markers", "xdist_group: Group for xdist parallelization")
+    config.addinivalue_line("markers", "no_session_isolation: Disable session isolation")
+    config.addinivalue_line("markers", "unit: Unit test")
+    config.addinivalue_line("markers", "flaky: Flaky test")
+
+
+    
 # Suppress aiohttp unclosed session warnings during tests
 warnings.filterwarnings("ignore", message="Unclosed client session")
 warnings.filterwarnings("ignore", message="Unclosed connector")
@@ -44,14 +60,15 @@ def cleanup_async_resources():
     # Force garbage collection to clean up any lingering async resources
     gc.collect()
 
-# Add the source paths to sys.path for imports
-# praisonai-agents package (core SDK)
-_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', 'praisonai-agents')
-if _agents_path not in sys.path:
+# Correct paths for src/praisonai/tests/conftest.py
+# Go up 3 levels to reach root (tests -> praisonai -> src -> root)
+_agents_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')
+if os.path.exists(_agents_path) and _agents_path not in sys.path:
     sys.path.insert(0, _agents_path)
-# praisonai wrapper package
+
+# Go up 2 levels to reach src, then to praisonai
 _wrapper_path = os.path.join(os.path.dirname(__file__), '..')
-if _wrapper_path not in sys.path:
+if os.path.exists(_wrapper_path) and _wrapper_path not in sys.path:
     sys.path.insert(0, _wrapper_path)
 
 @pytest.fixture
