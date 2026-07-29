@@ -63,7 +63,62 @@ def test_enable_shell_instruction_asks_to_report_stdout(mock_execute_command):
 
     lowered = agent.instructions.lower()
     assert "execute_command" in lowered
-    assert "stdout" in lowered
+    assert "include the command's stdout verbatim" in lowered
+    assert "do not claim there was no output" in lowered
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_instruction_added_when_prompt_already_names_tool(mock_execute_command):
+    """A preconfigured agent whose own prompt already mentions execute_command
+    must still receive the stdout-reporting directive (regression: the old
+    bare-tool-name guard skipped it, keeping the 'no output' bug reachable)."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent.instructions = "You may use the execute_command tool when needed."
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    lowered = agent.instructions.lower()
+    assert "include the command's stdout verbatim" in lowered
+    assert "do not claim there was no output" in lowered
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_enable_shell_instruction_not_duplicated(mock_execute_command):
+    """Idempotent: re-enabling shell must not append the directive twice."""
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent.instructions = ""
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+        first = agent.instructions
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+        )
+
+    assert agent.instructions == first
+    assert agent.instructions.lower().count("include the command's stdout verbatim") == 1
 
 
 @patch("praisonaiagents.tools.execute_command", create=True)
