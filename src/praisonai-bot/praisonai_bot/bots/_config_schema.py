@@ -575,6 +575,8 @@ class GatewayServerSchema(BaseModel):
     session_config: Optional[Dict[str, Any]] = None
     heartbeat_interval: Optional[int] = Field(None, ge=0)
     reconnect_timeout: Optional[int] = Field(None, ge=0)
+    # Per-turn wall-clock ceiling (#3467). 0 = disabled (default).
+    per_turn_timeout: Optional[float] = Field(None, ge=0)
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     max_buffered_bytes: Optional[int] = Field(None, ge=0)

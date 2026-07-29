@@ -692,6 +692,9 @@ class WebSocketGateway:
             max_connections=int(gateway_config.get("max_connections", 1000)),
             heartbeat_interval=int(gateway_config.get("heartbeat_interval", 30)),
             reconnect_timeout=int(gateway_config.get("reconnect_timeout", 60)),
+            per_turn_timeout=float(
+                gateway_config.get("per_turn_timeout", 0.0) or 0.0
+            ),
             ssl_cert=_substitute(gateway_config.get("ssl_cert")),
             ssl_key=_substitute(gateway_config.get("ssl_key")),
             max_buffered_bytes=int(
@@ -848,6 +851,11 @@ class WebSocketGateway:
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
+        # Issue #3467: in-flight turn registry so a running turn can be aborted
+        # (by a WS ``abort`` frame or a portable ``/stop`` chat command) and so
+        # a per-turn timeout can cancel a runaway turn. Maps session_id ->
+        # (driving asyncio.Task, InterruptController).
+        self._active_turns: Dict[str, Tuple[Any, Any]] = {}
         # Issue #2661: fingerprint of the shared secret each authenticated
         # client connected under, so rotating ``auth_token`` can force-close
         # every session stamped with a stale secret (instant credential
@@ -2738,10 +2746,13 @@ class WebSocketGateway:
             
             # Build features list - only advertise implemented features
             features = {
-                "methods": ["message", "leave"],  # abort not implemented
+                # Issue #3467: an in-flight turn can now be aborted via the
+                # ``abort`` method (or the ``message_abort`` event alias).
+                "methods": ["message", "leave", "abort"],
                 "events": [
                     EventType.MESSAGE.value,
                     EventType.ERROR.value,
+                    EventType.MESSAGE_ABORT.value,
                 ],
             }
             
@@ -2961,6 +2972,16 @@ class WebSocketGateway:
                 session = self._sessions.get(session_id)
                 if session:
                     content = data.get("content", "")
+                    # Issue #3467: portable stop command. A chat/operator client
+                    # can abort the in-flight turn by sending "/stop" (or "stop")
+                    # instead of a dedicated abort frame.
+                    if isinstance(content, str) and content.strip().lower() in ("/stop", "stop"):
+                        aborted = self._abort_active_turn(session_id, reason="user")
+                        await self._send_to_client(client_id, {
+                            "type": "aborted" if aborted else "no_active_turn",
+                            "session_id": session_id,
+                        })
+                        return True
                     message = GatewayMessage(
                         content=content,
                         sender_id=client_id,
@@ -2981,6 +3002,31 @@ class WebSocketGateway:
                     "message": "Not joined to any session",
                 })
         
+        elif msg_type in ("abort", EventType.MESSAGE_ABORT.value):
+            # Issue #3467: cancel the in-flight turn for this client's session.
+            # Requires the WRITE scope (same as sending a message as the agent).
+            if not self._client_has_scope(client_id, OperatorScope.WRITE):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": OperatorScope.WRITE.value,
+                })
+                return True
+            session_id = self._client_sessions.get(client_id)
+            if not session_id:
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "message": "Not joined to any session",
+                })
+                return True
+            reason = data.get("reason") or "user"
+            aborted = self._abort_active_turn(session_id, reason=str(reason))
+            await self._send_to_client(client_id, {
+                "type": "aborted" if aborted else "no_active_turn",
+                "session_id": session_id,
+            })
+
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
             if session_id:
@@ -3031,7 +3077,9 @@ class WebSocketGateway:
         return "Started processing."
 
     @staticmethod
-    async def _dispatch_agent_turn(agent: Any, content: str) -> Any:
+    async def _dispatch_agent_turn(
+        agent: Any, content: str, interrupt: Any = None
+    ) -> Any:
         """Execute a single agent turn.
 
         Prefers the agent's native async entry point (``arun``/``achat``) so
@@ -3039,13 +3087,181 @@ class WebSocketGateway:
         cleaner cancellation/timeout and true async streaming. Falls back to
         offloading the synchronous ``chat`` onto the default thread pool only
         when no async entry point is available (sync-only agents).
+
+        Issue #3467: when ``interrupt`` is supplied it is passed *per turn* as
+        the entry point's ``cancel_token`` (which the agent's run loop already
+        checks at each checkpoint) so the agent stops cooperatively. This keeps
+        the controller local to a single turn instead of mutating the shared
+        ``agent.interrupt_controller`` — critical because one ``Agent`` instance
+        can serve overlapping turns for several sessions, where a shared
+        controller would let one session's abort/timeout interrupt another. A
+        legacy fallback stamps ``agent.interrupt_controller`` only for agents
+        whose entry point does not accept ``cancel_token``.
         """
+        _kw = {"cancel_token": interrupt} if interrupt is not None else {}
+
+        async def _call_async(fn: Any) -> Any:
+            try:
+                return await fn(content, **_kw)
+            except TypeError:
+                if not _kw:
+                    raise
+                # Entry point predates cancel_token: fall back to the shared
+                # attribute for this turn (best-effort, non-isolated).
+                if hasattr(agent, "interrupt_controller"):
+                    agent.interrupt_controller = interrupt
+                return await fn(content)
+
         for _name in ("arun", "achat"):
             _fn = getattr(agent, _name, None)
             if _fn is not None and asyncio.iscoroutinefunction(_fn):
-                return await _fn(content)
+                return await _call_async(_fn)
+
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, agent.chat, content)
+
+        def _call_sync() -> Any:
+            try:
+                return agent.chat(content, **_kw)
+            except TypeError:
+                if not _kw:
+                    raise
+                if hasattr(agent, "interrupt_controller"):
+                    agent.interrupt_controller = interrupt
+                return agent.chat(content)
+
+        return await loop.run_in_executor(None, _call_sync)
+
+    def _abort_active_turn(self, session_id: str, reason: str = "user") -> bool:
+        """Signal (and, if needed, cancel) the in-flight turn for ``session_id``.
+
+        Cooperative-first: requests interruption via the turn's
+        ``InterruptController`` (checked at each agent checkpoint / as the
+        turn's ``cancel_token``) so the agent stops at a safe point and
+        preserves partial output. A hard ``task.cancel()`` is scheduled only as
+        a fallback for a turn that does not yield within ``_ABORT_GRACE_SECONDS``,
+        so a genuinely stuck turn is still torn down. Returns ``True`` when a
+        turn was active and an abort was signalled.
+        """
+        entry = self._active_turns.get(session_id)
+        if entry is None:
+            return False
+        task, controller = entry
+        try:
+            if controller is not None:
+                controller.request(reason)
+        except Exception:
+            pass
+
+        async def _cancel_if_stuck() -> None:
+            try:
+                await asyncio.sleep(self._ABORT_GRACE_SECONDS)
+                if task is not None and not task.done():
+                    task.cancel()
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        try:
+            if task is not None and not task.done():
+                asyncio.ensure_future(_cancel_if_stuck())
+        except Exception:
+            # No running loop / scheduling failure: fall back to immediate hard
+            # cancel so an abort is never a silent no-op.
+            try:
+                if task is not None and not task.done():
+                    task.cancel()
+            except Exception:
+                pass
+        return True
+
+    async def _drive_turn(
+        self,
+        session: GatewaySession,
+        agent: Any,
+        content: str,
+        controller: Any,
+        timeout: float,
+    ) -> Any:
+        """Run one agent turn cancellably and under an optional per-turn timeout.
+
+        Registers the driving task in ``_active_turns`` so ``_abort_active_turn``
+        can interrupt it, then awaits it with ``asyncio.wait_for`` when a
+        positive ``timeout`` is configured. A cancelled or timed-out turn is
+        normalised to a terminal string rather than left hanging or surfaced as
+        a raw traceback.
+
+        Cancellation is *cooperative first*: the turn's ``cancel_token``
+        (checked at each agent checkpoint) is requested before the driving
+        task is cancelled, so async and sync-only agents alike unwind at a safe
+        point. Because a synchronous ``agent.chat`` runs in a worker thread that
+        cannot be force-killed, we then give the turn a bounded grace window to
+        actually finish before advancing the serial session queue — otherwise a
+        timed-out sync turn could keep mutating shared agent state concurrently
+        with the next turn.
+        """
+        sid = session.session_id
+        task = asyncio.ensure_future(
+            self._dispatch_agent_turn(agent, content, interrupt=controller)
+        )
+        self._active_turns[sid] = (task, controller)
+        try:
+            if timeout and timeout > 0:
+                try:
+                    return await asyncio.wait_for(task, timeout=timeout)
+                except asyncio.TimeoutError:
+                    await self._settle_cancelled_turn(task, controller, "timeout")
+                    return self._finalise_aborted_turn(controller, "timeout")
+            return await task
+        except asyncio.CancelledError:
+            reason = controller.reason or "user"
+            await self._settle_cancelled_turn(task, controller, reason)
+            return self._finalise_aborted_turn(controller, reason)
+        finally:
+            existing = self._active_turns.get(sid)
+            if existing is not None and existing[0] is task:
+                self._active_turns.pop(sid, None)
+
+    # Bounded window to let a cooperatively-interrupted turn actually unwind
+    # (esp. a sync turn in a worker thread that cannot be force-killed) before
+    # the serial session queue advances to the next turn.
+    _ABORT_GRACE_SECONDS: float = 5.0
+
+    async def _settle_cancelled_turn(
+        self, task: "asyncio.Future", controller: Any, reason: str
+    ) -> None:
+        """Cooperatively stop ``task`` and wait (bounded) for it to unwind.
+
+        Requests interruption via the turn's controller first so the agent
+        stops at its next checkpoint, then—up to ``_ABORT_GRACE_SECONDS``—waits
+        for the task to settle. Only if it does not settle in time do we hard
+        ``cancel()`` the asyncio task (which cannot reclaim a blocked worker
+        thread, but at least frees the event-loop waiter).
+        """
+        try:
+            if controller is not None:
+                controller.request(reason)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task), timeout=self._ABORT_GRACE_SECONDS
+            )
+            return
+        except asyncio.TimeoutError:
+            pass
+        except (asyncio.CancelledError, Exception):
+            return
+        try:
+            if not task.done():
+                task.cancel()
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    def _finalise_aborted_turn(self, controller: Any, reason: str) -> str:
+        """Return a typed terminal message for an interrupted/timed-out turn."""
+        if reason == "timeout":
+            return "Turn cancelled: exceeded per-turn timeout."
+        return f"Turn cancelled: {reason}."
 
     async def _run_session_queue(self, session: GatewaySession, agent: Any, client_id: str) -> None:
         """Background task loop that constantly pulls from `_inbox` and executes the agent task."""
@@ -3062,6 +3278,13 @@ class WebSocketGateway:
                     relay_callback = self._make_stream_relay(client_id, session)
                     emitter.add_callback(relay_callback)
                 
+                # Issue #3467: run the turn under a cancel scope so it can be
+                # aborted (WS ``abort`` / ``/stop``) and time-bounded. The
+                # controller is checked by the agent's run loop; cancelling the
+                # task tears down a turn that does not yield promptly.
+                from praisonaiagents.agent.interrupt import InterruptController
+                controller = InterruptController()
+                timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 try:
                     gate = getattr(self, "_admission_gate", None)
                     if gate is not None and getattr(gate, "enabled", False):
@@ -3071,13 +3294,15 @@ class WebSocketGateway:
                         from ..bots._admission import AdmissionRejected
                         try:
                             async with gate.admit(session_id=session.session_id):
-                                response = await self._dispatch_agent_turn(
-                                    agent, content
+                                response = await self._drive_turn(
+                                    session, agent, content, controller, timeout
                                 )
                         except AdmissionRejected as rej:
                             response = rej.message
                     else:
-                        response = await self._dispatch_agent_turn(agent, content)
+                        response = await self._drive_turn(
+                            session, agent, content, controller, timeout
+                        )
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
@@ -7387,6 +7612,22 @@ class WebSocketGateway:
             self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
         if "max_queued_frames" in gw_cfg:
             self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
+        # Issue #3467: per-turn wall-clock ceiling. ``self.config`` is built in
+        # ``__init__`` with defaults, so stamp the validated ``gateway:`` value
+        # here (as the other per-key overrides above do) or the documented
+        # timeout silently stays disabled. Invalid values fall back to OFF.
+        if "per_turn_timeout" in gw_cfg:
+            try:
+                _ptt = float(gw_cfg["per_turn_timeout"] or 0.0)
+                if _ptt < 0:
+                    raise ValueError
+                self.config.per_turn_timeout = _ptt
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid gateway.per_turn_timeout %r; disabling per-turn "
+                    "timeout",
+                    gw_cfg.get("per_turn_timeout"),
+                )
         # Issue #3297: close-the-loop opt-in. Core ``GatewayConfig`` deliberately
         # does not carry these knobs (kept lightweight); the delivery router
         # reads them off ``self.config`` via ``getattr``. Stamp them from the
