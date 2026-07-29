@@ -187,6 +187,9 @@ class EventType(str, Enum):
     # Streaming events (relayed from agent's StreamEventEmitter)
     TOKEN_STREAM = "token_stream"
     TOOL_CALL_STREAM = "tool_call_stream"
+    REASONING_STREAM = "reasoning_stream"
+    TOOL_PROGRESS_STREAM = "tool_progress_stream"
+    STREAM_ERROR = "stream_error"
     STREAM_END = "stream_end"
     
     # System events
