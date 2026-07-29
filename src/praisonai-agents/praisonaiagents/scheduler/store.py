@@ -65,18 +65,43 @@ class FileScheduleStore:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def get_by_name(self, name: str) -> Optional[ScheduleJob]:
+    def get_by_name(
+        self,
+        name: str,
+        principal: Optional[str] = None,
+    ) -> Optional[ScheduleJob]:
+        """Return a job by name, optionally scoped to ``principal``.
+
+        When ``principal`` is given, a job owned by a *different* identity is
+        treated as not found (returns ``None``) so one gateway user cannot
+        read another's automation by guessing its name. ``None`` (the default)
+        preserves the pre-scoping global lookup.
+        """
         with self._lock:
             for job in self._jobs.values():
                 if job.name == name:
+                    if principal is not None and job.principal != principal:
+                        continue
                     return job
             return None
 
-    def list(self, agent_id: Optional[str] = None) -> List[ScheduleJob]:
+    def list(
+        self,
+        agent_id: Optional[str] = None,
+        principal: Optional[str] = None,
+    ) -> List[ScheduleJob]:
+        """List jobs, optionally filtered by owning agent and/or principal.
+
+        ``principal`` isolates a gateway end-user's automations from
+        another's. ``None`` (the default) returns everything, preserving
+        the pre-scoping global behaviour.
+        """
         with self._lock:
             jobs = list(self._jobs.values())
         if agent_id is not None:
             jobs = [j for j in jobs if j.agent_id == agent_id]
+        if principal is not None:
+            jobs = [j for j in jobs if j.principal == principal]
         return jobs
 
     def update(self, job: ScheduleJob) -> None:
@@ -102,11 +127,20 @@ class FileScheduleStore:
                 return True
             return False
 
-    def remove_by_name(self, name: str) -> bool:
+    def remove_by_name(self, name: str, principal: Optional[str] = None) -> bool:
+        """Remove a job by name, optionally scoped to ``principal``.
+
+        When ``principal`` is given, a job owned by a *different* identity is
+        skipped (not removed) so one gateway user cannot delete another's
+        automation by guessing its name. ``None`` (the default) preserves the
+        pre-scoping global removal.
+        """
         with self._lock, self._file_lock():
             self._reload_locked()
             for jid, job in list(self._jobs.items()):
                 if job.name == name:
+                    if principal is not None and job.principal != principal:
+                        continue
                     del self._jobs[jid]
                     self._save()
                     return True
