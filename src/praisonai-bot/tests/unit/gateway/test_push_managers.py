@@ -217,7 +217,9 @@ class TestDeliveryGuaranteeManager:
     @pytest.fixture
     def mgr(self, gateway):
         from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
-        cfg = DeliveryConfig(ack_timeout=2, max_retries=2, retry_backoff=1.0)
+        cfg = DeliveryConfig(
+            ack_timeout=2, max_retries=2, retry_backoff=1.0, store_backend="memory",
+        )
         dm = DeliveryGuaranteeManager(gateway, cfg)
         gateway._delivery_mgr = dm
         return dm
@@ -300,3 +302,94 @@ class TestDeliveryGuaranteeManager:
         await mgr.track_delivery("c1", event)
         resp = await mgr.handle_message("c1", "message_nack", {"event_id": event.event_id})
         assert resp["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# SQLite durable push-delivery store (Issue #3498)
+# ---------------------------------------------------------------------------
+
+class TestSqlitePushStore:
+    @pytest.mark.asyncio
+    async def test_store_persists_to_sqlite(self, tmp_path):
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+
+        db = tmp_path / "push.sqlite"
+        cfg = DeliveryConfig(store_backend="sqlite")
+        mgr = DeliveryGuaranteeManager(MockGateway(), cfg, sqlite_path=str(db))
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={"x": 1})
+        await mgr.store_message(event)
+
+        assert db.exists()
+        persisted = mgr._sqlite_store.load_all()
+        assert any(e.event_id == event.event_id for _cid, e in persisted)
+
+    @pytest.mark.asyncio
+    async def test_survives_restart(self, tmp_path):
+        """Pending events re-load into a fresh manager after a restart."""
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+
+        db = tmp_path / "push.sqlite"
+        cfg = DeliveryConfig(store_backend="sqlite")
+        mgr1 = DeliveryGuaranteeManager(MockGateway(), cfg, sqlite_path=str(db))
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={"y": 2})
+        await mgr1.track_delivery("c1", event)
+
+        # Simulate restart: new manager over the same DB file.
+        gw2 = MockGateway()
+        mgr2 = DeliveryGuaranteeManager(gw2, cfg, sqlite_path=str(db))
+        assert event.event_id in mgr2._message_store
+        # The recipient's pending-ack state is reconstructed so the event is
+        # actually redeliverable (durable at-least-once guarantee).
+        unacked = await mgr2.get_unacknowledged("c1")
+        assert [e.event_id for e in unacked] == [event.event_id]
+        count = await mgr2.retry_unacknowledged("c1")
+        assert count == 1
+        assert gw2._sent[0][0] == "c1"
+
+    @pytest.mark.asyncio
+    async def test_ack_evicts_from_sqlite(self, tmp_path):
+        """An acknowledged event is removed from the durable store."""
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+
+        db = tmp_path / "push.sqlite"
+        cfg = DeliveryConfig(store_backend="sqlite")
+        mgr = DeliveryGuaranteeManager(MockGateway(), cfg, sqlite_path=str(db))
+        event = GatewayEvent(type=EventType.CHANNEL_MESSAGE, data={})
+        await mgr.track_delivery("c1", event)
+        assert mgr._sqlite_store.load_all()  # persisted
+
+        assert await mgr.acknowledge("c1", event.event_id) is True
+        assert mgr._sqlite_store.load_all() == []
+
+        # A restart must not resurrect the acked event.
+        mgr2 = DeliveryGuaranteeManager(MockGateway(), cfg, sqlite_path=str(db))
+        assert event.event_id not in mgr2._message_store
+        assert await mgr2.get_unacknowledged("c1") == []
+
+    @pytest.mark.asyncio
+    async def test_purge_evicts_from_sqlite(self, tmp_path):
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+
+        db = tmp_path / "push.sqlite"
+        cfg = DeliveryConfig(store_backend="sqlite")
+        mgr = DeliveryGuaranteeManager(MockGateway(), cfg, sqlite_path=str(db))
+        event = GatewayEvent(
+            type=EventType.CHANNEL_MESSAGE, data={}, timestamp=time.time() - 100,
+        )
+        await mgr.store_message(event)
+        await mgr.purge_acknowledged(max_age_seconds=50)
+        assert mgr._sqlite_store.load_all() == []
+
+    def test_memory_backend_has_no_sqlite_store(self):
+        from praisonai_bot.gateway.push_delivery import DeliveryGuaranteeManager
+
+        cfg = DeliveryConfig(store_backend="memory")
+        mgr = DeliveryGuaranteeManager(MockGateway(), cfg)
+        assert mgr._sqlite_store is None
+
+    def test_default_backend_is_sqlite(self):
+        assert DeliveryConfig().store_backend == "sqlite"
+
+    def test_invalid_backend_rejected(self):
+        with pytest.raises(ValueError):
+            DeliveryConfig(store_backend="postgres")

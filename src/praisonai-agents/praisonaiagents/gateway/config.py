@@ -189,7 +189,11 @@ class DeliveryConfig:
         max_retries: Maximum retry attempts
         retry_backoff: Exponential backoff multiplier
         message_ttl: How long to retain unacknowledged messages (seconds)
-        store_backend: Message store backend ("memory" or "redis")
+        store_backend: Message store backend — ``"sqlite"`` (default,
+            zero-dependency durable store so the at-least-once guarantee
+            survives a gateway restart/redeploy), ``"redis"`` (durable +
+            multi-process horizontal fan-out) or ``"memory"`` (explicit,
+            ephemeral opt-out for testing/single-process throwaway use).
     """
     
     enabled: bool = True
@@ -197,7 +201,15 @@ class DeliveryConfig:
     max_retries: int = 3
     retry_backoff: float = 2.0
     message_ttl: int = 86400
-    store_backend: str = "memory"
+    store_backend: str = "sqlite"
+    
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.store_backend not in ("sqlite", "redis", "memory"):
+            raise ValueError(
+                f"Invalid delivery store_backend {self.store_backend!r}; "
+                "expected 'sqlite', 'redis' or 'memory'"
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

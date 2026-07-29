@@ -7,11 +7,15 @@ Provides at-least-once message delivery with ack tracking and retry logic.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sqlite3
 import threading
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from praisonaiagents.gateway.config import DeliveryConfig
 from praisonaiagents.gateway.protocols import (
@@ -23,6 +27,117 @@ if TYPE_CHECKING:
     from .server import WebSocketGateway
 
 logger = logging.getLogger(__name__)
+
+# Default durable store path, mirroring OutboundQueue's ~/.praisonai/state layout.
+_DEFAULT_SQLITE_PATH = "~/.praisonai/state/push_delivery.sqlite"
+
+
+class SqlitePushStore:
+    """SQLite-backed durable store for pending push-delivery events.
+
+    Mirrors the established ``OutboundQueue`` pattern (WAL journal, stdlib
+    ``sqlite3``, per-instance lock, TTL eviction) so the at-least-once push
+    guarantee survives a gateway restart without any external service. Each
+    row records the recipient ``client_id`` alongside the event so pending
+    deliveries can be reconstructed on startup; each is evicted on ack or once
+    older than ``message_ttl``.
+    """
+
+    def __init__(self, path: Union[str, Path] = _DEFAULT_SQLITE_PATH) -> None:
+        self.path = Path(path).expanduser()
+        self._lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            return conn
+        except Exception:
+            conn.close()
+            raise
+
+    def _init_schema(self) -> None:
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS push_delivery (
+                    event_id TEXT PRIMARY KEY,
+                    client_id TEXT,
+                    ts REAL NOT NULL,
+                    payload TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_push_ts ON push_delivery(ts)")
+            # Backfill the recipient column for stores created before the
+            # durable-recipient fix so pre-existing rows still load cleanly.
+            cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(push_delivery)").fetchall()
+            }
+            if "client_id" not in cols:
+                conn.execute("ALTER TABLE push_delivery ADD COLUMN client_id TEXT")
+            conn.commit()
+
+    def put(
+        self,
+        event_id: str,
+        payload: Dict[str, Any],
+        ts: float,
+        client_id: Optional[str] = None,
+    ) -> None:
+        """Persist (or replace) a pending event and its recipient."""
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO push_delivery(event_id, client_id, ts, payload) "
+                "VALUES (?, ?, ?, ?)",
+                (event_id, client_id, ts, json.dumps(payload)),
+            )
+            conn.commit()
+
+    def delete(self, event_id: str) -> None:
+        """Remove an event once acknowledged or expired."""
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute(
+                "DELETE FROM push_delivery WHERE event_id = ?", (event_id,)
+            )
+            conn.commit()
+
+    def evict_expired(self, cutoff: float, keep: Optional[set] = None) -> int:
+        """Delete events older than ``cutoff`` (unless still in ``keep``)."""
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT event_id FROM push_delivery WHERE ts < ?", (cutoff,)
+            ).fetchall()
+            purged = 0
+            for (eid,) in rows:
+                if keep and eid in keep:
+                    continue
+                conn.execute(
+                    "DELETE FROM push_delivery WHERE event_id = ?", (eid,)
+                )
+                purged += 1
+            conn.commit()
+            return purged
+
+    def load_all(self) -> List[tuple]:
+        """Return all persisted ``(client_id, GatewayEvent)`` (for crash replay).
+
+        ``client_id`` is ``None`` for rows persisted without a recipient (e.g.
+        via ``store_message`` outside a tracked delivery, or legacy rows).
+        """
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT client_id, payload FROM push_delivery ORDER BY ts ASC"
+            ).fetchall()
+        events: List[tuple] = []
+        for client_id, payload in rows:
+            try:
+                events.append((client_id, GatewayEvent.from_dict(json.loads(payload))))
+            except Exception:  # pragma: no cover - defensive
+                continue
+        return events
 
 
 @dataclass
@@ -45,6 +160,8 @@ class DeliveryGuaranteeManager:
         self,
         gateway: "WebSocketGateway",
         config: DeliveryConfig,
+        *,
+        sqlite_path: Optional[Union[str, Path]] = None,
     ) -> None:
         self._gateway = gateway
         self._config = config
@@ -54,6 +171,44 @@ class DeliveryGuaranteeManager:
         # client_id -> {event_id -> PendingDelivery}
         self._pending_acks: Dict[str, Dict[str, PendingDelivery]] = {}
         self._sweeper_task: Optional[asyncio.Task] = None
+        # Durable SQLite store (default backend). Zero external dependency, so
+        # pending events survive a gateway restart and are re-delivered on
+        # reconnect. Only initialised for the "sqlite" backend; "redis" mirrors
+        # to the redis adapter and "memory" is the ephemeral opt-out.
+        self._sqlite_store: Optional[SqlitePushStore] = None
+        if config.store_backend == "sqlite":
+            self._sqlite_store = SqlitePushStore(
+                sqlite_path or _DEFAULT_SQLITE_PATH
+            )
+            self._replay_persisted()
+
+    def _replay_persisted(self) -> None:
+        """Reload persisted pending events after a restart into the cache.
+
+        Both the event cache *and* the per-client pending-ack state are
+        reconstructed so the durable at-least-once guarantee actually holds:
+        the retry sweeper and reconnect redelivery both read ``_pending_acks``,
+        so a persisted event with a known recipient is scheduled for retry
+        immediately (``next_retry_at=now``) rather than being silently dropped.
+        """
+        if self._sqlite_store is None:
+            return
+        try:
+            now = time.time()
+            for client_id, event in self._sqlite_store.load_all():
+                self._message_store[event.event_id] = event
+                if not client_id:
+                    continue
+                self._pending_acks.setdefault(client_id, {})[event.event_id] = (
+                    PendingDelivery(
+                        event=event,
+                        sent_at=event.timestamp or now,
+                        retry_count=0,
+                        next_retry_at=now,
+                    )
+                )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.error("Failed to replay persisted push events: %s", e)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -84,10 +239,31 @@ class DeliveryGuaranteeManager:
     # Message storage
     # ------------------------------------------------------------------
 
-    async def store_message(self, event: GatewayEvent) -> str:
-        """Persist a message to the in-memory store."""
+    async def store_message(
+        self, event: GatewayEvent, client_id: Optional[str] = None,
+    ) -> str:
+        """Persist a message to the in-memory cache and durable backend.
+
+        ``client_id`` is the intended recipient; it is persisted so the pending
+        delivery can be reconstructed and redelivered after a restart.
+        """
         with self._lock:
             self._message_store[event.event_id] = event
+
+        # Durable by default: persist to the local SQLite store so pending
+        # events survive a gateway restart with no external service.
+        if self._sqlite_store is not None:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._sqlite_store.put,
+                    event.event_id,
+                    event.to_dict(),
+                    event.timestamp,
+                    client_id,
+                )
+            except Exception as e:
+                logger.error("SQLite message store failed: %s", e)
 
         # Also persist to Redis if configured
         redis_adapter = getattr(self._gateway, "_redis_pubsub", None)
@@ -112,7 +288,7 @@ class DeliveryGuaranteeManager:
         if not self._config.enabled:
             return
 
-        await self.store_message(event)
+        await self.store_message(event, client_id=client_id)
 
         now = time.time()
         pending = PendingDelivery(
@@ -133,6 +309,23 @@ class DeliveryGuaranteeManager:
             del client_pending[event_id]
             if not client_pending:
                 del self._pending_acks[client_id]
+            # Drop from the in-memory cache too, unless another client is still
+            # awaiting the same event.
+            still_pending = any(
+                event_id in pend for pend in self._pending_acks.values()
+            )
+            if not still_pending:
+                self._message_store.pop(event_id, None)
+
+        # Evict from the durable store so acked events are not reloaded and
+        # redelivered after a restart.
+        if self._sqlite_store is not None and not still_pending:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._sqlite_store.delete, event_id,
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error("SQLite push store delete failed: %s", e)
         logger.debug("ACK from %s for %s", client_id, event_id)
         return True
 
@@ -185,6 +378,13 @@ class DeliveryGuaranteeManager:
             for eid in to_remove:
                 del self._message_store[eid]
                 purged += 1
+
+        # Mirror the eviction to the durable store so it does not grow unbounded.
+        if self._sqlite_store is not None:
+            try:
+                self._sqlite_store.evict_expired(cutoff, keep=pending_ids)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error("SQLite push store eviction failed: %s", e)
 
         return purged
 
