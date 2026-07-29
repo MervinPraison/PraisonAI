@@ -78,12 +78,14 @@ class MCPToolRunner(threading.Thread):
                                 response_queue, kind, name, arguments = item
                                 try:
                                     if kind == "resource":
-                                        result = await session.read_resource(name)
+                                        result = await asyncio.wait_for(session.read_resource(name), timeout=self.timeout)
                                     elif kind == "prompt":
-                                        result = await session.get_prompt(name, arguments or None)
+                                        result = await asyncio.wait_for(session.get_prompt(name, arguments or None), timeout=self.timeout)
                                     else:
-                                        result = await session.call_tool(name, arguments)
+                                        result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=self.timeout)
                                     response_queue.put((True, result))
+                                except asyncio.TimeoutError:
+                                    response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
                                 except Exception as e:
                                     response_queue.put((False, str(e)))
                             except queue.Empty:

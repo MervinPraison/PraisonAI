@@ -388,6 +388,18 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
 
     # Build context first to include in task prompt
     context_text = ""
+    # Inter-task context / validation feedback assembled by the workflow process
+    # engine (Process._build_task_context) is stored on the task; fold it in so
+    # downstream/retried tasks actually see upstream output and rejection reasons.
+    extra_context = getattr(task, '_execution_context', None)
+    if extra_context:
+        context_text = extra_context
+        # NOTE: We intentionally do NOT clear _execution_context here. Task
+        # retries (guardrail/completion failures) re-enter this helper via the
+        # run_task/arun_task retry loops, and clearing would strip the upstream
+        # output + validation feedback the retry needs. The Process engine owns
+        # this field's lifecycle: it re-sets it before each task yield and resets
+        # every task's _execution_context to None before selecting the next task.
     if task.context:
         context_results = []  # Collect contexts then de-duplicate
         for context_item in task.context:
@@ -404,7 +416,11 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
             for i, ctx in enumerate(unique_contexts):
                 logger.debug(f"Context {i+1}: {ctx[:100]}...")
         context_separator = '\n\n'
-        context_text = context_separator.join(unique_contexts)
+        joined_contexts = context_separator.join(unique_contexts)
+        if context_text and joined_contexts:
+            context_text = context_text + context_separator + joined_contexts
+        elif joined_contexts:
+            context_text = joined_contexts
     
     # Build task prompt using DRY helper
     task_prompt = _prepare_task_prompt(task, task_description, context_text)

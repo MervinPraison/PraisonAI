@@ -2821,21 +2821,24 @@ CONCISE SUMMARY:"""
                     emitter.clear_branch()
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(copy_context_to_callable(lambda pair=(idx, item): execute_item(pair)))
-                    for idx, item in enumerate(items)
-                ]
+                # Map each future back to its original index so error attribution
+                # survives even if execute_item raises before returning its index.
+                future_to_idx = {}
+                for idx, item in enumerate(items):
+                    fut = executor.submit(copy_context_to_callable(lambda pair=(idx, item): execute_item(pair)))
+                    future_to_idx[fut] = idx
                 
                 # Collect results in order
                 indexed_results = []
-                for future in concurrent.futures.as_completed(futures):
+                for future in concurrent.futures.as_completed(future_to_idx):
+                    idx = future_to_idx[future]
                     try:
-                        idx, step_result = future.result()
+                        _, step_result = future.result()
                         indexed_results.append((idx, step_result))
                         if verbose:
                             print(f"  ✓ Item {idx + 1}/{num_items} complete")
                     except Exception as e:
-                        logger.error(f"Parallel loop iteration failed: {e}")
+                        logger.error(f"Parallel loop iteration {idx} failed: {e}")
                         indexed_results.append((idx, {"step": f"loop_{idx}", "output": f"Error: {e}"}))
                 
                 # Sort by index to maintain order
