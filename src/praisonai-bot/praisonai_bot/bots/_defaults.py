@@ -557,11 +557,19 @@ def enable_shell_tools(
         except ImportError:
             logger.warning("execute_command unavailable — install praisonaiagents with shell tools")
 
+    # Inject the stdout-reporting directive unless it is already present.
+    # Guard on the full directive (via a stable marker phrase) rather than the
+    # bare tool name so preconfigured agents whose own system prompt already
+    # mentions ``execute_command`` still receive the "report stdout verbatim"
+    # instruction — otherwise the model keeps replying "there was no output".
     instructions = getattr(agent, "instructions", "") or ""
-    if "execute_command" not in instructions.lower():
+    if "include the command's stdout verbatim" not in instructions.lower():
         agent.instructions = (
             instructions
-            + "\n\nYou can run shell commands on the bot server using the execute_command tool."
+            + "\n\nYou can run shell commands on the bot server using the execute_command "
+            "tool. When a user asks you to run a command, actually call execute_command "
+            "and report its output back: include the command's stdout verbatim in your "
+            "reply. Do not claim there was no output when the tool returned stdout."
         ).strip()
 
     deny = set(getattr(agent, "_perm_deny", None) or frozenset())
