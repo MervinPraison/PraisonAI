@@ -430,14 +430,19 @@ class PermissionManager:
         """Legacy flat matching against approvals and rules for a target."""
         with self._lock:
             # Check persistent approvals first
-            for approval in self._approvals:
+            for approval in list(self._approvals):
                 if approval.matches(target, agent):
-                    return PermissionResult(
+                    result = PermissionResult(
                         action=PermissionAction.ALLOW if approval.approved else PermissionAction.DENY,
                         target=target,
                         reason=f"Persistent approval: {'approved' if approval.approved else 'denied'}",
                         approved=approval.approved,
                     )
+                    # A "once" approval/denial is consumed on first match so it
+                    # does not silently become permanent for the process.
+                    if approval.scope == "once":
+                        self._approvals.remove(approval)
+                    return result
             
             # Check rules
             for rule in self._rules:

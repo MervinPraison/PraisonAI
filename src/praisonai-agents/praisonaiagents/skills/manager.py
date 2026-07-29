@@ -1,6 +1,7 @@
 """SkillManager for Agent Skills integration."""
 
 import logging
+import threading
 from typing import List, Optional, Dict, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class SkillManager:
             self._max_pending = max(1, int(os.getenv('SKILL_MAX_PENDING', '100')))
         except (TypeError, ValueError):
             self._max_pending = 100
+
+        # Serialise the load-mutate-save cycle on the pending-mutation store so
+        # concurrent proposals/approvals cannot silently overwrite each other.
+        self._pending_lock = threading.Lock()
 
     @property
     def skills(self) -> List[LoadedSkill]:
@@ -1332,15 +1337,6 @@ version: 1.0.0
         if action == "write_file" and len(payload.get("file_content") or "") > 100_000:
             return {"success": False, "error": "File content exceeds maximum size (100KB)"}
 
-        pending = self._load_pending()
-        if len(pending) >= self._max_pending:
-            return {
-                "success": False,
-                "error": (
-                    f"Pending skill store is full ({self._max_pending} entries); "
-                    "approve or reject existing proposals first."
-                ),
-            }
         request_id = f"skl-{secrets.token_hex(4)}"
         record = {
             "id": request_id,
@@ -1350,8 +1346,18 @@ version: 1.0.0
             "created_at": time.time(),
             "payload": {k: v for k, v in payload.items() if v is not None},
         }
-        pending[request_id] = record
-        self._save_pending(pending)
+        with self._pending_lock:
+            pending = self._load_pending()
+            if len(pending) >= self._max_pending:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Pending skill store is full ({self._max_pending} entries); "
+                        "approve or reject existing proposals first."
+                    ),
+                }
+            pending[request_id] = record
+            self._save_pending(pending)
         self._audit("proposed", record)
         logger.info(
             "Skill mutation staged for approval: %s (action=%s, skill=%s)",
@@ -1405,23 +1411,25 @@ version: 1.0.0
         Returns:
             Dict with the result of applying the mutation.
         """
-        pending = self._load_pending()
-        request_id = self._resolve_pending_id(identifier, pending)
-        if request_id is None:
-            return {"success": False, "error": f"No pending mutation: {identifier}"}
+        with self._pending_lock:
+            pending = self._load_pending()
+            request_id = self._resolve_pending_id(identifier, pending)
+            if request_id is None:
+                return {"success": False, "error": f"No pending mutation: {identifier}"}
 
-        # Apply first; only remove + audit "approved" once the mutation
-        # actually succeeds, so a failure neither loses the proposal nor
-        # records a false approval.
-        record = pending[request_id]
-        result = self._apply_pending(record)
-        result.setdefault("id", request_id)
-        if result.get("success"):
-            pending.pop(request_id, None)
-            self._save_pending(pending)
-            self._audit("approved", record)
-        else:
-            self._audit("approval_failed", record)
+            # Apply first; only remove + audit "approved" once the mutation
+            # actually succeeds, so a failure neither loses the proposal nor
+            # records a false approval.
+            record = pending[request_id]
+            result = self._apply_pending(record)
+            result.setdefault("id", request_id)
+            if result.get("success"):
+                pending.pop(request_id, None)
+                self._save_pending(pending)
+                event = "approved"
+            else:
+                event = "approval_failed"
+        self._audit(event, record)
         return result
 
     def reject(self, identifier: str) -> dict:
@@ -1433,13 +1441,14 @@ version: 1.0.0
         Returns:
             Dict confirming the rejection.
         """
-        pending = self._load_pending()
-        request_id = self._resolve_pending_id(identifier, pending)
-        if request_id is None:
-            return {"success": False, "error": f"No pending mutation: {identifier}"}
+        with self._pending_lock:
+            pending = self._load_pending()
+            request_id = self._resolve_pending_id(identifier, pending)
+            if request_id is None:
+                return {"success": False, "error": f"No pending mutation: {identifier}"}
 
-        record = pending.pop(request_id)
-        self._save_pending(pending)
+            record = pending.pop(request_id)
+            self._save_pending(pending)
         self._audit("rejected", record)
         return {
             "success": True,

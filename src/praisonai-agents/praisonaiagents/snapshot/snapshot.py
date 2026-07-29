@@ -238,6 +238,22 @@ class FileSnapshot:
                 except (IOError, OSError) as e:
                     logger.warning(f"Failed to copy {src_path}: {e}")
         
+        # Prune shadow files whose source has been removed from the project,
+        # so a later commit can record the deletion (the shadow tree must
+        # mirror the project, not be append-only).
+        tracked_now = set(files_to_track)
+        for root, dirs, files in os.walk(self.shadow_path):
+            if ".git" in root.split(os.sep):
+                continue
+            rel_root = os.path.relpath(root, self.shadow_path)
+            for file in files:
+                rel_path = file if rel_root == "." else os.path.join(rel_root, file)
+                if rel_path not in tracked_now:
+                    try:
+                        os.remove(os.path.join(root, file))
+                    except OSError:
+                        pass
+        
         return files_to_track
     
     def _should_ignore(self, name: str, patterns: set) -> bool:
@@ -414,26 +430,37 @@ class FileSnapshot:
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
                         shutil.copy2(src, dst)
             else:
-                # Restore all files
+                # Restore all files: only those actually part of the target
+                # commit's tree, and remove project files that aren't, so undo
+                # cannot resurrect or leak files from a later snapshot.
+                ls = self._run_git(
+                    "ls-tree", "-r", "--name-only", commit_hash, check=False
+                )
+                committed = (
+                    set(ls.stdout.strip().split("\n"))
+                    if ls.stdout.strip()
+                    else set()
+                )
                 self._run_git("checkout", commit_hash, "--", ".")
                 
-                # Copy all files back to project
-                for root, dirs, files_list in os.walk(self.shadow_path):
-                    # Skip .git directory
-                    if ".git" in root:
+                # Remove project files not present in the target commit.
+                for root, dirs, files_list in os.walk(self.project_path):
+                    if ".git" in root.split(os.sep):
                         continue
-                    
-                    rel_root = os.path.relpath(root, self.shadow_path)
-                    
+                    rel_root = os.path.relpath(root, self.project_path)
                     for file in files_list:
-                        if rel_root == ".":
-                            rel_path = file
-                        else:
-                            rel_path = os.path.join(rel_root, file)
-                        
-                        src = os.path.join(root, file)
+                        rel_path = file if rel_root == "." else os.path.join(rel_root, file)
+                        if rel_path not in committed:
+                            try:
+                                os.remove(os.path.join(root, file))
+                            except OSError:
+                                pass
+                
+                # Copy the committed files back to the project.
+                for rel_path in committed:
+                    src = os.path.join(self.shadow_path, rel_path)
+                    if os.path.exists(src):
                         dst = os.path.join(self.project_path, rel_path)
-                        
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
                         shutil.copy2(src, dst)
             
