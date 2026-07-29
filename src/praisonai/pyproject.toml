@@ -316,3 +316,4 @@ exclude = ["praisonai_code*", "praisonai_bot*"]
 
 [tool.setuptools.package-data]
 "praisonai.cli.configuration" = ["*.json"]
+"praisonai.config" = ["*.json"]
