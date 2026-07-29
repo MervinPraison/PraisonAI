@@ -53,11 +53,15 @@ __all__ = [
     "load_skill",
     # Protocols
     "SkillSourceProtocol",
+    "RemoteSkillSourceProtocol",
     "SkillInvocationPolicyProtocol",
     "SkillMutatorProtocol",
     "SkillActivationProtocol",
     "SkillReviewProtocol",
     "DefaultSkillReviewPolicy",
+    # Remote sources
+    "GitRemoteSkillSource",
+    "fetch_remote_skill_dirs",
     # Events
     "SkillDiscoveredEvent",
     "SkillActivatedEvent",
@@ -116,8 +120,12 @@ def __getattr__(name: str):
         from .shell_render import render_shell_blocks
         return render_shell_blocks
 
-    if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
-        from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
+    if name in ("SkillSourceProtocol", "RemoteSkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
+        from .protocols import SkillSourceProtocol, RemoteSkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
+        return locals()[name]
+
+    if name in ("GitRemoteSkillSource", "fetch_remote_skill_dirs"):
+        from .remote import GitRemoteSkillSource, fetch_remote_skill_dirs
         return locals()[name]
 
     if name in ("SkillReviewProtocol", "DefaultSkillReviewPolicy"):
