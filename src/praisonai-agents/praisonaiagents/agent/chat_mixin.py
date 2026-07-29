@@ -3749,56 +3749,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         _get_display_functions()['display_error'](f"Tool {function_name} not found")
                         continue
 
-                    # --- BEFORE_TOOL hook ---
-                    try:
-                        from ..hooks import HookEvent, BeforeToolInput
-                        _before_tool_input = BeforeToolInput(
-                            session_id=getattr(self, '_session_id', 'default'),
-                            cwd=os.getcwd(),
-                            event_name=HookEvent.BEFORE_TOOL,
-                            timestamp=str(time.time()),
-                            agent_name=self.name,
-                            tool_name=function_name,
-                            tool_input=arguments,
-                        )
-                        _before_results = await self._hook_runner.execute(HookEvent.BEFORE_TOOL, _before_tool_input)
-                        _tool_blocked = self._hook_runner.is_blocked(_before_results)
-                    except Exception as _hook_err:
-                        logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
-                        _tool_blocked = False
-                    if _tool_blocked:
-                        # Reason extraction must not be able to re-open a block:
-                        # use attributes present on both HookResult (plugin
-                        # bridge) and HookOutput, defaulting safely.
-                        _block_reason = next(
-                            (getattr(r.output, "reason", None) for r in _before_results
-                             if r.output and getattr(r.output, "is_denied", lambda: False)()),
-                            None,
-                        ) or "Blocked by hook"
-                        results.append(f"[Tool blocked by hook: {_block_reason}]")
-                        continue
-
-                    # Route through safety pipeline instead of direct execution
+                    # Route through safety pipeline instead of direct execution.
+                    # BEFORE_TOOL/AFTER_TOOL hooks (blocking, arg mutation and
+                    # after-context aggregation) are fired once, guarded, inside
+                    # execute_tool_async — no inline duplicate dispatch here.
                     # Pass the tools list to honor task-scoped tools
                     result = await self.execute_tool_async(function_name, arguments, tools_override=tools)
 
-                    # --- AFTER_TOOL hook ---
-                    try:
-                        from ..hooks import AfterToolInput
-                        _after_tool_input = AfterToolInput(
-                            session_id=getattr(self, '_session_id', 'default'),
-                            cwd=os.getcwd(),
-                            event_name=HookEvent.AFTER_TOOL,
-                            timestamp=str(time.time()),
-                            agent_name=self.name,
-                            tool_name=function_name,
-                            tool_input=arguments,
-                            tool_output=result,
-                        )
-                        await self._hook_runner.execute(HookEvent.AFTER_TOOL, _after_tool_input)
-                    except Exception as _hook_err:
-                        logging.debug(f"AFTER_TOOL hook error (non-fatal): {_hook_err}")
-                    
                     results.append(result)
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error executing tool {function_name}: {e}")
