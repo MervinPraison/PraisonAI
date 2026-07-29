@@ -61,6 +61,7 @@ def get_default_skill_dirs() -> List[Path]:
 def discover_skills(
     skill_dirs: Optional[List[str]] = None,
     include_defaults: bool = True,
+    sources: Optional[List] = None,
 ) -> List[SkillProperties]:
     """Discover all valid skills in the given directories.
 
@@ -68,6 +69,11 @@ def discover_skills(
         skill_dirs: List of directory paths to scan for skills.
             Each directory should contain skill subdirectories.
         include_defaults: Whether to include default skill directories
+        sources: Optional declarative remote skill sources (URL strings,
+            ``{"url","ref"}`` dicts, or objects implementing ``fetch``). These
+            are synced into a versioned local cache and scanned after local
+            directories. Opt-in and offline-safe (falls back to the last-good
+            cache). Remote skills are re-validated by the parser like any other.
 
     Returns:
         List of SkillProperties for all valid skills found
@@ -84,6 +90,16 @@ def discover_skills(
     # Add default directories
     if include_defaults:
         all_dirs.extend(get_default_skill_dirs())
+
+    # Add remote sources last (lowest precedence; local always wins).
+    # Lazy import keeps zero cost when no remote sources are configured.
+    if sources:
+        try:
+            from .remote import fetch_remote_skill_dirs
+
+            all_dirs.extend(fetch_remote_skill_dirs(sources))
+        except Exception as exc:  # noqa: BLE001 - never break local discovery
+            logger.warning("Skipping remote skill sources: %s", exc)
 
     # Remove duplicates while preserving order
     seen = set()

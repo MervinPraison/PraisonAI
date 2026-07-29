@@ -245,6 +245,87 @@ def skills_install(
     typer.echo(f"Installed: {installed}")
 
 
+@app.command("sync")
+def skills_sync(
+    url: str = typer.Argument(
+        None,
+        help="Remote skill source git URL. If omitted, uses skills.urls from config.",
+    ),
+    ref: str = typer.Option(None, "--ref", "-r", help="Pin a branch/tag/commit"),
+):
+    """Force-refresh declarative remote skill sources into the local cache.
+
+    Syncs remote skills into a versioned cache under ~/.praisonai/cache so that
+    ``discover_skills`` (and every agent) picks up the latest without a manual
+    ``skills install``. Offline-safe: keeps the last-good cache on failure.
+
+    Examples:
+        praisonai skills sync https://github.com/org/skills-repo
+        praisonai skills sync           # uses skills.urls from config
+    """
+    try:
+        from praisonaiagents.skills import fetch_remote_skill_dirs, validate as validate_skill
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    sources = []
+    if url:
+        sources = [{"url": url, "ref": ref} if ref else url]
+    else:
+        sources = _load_configured_skill_sources()
+
+    if not sources:
+        typer.echo(
+            "No remote skill sources. Pass a URL or set 'skills.urls' in config.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    dirs = fetch_remote_skill_dirs(sources)
+    if not dirs:
+        typer.echo("Sync produced no skills (offline or empty source).", err=True)
+        raise typer.Exit(1)
+
+    from pathlib import Path
+
+    count = 0
+    for parent in dirs:
+        for child in Path(parent).iterdir():
+            if child.is_dir() and (child / "SKILL.md").exists():
+                errors = validate_skill(child)
+                if errors:
+                    typer.echo(f"  ! {child.name}: {'; '.join(errors)}", err=True)
+                else:
+                    count += 1
+                    typer.echo(f"  ✓ {child.name}")
+    typer.echo(f"Synced {count} skill(s) into the local cache.")
+
+
+def _load_configured_skill_sources():
+    """Read skills.urls / skills.sources from the PraisonAI config, if present."""
+    try:
+        import yaml
+        from praisonaiagents.paths import get_config_path
+    except ImportError:
+        return []
+
+    cfg_path = get_config_path()
+    if not cfg_path.exists():
+        return []
+    try:
+        data = yaml.safe_load(cfg_path.read_text()) or {}
+    except Exception:
+        return []
+    skills_cfg = data.get("skills") or {}
+    if not isinstance(skills_cfg, dict):
+        return []
+    sources = skills_cfg.get("urls") or skills_cfg.get("sources") or []
+    if isinstance(sources, str):
+        sources = [sources]
+    return list(sources)
+
+
 @app.command("search")
 def skills_search(
     query: str = typer.Argument(..., help="Search query"),

@@ -7,9 +7,31 @@ plugin bundle, enterprise policy) without touching the core.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol, Iterable, Optional, runtime_checkable, List, Dict, Any
 
 from .models import SkillProperties
+
+
+@runtime_checkable
+class RemoteSkillSourceProtocol(Protocol):
+    """A declarative remote source that syncs skills into a local cache.
+
+    Implementations fetch a small manifest, download skill bundles into a
+    versioned cache directory, and atomically swap in updates when the remote
+    changes. They must be offline-safe (fall back to the last-good cache) and
+    treat remote content as untrusted (the caller re-validates fetched skills).
+    """
+
+    def fetch(self, cache_dir: Path) -> List[Path]:
+        """Sync the remote source into ``cache_dir`` and return skill dirs.
+
+        Returns the list of local directories containing fetched skills (the
+        parent directories that hold skill subdirectories). On network error,
+        implementations should fall back to the last-good cache rather than
+        raise, so discovery keeps working offline.
+        """
+        ...
 
 
 @runtime_checkable
