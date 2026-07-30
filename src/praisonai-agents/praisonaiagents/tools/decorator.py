@@ -31,7 +31,7 @@ import copy
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
-from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
+from .schema import build_parameters_schema
 
 # Valid human-approval risk levels, mirroring approval.RiskLevel. A misspelled
 # level (e.g. "critial") must be rejected rather than silently registered, since
