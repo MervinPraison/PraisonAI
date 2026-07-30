@@ -42,11 +42,21 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{/* Fail fast on insecure configuration: auth enabled + exposed via ingress but no token. */}}
+{{/*
+Fail fast on broken/insecure auth configuration.
+When auth is enabled the Deployment wires GATEWAY_AUTH_TOKEN from a Secret, so a
+token source is always required — otherwise the pod would reference a Secret that
+is never created (CreateContainerConfigError). Exposing via ingress makes this a
+security issue too; the message below calls that out explicitly.
+*/}}
 {{- define "praisonai-gateway.validateAuth" -}}
-{{- if and .Values.auth.enabled .Values.ingress.enabled -}}
+{{- if .Values.auth.enabled -}}
 {{- if and (not .Values.auth.existingSecret) (not .Values.auth.token) -}}
+{{- if .Values.ingress.enabled -}}
 {{- fail "auth.enabled and ingress.enabled are true but no auth.existingSecret or auth.token was provided. Refusing to expose the gateway without a GATEWAY_AUTH_TOKEN." -}}
+{{- else -}}
+{{- fail "auth.enabled is true but no auth.existingSecret or auth.token was provided. Set one of them, or disable auth with auth.enabled=false." -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

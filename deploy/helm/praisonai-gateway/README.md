@@ -44,9 +44,14 @@ See [`values.yaml`](./values.yaml) for the full list, including `env` (e.g.
 
 ## Security
 
-The chart **refuses to render** when `auth.enabled=true` and `ingress.enabled=true`
-but no `auth.existingSecret` / `auth.token` is provided — you cannot accidentally
-expose an unauthenticated gateway.
+When `auth.enabled=true` (the default) the chart **refuses to render** unless a
+token source (`auth.existingSecret` or `auth.token`) is provided — otherwise the
+pod would reference a Secret that is never created. If the gateway is additionally
+exposed via `ingress.enabled=true`, the failure message calls out the security
+risk explicitly, so you cannot accidentally expose an unauthenticated gateway.
+
+To run without a token (e.g. local testing behind trusted networking) set
+`auth.enabled=false`.
 
 ## WebSocket ingress
 
