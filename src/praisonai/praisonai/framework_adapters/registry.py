@@ -19,26 +19,6 @@ from .._registry import PluginRegistry
 logger = logging.getLogger(__name__)
 
 
-def _crewai_loader():
-    from .crewai_adapter import CrewAIAdapter
-    return CrewAIAdapter
-
-def _autogen_loader():
-    from .autogen_adapter import AutoGenFamilyAdapter
-    return AutoGenFamilyAdapter
-
-def _autogen_v2_loader():
-    from .autogen_adapter import AutoGenAdapter
-    return AutoGenAdapter
-
-def _autogen_v4_loader():
-    from .autogen_adapter import AutoGenV4Adapter
-    return AutoGenV4Adapter
-
-def _ag2_loader():
-    from .autogen_adapter import AG2Adapter
-    return AG2Adapter
-
 def _praisonai_loader():
     from .praisonai_adapter import PraisonAIAdapter
     return PraisonAIAdapter
