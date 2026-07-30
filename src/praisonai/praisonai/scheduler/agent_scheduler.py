@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from .base import ScheduleParser, PraisonAgentExecutor
-from .shared import backoff_delay
+from .shared import ScheduleTicker, backoff_delay
 from ._base_scheduler import (
     _BaseAgentScheduler,
     _compute_run_cost,
@@ -163,13 +163,24 @@ class AgentScheduler(_BaseAgentScheduler):
             return False
             
         try:
-            interval = ScheduleParser.parse(schedule_expr)
+            # Wall-clock aware ticker: cron fires at the real time-of-day (with
+            # once-only catch-up across downtime); plain intervals are unchanged.
+            self._load_persisted_last_run()
+            ticker = ScheduleTicker(
+                schedule_expr, last_run_at=getattr(self, "_last_run_at", None)
+            )
             self.is_running = True
             self._stop_event.clear()
-            
+
             logger.debug(f"Starting agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
             logger.debug(f"Task: {self.task}")
-            logger.debug(f"Schedule: {schedule_expr} ({interval}s interval)")
+            if ticker.is_cron:
+                logger.debug(f"Schedule: {schedule_expr} (wall-clock cron)")
+            else:
+                logger.debug(
+                    f"Schedule: {schedule_expr} "
+                    f"({int(ticker.seconds_until_next())}s interval)"
+                )
             self.is_running = True
             self._stop_event.clear()
             self._start_time = datetime.now()
@@ -178,10 +189,12 @@ class AgentScheduler(_BaseAgentScheduler):
             if run_immediately:
                 logger.debug("Running agent immediately before starting schedule...")
                 self._execute_with_retry(max_retries)
+                ticker.mark_ran()
+                self._last_run_at = ticker.last_run_at
             
             self._thread = threading.Thread(
                 target=self._run_schedule,
-                args=(interval, max_retries),
+                args=(ticker, max_retries),
                 daemon=True
             )
             self._thread.start()
@@ -237,8 +250,14 @@ class AgentScheduler(_BaseAgentScheduler):
                 total_cost=self._total_cost,
             )
     
-    def _run_schedule(self, interval: int, max_retries: int):
-        """Internal method to run scheduled agent executions."""
+    def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
+        """Internal method to run scheduled agent executions.
+
+        For a wall-clock cron schedule this sleeps until the next real
+        occurrence (running once immediately if a slot was already missed
+        during downtime); for a plain interval it sleeps the fixed interval —
+        preserving the previous behaviour.
+        """
         while not self._stop_event.is_set():
             # Check budget limit
             if self._budget_exceeded():
@@ -246,13 +265,33 @@ class AgentScheduler(_BaseAgentScheduler):
                 logger.warning("Stopping scheduler to prevent additional costs")
                 self.stop()
                 break
-            
+
+            # For cron, sleep until the next wall-clock slot *before* running
+            # (unless a missed slot is already due → catch up exactly once).
+            if ticker.is_cron and not ticker.is_due():
+                delay = ticker.seconds_until_next()
+                logger.debug(f"Next execution in {delay:.0f} seconds (cron)")
+                if self._stop_event.wait(delay):
+                    break  # Stop event was set
+
             logger.debug(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
-            
+
+            # Advance the wall-clock anchor *before* running so the state write
+            # inside _execute_with_retry persists this slot (not the previous
+            # one). Otherwise a restart would restore the prior anchor and
+            # replay an already-completed slot (see issue #3526 review).
+            ticker.mark_ran()
+            self._last_run_at = ticker.last_run_at
+
             self._execute_with_retry(max_retries)
-            
-            # Wait for next scheduled time
-            logger.debug(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
+
+            if ticker.is_cron:
+                # Loop back: the top of the loop computes the next slot.
+                continue
+
+            # Interval schedule: wait the fixed interval then run again.
+            interval = ticker.seconds_until_next()
+            logger.debug(f"Next execution in {interval:.0f} seconds ({interval/3600:.1f} hours)")
             if self.max_cost:
                 remaining = self.max_cost - self._total_cost
                 logger.debug(f"Budget remaining: ${remaining:.4f}")

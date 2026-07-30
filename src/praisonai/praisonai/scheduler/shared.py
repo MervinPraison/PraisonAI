@@ -1,5 +1,131 @@
 """Shared primitives for sync & async schedulers."""
 
+import logging
+import time
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Emit the "croniter missing" guidance at most once per process so a cron
+# schedule that degrades to a coarse interval is visible without log spam.
+_CRON_WARNING_EMITTED = False
+
+
+def _warn_cron_unavailable() -> None:
+    """Warn once that cron degrades to a coarse interval without ``croniter``.
+
+    Mirrors core ``praisonaiagents.scheduler.due.is_due``: a ``cron:`` schedule
+    needs the optional ``croniter`` engine to honour wall-clock timing. Without
+    it the wrapper falls back to a process-relative interval (the pre-#3526
+    behaviour), so surface a one-time actionable warning instead of degrading
+    silently.
+    """
+    global _CRON_WARNING_EMITTED
+    if not _CRON_WARNING_EMITTED:
+        _CRON_WARNING_EMITTED = True
+        logger.warning(
+            "croniter not installed — cron schedules fall back to a "
+            "process-relative interval and will not honour wall-clock timing "
+            "or catch up missed slots. Install with: pip install croniter"
+        )
+
+
+class ScheduleTicker:
+    """Wall-clock aware "when does this schedule fire next?" helper.
+
+    Unlike :class:`ScheduleParser` (which collapses everything to a fixed
+    integer interval anchored to process start), the ticker honours the real
+    schedule kind:
+
+    - ``cron:M H * * *`` fires at the actual wall-clock time-of-day via core
+      ``croniter`` (the same engine the gateway already uses), so a restart
+      does **not** re-phase the schedule and a slot missed while the process
+      was down/dormant runs **exactly once** on resume before re-anchoring to
+      the next future occurrence.
+    - Plain interval expressions (``hourly``, ``*/30m``, raw seconds) keep the
+      previous fixed-interval behaviour, so nothing regresses.
+
+    The ticker owns only the *timing*; the caller keeps its executor/delivery
+    wiring. State is a single ``last_run_at`` epoch persisted by the caller,
+    mirroring core ``ScheduleJob.last_run_at``.
+    """
+
+    def __init__(self, schedule_expr: str, last_run_at: Optional[float] = None):
+        self.schedule_expr = schedule_expr.strip()
+        self.last_run_at: Optional[float] = last_run_at
+        # Anchor for a never-run cron job, mirroring core ``ScheduleJob``'s use
+        # of ``created_at``: the schedule is measured from here so a slot that
+        # falls between this anchor and "now" is treated as missed → caught up.
+        self.created_at: float = time.time()
+        self._is_cron = self.schedule_expr.lower().startswith("cron:")
+        # For plain intervals we reuse the existing integer-interval parse so
+        # behaviour is byte-for-byte identical to the fixed-interval loop.
+        self._interval: Optional[int] = None
+        if not self._is_cron:
+            self._interval = ScheduleParser.parse(self.schedule_expr)
+
+    @property
+    def is_cron(self) -> bool:
+        """Whether this schedule is a wall-clock cron expression."""
+        return self._is_cron
+
+    def _cron_expr(self) -> str:
+        return self.schedule_expr[len("cron:"):].strip()
+
+    def is_due(self, now: Optional[float] = None) -> bool:
+        """Return ``True`` if a cron slot is due (used for downtime catch-up).
+
+        For interval schedules this always returns ``True`` on first tick
+        (there is no wall-clock slot to have missed).
+        """
+        if not self._is_cron:
+            return True
+        if now is None:
+            now = time.time()
+        try:
+            from croniter import croniter  # type: ignore[import-untyped]
+        except ImportError:
+            _warn_cron_unavailable()
+            return False
+        # Measure from the last run, or from creation for a never-run job
+        # (mirrors core ``is_due`` using ``last_run_at or created_at``).
+        base = self.last_run_at if self.last_run_at is not None else self.created_at
+        try:
+            next_run = croniter(self._cron_expr(), base).get_next(float)
+        except (ValueError, KeyError, TypeError):
+            return False
+        return now >= next_run
+
+    def seconds_until_next(self, now: Optional[float] = None) -> float:
+        """Seconds to sleep before the next execution.
+
+        - cron: seconds until the next wall-clock occurrence after ``now``
+          (clamped to ``>= 0``); if ``croniter`` is unavailable, falls back to
+          the best-effort interval so scheduling still progresses.
+        - interval: the fixed interval seconds.
+        """
+        if not self._is_cron:
+            return float(self._interval or 0)
+        if now is None:
+            now = time.time()
+        try:
+            from croniter import croniter  # type: ignore[import-untyped]
+        except ImportError:
+            # Degrade gracefully to the coarse interval rather than busy-loop,
+            # but surface a one-time warning so the degrade isn't silent.
+            _warn_cron_unavailable()
+            return float(ScheduleParser._parse_cron_to_interval(self._cron_expr()))
+        try:
+            next_run = croniter(self._cron_expr(), now).get_next(float)
+        except (ValueError, KeyError, TypeError):
+            return float(ScheduleParser._parse_cron_to_interval(self._cron_expr()))
+        return max(0.0, next_run - now)
+
+    def mark_ran(self, now: Optional[float] = None) -> None:
+        """Advance persisted ``last_run_at`` after a run (at-most-once anchor)."""
+        self.last_run_at = time.time() if now is None else now
+
+
 class ScheduleParser:
     """Shared schedule expression parser for both sync and async schedulers."""
 
