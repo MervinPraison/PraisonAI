@@ -951,10 +951,15 @@ Example: /handoff code "refactor the auth module" """
                 # Try async execution first for better non-blocking behavior
                 if hasattr(agent, 'astart'):
                     try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        response = loop.run_until_complete(agent.astart(prompt))
-                        loop.close()
+                        # Share the process-wide async bridge instead of
+                        # spawning a fresh loop per prompt, so LiteLLM/HTTPX/DB
+                        # per-loop connection pools survive across turns and any
+                        # caller-installed scoped_bridge() binding still wins.
+                        from praisonai._async_bridge import run_sync_or_offload
+                        response = run_sync_or_offload(
+                            agent.astart(prompt),
+                            thread_name="praisonai-tui-turn",
+                        )
                         logger.debug("Used async execution (astart)")
                     except Exception as e:
                         logger.debug(f"Async execution failed: {e}, falling back to sync")
@@ -1210,10 +1215,13 @@ Example: /handoff code "refactor the auth module" """
         
         # Start runtime (ACP/LSP servers) before TUI
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._start_runtime())
-            loop.close()
+            # Use the shared async bridge instead of a throwaway loop so
+            # per-loop connection pools are preserved for later turns.
+            from praisonai._async_bridge import run_sync_or_offload
+            run_sync_or_offload(
+                self._start_runtime(),
+                thread_name="praisonai-tui-runtime",
+            )
             # Runtime status logged to debug file only (not shown in UI)
             # Tools are available silently when runtime is ready
         except Exception as e:
