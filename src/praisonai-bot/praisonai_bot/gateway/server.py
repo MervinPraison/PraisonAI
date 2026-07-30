@@ -906,6 +906,16 @@ class WebSocketGateway:
         # visible in ``health()`` as ``degraded`` instead of vanishing — a
         # skipped channel must be distinguishable from one never configured.
         self._degraded_channels: Dict[str, str] = {}  # channel_name -> reason
+        # Issue #3518: shared, cross-owner degraded-capability registry so
+        # provider/model auth, SecretRef resolution, and MCP capability owners
+        # can record degradation that ``health()`` aggregates into a single
+        # ``degraded_owners`` surface alongside channels. Kept optional/lazy so
+        # gateways that never touch it are unaffected.
+        try:
+            from praisonaiagents.gateway import DegradedCapabilityRegistry
+            self._degraded_registry = DegradedCapabilityRegistry()
+        except Exception:
+            self._degraded_registry = None
         # Issue #2624: resilient outbound delivery for the gateway's own
         # scheduled/hook path. Lazily built (see ``delivery_router``) so the
         # scheduled-job and hook replies share the same token-bucket rate
@@ -4637,6 +4647,56 @@ class WebSocketGateway:
             "channels": channel_status,
             "last_inbound_at": self._last_inbound_ts,
         }
+
+        # Issue #3518: expose a single, unified degraded-owner surface so an
+        # operator (or the agent) can see *every* degraded owner — not just
+        # channels — with a consistent, redacted shape and a next action. The
+        # channel-only ``channels`` map above stays for backward compatibility;
+        # this aggregates the same channel facts (plus any provider/capability/
+        # route degradation other owners record) into the core registry so a
+        # provider auth failure or unresolved secret-backed capability is no
+        # longer classified-but-invisible. Computed defensively so health()
+        # never raises.
+        try:
+            from praisonaiagents.gateway import (
+                DegradedCapabilityRegistry,
+                DegradedOwner,
+            )
+
+            registry = DegradedCapabilityRegistry()
+            for name, reason in self._degraded_channels.items():
+                registry.mark(
+                    DegradedOwner(
+                        owner_kind="channel",
+                        owner_id=name,
+                        state="cold",
+                        reason=reason,
+                        retry_hint="praisonai gateway doctor --fix",
+                    )
+                )
+            for name, entry in channel_status.items():
+                if entry.get("status") == "degraded" and name not in self._degraded_channels:
+                    registry.mark(
+                        DegradedOwner(
+                            owner_kind="channel",
+                            owner_id=name,
+                            state="stale",
+                            reason=str(entry.get("reason", "degraded")),
+                            retry_hint="praisonai gateway doctor --fix",
+                        )
+                    )
+            # Let any other owner (provider/model auth, SecretRef resolution,
+            # MCP capability load) that recorded into a shared registry surface
+            # here too, if one was attached to this gateway instance.
+            shared = getattr(self, "_degraded_registry", None)
+            if shared is not None:
+                for owner in shared.list_degraded():
+                    registry.mark(owner)
+            degraded_owners = registry.to_list()
+            if degraded_owners:
+                result["degraded_owners"] = degraded_owners
+        except Exception:
+            pass
 
         # Issue #3021: surface opt-in lifecycle state so an operator can see
         # whether scale-to-zero is armed / the gateway is dormant / an external
