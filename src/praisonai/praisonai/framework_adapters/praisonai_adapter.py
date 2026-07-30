@@ -258,6 +258,39 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 return None
         return None
 
+    @staticmethod
+    def _normalize_autonomy(value):
+        """Translate a wrapper autonomy value into one core Agent accepts.
+
+        The wrapper YAML schema types ``autonomy`` as an int 0-10, but core
+        ``Agent(autonomy=...)`` only understands ``bool``/``str`` preset/
+        ``dict``/``AutonomyConfig``. Forwarding a raw int lands in core's
+        disable branch, silently ignoring a configured level. We map the
+        numeric level onto core's string presets and pass the other accepted
+        forms straight through:
+
+        - ``None`` / ``0``  -> ``None`` (autonomy off; nothing forwarded)
+        - ``1``-``3``       -> ``"suggest"``
+        - ``4``-``7``       -> ``"auto_edit"``
+        - ``8``-``10``      -> ``"full_auto"``
+        - ``bool``/``str``/``dict``/other -> passed through unchanged
+        """
+        if value is None:
+            return None
+        # bool is a subclass of int, so check it first and pass through.
+        if isinstance(value, bool):
+            return value or None
+        if isinstance(value, int):
+            if value <= 0:
+                return None
+            if value <= 3:
+                return "suggest"
+            if value <= 7:
+                return "auto_edit"
+            return "full_auto"
+        # str preset, dict, or AutonomyConfig — core handles these directly.
+        return value
+
     async def _astart_interactive_runtime(self, config: Dict[str, Any]):
         """Start InteractiveRuntime if ACP/LSP is enabled."""
         import os
@@ -369,12 +402,20 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'reflection': 'reflection',
                 'guardrails': 'guardrails',
                 'web': 'web',
-                'autonomy': 'autonomy',
                 'skills': 'skills',
             }
             for yaml_field, core_kwarg in forwardable_fields.items():
                 if details.get(yaml_field) is not None:
                     agent_kwargs[core_kwarg] = details[yaml_field]
+
+            # `autonomy` needs translation, not a raw forward: the wrapper YAML
+            # schema types it as an int 0-10 (config/schema.py), but core Agent
+            # only accepts bool/str/dict/AutonomyConfig — an int falls through to
+            # the disable branch, silently ignoring a configured level. Map the
+            # numeric level onto core's string presets (0 => off, so skip).
+            autonomy_value = self._normalize_autonomy(details.get('autonomy'))
+            if autonomy_value is not None:
+                agent_kwargs['autonomy'] = autonomy_value
 
             # Add approval config if present
             if agent_approval:
