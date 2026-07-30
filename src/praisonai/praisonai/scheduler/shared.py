@@ -1,7 +1,33 @@
 """Shared primitives for sync & async schedulers."""
 
+import logging
 import time
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Emit the "croniter missing" guidance at most once per process so a cron
+# schedule that degrades to a coarse interval is visible without log spam.
+_CRON_WARNING_EMITTED = False
+
+
+def _warn_cron_unavailable() -> None:
+    """Warn once that cron degrades to a coarse interval without ``croniter``.
+
+    Mirrors core ``praisonaiagents.scheduler.due.is_due``: a ``cron:`` schedule
+    needs the optional ``croniter`` engine to honour wall-clock timing. Without
+    it the wrapper falls back to a process-relative interval (the pre-#3526
+    behaviour), so surface a one-time actionable warning instead of degrading
+    silently.
+    """
+    global _CRON_WARNING_EMITTED
+    if not _CRON_WARNING_EMITTED:
+        _CRON_WARNING_EMITTED = True
+        logger.warning(
+            "croniter not installed — cron schedules fall back to a "
+            "process-relative interval and will not honour wall-clock timing "
+            "or catch up missed slots. Install with: pip install croniter"
+        )
 
 
 class ScheduleTicker:
@@ -59,6 +85,7 @@ class ScheduleTicker:
         try:
             from croniter import croniter  # type: ignore[import-untyped]
         except ImportError:
+            _warn_cron_unavailable()
             return False
         # Measure from the last run, or from creation for a never-run job
         # (mirrors core ``is_due`` using ``last_run_at or created_at``).
@@ -84,7 +111,9 @@ class ScheduleTicker:
         try:
             from croniter import croniter  # type: ignore[import-untyped]
         except ImportError:
-            # Degrade gracefully to the coarse interval rather than busy-loop.
+            # Degrade gracefully to the coarse interval rather than busy-loop,
+            # but surface a one-time warning so the degrade isn't silent.
+            _warn_cron_unavailable()
             return float(ScheduleParser._parse_cron_to_interval(self._cron_expr()))
         try:
             next_run = croniter(self._cron_expr(), now).get_next(float)

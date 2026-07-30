@@ -276,9 +276,14 @@ class AgentScheduler(_BaseAgentScheduler):
 
             logger.debug(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
 
-            self._execute_with_retry(max_retries)
+            # Advance the wall-clock anchor *before* running so the state write
+            # inside _execute_with_retry persists this slot (not the previous
+            # one). Otherwise a restart would restore the prior anchor and
+            # replay an already-completed slot (see issue #3526 review).
             ticker.mark_ran()
             self._last_run_at = ticker.last_run_at
+
+            self._execute_with_retry(max_retries)
 
             if ticker.is_cron:
                 # Loop back: the top of the loop computes the next slot.
