@@ -62,7 +62,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple, Union
 
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, server_retry_after
+from ._resilience import (
+    BackoffPolicy,
+    LocalDeadLetterPolicy,
+    compute_backoff,
+    is_permanent_target_failure,
+    is_recoverable_error,
+    server_retry_after,
+)
+
+try:  # Core delivery-guarantee policy (Issue #3519); optional at import time.
+    from praisonaiagents.gateway import AttemptAndAgeDeadLetterPolicy
+except Exception:  # pragma: no cover - only when core predates the shared policy
+    # Core installs older than the policy (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack this symbol; fall back to
+    # the dependency-free local policy so the age gate still holds instead of
+    # silently reverting to attempt-only dead-lettering.
+    AttemptAndAgeDeadLetterPolicy = LocalDeadLetterPolicy  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +86,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TTL_SECONDS = 7 * 86400
 _DEFAULT_MAX_SIZE = 50_000
 _DEFAULT_MAX_ATTEMPTS = 5
+# Issue #3519: a recoverable/transient failure must be BOTH attempt-exhausted
+# AND at least this old before it is dead-lettered, so a brief channel outage
+# no longer permanently drops deliverable messages. 6h ≫ any realistic channel
+# incident yet well under the 7-day retention TTL.
+_DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS = 6 * 3600
 
 
 @dataclass(frozen=True)
@@ -149,12 +170,28 @@ class OutboundQueue:
         max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
         backoff: Optional[BackoffPolicy] = None,
         ordering: Literal["strict", "best_effort"] = "best_effort",
+        dead_letter_min_age: float = _DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS,
+        dead_letter_policy: Optional[Any] = None,
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self.max_attempts = int(max_attempts)
         self.backoff = backoff or BackoffPolicy()
+        # Issue #3519: dead-letter only when BOTH attempt-exhausted AND old
+        # enough, so a transient channel outage no longer drops deliverable
+        # traffic. An explicit policy wins; otherwise build the core default
+        # (or fall back to attempt-only if core is unavailable).
+        self.dead_letter_min_age = max(0.0, float(dead_letter_min_age))
+        if dead_letter_policy is not None:
+            self._dead_letter_policy = dead_letter_policy
+        elif AttemptAndAgeDeadLetterPolicy is not None:
+            self._dead_letter_policy = AttemptAndAgeDeadLetterPolicy(
+                max_attempts=self.max_attempts,
+                min_age_seconds=self.dead_letter_min_age,
+            )
+        else:  # pragma: no cover - core always present in full installs
+            self._dead_letter_policy = None
         if ordering not in ("strict", "best_effort"):
             raise ValueError(
                 f"ordering must be 'strict' or 'best_effort', got {ordering!r}"
@@ -429,11 +466,19 @@ class OutboundQueue:
         succeeded = failed = 0
         
         for entry in entries:
-            # Skip if we've hit max attempts
+            # Dead-letter decision (Issue #3519): a recoverable/transient
+            # failure is only terminal once it is BOTH attempt-exhausted AND
+            # genuinely old, so a brief channel outage keeps retrying under
+            # capped backoff instead of permanently dropping the message. A
+            # known-permanent error still short-circuits. Below both thresholds
+            # the entry falls through to the normal backoff/retry path.
             if entry.attempts >= self.max_attempts:
-                self._mark_permanent_failure(entry.id, "Max attempts exceeded")
-                failed += 1
-                continue
+                if self._should_dead_letter(entry):
+                    self._mark_permanent_failure(
+                        entry.id, "Max attempts exceeded"
+                    )
+                    failed += 1
+                    continue
             
             # Calculate backoff delay. Honour a server-mandated wait
             # (Telegram retry_after / HTTP Retry-After) recorded in the prior
@@ -596,6 +641,41 @@ class OutboundQueue:
                     
             return True
     
+    def _classify_error(self, error: Optional[str]) -> str:
+        """Classify a stored error string for the dead-letter policy.
+
+        Returns ``"permanent_target"`` for known-permanent target failures
+        (which should dead-letter immediately regardless of age) and
+        ``"recoverable"`` otherwise. Credential parking is handled upstream by
+        the supervisor (``ChannelState.CREDENTIAL_UNAVAILABLE``) so it never
+        reaches this attempt-exhausted path; entries here are treated as
+        transient unless the recorded error is a permanent target failure.
+        """
+        if not error:
+            return "recoverable"
+        try:
+            if is_permanent_target_failure(Exception(error)):
+                return "permanent_target"
+        except Exception:  # pragma: no cover - classifier is best-effort
+            pass
+        return "recoverable"
+
+    def _should_dead_letter(self, entry: OutboundEntry) -> bool:
+        """Whether an attempt-exhausted entry may be dead-lettered now.
+
+        Consults the injected dead-letter policy (Issue #3519). Falls back to
+        the legacy attempt-count-only behaviour if core is unavailable.
+        """
+        if self._dead_letter_policy is None:  # pragma: no cover - full installs have core
+            return True
+        decision = self._dead_letter_policy.should_dead_letter(
+            attempts=entry.attempts,
+            first_seen_epoch=entry.ts,
+            now_epoch=time.time(),
+            error_class=self._classify_error(entry.error),
+        )
+        return bool(decision.dead_letter)
+
     def _mark_permanent_failure(self, entry_id: int, error: str) -> None:
         """Mark entry as permanently failed."""
         with self._lock, closing(self._connect()) as conn:

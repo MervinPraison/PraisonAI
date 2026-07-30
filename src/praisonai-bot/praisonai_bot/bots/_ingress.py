@@ -59,6 +59,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+try:  # Core delivery-guarantee policy (Issue #3519); optional at import time.
+    from praisonaiagents.gateway import AttemptAndAgeDeadLetterPolicy
+except Exception:  # pragma: no cover - only when core predates the shared policy
+    # Core installs older than the policy (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack this symbol; fall back to
+    # the dependency-free local policy so the age gate still holds instead of
+    # silently reverting to attempt-only quarantine.
+    from ._resilience import LocalDeadLetterPolicy as AttemptAndAgeDeadLetterPolicy  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # 30 days default — long enough for ops to investigate, short enough not to blow up disk
@@ -68,6 +77,11 @@ _DEFAULT_CLAIM_TIMEOUT = 300  # 5 minutes
 # Cap on inbound claim attempts before an entry is quarantined. Mirrors the
 # outbound queue's max_attempts so a poison message cannot loop the gateway.
 _DEFAULT_MAX_ATTEMPTS = 5
+# Issue #3519: an attempt-exhausted entry must also be at least this old before
+# it is quarantined/dead-lettered, so a transient outage that burns attempts
+# quickly does not permanently drop a deliverable inbound message. 6h ≫ any
+# realistic channel incident yet well under the 30-day retention TTL.
+_DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS = 6 * 3600
 
 
 @dataclass(frozen=True)
@@ -151,6 +165,8 @@ class InboundJournal:
         claim_timeout: int = _DEFAULT_CLAIM_TIMEOUT,
         max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
         dlq: Optional[Any] = None,
+        dead_letter_min_age: float = _DEFAULT_DEAD_LETTER_MIN_AGE_SECONDS,
+        dead_letter_policy: Optional[Any] = None,
     ) -> None:
         self.path = Path(path).expanduser()
         self.max_size = int(max_size)
@@ -158,6 +174,20 @@ class InboundJournal:
         self.claim_timeout = int(claim_timeout)
         self.max_attempts = max(1, int(max_attempts))
         self._dlq = dlq
+        # Issue #3519: quarantine an exhausted entry only once it is also old
+        # enough, so a transient outage no longer permanently drops inbound
+        # messages. An explicit policy wins; otherwise use the core default
+        # (or fall back to attempt-only if core is unavailable).
+        self.dead_letter_min_age = max(0.0, float(dead_letter_min_age))
+        if dead_letter_policy is not None:
+            self._dead_letter_policy = dead_letter_policy
+        elif AttemptAndAgeDeadLetterPolicy is not None:
+            self._dead_letter_policy = AttemptAndAgeDeadLetterPolicy(
+                max_attempts=self.max_attempts,
+                min_age_seconds=self.dead_letter_min_age,
+            )
+        else:  # pragma: no cover - core always present in full installs
+            self._dead_letter_policy = None
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
@@ -377,7 +407,12 @@ class InboundJournal:
             # Active claim still within timeout — do not disturb it.
             return None, None
 
-        if attempts >= self.max_attempts:
+        # Dead-letter decision (Issue #3519): quarantine a redelivered
+        # exhausted entry only once it is BOTH attempt-exhausted AND genuinely
+        # old, so a transient outage that burns attempts quickly keeps being
+        # reprocessed instead of permanently dropping a deliverable message. A
+        # true poison message still quarantines once it ages past the floor.
+        if self._should_quarantine(entry):
             conn.execute(
                 """
                 UPDATE ingress_journal
@@ -471,6 +506,26 @@ class InboundJournal:
 
         return deleted
     
+    def _should_quarantine(self, entry: JournalEntry) -> bool:
+        """Whether a stale claimed entry should be quarantined now.
+
+        Consults the injected dead-letter policy (Issue #3519): an entry is
+        only dead-lettered once it is BOTH attempt-exhausted AND genuinely old.
+        Inbound claim failures carry no per-entry error classification, so the
+        transient path is used; a truly poisoned entry still quarantines once
+        it ages past the floor. Falls back to the legacy attempt-count-only
+        behaviour if core is unavailable.
+        """
+        if self._dead_letter_policy is None:  # pragma: no cover - full installs have core
+            return entry.attempts >= self.max_attempts
+        decision = self._dead_letter_policy.should_dead_letter(
+            attempts=entry.attempts,
+            first_seen_epoch=entry.ts,
+            now_epoch=time.time(),
+            error_class="",
+        )
+        return bool(decision.dead_letter)
+
     def replay(self) -> int:
         """Find and replay stale claimed entries. Returns count replayed.
 
@@ -500,7 +555,13 @@ class InboundJournal:
             stale = [JournalEntry(*row) for row in cur.fetchall()]
 
             for entry in stale:
-                if entry.attempts >= self.max_attempts:
+                # Quarantine decision (Issue #3519): an exhausted entry is only
+                # dead-lettered once it is BOTH attempt-exhausted AND genuinely
+                # old, so a transient outage that burns attempts quickly keeps
+                # replaying under the claim timeout instead of permanently
+                # dropping a deliverable inbound message. A true poison message
+                # still quarantines once it is old enough.
+                if self._should_quarantine(entry):
                     quarantine_ids.append(entry.id)
                     quarantine_entries.append(entry)
                 else:

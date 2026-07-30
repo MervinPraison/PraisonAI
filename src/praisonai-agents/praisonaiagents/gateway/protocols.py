@@ -3268,6 +3268,163 @@ RateLimitPolicy = RateLimitPolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Durable-queue dead-letter decision (Issue #3519)
+#
+# The gateway's durable inbound journal and outbound queue must decide when a
+# repeatedly-failing entry is a genuine *poison message* (dead-letter it) vs a
+# victim of a *transient channel outage* (keep retrying). Deciding on the
+# attempt counter alone dead-letters deliverable traffic during a routine
+# few-minute API incident, because the exponential backoff burns the default
+# five attempts in well under a minute — a silent-loss failure the durable
+# queue exists to prevent.
+#
+# The fix is a pure, import-free *decision* contract, symmetric with the other
+# gateway policy protocols above (``SendPolicyProtocol``,
+# ``RateLimitPolicyProtocol``): a recoverable/transient failure is only
+# dead-lettered once it is BOTH attempt-exhausted AND genuinely old, while a
+# permanently-classified error (credentials revoked, permanent target) still
+# short-circuits immediately. The durable-queue runtime in ``praisonai-bot``
+# consumes it where it currently tests ``attempts >= max_attempts``.
+# ---------------------------------------------------------------------------
+
+
+# Error classes that are already *known-permanent* and should dead-letter
+# immediately regardless of age — no amount of retrying recovers a revoked
+# credential or a permanently-invalid target.
+PERMANENT_ERROR_CLASSES: Tuple[str, ...] = ("credential", "permanent_target")
+
+
+@dataclass(frozen=True)
+class DeadLetterDecision:
+    """Result of a dead-letter evaluation.
+
+    Attributes:
+        dead_letter: Whether the entry should be routed to the dead-letter
+            queue / marked ``permanent_failure`` now. When ``False`` the
+            caller reschedules the entry under its normal capped backoff.
+        reason: Short machine-readable explanation (``"permanent_error"``,
+            ``"attempts_and_age"``, ``"retry"``) for logging/metrics.
+    """
+
+    dead_letter: bool
+    reason: str = ""
+
+
+@runtime_checkable
+class DeadLetterPolicyProtocol(Protocol):
+    """Protocol for the durable-queue dead-letter decision.
+
+    Pure, import-free decision contract consumed by the outbound queue's
+    ``drain`` and the inbound journal's redelivery/replay paths. The runtime
+    supplies typed facts about a repeatedly-failing entry (its ``attempts``,
+    the ``first_seen_epoch`` it was first received, the current ``now_epoch``,
+    and a coarse ``error_class``) and the policy returns a
+    :class:`DeadLetterDecision`. Concrete queue state and side effects (SQLite
+    rows, DLQ enqueue) stay in the implementation; this keeps the *policy*
+    injectable and testable in isolation, symmetric with
+    :class:`SendPolicyProtocol` / :class:`RateLimitPolicyProtocol`.
+
+    A config-driven default (:class:`AttemptAndAgeDeadLetterPolicy`) is
+    provided for the common "poison vs transient" case.
+    """
+
+    def should_dead_letter(
+        self,
+        *,
+        attempts: int,
+        first_seen_epoch: float,
+        now_epoch: float,
+        error_class: str = "",
+    ) -> DeadLetterDecision:
+        """Return a :class:`DeadLetterDecision` for the supplied facts."""
+        ...
+
+
+class AttemptAndAgeDeadLetterPolicy:
+    """Default dead-letter policy: require BOTH attempt-exhaustion AND age.
+
+    Distinguishes a *poison message* (fails repeatedly over a long time) from
+    a *transient outage* (fails a few times quickly, then recovers). A
+    recoverable/transient failure is dead-lettered only once it satisfies
+    **both**:
+
+    1. ``attempts >= max_attempts``, and
+    2. ``age >= min_age_seconds`` (wall-clock age since first receipt).
+
+    Until an entry is genuinely old it keeps retrying under capped backoff
+    rather than being discarded, so a brief channel incident results in
+    delayed-but-delivered messages rather than a DLQ full of manual-replay
+    work. A truly poisoned entry still dead-letters — it keeps failing past
+    both thresholds.
+
+    An error whose ``error_class`` is known-permanent (see
+    :data:`PERMANENT_ERROR_CLASSES` — a revoked credential or a permanently
+    invalid target) short-circuits to dead-letter immediately regardless of
+    age, since retrying can never recover it.
+
+    ``min_age_seconds=0`` restores the legacy attempt-count-only behaviour,
+    keeping the knob fully backward-compatible for callers that opt in.
+
+    Example::
+
+        AttemptAndAgeDeadLetterPolicy(max_attempts=5, min_age_seconds=6*3600)
+    """
+
+    #: Default minimum age (6 hours) before a transient failure may dead-letter.
+    DEFAULT_MIN_AGE_SECONDS: int = 6 * 3600
+
+    def __init__(
+        self,
+        max_attempts: int = 5,
+        min_age_seconds: int = DEFAULT_MIN_AGE_SECONDS,
+    ) -> None:
+        try:
+            attempts_ceiling = int(max_attempts)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"max_attempts must be an integer, got {max_attempts!r}"
+            ) from err
+        if attempts_ceiling < 1:
+            raise ValueError(
+                f"max_attempts must be >= 1, got {max_attempts!r}"
+            )
+        try:
+            min_age = float(min_age_seconds)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"min_age_seconds must be a number, got {min_age_seconds!r}"
+            ) from err
+        if min_age < 0:
+            raise ValueError(
+                f"min_age_seconds must be >= 0, got {min_age_seconds!r}"
+            )
+        self.max_attempts = attempts_ceiling
+        self.min_age_seconds = min_age
+
+    def should_dead_letter(
+        self,
+        *,
+        attempts: int,
+        first_seen_epoch: float,
+        now_epoch: float,
+        error_class: str = "",
+    ) -> DeadLetterDecision:
+        # Known-permanent conditions can never be recovered by retrying.
+        if error_class in PERMANENT_ERROR_CLASSES:
+            return DeadLetterDecision(dead_letter=True, reason="permanent_error")
+
+        exhausted = attempts >= self.max_attempts
+        # Guard against a missing/zero first-seen stamp: treat it as "just now"
+        # so a malformed row is never prematurely dead-lettered on age.
+        age = now_epoch - first_seen_epoch if first_seen_epoch else 0.0
+        old_enough = age >= self.min_age_seconds
+
+        if exhausted and old_enough:
+            return DeadLetterDecision(dead_letter=True, reason="attempts_and_age")
+        return DeadLetterDecision(dead_letter=False, reason="retry")
+
+
+# ---------------------------------------------------------------------------
 # Port-less, restart-safe external drain trigger (Issue #2390)
 #
 # Hosted/containerised deployments (Docker, Fly, Kubernetes) need to ask a

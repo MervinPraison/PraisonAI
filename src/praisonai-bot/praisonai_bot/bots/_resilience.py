@@ -597,3 +597,59 @@ async def deliver_with_retry(
             )
             
             await asyncio.sleep(delay)
+
+
+# Error classes that dead-letter immediately regardless of age. Kept in sync
+# with praisonaiagents.gateway.PERMANENT_ERROR_CLASSES so the local fallback
+# below matches core semantics when core predates the shared policy.
+_PERMANENT_ERROR_CLASSES = ("credential", "permanent_target")
+
+
+@dataclass(frozen=True)
+class _LocalDeadLetterDecision:
+    """Local mirror of ``praisonaiagents.gateway.DeadLetterDecision``.
+
+    Exposes the same ``dead_letter`` / ``reason`` attributes so queue callers
+    read the result identically whether the policy came from core or from the
+    local fallback below.
+    """
+
+    dead_letter: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class LocalDeadLetterPolicy:
+    """Dependency-free attempt-and-age dead-letter policy (Issue #3519).
+
+    A structural stand-in for
+    :class:`praisonaiagents.gateway.AttemptAndAgeDeadLetterPolicy`, used by the
+    durable queues when the installed core predates that symbol (the bot's
+    dependency floor ``praisonaiagents>=1.6.152`` admits releases older than the
+    policy). Without this, the queues would silently revert to attempt-only
+    dead-lettering and re-introduce the transient message loss this fix
+    prevents. An entry is dead-lettered only when it is BOTH attempt-exhausted
+    AND at least ``min_age_seconds`` old; a known-permanent ``error_class``
+    short-circuits immediately. ``min_age_seconds=0`` restores legacy
+    attempt-only behaviour.
+    """
+
+    max_attempts: int = 5
+    min_age_seconds: float = 6 * 3600
+
+    def should_dead_letter(
+        self,
+        *,
+        attempts: int,
+        first_seen_epoch: float,
+        now_epoch: float,
+        error_class: str = "",
+    ) -> _LocalDeadLetterDecision:
+        if error_class in _PERMANENT_ERROR_CLASSES:
+            return _LocalDeadLetterDecision(dead_letter=True, reason="permanent_error")
+        exhausted = attempts >= self.max_attempts
+        age = now_epoch - first_seen_epoch if first_seen_epoch else 0.0
+        old_enough = age >= self.min_age_seconds
+        if exhausted and old_enough:
+            return _LocalDeadLetterDecision(dead_letter=True, reason="attempts_and_age")
+        return _LocalDeadLetterDecision(dead_letter=False, reason="retry")

@@ -57,7 +57,8 @@ class TestInboundJournalQuarantine:
         from praisonai_bot.bots import InboundJournal
 
         journal = InboundJournal(
-            path=tmp_path / "ingress.sqlite", claim_timeout=1, max_attempts=3
+            path=tmp_path / "ingress.sqlite", claim_timeout=1, max_attempts=3,
+            dead_letter_min_age=0,
         )
         key = journal.receive("telegram", "bot1", "chat1", "poison", {"text": "x"})
         assert key is not None
@@ -100,6 +101,7 @@ class TestInboundJournalQuarantine:
             claim_timeout=1,
             max_attempts=1,
             dlq=dlq,
+            dead_letter_min_age=0,
         )
         key = journal.receive(
             "telegram", "bot1", "chat1", "poison",
@@ -122,7 +124,8 @@ class TestInboundJournalQuarantine:
         from praisonai_bot.bots import InboundJournal
 
         journal = InboundJournal(
-            path=tmp_path / "ingress.sqlite", claim_timeout=1, max_attempts=1
+            path=tmp_path / "ingress.sqlite", claim_timeout=1, max_attempts=1,
+            dead_letter_min_age=0,
         )
         key = journal.receive("telegram", "bot1", "chat1", "poison", {"text": "x"})
         assert key is not None
@@ -146,6 +149,7 @@ class TestInboundJournalQuarantine:
             claim_timeout=1,
             max_attempts=1,
             dlq=dlq,
+            dead_letter_min_age=0,
         )
         key = journal.receive(
             "telegram", "bot1", "chat1", "poison",
@@ -170,7 +174,8 @@ class TestInboundJournalQuarantine:
         from praisonai_bot.bots import InboundJournal
 
         journal = InboundJournal(
-            path=tmp_path / "ingress.sqlite", claim_timeout=300, max_attempts=2
+            path=tmp_path / "ingress.sqlite", claim_timeout=300, max_attempts=2,
+            dead_letter_min_age=0,
         )
         key = journal.receive("telegram", "bot1", "chat1", "poison", {"text": "x"})
         assert key is not None
