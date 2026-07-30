@@ -93,3 +93,21 @@ def test_to_list_returns_dicts():
 def test_closed_vocabularies_exposed():
     assert set(OWNER_KINDS) == {"channel", "provider", "capability", "route", "gateway"}
     assert set(DEGRADED_STATES) == {"cold", "stale"}
+
+
+def test_owner_rejects_unknown_owner_kind():
+    with pytest.raises(ValueError):
+        DegradedOwner("not-a-kind", "x", "cold", "reason", "")
+
+
+def test_owner_rejects_unknown_state():
+    with pytest.raises(ValueError):
+        DegradedOwner("provider", "openai", "not-a-state", "reason", "")
+
+
+def test_owner_accepts_every_declared_vocabulary_value():
+    for kind in OWNER_KINDS:
+        for state in DEGRADED_STATES:
+            owner = DegradedOwner(kind, "id", state, "reason", "")
+            assert owner.owner_kind == kind
+            assert owner.state == state

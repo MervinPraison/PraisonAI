@@ -4546,6 +4546,54 @@ class WebSocketGateway:
         self._refresh_metric_gauges()
         return self._metrics.snapshot()
 
+    def _mark_degraded_owner(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        reason: str,
+        *,
+        state: str = "cold",
+        retry_hint: str = "praisonai gateway doctor --fix",
+    ) -> None:
+        """Record a degraded owner into the shared cross-owner registry.
+
+        Issue #3518: the single write path any gateway owner (channel /
+        provider / capability / route) uses to declare degradation, so
+        ``health()`` can surface *every* degraded owner — not just channels —
+        with a consistent, redacted, actionable shape. Defensive: never raises
+        into the caller's hot path if the optional registry is unavailable.
+        """
+        registry = getattr(self, "_degraded_registry", None)
+        if registry is None:
+            return
+        try:
+            from praisonaiagents.gateway import DegradedOwner
+
+            registry.mark(
+                DegradedOwner(
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
+                    state=state,
+                    reason=reason,
+                    retry_hint=retry_hint,
+                )
+            )
+        except Exception:
+            pass
+
+    def _clear_degraded_owner(self, owner_kind: str, owner_id: str) -> None:
+        """Clear a degraded owner from the shared registry on recovery.
+
+        Issue #3518: idempotent counterpart to :meth:`_mark_degraded_owner`.
+        """
+        registry = getattr(self, "_degraded_registry", None)
+        if registry is None:
+            return
+        try:
+            registry.clear(owner_kind, owner_id)
+        except Exception:
+            pass
+
     def health(self) -> Dict[str, Any]:
         """Get gateway health status including per-channel bot status and supervision state."""
         from praisonaiagents.bots.protocols import HealthReason, HealthResult, evaluate_channel_health
@@ -5840,10 +5888,17 @@ class WebSocketGateway:
                 # a monitor can tell "configured-but-unavailable" apart from
                 # "never configured". Healthy channels keep serving unaffected.
                 self._degraded_channels[channel_name] = "credential unavailable"
+                # Issue #3518: also record into the shared cross-owner registry
+                # so this channel is a genuine live producer of the unified
+                # ``degraded_owners`` surface, not just the channel-only map.
+                self._mark_degraded_owner(
+                    "channel", channel_name, "credential unavailable"
+                )
                 continue
             # Recovered on (re)start: a channel that previously degraded but now
             # has a token must not linger in the degraded set.
             self._degraded_channels.pop(channel_name, None)
+            self._clear_degraded_owner("channel", channel_name)
 
             routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
             self._routing_rules[channel_name] = routes
@@ -7042,9 +7097,14 @@ class WebSocketGateway:
             logger.warning(f"No token for channel '{channel_name}', skipping")
             # Issue #3159: a channel that degrades on hot-reload stays queryable.
             self._degraded_channels[channel_name] = "credential unavailable"
+            # Issue #3518: mirror into the shared registry (live producer).
+            self._mark_degraded_owner(
+                "channel", channel_name, "credential unavailable"
+            )
             return
         # Recovered on hot-reload: clear any prior degraded marker.
         self._degraded_channels.pop(channel_name, None)
+        self._clear_degraded_owner("channel", channel_name)
 
         routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
         self._routing_rules[channel_name] = routes

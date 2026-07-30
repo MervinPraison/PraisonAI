@@ -23,7 +23,7 @@ state and :meth:`DegradedCapabilityRegistry.clear` on recovery; readers call
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Protocol, Tuple, runtime_checkable
 
 # Closed vocabularies kept as module constants so owners and readers agree on
@@ -49,6 +49,20 @@ class DegradedOwner:
     state: str
     reason: str
     retry_hint: str = ""
+
+    def __post_init__(self) -> None:
+        # Enforce the closed vocabularies at construction so an unsupported
+        # owner_kind/state can never reach an operator-facing record. Frozen
+        # dataclass validation belongs here rather than being duplicated by
+        # every writer and reader (Issue #3518).
+        if self.owner_kind not in OWNER_KINDS:
+            raise ValueError(
+                f"owner_kind {self.owner_kind!r} not in {OWNER_KINDS!r}"
+            )
+        if self.state not in DEGRADED_STATES:
+            raise ValueError(
+                f"state {self.state!r} not in {DEGRADED_STATES!r}"
+            )
 
     def to_dict(self) -> Dict[str, str]:
         return {
