@@ -103,3 +103,47 @@ def test_no_client_instructions_parameter():
     assert "instructions" not in props
     assert set(props) <= {"message", "session_id", "user_id"}
     assert schema["inputSchema"]["required"] == ["message"]
+
+
+def test_same_session_id_across_agents_does_not_leak_history():
+    support = FakeAgent("support")
+    billing = FakeAgent("billing")
+    server = Server()
+    register_agents(server, [support, billing])
+
+    # Reuse the SAME client-supplied session id across two different agents.
+    _call(server._tool_registry, "ask_support", message="hi support", session_id="shared")
+    _call(server._tool_registry, "ask_billing", message="hi billing", session_id="shared")
+
+    # Billing's turn must start empty — it must not see support's transcript.
+    assert billing.seen_histories[0] == []
+
+
+def test_normalized_name_collision_registers_distinct_tools():
+    server = Server()
+    # "Support" and "support" normalize to the same suffix; both must survive.
+    register_agents(server, [FakeAgent("Support"), FakeAgent("support")])
+
+    names = {t.name for t in server._tool_registry.list_all()}
+    assert "ask_support" in names
+    assert "ask_support_2" in names
+
+
+def test_unnamed_agents_do_not_collide():
+    server = Server()
+    a = FakeAgent("support")
+    a.name = None
+    b = FakeAgent("billing")
+    b.name = None
+    register_agents(server, [a, b])
+
+    names = {t.name for t in server._tool_registry.list_all()}
+    assert "ask_agent" in names
+    assert "ask_agent_2" in names
+
+
+def test_serve_agents_rejects_unknown_transport():
+    from praisonai_mcp import serve_agents
+
+    with pytest.raises(ValueError):
+        serve_agents([FakeAgent("support")], transport="websocket")

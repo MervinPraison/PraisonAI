@@ -38,11 +38,26 @@ def _safe_tool_name(name: str) -> str:
 
 
 class _SessionStore:
-    """Thread-safe in-memory transcript store keyed by session id."""
+    """Thread-safe in-memory transcript store keyed by session id.
+
+    Exposes a per-session lock so a single ``load → run → save`` turn is
+    serialized against concurrent turns for the *same* session (otherwise two
+    overlapping calls both read the same transcript and the later save discards
+    the other's completed turn). Turns for *different* sessions never contend.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._sessions: Dict[str, List[Dict[str, Any]]] = {}
+        self._session_locks: Dict[str, threading.Lock] = {}
+
+    def lock_for(self, session_id: str) -> threading.Lock:
+        with self._lock:
+            lock = self._session_locks.get(session_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._session_locks[session_id] = lock
+            return lock
 
     def load(self, session_id: str) -> List[Dict[str, Any]]:
         with self._lock:
@@ -70,10 +85,18 @@ def register_agents(server: Any, agents: List[Any]) -> None:
     store = _SessionStore()
 
     catalog: List[Dict[str, str]] = []
+    used_suffixes: Dict[str, int] = {}
 
     for agent in agents:
         raw_name = getattr(agent, "name", None) or "agent"
         suffix = _safe_tool_name(raw_name)
+        # Disambiguate distinct agents whose names normalize to the same suffix
+        # (e.g. "Support", "support", "sup-port", or two unnamed agents) so a
+        # later registration never silently shadows an earlier agent's tool.
+        seen = used_suffixes.get(suffix, 0)
+        used_suffixes[suffix] = seen + 1
+        if seen:
+            suffix = f"{suffix}_{seen + 1}"
         tool_name = f"ask_{suffix}"
         description = (
             getattr(agent, "role", None)
@@ -86,7 +109,7 @@ def register_agents(server: Any, agents: List[Any]) -> None:
 
         registry.register(
             name=tool_name,
-            handler=_make_ask_handler(agent, store),
+            handler=_make_ask_handler(agent, store, tool_name),
             description=f"Ask the {raw_name} agent.",
             input_schema={
                 "type": "object",
@@ -116,7 +139,7 @@ def register_agents(server: Any, agents: List[Any]) -> None:
     logger.info("Registered %d agent(s) as MCP tools", len(agents))
 
 
-def _make_ask_handler(agent: Any, store: _SessionStore):
+def _make_ask_handler(agent: Any, store: _SessionStore, tool_name: str):
     async def ask(
         message: str,
         session_id: Optional[str] = None,
@@ -124,21 +147,32 @@ def _make_ask_handler(agent: Any, store: _SessionStore):
     ) -> Dict[str, Any]:
         # Mint a fresh id when omitted — never fall back to a shared session.
         sid = session_id or uuid.uuid4().hex
-        history = store.load(sid)
+        # Namespace the transcript by tool so reusing the *same* client-supplied
+        # session_id across different ask_* agents never mixes their histories.
+        store_key = f"{tool_name}:{sid}"
 
-        # Isolate per-call so concurrent sessions never share mutable state.
-        turn_agent = _isolated_agent(agent)
+        # Serialize the load → run → save turn for this session so overlapping
+        # calls can't both read the same transcript and clobber each other.
+        turn_lock = store.lock_for(store_key)
+        turn_lock.acquire()
         try:
-            turn_agent.chat_history = list(history)
-        except Exception:
-            pass
+            history = store.load(store_key)
 
-        text = await _run_turn(turn_agent, message)
+            # Isolate per-call so concurrent sessions never share mutable state.
+            turn_agent = _isolated_agent(agent)
+            try:
+                turn_agent.chat_history = list(history)
+            except Exception:
+                pass
 
-        new_history = list(history)
-        new_history.append({"role": "user", "content": message})
-        new_history.append({"role": "assistant", "content": text})
-        store.save(sid, new_history)
+            text = await _run_turn(turn_agent, message)
+
+            new_history = list(history)
+            new_history.append({"role": "user", "content": message})
+            new_history.append({"role": "assistant", "content": text})
+            store.save(store_key, new_history)
+        finally:
+            turn_lock.release()
 
         return {
             "text": text,

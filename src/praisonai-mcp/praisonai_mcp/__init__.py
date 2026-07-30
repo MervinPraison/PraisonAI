@@ -51,8 +51,12 @@ def serve_agents(
 
     if transport == "stdio":
         server.run(transport="stdio")
-    else:
+    elif transport == "http-stream":
         server.run(transport="http-stream", host=host, port=port, **kwargs)
+    else:
+        raise ValueError(
+            f"Unknown transport {transport!r}; expected 'http-stream' or 'stdio'."
+        )
     return server
 
 
