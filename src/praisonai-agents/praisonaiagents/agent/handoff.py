@@ -309,7 +309,14 @@ class Handoff:
     - Cycle detection and depth limiting
     - Configurable context policies
     """
-    
+
+    # Class-level lock guarding lazy creation of each instance's async
+    # semaphore. The semaphore itself is per-instance (so every Handoff
+    # enforces its own max_concurrent), but the brief init critical section is
+    # only ever touched under this shared threading.Lock, which keeps
+    # double-checked lazy creation thread-safe without a per-instance lock.
+    _semaphore_lock: threading.Lock = threading.Lock()
+
     def __init__(
         self,
         agent: 'Agent',
@@ -349,7 +356,6 @@ class Handoff:
         # running loop on first use.
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._semaphore_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._semaphore_lock: threading.Lock = threading.Lock()
         
         # Override config callback if on_handoff provided directly
         if on_handoff and not self.config.on_handoff:
