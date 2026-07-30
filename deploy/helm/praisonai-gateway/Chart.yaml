@@ -1,0 +1,17 @@
+apiVersion: v2
+name: praisonai-gateway
+description: Helm chart for the PraisonAI gateway (WebSocket + REST) using the official GHCR image.
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://docs.praison.ai
+sources:
+  - https://github.com/MervinPraison/PraisonAI
+keywords:
+  - praisonai
+  - agents
+  - gateway
+  - websocket
+maintainers:
+  - name: MervinPraison
+    url: https://github.com/MervinPraison/PraisonAI
