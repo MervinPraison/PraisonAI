@@ -301,6 +301,12 @@ class _BaseAgentScheduler:
                     if state.get("pid") == current_pid:
                         state["executions"] = self._execution_count
                         state["cost"] = round(self._total_cost, 4)
+                        # Persist the wall-clock anchor so a restart resumes the
+                        # schedule at the next real occurrence instead of
+                        # re-phasing from process start (see issue #3526).
+                        last_run = getattr(self, "_last_run_at", None)
+                        if last_run is not None:
+                            state["last_run_at"] = last_run
                         with open(path, "w") as f:
                             json.dump(state, f, indent=2)
                         break
@@ -308,3 +314,33 @@ class _BaseAgentScheduler:
                     continue
         except Exception as e:
             logger.debug("Failed to update state: %s", e)
+
+    def _load_persisted_last_run(self) -> None:
+        """Restore ``_last_run_at`` from this PID's daemon state file, if any.
+
+        Lets a restarted daemon resume a wall-clock (cron) schedule from where
+        it left off — a slot missed during downtime runs once, then re-anchors
+        — instead of re-phasing from process start (see issue #3526). No-op for
+        plain interval schedules and when no daemon state file exists.
+        """
+        try:
+            state_dir = os.path.expanduser("~/.praisonai/schedulers")
+            if not os.path.exists(state_dir):
+                return
+            current_pid = os.getpid()
+            for fname in os.listdir(state_dir):
+                if not fname.endswith(".json"):
+                    continue
+                path = os.path.join(state_dir, fname)
+                try:
+                    with open(path, "r") as f:
+                        state = json.load(f)
+                    if state.get("pid") == current_pid:
+                        last_run = state.get("last_run_at")
+                        if last_run is not None:
+                            self._last_run_at = float(last_run)
+                        break
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("Failed to load persisted last_run_at: %s", e)

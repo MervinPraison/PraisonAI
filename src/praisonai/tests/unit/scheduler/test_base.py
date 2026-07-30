@@ -98,6 +98,70 @@ class TestScheduleParser:
         assert ScheduleParser.parse("cron:0 8,12 * * *") == 60
 
 
+croniter = pytest.importorskip("croniter", reason="cron ticker needs croniter")
+
+
+def _epoch(y, mo, d, h, mi):
+    from datetime import datetime, timezone
+    return datetime(y, mo, d, h, mi, tzinfo=timezone.utc).timestamp()
+
+
+class TestScheduleTicker:
+    """Wall-clock cron scheduling via ScheduleTicker (issue #3526)."""
+
+    def test_interval_is_not_cron_and_keeps_fixed_seconds(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("hourly")
+        assert t.is_cron is False
+        assert t.seconds_until_next() == 3600.0
+        # Interval schedules are always "due" on the first tick.
+        assert t.is_due() is True
+
+    def test_interval_various_forms(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        assert ScheduleTicker("*/30m").seconds_until_next() == 1800.0
+        assert ScheduleTicker("60").seconds_until_next() == 60.0
+
+    def test_cron_honours_wall_clock_time_of_day(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        t.created_at = _epoch(2026, 1, 1, 7, 0)
+        assert t.is_cron is True
+        now = _epoch(2026, 1, 1, 8, 0)
+        assert t.is_due(now) is False  # 09:00 slot not yet reached
+        assert abs(t.seconds_until_next(now) - 3600) < 2  # fires in ~1h
+
+    def test_cron_not_due_immediately_after_run(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        last = _epoch(2026, 1, 1, 9, 0)
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=last)
+        now = _epoch(2026, 1, 1, 9, 30)
+        assert t.is_due(now) is False
+        # Next occurrence is tomorrow 09:00 (~23.5h away).
+        assert abs(t.seconds_until_next(now) - (23.5 * 3600)) < 2
+
+    def test_cron_catches_up_missed_slot_across_downtime(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        # Last run yesterday 09:00, process resumes today 10:00 → slot missed.
+        last = _epoch(2025, 12, 31, 9, 0)
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=last)
+        assert t.is_due(_epoch(2026, 1, 1, 10, 0)) is True
+
+    def test_cron_startup_after_slot_catches_up_once(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        t.created_at = _epoch(2026, 1, 1, 8, 0)
+        # Started 08:00, now 10:00 → today's 09:00 slot passed → due once.
+        assert t.is_due(_epoch(2026, 1, 1, 10, 0)) is True
+
+    def test_mark_ran_advances_anchor(self):
+        from praisonai.scheduler.shared import ScheduleTicker
+        t = ScheduleTicker("cron:0 9 * * *", last_run_at=None)
+        assert t.last_run_at is None
+        t.mark_ran(now=_epoch(2026, 1, 1, 9, 0))
+        assert t.last_run_at == _epoch(2026, 1, 1, 9, 0)
+
+
 class TestExecutorInterface:
     """Test ExecutorInterface abstract class."""
     
