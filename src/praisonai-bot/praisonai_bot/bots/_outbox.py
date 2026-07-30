@@ -64,6 +64,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tupl
 
 from ._resilience import (
     BackoffPolicy,
+    LocalDeadLetterPolicy,
     compute_backoff,
     is_permanent_target_failure,
     is_recoverable_error,
@@ -72,8 +73,12 @@ from ._resilience import (
 
 try:  # Core delivery-guarantee policy (Issue #3519); optional at import time.
     from praisonaiagents.gateway import AttemptAndAgeDeadLetterPolicy
-except Exception:  # pragma: no cover - core always present in full installs
-    AttemptAndAgeDeadLetterPolicy = None  # type: ignore[assignment]
+except Exception:  # pragma: no cover - only when core predates the shared policy
+    # Core installs older than the policy (the dependency floor
+    # ``praisonaiagents>=1.6.152`` admits them) lack this symbol; fall back to
+    # the dependency-free local policy so the age gate still holds instead of
+    # silently reverting to attempt-only dead-lettering.
+    AttemptAndAgeDeadLetterPolicy = LocalDeadLetterPolicy  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
