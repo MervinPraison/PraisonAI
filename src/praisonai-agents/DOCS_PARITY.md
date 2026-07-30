@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 61 | 22306 |
+| ✅ Gateway | 7 | 62 | 22609 |
 | ✅ Guardrails | 4 | 4 | 1731 |
 | ✅ Handoffs | 11 | 6 | 2502 |
 | ✅ Hooks | 2 | 9 | 4128 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 134 | 38460 |
+| ✅ Tools | 12 | 134 | 38490 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
