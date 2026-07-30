@@ -4165,6 +4165,7 @@ class WorkflowManager:
             # Handle loop_over - iterate over a variable
             if step.loop_over and step.loop_over in all_variables:
                 loop_items = all_variables[step.loop_over]
+                loop_stopped = False
                 if isinstance(loop_items, (list, tuple)):
                     loop_results = []
                     for item_idx, item in enumerate(loop_items):
@@ -4182,6 +4183,7 @@ class WorkflowManager:
 
                         if not step_result["success"] and step.on_error == "stop":
                             state["success"] = False
+                            loop_stopped = True
                             break
 
                     # Store all loop results
@@ -4197,6 +4199,22 @@ class WorkflowManager:
                     all_variables.pop("_loop_index", None)
                 else:
                     self._log(f"loop_over variable '{step.loop_over}' is not iterable")
+
+                # A stop-on-error inside the loop aborts the whole workflow,
+                # not just the inner item iteration.
+                if loop_stopped:
+                    break
+
+                # Persist checkpoint after a completed loop step so resume does
+                # not re-run every loop item (parity with single-step saves).
+                if checkpoint:
+                    self._save_checkpoint(
+                        name=checkpoint,
+                        workflow_name=workflow_name,
+                        completed_steps=i + 1,
+                        results=results,
+                        variables=all_variables
+                    )
 
                 current_step_idx += 1
                 continue
