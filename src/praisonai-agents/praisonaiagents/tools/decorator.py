@@ -33,6 +33,11 @@ from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 from .base import BaseTool
 from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
 
+# Valid human-approval risk levels, mirroring approval.RiskLevel. A misspelled
+# level (e.g. "critial") must be rejected rather than silently registered, since
+# critical-only policy checks compare against the exact "critical" string.
+_VALID_RISK_LEVELS = ("critical", "high", "medium", "low")
+
 # Lazy load injected module functions to reduce import time
 _injected_module = None
 
@@ -80,10 +85,15 @@ class FunctionTool(BaseTool):
         self._schema_override = dynamic_schema_overrides
         self.retry_policy = retry_policy
         self.requires_approval = requires_approval
-        self.risk_level = (
-            requires_approval if isinstance(requires_approval, str)
-            else ("high" if requires_approval else None)
-        )
+        if isinstance(requires_approval, str):
+            if requires_approval not in _VALID_RISK_LEVELS:
+                raise ValueError(
+                    f"Invalid requires_approval risk level {requires_approval!r} for "
+                    f"tool '{self.name}'. Expected one of {_VALID_RISK_LEVELS} or a bool."
+                )
+            self.risk_level = requires_approval
+        else:
+            self.risk_level = "high" if requires_approval else None
         
         # Detect injected parameters
         self._injected_params = get_injected_params(func)
@@ -255,14 +265,18 @@ def tool(
 
         # Register approval requirement with the global registry so local,
         # gateway, and served runs all honour this tool's human sign-off.
+        # This is a security gate, so it MUST fail closed: if registration
+        # cannot be installed we refuse to hand back an executable tool that
+        # would otherwise run without its declared approval requirement.
         if tool_instance.risk_level is not None:
             try:
                 from praisonaiagents.approval import add_approval_requirement
                 add_approval_requirement(tool_instance.name, tool_instance.risk_level)
             except Exception as e:
-                logging.warning(
-                    f"Failed to register approval requirement for {tool_instance.name}: {e}"
-                )
+                raise RuntimeError(
+                    f"Failed to register approval requirement for "
+                    f"'{tool_instance.name}'; refusing to expose an ungated tool: {e}"
+                ) from e
 
         # Validate the tool at creation time for early error detection
         try:

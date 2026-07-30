@@ -1,6 +1,8 @@
 """
 Tests for @tool(requires_approval=...) decorator functionality.
 """
+import pytest
+
 from praisonaiagents import tool
 from praisonaiagents.approval import (
     get_approval_registry,
@@ -65,3 +67,34 @@ class TestToolDecoratorRequiresApproval:
             assert is_approval_required("some_func") is False
         finally:
             remove_approval_requirement("danger_op")
+
+    def test_invalid_risk_level_string_rejected(self):
+        """A misspelled risk level raises rather than silently registering.
+
+        Guards against ``requires_approval="critial"`` slipping through as a
+        non-critical tool when critical-only checks compare against "critical".
+        """
+        with pytest.raises(ValueError):
+            @tool(requires_approval="critial")
+            def typo_level(x: str) -> str:
+                """Bad level."""
+                return x
+
+        assert is_approval_required("typo_level") is False
+
+    def test_registration_failure_fails_closed(self, monkeypatch):
+        """If approval registration raises, no ungated tool is exposed."""
+        import praisonaiagents.approval as approval_mod
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("registry unavailable")
+
+        monkeypatch.setattr(approval_mod, "add_approval_requirement", boom)
+
+        with pytest.raises(RuntimeError):
+            @tool(requires_approval=True)
+            def fails_closed(x: str) -> str:
+                """Should not be exposed if registration fails."""
+                return x
+
+        assert is_approval_required("fails_closed") is False
