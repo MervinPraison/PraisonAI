@@ -87,6 +87,18 @@ except ImportError:
 # NOTE: The custom-LLM path (Agent.chat → get_response) and OpenAI path
 # (Agent.chat → _chat_completion) are separate code paths, not duplicate
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
+class LLMResponseError(Exception):
+    """Raised when the LLM tool-calling loop fails and cannot produce a response.
+
+    This ensures a mid-loop failure surfaces as a distinguishable exception to
+    the caller instead of being silently swallowed and returned as an empty
+    string.
+    """
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
+
 class LLMContextLengthExceededException(Exception):
     """Raised when LLM context length is exceeded"""
     def __init__(self, message: str):
@@ -3563,9 +3575,16 @@ Respond with ONLY a valid JSON tool call in this format:
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
+                except LLMResponseError:
+                    raise
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
-                    break
+                    # Don't swallow the failure and return an empty string as if
+                    # the call succeeded. Re-raise as a distinguishable exception
+                    # so the caller (e.g. Agent.chat) can surface the real error.
+                    raise LLMResponseError(
+                        f"LLM tool-calling loop failed at iteration {iteration_count}: {e}"
+                    ) from e
                     
             # End of while loop - return final response
             if final_response_text:

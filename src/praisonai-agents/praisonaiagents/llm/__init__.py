@@ -34,6 +34,10 @@ def __getattr__(name):
             from .llm import LLMContextLengthExceededException
             _lazy_cache[name] = LLMContextLengthExceededException
             return LLMContextLengthExceededException
+        elif name == "LLMResponseError":
+            from .llm import LLMResponseError
+            _lazy_cache[name] = LLMResponseError
+            return LLMResponseError
 
         elif name == "OpenAIClient":
             from .openai_client import OpenAIClient
@@ -206,6 +210,7 @@ def __getattr__(name):
 __all__ = [
     "LLM", 
     "LLMContextLengthExceededException", 
+    "LLMResponseError",
     "OpenAIClient", 
     "get_openai_client",
     "ChatCompletionMessage",

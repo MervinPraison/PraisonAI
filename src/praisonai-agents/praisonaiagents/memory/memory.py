@@ -707,11 +707,13 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 return []
         
         else:
-            # Delegate to the active adapter when provider falls back to
-            # sqlite/in_memory. This avoids the legacy short_mem schema mismatch
-            # where the adapter creates short_term_memory but legacy queries
-            # short_mem (which is never created by the adapter).
-            if getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+            # Delegate to the active adapter whenever one is configured. This
+            # mirrors the adapter-agnostic store path (store_short_term uses any
+            # configured memory_adapter regardless of provider name), so data
+            # stored via a registered adapter (e.g. "dakera") remains findable.
+            # Otherwise the legacy short_mem query — never written to when the
+            # adapter store succeeded — would always return [].
+            if getattr(self, "memory_adapter", None):
                 try:
                     adapter_results = self.memory_adapter.search_short_term(query, limit=limit, **kwargs)
                     if min_quality > 0:
@@ -757,12 +759,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_short_term(self):
         """Completely clears short-term memory."""
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory, mirroring search_short_term. The adapter creates
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_short_term/search_short_term. The adapter creates
         # short_term_memory; the legacy short_mem table below is never created
         # by the adapter, so DELETE FROM short_mem would raise.
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)):
+        if getattr(self, "memory_adapter", None):
             if hasattr(self.memory_adapter, "reset_short_term"):
                 self.memory_adapter.reset_short_term()
             return
@@ -817,15 +818,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
         ident = str(time.time_ns())
         created = time.time()
 
-        # Protocol-driven storage: Try adapter first only when the provider has
-        # fallen back to sqlite/in_memory. This keeps storage consistent with
-        # search (which delegates to the adapter for the same providers) and
-        # avoids the legacy long_mem schema mismatch. Other providers (chroma,
-        # mem0, mongodb) keep their existing dedicated write paths below so the
-        # embedding model and vector space stay consistent with search.
+        # Protocol-driven storage: Try adapter first whenever one is configured.
+        # This mirrors store_short_term (adapter-agnostic) and keeps storage
+        # symmetric with search_long_term, so data stored via a registered
+        # adapter (e.g. "dakera") is written to — and later found in — the same
+        # place. The dedicated chroma/mem0/mongodb write paths below are only
+        # used when no adapter handled the store.
         adapter_success = False
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)):
+        if getattr(self, "memory_adapter", None):
             try:
                 result_id = self.memory_adapter.store_long_term(text, metadata=metadata)
                 logger.info(f"Successfully stored via memory adapter with ID: {result_id}")
@@ -858,14 +858,13 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 # Continue to SQLite fallback
         
         # Store in SQLite (with write lock for concurrency safety).
-        # Skip the legacy long_mem schema for adapter-driven sqlite/in_memory
-        # providers: those use the adapter's long_term_memory table and the
-        # legacy long_mem table is never created, which would silently drop
-        # the write. Surface the adapter failure instead.
-        if not adapter_success and getattr(self, "provider", None) in ("sqlite", "in_memory") \
-                and getattr(self, "memory_adapter", None):
+        # Skip the legacy long_mem schema for adapter-driven providers: those use
+        # the adapter's long_term_memory table and the legacy long_mem table is
+        # never created, which would silently drop the write (and search delegates
+        # to the adapter, not long_mem). Surface the adapter failure instead.
+        if not adapter_success and getattr(self, "memory_adapter", None):
             raise RuntimeError(
-                "Long-term store failed via adapter for sqlite/in_memory provider; "
+                "Long-term store failed via memory adapter; "
                 "the legacy long_mem table is not schema-compatible."
             )
 
@@ -1057,10 +1056,12 @@ class Memory(SearchMixin, MemoryCoreMixin):
             except Exception as e:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
 
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory. This avoids the legacy long_mem schema mismatch
-        # where the adapter creates long_term_memory but legacy queries long_mem.
-        if not found and getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+        # Delegate to the active adapter whenever one is configured. This mirrors
+        # the adapter-agnostic store path (store_long_term uses any configured
+        # memory_adapter regardless of provider name), so data stored via a
+        # registered adapter (e.g. "dakera") remains findable rather than being
+        # lost to the legacy long_mem query that was never written to.
+        if not found and getattr(self, "memory_adapter", None):
             try:
                 adapter_results = self.memory_adapter.search_long_term(query, limit=limit, **kwargs)
                 if min_quality > 0:
@@ -1129,12 +1130,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
     def reset_long_term(self):
         """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory, mirroring search_long_term. The adapter creates
-        # long_term_memory; the legacy long_mem table below is never created
-        # by the adapter, so DELETE FROM long_mem would raise.
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)):
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_long_term/search_long_term. The adapter creates long_term_memory;
+        # the legacy long_mem table below is never created by the adapter, so
+        # DELETE FROM long_mem would raise.
+        if getattr(self, "memory_adapter", None):
             if hasattr(self.memory_adapter, "reset_long_term"):
                 self.memory_adapter.reset_long_term()
             return
@@ -1186,12 +1186,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory, mirroring search_short_term. Data written through
-        # the adapter lives in short_term_memory, not the legacy short_mem
-        # table, so a direct DELETE below would silently match zero rows.
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_short_term/search_short_term. Data written through the adapter
+        # lives in short_term_memory, not the legacy short_mem table, so a direct
+        # DELETE below would silently match zero rows.
+        if (getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "delete_memory")):
             return self.memory_adapter.delete_memory(memory_id, tier="short")
 
@@ -1236,12 +1235,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         Returns:
             True if memory was found and deleted, False otherwise
         """
-        # Delegate to the active adapter when provider falls back to
-        # sqlite/in_memory, mirroring search_long_term. Data written through
-        # the adapter lives in long_term_memory, not the legacy long_mem
-        # table, so a direct DELETE below would silently match zero rows.
-        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
-                and getattr(self, "memory_adapter", None)
+        # Delegate to the active adapter whenever one is configured, mirroring
+        # store_long_term/search_long_term. Data written through the adapter
+        # lives in long_term_memory, not the legacy long_mem table, so a direct
+        # DELETE below would silently match zero rows.
+        if (getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "delete_memory")):
             return self.memory_adapter.delete_memory(memory_id, tier="long")
 
