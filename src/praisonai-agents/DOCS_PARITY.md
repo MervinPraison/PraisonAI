@@ -23,11 +23,11 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2312 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 10 | 2958 |
-| ✅ Autonomy | 3 | 7 | 2707 |
+| ✅ Auto Generation | 5 | 10 | 2993 |
+| ✅ Autonomy | 3 | 7 | 2736 |
 | ✅ Bots | 7 | 31 | 12500 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 34562 |
+| ✅ CLI | 5 | 119 | 34592 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 4031 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 400 |
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 60 | 22005 |
+| ✅ Gateway | 7 | 61 | 22306 |
 | ✅ Guardrails | 4 | 4 | 1731 |
 | ✅ Handoffs | 11 | 6 | 2502 |
 | ✅ Hooks | 2 | 9 | 4128 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 6 | 1545 |
 | ✅ Plugins | 8 | 3 | 1900 |
 | ✅ Prompts | 2 | 9 | 1965 |
-| ✅ Providers | 1 | 55 | 7502 |
+| ✅ Providers | 1 | 56 | 7723 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 2936 |
 | ✅ Realtime | 2 | 5 | 668 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 133 | 38174 |
+| ✅ Tools | 12 | 134 | 38460 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
