@@ -79,6 +79,11 @@ from .protocols import (
     RateLimitPolicyProtocol,
     RateLimitPolicy,  # backward-compat alias
     SlidingWindowRateLimitPolicy,
+    # Durable-queue dead-letter decision (Issue #3519)
+    PERMANENT_ERROR_CLASSES,
+    DeadLetterDecision,
+    DeadLetterPolicyProtocol,
+    AttemptAndAgeDeadLetterPolicy,
     # Port-less, restart-safe external drain trigger (Issue #2390)
     current_epoch,
     DrainMarkerPolicy,
@@ -293,6 +298,11 @@ __all__ = [
     "RateLimitPolicyProtocol",
     "RateLimitPolicy",
     "SlidingWindowRateLimitPolicy",
+    # Durable-queue dead-letter decision (Issue #3519)
+    "PERMANENT_ERROR_CLASSES",
+    "DeadLetterDecision",
+    "DeadLetterPolicyProtocol",
+    "AttemptAndAgeDeadLetterPolicy",
     # Port-less, restart-safe external drain trigger (Issue #2390)
     "current_epoch",
     "DrainMarkerPolicy",
