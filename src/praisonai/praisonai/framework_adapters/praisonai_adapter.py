@@ -193,8 +193,26 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                         timeout=approval_config.get('timeout', 0),
                         permissions=permissions,
                     )
-                # Otherwise return the approval config as-is
-                return ApprovalConfig(**approval_config)
+                # Otherwise map the wrapper approval dict onto the core
+                # ApprovalConfig fields. The wrapper spec carries extra keys
+                # (enabled, approve_all_tools, approve_level, guardrails,
+                # default_policy, approve_tools) that the core dataclass does
+                # not accept; passing them straight through raises TypeError.
+                field_map = {'approve_all_tools': 'all_tools'}
+                allowed = {'all_tools', 'timeout', 'permissions', 'permission_mode'}
+                core_kwargs = {}
+                for key, value in approval_config.items():
+                    mapped = field_map.get(key, key)
+                    if mapped in allowed:
+                        core_kwargs[mapped] = value
+                # ``backend`` on the wrapper spec is a string ("auto", "console",
+                # ...); core ApprovalConfig.backend expects a backend object.
+                # Resolve the ones we can, otherwise leave it to the registry.
+                backend_name = approval_config.get('backend')
+                resolved_backend = self._resolve_approval_backend(backend_name)
+                if resolved_backend is not None:
+                    core_kwargs['backend'] = resolved_backend
+                return ApprovalConfig(**core_kwargs)
             return approval_config
         
         # Check for global permissions in config
@@ -211,7 +229,68 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 )
         
         return None
-    
+
+    @staticmethod
+    def _resolve_approval_backend(backend_name):
+        """Resolve a wrapper backend name (str) to a core backend instance.
+
+        The wrapper approval spec stores ``backend`` as a string ("auto",
+        "console", ...). Core ``ApprovalConfig.backend`` expects a backend
+        object. We resolve the two names the CLI can emit and otherwise
+        return ``None`` so the core falls back to its global registry.
+        """
+        if not isinstance(backend_name, str) or backend_name in ('none', 'auto'):
+            # "auto" means auto-approve; that is expressed via all_tools /
+            # AutoApproveBackend at the core level, but returning None keeps
+            # this mapping minimal and lets the registry/all_tools drive it.
+            if backend_name == 'auto':
+                try:
+                    from praisonaiagents.approval.backends import AutoApproveBackend
+                    return AutoApproveBackend()
+                except ImportError:
+                    return None
+            return None
+        if backend_name == 'console':
+            try:
+                from praisonaiagents.approval.backends import ConsoleBackend
+                return ConsoleBackend()
+            except ImportError:
+                return None
+        return None
+
+    @staticmethod
+    def _normalize_autonomy(value):
+        """Translate a wrapper autonomy value into one core Agent accepts.
+
+        The wrapper YAML schema types ``autonomy`` as an int 0-10, but core
+        ``Agent(autonomy=...)`` only understands ``bool``/``str`` preset/
+        ``dict``/``AutonomyConfig``. Forwarding a raw int lands in core's
+        disable branch, silently ignoring a configured level. We map the
+        numeric level onto core's string presets and pass the other accepted
+        forms straight through:
+
+        - ``None`` / ``0``  -> ``None`` (autonomy off; nothing forwarded)
+        - ``1``-``3``       -> ``"suggest"``
+        - ``4``-``7``       -> ``"auto_edit"``
+        - ``8``-``10``      -> ``"full_auto"``
+        - ``bool``/``str``/``dict``/other -> passed through unchanged
+        """
+        if value is None:
+            return None
+        # bool is a subclass of int, so check it first and pass through.
+        if isinstance(value, bool):
+            return value or None
+        if isinstance(value, int):
+            if value <= 0:
+                return None
+            if value <= 3:
+                return "suggest"
+            if value <= 7:
+                return "auto_edit"
+            return "full_auto"
+        # str preset, dict, or AutonomyConfig — core handles these directly.
+        return value
+
     async def _astart_interactive_runtime(self, config: Dict[str, Any]):
         """Start InteractiveRuntime if ACP/LSP is enabled."""
         import os
@@ -310,6 +389,34 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 'runtime': agent_runtime,
             }
             
+            # Forward agent-level fields that core Agent already accepts as-is
+            # so CLI/YAML flags (--planning, --web, --autonomy, ...) are
+            # honoured instead of being silently dropped. Each core param
+            # accepts the wrapper's value directly (bool/str/dict/Config).
+            # NOTE: `handoff` is intentionally NOT forwarded here — the CLI
+            # emits a {'to': [...role names...]} dict, but core `handoffs=`
+            # expects resolved Agent/Handoff objects. Wiring that up needs
+            # role->Agent resolution that does not belong in this hot path.
+            forwardable_fields = {
+                'planning': 'planning',
+                'reflection': 'reflection',
+                'guardrails': 'guardrails',
+                'web': 'web',
+                'skills': 'skills',
+            }
+            for yaml_field, core_kwarg in forwardable_fields.items():
+                if details.get(yaml_field) is not None:
+                    agent_kwargs[core_kwarg] = details[yaml_field]
+
+            # `autonomy` needs translation, not a raw forward: the wrapper YAML
+            # schema types it as an int 0-10 (config/schema.py), but core Agent
+            # only accepts bool/str/dict/AutonomyConfig — an int falls through to
+            # the disable branch, silently ignoring a configured level. Map the
+            # numeric level onto core's string presets (0 => off, so skip).
+            autonomy_value = self._normalize_autonomy(details.get('autonomy'))
+            if autonomy_value is not None:
+                agent_kwargs['autonomy'] = autonomy_value
+
             # Add approval config if present
             if agent_approval:
                 agent_kwargs['approval'] = agent_approval
@@ -483,14 +590,21 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             Execution result as string
         """
         # Single source of truth: sync goes through the async bridge.
-        from praisonai._async_bridge import run_sync
-        return run_sync(self.arun(
-            config, llm_config, topic,
-            tools_dict=tools_dict,
-            agent_callback=agent_callback,
-            task_callback=task_callback,
-            cli_config=cli_config,
-        ))
+        # Use run_sync_or_offload so this flagship sync entry point is safe
+        # from ANY calling context (plain sync, FastAPI handler, async test,
+        # notebook). A bare run_sync would raise RuntimeError inside a running
+        # loop, crashing praisonai.run(...) deep in the adapter.
+        from praisonai._async_bridge import run_sync_or_offload
+        return run_sync_or_offload(
+            self.arun(
+                config, llm_config, topic,
+                tools_dict=tools_dict,
+                agent_callback=agent_callback,
+                task_callback=task_callback,
+                cli_config=cli_config,
+            ),
+            thread_name="praisonai-adapter-sync",
+        )
 
     async def arun(
         self,
