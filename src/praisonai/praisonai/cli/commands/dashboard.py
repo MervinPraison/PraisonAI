@@ -208,7 +208,10 @@ def _load_bundled_dashboard_app():
     """
     import importlib
 
-    module = importlib.import_module("praisonai.ui_dashboard.default_app")
+    try:
+        module = importlib.import_module("praisonai.ui_dashboard.default_app")
+    except Exception:
+        return None
     return getattr(module, "app", None)
 
 
