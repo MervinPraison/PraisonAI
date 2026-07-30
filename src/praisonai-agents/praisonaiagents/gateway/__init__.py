@@ -146,6 +146,14 @@ from .liveness import (
     LoopWatchdogPolicy,
     LoopWatchdog,
 )
+from .degraded_state import (
+    # Unified degraded-capability registry (Issue #3518)
+    DegradedOwner,
+    DegradedCapabilityProtocol,
+    DegradedCapabilityRegistry,
+    OWNER_KINDS,
+    DEGRADED_STATES,
+)
 from .hooks import (
     HookAction,
     HookConfig,
@@ -357,6 +365,12 @@ __all__ = [
     # Event-loop liveness watchdog (Issue #3385)
     "LoopWatchdogPolicy",
     "LoopWatchdog",
+    # Unified degraded-capability registry (Issue #3518)
+    "DegradedOwner",
+    "DegradedCapabilityProtocol",
+    "DegradedCapabilityRegistry",
+    "OWNER_KINDS",
+    "DEGRADED_STATES",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
