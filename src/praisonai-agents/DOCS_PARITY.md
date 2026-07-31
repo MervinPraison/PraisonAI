@@ -18,10 +18,10 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 46 | 14664 |
+| ✅ Agent | 21 | 46 | 14672 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
-| ✅ Approval | 1 | 5 | 2312 |
+| ✅ Approval | 1 | 5 | 2338 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 2993 |
 | ✅ Autonomy | 3 | 7 | 2736 |
@@ -51,8 +51,8 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4871 |
 | ✅ Loops | 4 | 5 | 1422 |
-| ✅ MCP | 1 | 59 | 13497 |
-| ✅ Memory | 6 | 17 | 6635 |
+| ✅ MCP | 1 | 60 | 13724 |
+| ✅ Memory | 6 | 17 | 6639 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2800 |
 | ✅ Optimizer | 1 | 2 | 792 |
@@ -71,11 +71,11 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sandbox | 5 | 6 | 2766 |
 | ✅ Security | 1 | 3 | 2970 |
 | ✅ Sessions | 4 | 13 | 5302 |
-| ✅ Skills | 6 | 13 | 5043 |
+| ✅ Skills | 6 | 14 | 5301 |
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 134 | 38490 |
+| ✅ Tools | 12 | 135 | 38816 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
