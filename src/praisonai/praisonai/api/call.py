@@ -7,7 +7,6 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect
-from dotenv import load_dotenv
 import uvicorn
 from pyngrok import ngrok, conf
 from rich import print
@@ -17,7 +16,22 @@ import importlib.util
 import time
 from collections import defaultdict
 
-load_dotenv()
+
+def _maybe_load_dotenv() -> None:
+    """Load a ``.env`` file only when explicitly opted in.
+
+    Importing a library should never mutate ``os.environ``. Loading the
+    ``.env`` at import time surprises callers who deliberately unset variables
+    and makes test isolation harder. Opt in with
+    ``PRAISONAI_CALL_LOAD_DOTENV=true`` (or run the ``praisonai call`` CLI which
+    enables it explicitly).
+    """
+    if os.getenv("PRAISONAI_CALL_LOAD_DOTENV", "").lower() == "true":
+        from dotenv import load_dotenv
+        load_dotenv()
+
+
+_maybe_load_dotenv()
 
 # Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # requires OpenAI Realtime API Access
@@ -380,9 +394,17 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
 
 def main(args=None):
     """Run the Praison AI Call Server."""
+    # The ``praisonai call`` entry point runs a real server, so honour the
+    # user's ``.env`` here (explicit run-time load, not an import-time side
+    # effect). Values captured at import are refreshed after loading.
+    from dotenv import load_dotenv
+    load_dotenv()
+    default_port = int(os.getenv('PORT', PORT))
+    use_public_env = os.getenv('PUBLIC', 'false').lower() == 'true'
+
     parser = argparse.ArgumentParser(description="Run the Praison AI Call Server.")
     parser.add_argument('--public', action='store_true', help="Use ngrok to expose the server publicly")
-    parser.add_argument('--port', type=int, default=PORT, help="Port to run the server on")
+    parser.add_argument('--port', type=int, default=default_port, help="Port to run the server on")
     parser.add_argument('--host', type=str, default="127.0.0.1", help="Host to bind the server to")
 
     if args is None:
@@ -392,7 +414,7 @@ def main(args=None):
 
     port = args.port
     host = args.host
-    use_public = args.public or PUBLIC
+    use_public = args.public or use_public_env
 
     run_server(port=port, host=host, use_public=use_public)
 

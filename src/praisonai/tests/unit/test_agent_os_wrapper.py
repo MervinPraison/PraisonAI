@@ -42,3 +42,53 @@ class TestAgentAppNoDeprecationWarning:
             _ = AgentApp
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             assert len(deprecation_warnings) == 0, f"Got deprecation warnings: {deprecation_warnings}"
+
+
+class TestAgentOSChatSessionIsolation:
+    """Gap 1: /chat must isolate a per-request agent, not share one instance."""
+
+    def _client(self):
+        pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+        from praisonaiagents import Agent
+        from praisonai import AgentOS
+
+        template = Agent(name="assistant", instructions="Be helpful")
+
+        # Record the object instance that actually handled each request and
+        # avoid any real LLM call by stubbing achat on every clone.
+        seen = []
+
+        async def _fake_achat(self, message):
+            seen.append((id(self), getattr(self, "_session_id", None), list(self.chat_history)))
+            self.chat_history.append({"role": "user", "content": message})
+            return f"echo:{message}"
+
+        # Bind the stub on the class so clones inherit it.
+        type(template).achat = _fake_achat
+
+        os_app = AgentOS(agents=[template])
+        client = TestClient(os_app.get_app())
+        prefix = os_app.config.api_prefix
+        return client, template, seen, prefix
+
+    def test_chat_clones_agent_per_request(self):
+        client, template, seen, prefix = self._client()
+        r1 = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "alice"})
+        assert r1.status_code == 200, r1.text
+        # The handling agent must not be the shared template instance.
+        assert seen[-1][0] != id(template)
+
+    def test_chat_binds_session_id(self):
+        client, template, seen, prefix = self._client()
+        r = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "bob"})
+        assert r.status_code == 200, r.text
+        assert seen[-1][1] == "bob"
+        assert r.json()["session_id"] == "bob"
+
+    def test_template_history_not_mutated_across_requests(self):
+        client, template, seen, prefix = self._client()
+        client.post(f"{prefix}/chat", json={"message": "a", "session_id": "s1"})
+        client.post(f"{prefix}/chat", json={"message": "b", "session_id": "s2"})
+        # The shared template's history must stay empty; each request used a clone.
+        assert template.chat_history == []
