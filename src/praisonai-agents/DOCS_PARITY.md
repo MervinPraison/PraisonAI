@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 46 | 14672 |
+| ✅ Agent | 21 | 46 | 14707 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 585 |
 | ✅ Approval | 1 | 5 | 2338 |
@@ -44,7 +44,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
 | ✅ Gateway | 7 | 62 | 22609 |
-| ✅ Guardrails | 4 | 4 | 1731 |
+| ✅ Guardrails | 4 | 4 | 1777 |
 | ✅ Handoffs | 11 | 6 | 2502 |
 | ✅ Hooks | 2 | 9 | 4128 |
 | ✅ Image | 1 | 11 | 1255 |
@@ -71,11 +71,11 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Sandbox | 5 | 6 | 2766 |
 | ✅ Security | 1 | 3 | 2970 |
 | ✅ Sessions | 4 | 13 | 5302 |
-| ✅ Skills | 6 | 14 | 5301 |
+| ✅ Skills | 6 | 14 | 5346 |
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 135 | 38816 |
+| ✅ Tools | 12 | 135 | 38844 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1193 |
 | ✅ Video | 2 | 6 | 649 |
