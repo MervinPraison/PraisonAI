@@ -1565,7 +1565,9 @@ class ToolExecutionMixin:
         - ``PLAN``: read-only exploration → deny any tool not tagged read-only.
         - ``DONT_ASK``: auto-deny anything that would otherwise prompt for input
           (an explicit ``ask`` rule or a known dangerous tool).
-        - ``DEFAULT``/``ACCEPT_EDITS``/unset: defer (return ``None``).
+        - ``ACCEPT_EDITS``: auto-approve file edit/write tools; defer the rest so
+          non-edit prompts (shell exec, deletes, external tools) still apply.
+        - ``DEFAULT``/unset: defer (return ``None``).
         """
         mode = getattr(self, "_permission_mode", None)
         if mode is None:
@@ -1623,6 +1625,17 @@ class ToolExecutionMixin:
                 ))
             return None
 
+        if mode == PermissionMode.ACCEPT_EDITS:
+            # Auto-approve file edit/write tools so edits flow without prompting,
+            # while deferring everything else (shell exec, deletes, external
+            # tools) to the normal approval flow so they still gate as usual.
+            if self._is_edit_tool(function_name):
+                return _wrap(ApprovalDecision(
+                    approved=True,
+                    reason=f"PermissionMode.ACCEPT_EDITS: auto-approved edit tool '{function_name}'",
+                ))
+            return None
+
         return None
 
     def _tool_would_prompt(self, function_name) -> bool:
@@ -1668,6 +1681,23 @@ class ToolExecutionMixin:
             "kill", "apply_patch", "install", "deploy",
         )
         return not any(marker in name for marker in write_markers)
+
+    @staticmethod
+    def _is_edit_tool(function_name) -> bool:
+        """Best-effort heuristic for whether a tool edits/writes a file.
+
+        Used by ``PermissionMode.ACCEPT_EDITS`` to auto-approve edit-class tools
+        (write/edit/append/create/save/patch/mkdir) while leaving destructive or
+        execution tools (delete/exec/shell/…) to the normal approval flow.
+        """
+        if not function_name:
+            return False
+        name = str(function_name).lower()
+        edit_markers = (
+            "write", "edit", "append", "create", "mkdir", "save",
+            "insert", "patch", "apply_patch",
+        )
+        return any(marker in name for marker in edit_markers)
 
     def _check_permission_manager_deny(self, function_name):
         """Return an error dict if the PermissionManager hard-denies the tool.

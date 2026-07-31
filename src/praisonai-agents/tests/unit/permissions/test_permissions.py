@@ -114,6 +114,34 @@ class TestAgentApprovalPresetResolution:
         assert full._perm_deny == PERMISSION_PRESETS["full"]
 
 
+class TestAcceptEditsModeDecision:
+    """PermissionMode.ACCEPT_EDITS auto-approves edit tools, defers the rest."""
+
+    def test_accept_edits_auto_approves_edit_tools(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="accept_edits")
+        for tool in ("write_file", "edit_file", "create_file", "apply_patch"):
+            decision = agent._resolve_permission_mode_decision(tool)
+            assert decision is not None
+            assert decision.approved is True
+
+    def test_accept_edits_defers_non_edit_tools(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="accept_edits")
+        # Non-edit tools defer to the normal approval flow (return None).
+        for tool in ("read_file", "execute_command", "delete_file", "list_dir"):
+            assert agent._resolve_permission_mode_decision(tool) is None
+
+    def test_auto_edit_alias_behaves_like_accept_edits(self):
+        from praisonaiagents import Agent
+
+        agent = Agent(name="a", approval="auto_edit")
+        decision = agent._resolve_permission_mode_decision("write_file")
+        assert decision is not None and decision.approved is True
+
+
 class TestPermissionRule:
     """Tests for PermissionRule."""
     

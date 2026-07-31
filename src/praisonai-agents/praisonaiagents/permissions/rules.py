@@ -50,11 +50,15 @@ class PermissionMode(str, Enum):
         letting callers fall through to their existing handling.
 
         Recognised aliases (case-insensitive, ``-``/``_`` interchangeable):
-        - ``plan``, ``read_only``-as-mode … PLAN (read-only)
+        - ``plan`` … PLAN (read-only)
         - ``bypass``, ``bypass_permissions``, ``yolo``, ``full_auto`` … BYPASS
         - ``accept_edits``, ``auto_edit`` … ACCEPT_EDITS
         - ``dont_ask``, ``reject``, ``no_ask`` … DONT_ASK
         - ``default``, ``ask``, ``suggest``, ``prompt`` … DEFAULT
+
+        Note: the deny-set presets ``safe``/``read_only``/``full``/``off`` are
+        deliberately *not* modes and return ``None`` here — they are handled by
+        their own deny-set machinery in ``Agent``.
         """
         if isinstance(value, cls):
             return value
