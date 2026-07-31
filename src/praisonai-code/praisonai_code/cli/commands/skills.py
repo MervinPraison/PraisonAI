@@ -245,6 +245,21 @@ def skills_install(
     typer.echo(f"Installed: {installed}")
 
 
+@app.command("add")
+def skills_add(
+    source: str = typer.Argument(..., help="Skill source (local path or https:// git URL)"),
+    dest: str = typer.Option(None, "--dest", "-d", help="Install destination (defaults to ~/.praisonai/skills)"),
+):
+    """Add a skill from a URL or local path (alias of ``install``).
+
+    Mirrors the familiar ``skills add <url>`` verb:
+
+        praisonai skills add https://github.com/org/repo
+        praisonai skills add ./my-skill
+    """
+    skills_install(source=source, dest=dest)
+
+
 @app.command("sync")
 def skills_sync(
     url: str = typer.Argument(
