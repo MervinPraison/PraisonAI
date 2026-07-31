@@ -1751,14 +1751,20 @@ Write the complete compiled report:"""
         """
         try:
             from praisonai_mcp import serve_agents
+
+            # Keep the call inside the ImportError guard: serve_agents() lazily
+            # imports its transport backend, so a package that is installed
+            # without its optional transport extras surfaces the missing
+            # dependency here rather than at the import line above. Catching it
+            # in the same place yields one actionable install message instead of
+            # an uncaught traceback.
+            return serve_agents([self], host=host, port=port)
         except ImportError:
             _get_display_functions()['display_error'](
                 "MCP serving requires the 'praisonai-mcp' package."
             )
             print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
             return None
-
-        return serve_agents([self], host=host, port=port)
 
     async def _emit_retry_hook_async(self, tool_name, attempt, delay_ms, error, max_attempts, error_type):
         """Emit ON_RETRY hook event (async version).

@@ -2334,13 +2334,19 @@ class AgentTeam(SpawnAnnounceProtocol):
             # keeps no hard dependency on it.
             try:
                 from praisonai_mcp import serve_agents
+
+                # Keep the call inside the ImportError guard: serve_agents()
+                # lazily imports its transport backend, so a praisonai-mcp
+                # installed without its optional transport extras surfaces the
+                # missing dependency here rather than at the import line above.
+                # Handling it in one place yields a single actionable install
+                # message instead of an uncaught traceback.
+                return serve_agents(self.agents, host=host, port=port)
             except ImportError:
                 display_error("MCP serving requires the 'praisonai-mcp' package.")
                 logging.error("MCP serving requires the 'praisonai-mcp' package.")
                 print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
                 return None
-
-            return serve_agents(self.agents, host=host, port=port)
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
             return None

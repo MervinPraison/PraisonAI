@@ -44,6 +44,12 @@ from .schema import annotation_to_json_schema, get_parameter_requirements, build
 # critical-only policy checks compare against the exact "critical" string.
 _VALID_RISK_LEVELS = ("critical", "high", "medium", "low")
 
+# Sentinel distinguishing "requires_approval was omitted" from an explicit
+# ``requires_approval=False``. The latter is still use of the deprecated
+# spelling and must emit the ``DeprecationWarning``, so a plain ``False``
+# default cannot tell the two apart.
+_UNSET = object()
+
 # Lazy load injected module functions to reduce import time
 _injected_module = None
 
@@ -70,21 +76,24 @@ def _resolve_approval(approval, requires_approval):
 
     ``approval`` mirrors ``Agent(approval=...)`` and is the canonical parameter.
     ``requires_approval`` is the deprecated alias that shipped in PR #3530; it
-    still works but emits a ``DeprecationWarning``. When both are supplied the
-    canonical ``approval`` wins. Both funnel to the same value space
-    (``bool | risk-level str``) and the same ApprovalRegistry registration.
+    still works but emits a ``DeprecationWarning`` whenever it is supplied
+    explicitly — including an explicit ``requires_approval=False`` — since any
+    use of the old spelling should nudge callers to migrate. When both are
+    supplied the canonical ``approval`` wins. Both funnel to the same value
+    space (``bool | risk-level str``) and the same ApprovalRegistry registration.
     """
-    if approval is not None:
-        return approval
-    if requires_approval:
+    if requires_approval is not _UNSET:
         warnings.warn(
             "@tool(requires_approval=...) is deprecated; use "
             "@tool(approval=...) to match Agent(approval=...).",
             DeprecationWarning,
             stacklevel=3,
         )
-        return requires_approval
-    return False
+    if approval is not None:
+        return approval
+    if requires_approval is _UNSET:
+        return False
+    return requires_approval
 
 
 class FunctionTool(BaseTool):
@@ -104,7 +113,7 @@ class FunctionTool(BaseTool):
         dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
         retry_policy: Optional[Any] = None,
         approval: Optional[Union[bool, str]] = None,
-        requires_approval: Union[bool, str] = False
+        requires_approval: Union[bool, str] = _UNSET
     ):
         self._func = func
         self.name = name or func.__name__
@@ -239,7 +248,7 @@ def tool(
     dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     retry_policy: Optional[Any] = None,
     approval: Optional[Union[bool, str]] = None,
-    requires_approval: Union[bool, str] = False
+    requires_approval: Union[bool, str] = _UNSET
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     

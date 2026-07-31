@@ -183,12 +183,12 @@ class TestToolDecoratorApprovalParam:
             remove_approval_requirement("no_warn")
 
     def test_approval_wins_over_requires_approval(self):
-        """When both are set, approval= wins (and no deprecation warning)."""
-        import warnings
+        """When both are set, approval= wins for the resolved value.
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-
+        The deprecated spelling still warns because the caller used it, but the
+        canonical ``approval`` determines the registered risk level.
+        """
+        with pytest.warns(DeprecationWarning):
             @tool(approval="critical", requires_approval="low")
             def both_set(x: str) -> str:
                 """Both spellings given."""
@@ -199,3 +199,34 @@ class TestToolDecoratorApprovalParam:
             assert get_risk_level("both_set") == "critical"
         finally:
             remove_approval_requirement("both_set")
+
+    def test_requires_approval_false_still_warns(self):
+        """An explicit requires_approval=False is still deprecated usage.
+
+        Regression guard: a plain ``False`` default would swallow the warning
+        and let the old spelling be used silently, so an explicit ``False`` must
+        still nudge callers to migrate to ``approval=``.
+        """
+        with pytest.warns(DeprecationWarning):
+            @tool(requires_approval=False)
+            def explicit_false(x: str) -> str:
+                """Uses the deprecated alias explicitly with False."""
+                return x
+
+        assert explicit_false.risk_level is None
+        assert is_approval_required("explicit_false") is False
+
+    def test_omitted_alias_does_not_warn(self):
+        """Omitting the deprecated alias entirely emits no warning."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+
+            @tool
+            def plain_tool(x: str) -> str:
+                """No approval params at all."""
+                return x
+
+        assert plain_tool.risk_level is None
+        assert plain_tool.requires_approval is False

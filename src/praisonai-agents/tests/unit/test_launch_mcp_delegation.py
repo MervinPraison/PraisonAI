@@ -76,6 +76,37 @@ def test_agent_launch_mcp_missing_package(monkeypatch):
     assert agent.launch(protocol="mcp") is None
 
 
+def _install_fake_mcp_missing_transport(monkeypatch):
+    """Install a praisonai_mcp whose serve_agents raises ImportError.
+
+    Mirrors the real case where praisonai-mcp is installed but its optional
+    transport backend is not, so the missing dependency only surfaces when
+    serve_agents() lazily imports it — after the top-level import succeeded.
+    """
+    def raising_serve_agents(agents, **kwargs):
+        raise ImportError("No module named 'fastapi'")
+
+    fake_module = types.ModuleType("praisonai_mcp")
+    fake_module.serve_agents = raising_serve_agents
+    monkeypatch.setitem(sys.modules, "praisonai_mcp", fake_module)
+
+
+def test_agent_launch_mcp_missing_transport_extras(monkeypatch):
+    """A late transport ImportError is handled, not raised to the caller."""
+    _install_fake_mcp_missing_transport(monkeypatch)
+
+    agent = Agent(name="solo", instructions="do things")
+    assert agent.launch(protocol="mcp") is None
+
+
+def test_agents_launch_mcp_missing_transport_extras(monkeypatch):
+    """Multi-agent launch also handles a late transport ImportError cleanly."""
+    _install_fake_mcp_missing_transport(monkeypatch)
+
+    group = PraisonAIAgents(agents=[Agent(name="solo", instructions="do things")])
+    assert group.launch(protocol="mcp") is None
+
+
 def test_invalid_protocol_rejected():
     """An unknown protocol raises/reports rather than serving."""
     agent = Agent(name="solo", instructions="do things")
