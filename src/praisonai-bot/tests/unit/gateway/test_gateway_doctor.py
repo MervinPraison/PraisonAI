@@ -619,6 +619,83 @@ def test_doctor_fix_dry_run_writes_nothing(monkeypatch, tmp_path):
     assert "would mint" in result.stdout
 
 
+def test_doctor_fix_rewrites_explicit_weak_yaml_token(monkeypatch, tmp_path):
+    """`--fix` must rewrite an explicit weak YAML auth_token, not only the env
+    var — otherwise the YAML value (which wins at startup + re-validation)
+    stays active and re-validation still reports weak (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import yaml
+
+    # External bind so a weak/absent token fails closed (matches startup).
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  bind_host: 0.0.0.0\n"
+        "  auth_token: change-me\n"
+        "channels: {}\n"
+    )
+
+    # Persist to a throwaway .env so ~/.praisonai/.env is untouched.
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars",
+        lambda env_vars: tmp_path / ".env",
+    )
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    # Real _check_gateway_secret_strength runs (unmocked): the weak YAML value
+    # must be replaced for re-validation to clear.
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+    assert "re-validated" in result.stdout
+
+    rewritten = yaml.safe_load(cfg.read_text())
+    new_token = rewritten["gateway"]["auth_token"]
+    assert new_token != "change-me"
+    assert len(new_token) >= 32
+
+
+def test_doctor_fix_preserves_env_ref_yaml_token(monkeypatch, tmp_path):
+    """A ``${ENV}`` auth_token reference must NOT be overwritten by --fix — it
+    resolves from the env store the env repair already fixes (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+    import yaml
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "gateway:\n"
+        "  bind_host: 0.0.0.0\n"
+        "  auth_token: ${GATEWAY_AUTH_TOKEN}\n"
+        "channels: {}\n"
+    )
+
+    calls = {"n": 0}
+
+    def _weak_then_strong(_cfg):
+        calls["n"] += 1
+        return "weak: gateway.auth_token" if calls["n"] == 1 else None
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        _weak_then_strong,
+    )
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars",
+        lambda env_vars: tmp_path / ".env",
+    )
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+
+    preserved = yaml.safe_load(cfg.read_text())
+    assert preserved["gateway"]["auth_token"] == "${GATEWAY_AUTH_TOKEN}"
+
+
 def test_gateway_sessions_list_cli(tmp_path, monkeypatch):
     typer_testing = pytest.importorskip("typer.testing")
     import json
