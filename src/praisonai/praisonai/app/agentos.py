@@ -183,20 +183,55 @@ class AgentOS:
         
         @app.post(f"{self.config.api_prefix}/chat", response_model=ChatResponse)
         async def chat(request: ChatRequest):
-            # Find the agent
-            agent = None
+            # Find the agent template (shared instance in self.agents).
+            template = None
             if request.agent_name:
                 for a in self.agents:
                     if getattr(a, 'name', None) == request.agent_name:
-                        agent = a
+                        template = a
                         break
-                if agent is None:
+                if template is None:
                     raise HTTPException(status_code=404, detail=f"Agent '{request.agent_name}' not found")
             elif self.agents:
-                agent = self.agents[0]
+                template = self.agents[0]
             else:
                 raise HTTPException(status_code=400, detail="No agents available")
-            
+
+            # Isolate a per-request/session agent so concurrent callers never
+            # share mutable chat_history. Reuse the wrapper's existing helpers
+            # (api/agent_invoke.py) rather than reinventing cloning here. Plain
+            # mocks / lightweight callables fall back to the shared template.
+            from praisonai.api.agent_invoke import (
+                _supports_session_isolation,
+                _clone_agent,
+            )
+            # ``clone_for_channel`` intentionally drops handoffs (nested Agents
+            # can't be safely deep-copied and would share RLocks). To avoid
+            # silently losing configured delegation, agents with handoffs stay
+            # on the shared template rather than being cloned.
+            has_handoffs = bool(getattr(template, "handoffs", None))
+            if _supports_session_isolation(template) and not has_handoffs:
+                try:
+                    agent = _clone_agent(template)
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to isolate agent for session: {e}",
+                    )
+                agent.chat_history = []
+                if hasattr(agent, "_session_store_initialized"):
+                    agent._session_store_initialized = False
+                if request.session_id:
+                    agent._session_id = request.session_id
+                    if hasattr(agent, "_history_session_id"):
+                        agent._history_session_id = request.session_id
+                else:
+                    agent._session_id = None
+                    if hasattr(agent, "_history_session_id"):
+                        agent._history_session_id = None
+            else:
+                agent = template
+
             # Call the agent without blocking the event loop: prefer the async
             # twin, otherwise offload the sync call to a worker thread.
             try:
