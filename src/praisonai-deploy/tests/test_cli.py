@@ -318,3 +318,73 @@ def test_build_deploy_config_from_args_merges_docker_yaml():
         assert config.docker.expose == [9000]
     finally:
         os.unlink(yaml_path)
+
+
+def test_build_deploy_config_from_args_api_yaml_wins_when_cli_unset():
+    """API shortcut must honor deploy.api YAML when CLI flags are unset (None)."""
+    from types import SimpleNamespace
+    import yaml
+    from praisonai_deploy.cli.features.deploy import _build_deploy_config_from_args
+    from praisonai_deploy.models import DeployType
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump({
+            "deploy": {
+                "type": "api",
+                "api": {"host": "0.0.0.0", "port": 9000, "workers": 4},
+            },
+        }, f)
+        yaml_path = f.name
+
+    try:
+        # Unset CLI flags => YAML values win.
+        args = SimpleNamespace(type="api", file=yaml_path, host=None, port=None, workers=None)
+        config = _build_deploy_config_from_args(args)
+        assert config.type == DeployType.API
+        assert config.api.host == "0.0.0.0"
+        assert config.api.port == 9000
+        assert config.api.workers == 4
+
+        # Explicit CLI flag overrides YAML.
+        args_override = SimpleNamespace(type="api", file=yaml_path, host="127.0.0.1", port=None, workers=None)
+        config_override = _build_deploy_config_from_args(args_override)
+        assert config_override.api.host == "127.0.0.1"
+        assert config_override.api.port == 9000
+    finally:
+        os.unlink(yaml_path)
+
+
+def test_build_deploy_config_from_args_cloud_yaml_wins_when_cli_unset():
+    """Cloud shortcut must honor deploy.cloud YAML when CLI flags are unset (None)."""
+    from types import SimpleNamespace
+    import yaml
+    from praisonai_deploy.cli.features.deploy import _build_deploy_config_from_args
+    from praisonai_deploy.models import DeployType
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump({
+            "deploy": {
+                "type": "cloud",
+                "cloud": {
+                    "provider": "gcp",
+                    "region": "us-central1",
+                    "service_name": "my-svc",
+                    "project_id": "proj-123",
+                },
+            },
+        }, f)
+        yaml_path = f.name
+
+    try:
+        args = SimpleNamespace(
+            type="cloud", provider="gcp", file=yaml_path,
+            region=None, service_name=None, project_id=None,
+            resource_group=None, subscription_id=None,
+        )
+        config = _build_deploy_config_from_args(args)
+        assert config.type == DeployType.CLOUD
+        assert config.cloud.region == "us-central1"
+        assert config.cloud.service_name == "my-svc"
+        assert config.cloud.project_id == "proj-123"
+    finally:
+        os.unlink(yaml_path)

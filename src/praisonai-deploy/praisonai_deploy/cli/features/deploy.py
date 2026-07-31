@@ -26,11 +26,14 @@ def _build_deploy_config_from_args(args):
 
     if deploy_type == DeployType.API:
         api = yaml_config.api.model_copy() if yaml_config and yaml_config.api else APIConfig()
-        api = api.model_copy(update={
-            "host": getattr(args, 'host', api.host),
-            "port": getattr(args, 'port', api.port),
-            "workers": getattr(args, 'workers', api.workers),
-        })
+        updates = {}
+        if getattr(args, 'host', None) is not None:
+            updates["host"] = args.host
+        if getattr(args, 'port', None) is not None:
+            updates["port"] = args.port
+        if getattr(args, 'workers', None) is not None:
+            updates["workers"] = args.workers
+        api = api.model_copy(update=updates)
         return DeployConfig(type=deploy_type, api=api)
 
     if deploy_type == DeployType.DOCKER:
@@ -51,17 +54,15 @@ def _build_deploy_config_from_args(args):
     provider = CloudProvider(args.provider)
     cloud = yaml_config.cloud.model_copy() if yaml_config and yaml_config.cloud else CloudConfig(
         provider=provider,
-        region=getattr(args, 'region', 'us-east-1'),
-        service_name=getattr(args, 'service_name', 'praisonai-service'),
+        region=getattr(args, 'region', None) or 'us-east-1',
+        service_name=getattr(args, 'service_name', None) or 'praisonai-service',
     )
-    cloud = cloud.model_copy(update={
-        "provider": provider,
-        "region": getattr(args, 'region', cloud.region),
-        "service_name": getattr(args, 'service_name', cloud.service_name),
-        "project_id": getattr(args, 'project_id', cloud.project_id),
-        "resource_group": getattr(args, 'resource_group', cloud.resource_group),
-        "subscription_id": getattr(args, 'subscription_id', cloud.subscription_id),
-    })
+    updates = {"provider": provider}
+    for attr in ('region', 'service_name', 'project_id', 'resource_group', 'subscription_id'):
+        value = getattr(args, attr, None)
+        if value is not None:
+            updates[attr] = value
+    cloud = cloud.model_copy(update=updates)
     return DeployConfig(type=deploy_type, cloud=cloud)
 
 
@@ -520,13 +521,13 @@ def handle_deploy_command(args):
     deploy_args.region = None
     deploy_args.project_id = None
     deploy_args.resource_group = None
-    deploy_args.host = '127.0.0.1'
-    deploy_args.port = 8005
-    deploy_args.workers = 1
-    deploy_args.image_name = 'praisonai-app'
+    deploy_args.host = None
+    deploy_args.port = None
+    deploy_args.workers = None
+    deploy_args.image_name = None
     deploy_args.push = False
     deploy_args.registry = None
-    deploy_args.service_name = 'praisonai-service'
+    deploy_args.service_name = None
     deploy_args.subscription_id = None
 
     value_flags = {

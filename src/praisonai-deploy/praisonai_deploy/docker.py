@@ -2,6 +2,7 @@
 Docker deployment functionality.
 """
 import os
+import re
 import subprocess
 import json
 from typing import Optional, Dict, Tuple
@@ -26,8 +27,14 @@ def resolve_docker_paths(agents_file: str) -> Tuple[str, str, Path]:
 
 
 def docker_container_name(config: DockerConfig) -> str:
-    """Stable container name for a Docker deploy config."""
-    return f"{config.image_name}-{config.tag}".replace(':', '-')
+    """Stable, Docker-valid container name for a Docker deploy config.
+
+    Docker container names must match ``[a-zA-Z0-9][a-zA-Z0-9_.-]*``; any
+    disallowed character (e.g. ``/`` in ``team/app``) is replaced with ``-``.
+    """
+    raw = f"{config.image_name}-{config.tag}"
+    name = re.sub(r'[^a-zA-Z0-9_.-]', '-', raw)
+    return name.lstrip('-._') or 'praisonai-app'
 
 
 def collect_runtime_env_vars(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -349,13 +356,13 @@ def save_dockerfile(
 
 
 def prepare_docker_build_context(agents_file: str, api_server_code: str) -> str:
-    """Write Dockerfile and api_server.py next to the agents file; return build context."""
+    """Write api_server.py next to the agents file; return the build context path."""
     build_context, _, agents_path = resolve_docker_paths(agents_file)
-    api_server_path = Path(build_context) / "api_server.py"
-    with open(api_server_path, 'w') as f:
-        f.write(api_server_code)
     if not agents_path.exists():
         raise FileNotFoundError(f"Agents file not found: {agents_file}")
+    api_server_path = Path(build_context) / "api_server.py"
+    with open(api_server_path, 'w', encoding='utf-8') as f:
+        f.write(api_server_code)
     return build_context
 
 

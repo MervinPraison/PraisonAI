@@ -104,7 +104,10 @@ class Deploy:
 
         _, agents_basename, _ = resolve_docker_paths(self.agents_file)
         docker_cfg = self.config.docker
-        assert docker_cfg is not None
+        if docker_cfg is None:
+            raise ValueError(
+                "Docker deployment requires a 'docker' section in the deploy configuration"
+            )
 
         api_config = self.config.api or APIConfig(
             host="0.0.0.0",

@@ -7,7 +7,6 @@ previously shadowed by the mock in __init__.py.
 
 import logging
 import threading
-import time
 import asyncio
 from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
@@ -34,26 +33,33 @@ class DeployHandlerAdapter(DeployerInterface):
     def deploy(self) -> bool:
         """Execute deployment using the real DeployHandler."""
         try:
+            from types import SimpleNamespace
             from praisonai_deploy.cli.features.deploy import DeployHandler
-            
+
             handler = DeployHandler()
-            
-            # Create args object for handler
-            class DeployArgs:
-                def __init__(self):
-                    self.file = "agents.yaml"
-                    self.type = None
-                    self.provider = self.provider if hasattr(self, 'provider') else 'gcp'
-                    self.json = False
-                    self.background = False
-            
-            # Create args with the provider from the scheduler
-            deploy_args = DeployArgs()
-            deploy_args.provider = self.provider
-            
+
+            # Build a namespace carrying every attribute ``handle_deploy`` reads.
+            deploy_args = SimpleNamespace(
+                file=self.config.get("file", "agents.yaml"),
+                type=self.config.get("type", "cloud"),
+                provider=self.provider,
+                json=False,
+                background=False,
+                verbose=False,
+                yes=True,
+                force=False,
+            )
+
+            # ``handle_deploy`` signals failure via ``sys.exit`` (SystemExit).
             handler.handle_deploy(deploy_args)
             return True
-            
+
+        except SystemExit as exc:
+            code = exc.code
+            success = code in (None, 0)
+            if not success:
+                logger.error(f"Deployment failed with exit code {code}")
+            return success
         except Exception as e:
             logger.error(f"Deployment failed: {e}")
             return False
@@ -161,7 +167,9 @@ class DeploymentScheduler:
                     logger.error(f"Deployment error on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
-                    time.sleep(30)  # Wait before retry
+                    # Interruptible wait so stop() can break the retry loop.
+                    if self._stop_event.wait(30):
+                        return
             
             if not success:
                 logger.error(f"Deployment failed after {max_retries} attempts")

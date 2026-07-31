@@ -26,6 +26,6 @@ def import_wrapper_module(name: str) -> Any:
 def optional_wrapper_attr(module: str, attr: str, default: Any = None) -> Any:
     try:
         mod = import_wrapper_module(module)
-        return getattr(mod, attr)
     except ImportError:
         return default
+    return getattr(mod, attr, default)
