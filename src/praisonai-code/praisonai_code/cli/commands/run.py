@@ -1096,6 +1096,7 @@ def run_main(
             no_save=no_save,
             thinking_budget=thinking_budget,
             subagents=subagents,
+            no_rules=no_rules,
         )
         return
     
@@ -1240,6 +1241,7 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                no_rules=no_rules,
             )
         return
     
@@ -1617,6 +1619,7 @@ def _run_prompt(
             if selected_tools:
                 agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
 
+            _wire_subtree_context_hook(agent_config, no_rules=no_rules)
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
             # constructor kwarg) so defaults are unchanged when omitted.
@@ -1917,6 +1920,81 @@ def _wire_subagent_delegation(
     agent_config["tools"] = list(agent_config.get("tools") or []) + [tool]
 
 
+def _wire_subtree_context_hook(
+    agent_config: Dict[str, Any],
+    *,
+    no_rules: bool = False,
+) -> None:
+    """Attach the just-in-time subtree instruction hook to ``agent_config``.
+
+    The interactive REPL already lazily attaches a subdirectory's
+    ``AGENTS.md``/``CLAUDE.md`` the first time the agent reads/edits a file
+    under it (see ``praisonai/cli/interactive/core.py``). The scriptable
+    ``praisonai run`` path constructed ``Agent(**agent_config)`` without it, so
+    a monorepo run like ``refactor packages/foo/bar.py`` never saw
+    ``packages/foo/AGENTS.md`` even though ``praisonai chat`` in the same repo
+    did. This registers the *existing* ``AFTER_TOOL`` subtree hook on a fresh,
+    session-scoped registry so the non-interactive/CI/SDK-via-CLI surface
+    matches interactive behaviour.
+
+    No-op (leaving the default run unchanged) when the up-front rules are
+    disabled via ``--no-rules`` / ``PRAISON_NO_RULES`` or when the optional
+    helper is unavailable. Honours the existing ``PRAISON_CONTEXT_BUDGET``
+    character budget shared with the interactive path.
+    """
+    import os
+
+    if no_rules or os.environ.get("PRAISON_NO_RULES", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+
+    try:
+        import importlib
+
+        # The subtree-context helper is optional. Its canonical home is the
+        # ``praisonai_bot`` support package; the ``praisonai`` wrapper only
+        # re-exports it via a compat shim. Prefer ``praisonai_bot`` so the hook
+        # is available on any install that ships it (matching ``chat``) without
+        # forcing the full wrapper, then fall back to the wrapper shim. Either
+        # way ``run.py`` avoids a module-level ``praisonai`` import (C7 gate).
+        context_files = None
+        for _mod in ("praisonai_bot.integration.context_files",
+                     "praisonai.integration.context_files"):
+            try:
+                context_files = importlib.import_module(_mod)
+                break
+            except ImportError:
+                continue
+        if context_files is None:
+            return
+        build_subtree_context_hook = context_files.build_subtree_context_hook
+        file_tool_matcher = context_files.file_tool_matcher
+        from praisonaiagents.hooks import HookEvent, HookRegistry
+    except (ImportError, AttributeError):
+        return
+
+    try:
+        budget = int(os.environ.get("PRAISON_CONTEXT_BUDGET", "0") or "0")
+    except ValueError:
+        budget = 0
+
+    try:
+        hook = build_subtree_context_hook(max_chars=budget)
+        registry = HookRegistry()
+        registry.register_function(
+            event=HookEvent.AFTER_TOOL,
+            func=hook,
+            matcher=file_tool_matcher(),
+            name="subtree_instruction_injection",
+        )
+        agent_config["hooks"] = registry
+    except Exception:
+        return
+
+
 def _run_custom_agent(
     agent_config: Dict[str, Any],
     prompt: str,
@@ -1939,6 +2017,7 @@ def _run_custom_agent(
     no_save: bool = False,
     thinking_budget: Optional[int] = None,
     subagents: Optional[str] = None,
+    no_rules: bool = False,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
@@ -2064,6 +2143,7 @@ def _run_custom_agent(
             agent_config["auto_save"] = auto_save_name
         
         # Create and run agent
+        _wire_subtree_context_hook(agent_config, no_rules=no_rules)
         agent = Agent(**agent_config)
         # Reasoning effort applied via the property setter (not a constructor
         # kwarg) so defaults are unchanged when --thinking is omitted.
@@ -2113,6 +2193,7 @@ def _run_prompt_profiled(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    no_rules: bool = False,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2184,6 +2265,7 @@ def _run_prompt_profiled(
         if memory_cfg is not None:
             agent_config["memory"] = memory_cfg
     
+    _wire_subtree_context_hook(agent_config, no_rules=no_rules)
     agent = Agent(**agent_config)
     if session_id or auto_save_name:
         apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
