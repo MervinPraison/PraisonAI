@@ -1977,21 +1977,27 @@ Your Goal: {self.goal}
         # None = normal rule flow. Consulted at tool-call approval time.
         self._permission_mode = None
         if isinstance(approval, str) and approval not in ('True', 'False'):
-            # Permission preset: "safe", "read_only", "full"
+            # One string entry point for "how much the agent may do":
+            #   • deny-set presets — "safe"/"read_only"/"full"/"off"/"default"
+            #   • PermissionMode presets — "plan"/"bypass"/"accept_edits"/
+            #     "dont_ask" (+ aliases like "yolo", "auto_edit", "reject").
+            # Deny-set presets are matched first so their exact behaviour is
+            # unchanged; anything else falls through to the canonical
+            # PermissionMode resolver, so all spellings share one model.
             from ..approval.registry import PERMISSION_PRESETS
-            preset_deny = PERMISSION_PRESETS.get(approval)
+            preset_deny = PERMISSION_PRESETS.get(approval.strip().lower())
+            self._approval_backend = None
+            self._approve_all_tools = False
+            self._approval_timeout = 0
+            self._approval_permissions = None
             if preset_deny is not None:
                 self._perm_deny = preset_deny
-                self._approval_backend = None
-                self._approve_all_tools = False
-                self._approval_timeout = 0
-                self._approval_permissions = None
             else:
-                # Unknown string — treat as no approval
-                self._approval_backend = None
-                self._approve_all_tools = False
-                self._approval_timeout = 0
-                self._approval_permissions = None
+                # Not a deny-set preset — try the canonical PermissionMode
+                # presets (plan/bypass/accept_edits/dont_ask + aliases).
+                from ..permissions.rules import PermissionMode
+                self._permission_mode = PermissionMode.resolve(approval)
+                # Unknown string with no mode → treat as no approval.
         elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
