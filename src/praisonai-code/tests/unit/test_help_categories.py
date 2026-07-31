@@ -11,7 +11,7 @@ import click
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from praisonai_code.cli.app import app, _LAZY_COMMANDS, _SPECIAL_COMMANDS
+from praisonai_code.cli.app import app, _LAZY_COMMANDS, _SPECIAL_COMMANDS, _DEPLOY_RESIDENT_COMMANDS
 from praisonai_code.cli.help_categories import (
     CATEGORIES,
     DEFAULT_CATEGORY,
@@ -43,7 +43,7 @@ def test_every_registered_command_has_a_category():
     we assert every registry command is *explicitly* mapped so new commands opt
     into a category deliberately at registration time.
     """
-    registered = set(_LAZY_COMMANDS) | set(_SPECIAL_COMMANDS)
+    registered = set(_LAZY_COMMANDS) | set(_SPECIAL_COMMANDS) | set(_DEPLOY_RESIDENT_COMMANDS)
     # Advertised inline/dynamic commands not present in the registries.
     registered.update({"app", "standardise", "standardize", "index", "query", "search"})
 

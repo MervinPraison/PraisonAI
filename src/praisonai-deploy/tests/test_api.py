@@ -7,14 +7,34 @@ import os
 
 
 @patch('subprocess.Popen')
+def test_start_api_server_foreground_waits(mock_popen):
+    """Foreground API deploy blocks until the server process exits."""
+    from praisonai_deploy.api import start_api_server
+    from praisonai_deploy.models import APIConfig
+
+    config = APIConfig(host="127.0.0.1", port=8005)
+    mock_process = Mock()
+    mock_process.pid = 12345
+    mock_process.wait.return_value = 0
+    mock_popen.return_value = mock_process
+
+    result = start_api_server("agents.yaml", config, background=False)
+
+    mock_process.wait.assert_called_once()
+    assert result.success is True
+    assert result.metadata["exit_code"] == 0
+
+
+@patch('subprocess.Popen')
 def test_start_api_server_success(mock_popen):
     """Test starting API server successfully."""
-    from praisonai.deploy.api import start_api_server
-    from praisonai.deploy.models import APIConfig
+    from praisonai_deploy.api import start_api_server
+    from praisonai_deploy.models import APIConfig
     
     config = APIConfig(host="127.0.0.1", port=8005)
     mock_process = Mock()
     mock_process.pid = 12345
+    mock_process.wait.return_value = 0
     mock_popen.return_value = mock_process
     
     result = start_api_server("agents.yaml", config)
@@ -26,8 +46,8 @@ def test_start_api_server_success(mock_popen):
 @patch('subprocess.Popen')
 def test_start_api_server_background(mock_popen):
     """Test starting API server in background mode."""
-    from praisonai.deploy.api import start_api_server
-    from praisonai.deploy.models import APIConfig
+    from praisonai_deploy.api import start_api_server
+    from praisonai_deploy.models import APIConfig
     
     config = APIConfig(host="0.0.0.0", port=8080)
     mock_process = Mock()
@@ -44,7 +64,7 @@ def test_start_api_server_background(mock_popen):
 
 def test_generate_api_server_code():
     """Test generating API server code."""
-    from praisonai.deploy.api import generate_api_server_code
+    from praisonai_deploy.api import generate_api_server_code
     
     code = generate_api_server_code("agents.yaml")
     
@@ -54,8 +74,8 @@ def test_generate_api_server_code():
 
 def test_generate_api_server_code_with_auth():
     """Test generating API server code with authentication."""
-    from praisonai.deploy.api import generate_api_server_code
-    from praisonai.deploy.models import APIConfig
+    from praisonai_deploy.api import generate_api_server_code
+    from praisonai_deploy.models import APIConfig
     
     config = APIConfig(auth_enabled=True, auth_token="secret123")
     code = generate_api_server_code("agents.yaml", config)
@@ -63,10 +83,20 @@ def test_generate_api_server_code_with_auth():
     assert "auth" in code.lower() or "token" in code.lower()
 
 
+def test_generate_api_server_code_passes_chat_message():
+    """Chat endpoint must forward the user message via cli_config topic."""
+    from praisonai_deploy.api import generate_api_server_code
+
+    code = generate_api_server_code("agents.yaml")
+
+    assert 'cli_config={"topic": message}' in code
+    assert "praisonai.run()" not in code
+
+
 @patch('urllib.request.urlopen')
 def test_check_api_health_success(mock_urlopen):
     """Test checking API health successfully."""
-    from praisonai.deploy.api import check_api_health
+    from praisonai_deploy.api import check_api_health
     
     mock_response = Mock()
     mock_response.status = 200
@@ -81,7 +111,7 @@ def test_check_api_health_success(mock_urlopen):
 @patch('urllib.request.urlopen')
 def test_check_api_health_failure(mock_urlopen):
     """Test checking API health failure."""
-    from praisonai.deploy.api import check_api_health
+    from praisonai_deploy.api import check_api_health
     
     mock_urlopen.side_effect = Exception("Connection refused")
     
@@ -91,7 +121,7 @@ def test_check_api_health_failure(mock_urlopen):
 
 def test_stop_api_server():
     """Test stopping API server."""
-    from praisonai.deploy.api import stop_api_server
+    from praisonai_deploy.api import stop_api_server
     
     with patch('os.kill') as mock_kill:
         result = stop_api_server(12345)
@@ -101,7 +131,7 @@ def test_stop_api_server():
 
 def test_stop_api_server_not_found():
     """Test stopping API server when PID not found."""
-    from praisonai.deploy.api import stop_api_server
+    from praisonai_deploy.api import stop_api_server
     
     with patch('os.kill', side_effect=ProcessLookupError()):
         result = stop_api_server(99999)

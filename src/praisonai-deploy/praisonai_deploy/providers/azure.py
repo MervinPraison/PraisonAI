@@ -130,12 +130,11 @@ class AzureProvider(BaseProvider):
                 '--max-replicas', str(self.config.max_instances)
             ]
             
-            # Add environment variables
+            # Add environment variables (space-separated under a single flag so
+            # later pairs do not override earlier ones).
             if self.config.env_vars:
-                env_args = []
-                for k, v in self.config.env_vars.items():
-                    env_args.extend(['--env-vars', f"{k}={v}"])
-                cmd.extend(env_args)
+                cmd.append('--env-vars')
+                cmd.extend(f"{k}={v}" for k, v in self.config.env_vars.items())
             
             result = subprocess.run(
                 cmd,
@@ -145,10 +144,24 @@ class AzureProvider(BaseProvider):
             )
             
             if result.returncode != 0:
-                # Try update instead
-                cmd[1] = 'update'
+                # Container App already exists — build a dedicated update command.
+                # ``az containerapp update`` rejects create-only flags such as
+                # --environment/--ingress/--target-port, so we cannot reuse ``cmd``.
+                update_cmd = [
+                    'az', 'containerapp', 'update',
+                    '--name', self.config.service_name,
+                    '--resource-group', self.config.resource_group,
+                    '--image', self.config.image or f"{self.config.service_name}:latest",
+                    '--cpu', str(self.config.cpu),
+                    '--memory', f"{self.config.memory}Gi",
+                    '--min-replicas', str(self.config.min_instances),
+                    '--max-replicas', str(self.config.max_instances),
+                ]
+                if self.config.env_vars:
+                    update_cmd.append('--set-env-vars')
+                    update_cmd.extend(f"{k}={v}" for k, v in self.config.env_vars.items())
                 result = subprocess.run(
-                    cmd,
+                    update_cmd,
                     capture_output=True,
                     text=True,
                     timeout=180

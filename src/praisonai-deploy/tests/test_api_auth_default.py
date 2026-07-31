@@ -1,7 +1,7 @@
 """Generated deploy API servers must enable auth by default."""
 
-from praisonai.deploy.api import generate_api_server_code
-from praisonai.deploy.models import APIConfig
+from praisonai_deploy.api import generate_api_server_code
+from praisonai_deploy.models import APIConfig
 
 
 def test_generate_api_server_auth_enabled_by_default():

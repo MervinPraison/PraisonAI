@@ -8,11 +8,11 @@ wrapper when agents changes).
 
 Publish order when selected:
   praisonaiagents → praisonai-code → praisonai-bot → praisonai-train
-  → praisonai-browser → praisonai-mcp → praisonai-sandbox → praisonai (wrapper)
+  → praisonai-browser → praisonai-mcp → praisonai-sandbox → praisonai-deploy → praisonai (wrapper)
 
 Usage (from repo root or src/praisonai):
   python scripts/publish_all.py                  # changed packages only (default)
-  python scripts/publish_all.py --all            # bump + publish all eight
+  python scripts/publish_all.py --all            # bump + publish all nine
   python scripts/publish_all.py --dry-run        # preview versions only
   python scripts/publish_all.py --since v4.6.149 # diff since tag/ref
   python scripts/publish_all.py --skip-wrapper   # publish changed deps only
@@ -66,17 +66,17 @@ def _apply_changed_only(
     """Auto-skip unchanged tier packages; always refresh wrapper when deps ship."""
     if overrides.get("agents"):
         changed.add("agents")
-    for key in ("code", "bot", "train", "browser", "mcp", "sandbox"):
+    for key in ("code", "bot", "train", "browser", "mcp", "sandbox", "deploy"):
         if overrides.get(key):
             changed.add(key)
     if overrides.get("wrapper"):
         changed.add("wrapper")
 
-    for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"):
+    for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "deploy"):
         if key not in changed:
             skip[key] = True
 
-    dep_publish = any(not skip[k] for k in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"))
+    dep_publish = any(not skip[k] for k in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "deploy"))
     if dep_publish and not skip_wrapper_flag:
         skip["wrapper"] = False
     elif "wrapper" not in changed:
@@ -107,6 +107,7 @@ def _print_plan(
         ("browser", lib.PYPI_NAMES["browser"]),
         ("mcp", lib.PYPI_NAMES["mcp"]),
         ("sandbox", lib.PYPI_NAMES["sandbox"]),
+        ("deploy", lib.PYPI_NAMES["deploy"]),
         ("wrapper", lib.PYPI_NAMES["wrapper"]),
     ]
     for key, pypi_name in order:
@@ -141,6 +142,8 @@ def _wrapper_bump_kwargs(
         "mcp_pin_only": skip["mcp"],
         "sandbox_version": planned["sandbox"] if not skip["sandbox"] else current["sandbox"],
         "sandbox_pin_only": skip["sandbox"],
+        "deploy_version": planned["deploy"] if not skip["deploy"] else current["deploy"],
+        "deploy_pin_only": skip["deploy"],
     }
 
 
@@ -153,6 +156,7 @@ def _validate_kwargs(planned: dict[str, str], skip: dict[str, bool]) -> dict:
         "browser_version": None if skip["browser"] else planned["browser"],
         "mcp_version": None if skip["mcp"] else planned["mcp"],
         "sandbox_version": None if skip["sandbox"] else planned["sandbox"],
+        "deploy_version": None if skip["deploy"] else planned["deploy"],
     }
 
 
@@ -169,7 +173,7 @@ def main() -> None:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Publish all eight packages (default: only changed packages since --since)",
+        help="Publish all nine packages (default: only changed packages since --since)",
     )
     parser.add_argument(
         "--since",
@@ -188,6 +192,7 @@ def main() -> None:
     parser.add_argument("--skip-browser", action="store_true")
     parser.add_argument("--skip-mcp", action="store_true")
     parser.add_argument("--skip-sandbox", action="store_true")
+    parser.add_argument("--skip-deploy", action="store_true")
     parser.add_argument("--skip-wrapper", action="store_true")
     parser.add_argument("--agents-version", default=None)
     parser.add_argument("--code-version", default=None)
@@ -196,6 +201,7 @@ def main() -> None:
     parser.add_argument("--browser-version", default=None)
     parser.add_argument("--mcp-version", default=None)
     parser.add_argument("--sandbox-version", default=None)
+    parser.add_argument("--deploy-version", default=None)
     parser.add_argument("--wrapper-version", default=None)
     args = parser.parse_args()
 
@@ -213,6 +219,7 @@ def main() -> None:
         "browser": args.skip_browser,
         "mcp": args.skip_mcp,
         "sandbox": args.skip_sandbox,
+        "deploy": args.skip_deploy,
         "wrapper": args.skip_wrapper,
     }
     overrides = {
@@ -223,6 +230,7 @@ def main() -> None:
         "browser": args.browser_version,
         "mcp": args.mcp_version,
         "sandbox": args.sandbox_version,
+        "deploy": args.deploy_version,
         "wrapper": args.wrapper_version,
     }
 
@@ -409,7 +417,30 @@ def main() -> None:
                     root,
                 )
 
-    # --- 8. praisonai wrapper ---
+    # --- 8. praisonai-deploy ---
+    if not skip["deploy"]:
+        pkg = lib.PYPI_NAMES["deploy"]
+        ver = planned["deploy"]
+        if lib.pypi_has_version(pkg, ver):
+            print(f"⏭️  {pkg}=={ver} already on PyPI")
+        else:
+            print(f"\n📦 Publishing {pkg} {ver}")
+            wait_published("agents")
+            lib.bump_deploy_files(ver)
+            lib.publish_package(lib.deploy_dir())
+            _wait(pkg, ver, args.max_wait)
+            if not args.no_git:
+                lib.git_commit_files(
+                    f"Bump praisonai-deploy to {ver}",
+                    [
+                        "src/praisonai-deploy/pyproject.toml",
+                        "src/praisonai-deploy/uv.lock",
+                        "src/praisonai-deploy/praisonai_deploy/_version.py",
+                    ],
+                    root,
+                )
+
+    # --- 9. praisonai wrapper ---
     if not skip["wrapper"]:
         pkg = lib.PYPI_NAMES["wrapper"]
         ver = planned["wrapper"]
@@ -417,7 +448,7 @@ def main() -> None:
             print(f"⏭️  {pkg}=={ver} already on PyPI")
         else:
             print(f"\n📦 Publishing {pkg} (wrapper) {ver}")
-            for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox"):
+            for key in ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "deploy"):
                 wait_published(key)
 
             bump.bump_version(ver, **_wrapper_bump_kwargs(planned, current, skip))

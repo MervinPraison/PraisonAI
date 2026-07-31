@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 def test_deploy_type_enum():
     """Test DeployType enum values."""
-    from praisonai.deploy.models import DeployType
+    from praisonai_deploy.models import DeployType
     
     assert DeployType.API == "api"
     assert DeployType.DOCKER == "docker"
@@ -16,7 +16,7 @@ def test_deploy_type_enum():
 
 def test_cloud_provider_enum():
     """Test CloudProvider enum values."""
-    from praisonai.deploy.models import CloudProvider
+    from praisonai_deploy.models import CloudProvider
     
     assert CloudProvider.AWS == "aws"
     assert CloudProvider.AZURE == "azure"
@@ -25,7 +25,7 @@ def test_cloud_provider_enum():
 
 def test_api_config_defaults():
     """Test APIConfig with default values."""
-    from praisonai.deploy.models import APIConfig
+    from praisonai_deploy.models import APIConfig
     
     config = APIConfig()
     assert config.host == "127.0.0.1"
@@ -37,7 +37,7 @@ def test_api_config_defaults():
 
 def test_api_config_custom():
     """Test APIConfig with custom values."""
-    from praisonai.deploy.models import APIConfig
+    from praisonai_deploy.models import APIConfig
     
     config = APIConfig(
         host="0.0.0.0",
@@ -55,7 +55,7 @@ def test_api_config_custom():
 
 def test_docker_config_defaults():
     """Test DockerConfig with default values."""
-    from praisonai.deploy.models import DockerConfig
+    from praisonai_deploy.models import DockerConfig
     
     config = DockerConfig()
     assert config.image_name == "praisonai-app"
@@ -68,7 +68,7 @@ def test_docker_config_defaults():
 
 def test_docker_config_custom():
     """Test DockerConfig with custom values."""
-    from praisonai.deploy.models import DockerConfig
+    from praisonai_deploy.models import DockerConfig
     
     config = DockerConfig(
         image_name="my-agent",
@@ -87,7 +87,7 @@ def test_docker_config_custom():
 
 def test_cloud_config_aws():
     """Test CloudConfig for AWS."""
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -103,7 +103,7 @@ def test_cloud_config_aws():
 
 def test_cloud_config_azure():
     """Test CloudConfig for Azure."""
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -119,7 +119,7 @@ def test_cloud_config_azure():
 
 def test_cloud_config_gcp():
     """Test CloudConfig for GCP."""
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,
@@ -133,7 +133,7 @@ def test_cloud_config_gcp():
 
 def test_deploy_config_api_type():
     """Test DeployConfig with API type."""
-    from praisonai.deploy.models import DeployConfig, DeployType, APIConfig
+    from praisonai_deploy.models import DeployConfig, DeployType, APIConfig
     
     config = DeployConfig(
         type=DeployType.API,
@@ -147,7 +147,7 @@ def test_deploy_config_api_type():
 
 def test_deploy_config_docker_type():
     """Test DeployConfig with Docker type."""
-    from praisonai.deploy.models import DeployConfig, DeployType, DockerConfig
+    from praisonai_deploy.models import DeployConfig, DeployType, DockerConfig
     
     config = DeployConfig(
         type=DeployType.DOCKER,
@@ -159,7 +159,7 @@ def test_deploy_config_docker_type():
 
 def test_deploy_config_cloud_type():
     """Test DeployConfig with Cloud type."""
-    from praisonai.deploy.models import DeployConfig, DeployType, CloudConfig, CloudProvider
+    from praisonai_deploy.models import DeployConfig, DeployType, CloudConfig, CloudProvider
     
     config = DeployConfig(
         type=DeployType.CLOUD,
@@ -175,7 +175,7 @@ def test_deploy_config_cloud_type():
 
 def test_deploy_config_validation_api_auto_defaults():
     """Test DeployConfig auto-creates API config with defaults for API type."""
-    from praisonai.deploy.models import DeployConfig, DeployType, APIConfig
+    from praisonai_deploy.models import DeployConfig, DeployType, APIConfig
     
     config = DeployConfig(type=DeployType.API)
     assert config.api is not None
@@ -185,7 +185,7 @@ def test_deploy_config_validation_api_auto_defaults():
 
 def test_deploy_config_validation_docker_auto_defaults():
     """Test DeployConfig auto-creates Docker config with defaults for Docker type."""
-    from praisonai.deploy.models import DeployConfig, DeployType, DockerConfig
+    from praisonai_deploy.models import DeployConfig, DeployType, DockerConfig
     
     config = DeployConfig(type=DeployType.DOCKER)
     assert config.docker is not None
@@ -195,7 +195,7 @@ def test_deploy_config_validation_docker_auto_defaults():
 
 def test_deploy_config_validation_cloud_missing():
     """Test DeployConfig validation fails when Cloud config missing for Cloud type."""
-    from praisonai.deploy.models import DeployConfig, DeployType
+    from praisonai_deploy.models import DeployConfig, DeployType
     
     with pytest.raises(ValueError, match="cloud config required"):
         DeployConfig(type=DeployType.CLOUD)
@@ -203,7 +203,7 @@ def test_deploy_config_validation_cloud_missing():
 
 def test_deploy_result_success():
     """Test DeployResult for successful deployment."""
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.models import DeployResult
     
     result = DeployResult(
         success=True,
@@ -218,7 +218,7 @@ def test_deploy_result_success():
 
 def test_deploy_result_failure():
     """Test DeployResult for failed deployment."""
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.models import DeployResult
     
     result = DeployResult(
         success=False,
@@ -232,7 +232,7 @@ def test_deploy_result_failure():
 
 def test_agent_config_minimal():
     """Test AgentConfig with minimal required fields."""
-    from praisonai.deploy.models import AgentConfig
+    from praisonai_deploy.models import AgentConfig
     
     config = AgentConfig(
         name="test-agent",
@@ -246,7 +246,7 @@ def test_agent_config_minimal():
 
 def test_agent_config_full():
     """Test AgentConfig with all fields."""
-    from praisonai.deploy.models import AgentConfig
+    from praisonai_deploy.models import AgentConfig
     
     config = AgentConfig(
         name="test-agent",

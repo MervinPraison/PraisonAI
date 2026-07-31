@@ -70,7 +70,7 @@ Console script: `praisonai-bot`
 - `cli/features/serve.py` (HTTP agents/mcp/a2a serve — not gateway recipe)
 - `scheduler/run_policy.py` (optional safety gate for unattended runs)
 - `jobs/*` (async runs API — lazy `praisonai` + recipe deps; UI bridge only)
-- Framework adapters, deploy (train extracted to `praisonai-train` in C10)
+- Framework adapters (deploy extracted to `praisonai-deploy` in C14)
 
 ## Install matrix
 
@@ -83,6 +83,6 @@ Console script: `praisonai-bot`
 
 ## Publish order
 
-`praisonaiagents` → `praisonai-code` + `praisonai-bot` → `praisonai`
+`praisonaiagents` → tier-2 packages → `praisonai-sandbox` → `praisonai-deploy` → `praisonai`
 
 See `src/praisonai/scripts/publish_all.py` and `.github/workflows/pypi-release.yml`.

@@ -61,6 +61,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_deploy:
+        description: 'Skip praisonai-deploy publish (recovery if already on PyPI)'
+        required: false
+        default: false
+        type: boolean
       agents_version:
         description: 'Override agents version (empty = auto bump from pyproject.toml)'
         required: false
@@ -98,6 +103,11 @@ on:
         type: string
       sandbox_version:
         description: 'Override praisonai-sandbox version (empty = auto bump from pyproject.toml)'
+        required: false
+        default: ''
+        type: string
+      deploy_version:
+        description: 'Override praisonai-deploy version (empty = auto bump from pyproject.toml)'
         required: false
         default: ''
         type: string
@@ -180,6 +190,7 @@ jobs:
           BROWSER_OVERRIDE: ${{ inputs.browser_version }}
           MCP_OVERRIDE: ${{ inputs.mcp_version }}
           SANDBOX_OVERRIDE: ${{ inputs.sandbox_version }}
+          DEPLOY_OVERRIDE: ${{ inputs.deploy_version }}
           SKIP_AGENTS: ${{ inputs.skip_agents }}
           SKIP_CODE: ${{ inputs.skip_code }}
           SKIP_BOT: ${{ inputs.skip_bot }}
@@ -187,6 +198,7 @@ jobs:
           SKIP_BROWSER: ${{ inputs.skip_browser }}
           SKIP_MCP: ${{ inputs.skip_mcp }}
           SKIP_SANDBOX: ${{ inputs.skip_sandbox }}
+          SKIP_DEPLOY: ${{ inputs.skip_deploy }}
         run: |
           python <<'PY'
           import os
@@ -223,6 +235,7 @@ jobs:
           browser_override = os.environ.get("BROWSER_OVERRIDE", "").strip()
           mcp_override = os.environ.get("MCP_OVERRIDE", "").strip()
           sandbox_override = os.environ.get("SANDBOX_OVERRIDE", "").strip()
+          deploy_override = os.environ.get("DEPLOY_OVERRIDE", "").strip()
           validate_version("agents_version", agents_override)
           validate_version("wrapper_version", wrapper_override)
           validate_version("code_version", code_override)
@@ -231,6 +244,7 @@ jobs:
           validate_version("browser_version", browser_override)
           validate_version("mcp_version", mcp_override)
           validate_version("sandbox_version", sandbox_override)
+          validate_version("deploy_version", deploy_override)
 
           agents_pyproject = root / "src/praisonai-agents/pyproject.toml"
           agents_content = agents_pyproject.read_text()
@@ -288,6 +302,14 @@ jobs:
               sys.exit(1)
           current_sandbox = sandbox_match.group(1)
 
+          deploy_pyproject = root / "src/praisonai-deploy/pyproject.toml"
+          deploy_content = deploy_pyproject.read_text()
+          deploy_match = re.search(r'^version\s*=\s*"([^"]+)"', deploy_content, re.MULTILINE)
+          if not deploy_match:
+              print("Could not read praisonai-deploy version from pyproject.toml", file=sys.stderr)
+              sys.exit(1)
+          current_deploy = deploy_match.group(1)
+
           wrapper_version_py = root / "src/praisonai/praisonai/version.py"
           wrapper_content = wrapper_version_py.read_text()
           wrapper_match = re.search(r'__version__ = "([^"]+)"', wrapper_content)
@@ -304,6 +326,7 @@ jobs:
               ("browser", current_browser),
               ("mcp", current_mcp),
               ("sandbox", current_sandbox),
+              ("deploy", current_deploy),
               ("wrapper", current_wrapper),
           ):
               if not SEMVER.match(value):
@@ -317,6 +340,7 @@ jobs:
           skip_browser = os.environ.get("SKIP_BROWSER", "false").lower() == "true"
           skip_mcp = os.environ.get("SKIP_MCP", "false").lower() == "true"
           skip_sandbox = os.environ.get("SKIP_SANDBOX", "false").lower() == "true"
+          skip_deploy = os.environ.get("SKIP_DEPLOY", "false").lower() == "true"
 
           if agents_override:
               agents_version = agents_override
@@ -367,6 +391,13 @@ jobs:
           else:
               sandbox_version = bump_version(current_sandbox)
 
+          if deploy_override:
+              deploy_version = deploy_override
+          elif skip_deploy:
+              deploy_version = current_deploy
+          else:
+              deploy_version = bump_version(current_deploy)
+
           if wrapper_override:
               wrapper_version = wrapper_override
           else:
@@ -381,6 +412,7 @@ jobs:
               fh.write(f"browser_version={browser_version}\n")
               fh.write(f"mcp_version={mcp_version}\n")
               fh.write(f"sandbox_version={sandbox_version}\n")
+              fh.write(f"deploy_version={deploy_version}\n")
               fh.write(f"wrapper_version={wrapper_version}\n")
               fh.write(f"current_agents={current_agents}\n")
               fh.write(f"current_code={current_code}\n")
@@ -389,6 +421,7 @@ jobs:
               fh.write(f"current_browser={current_browser}\n")
               fh.write(f"current_mcp={current_mcp}\n")
               fh.write(f"current_sandbox={current_sandbox}\n")
+              fh.write(f"current_deploy={current_deploy}\n")
               fh.write(f"current_wrapper={current_wrapper}\n")
 
           print(f"Agents:  {current_agents} -> {agents_version}")
@@ -398,6 +431,7 @@ jobs:
           print(f"Browser: {current_browser} -> {browser_version}")
           print(f"MCP:     {current_mcp} -> {mcp_version}")
           print(f"Sandbox: {current_sandbox} -> {sandbox_version}")
+          print(f"Deploy:  {current_deploy} -> {deploy_version}")
           print(f"Wrapper: {current_wrapper} -> {wrapper_version}")
           PY
 
@@ -412,6 +446,7 @@ jobs:
           BROWSER_VERSION: ${{ steps.versions.outputs.browser_version }}
           MCP_VERSION: ${{ steps.versions.outputs.mcp_version }}
           SANDBOX_VERSION: ${{ steps.versions.outputs.sandbox_version }}
+          DEPLOY_VERSION: ${{ steps.versions.outputs.deploy_version }}
           WRAPPER_VERSION: ${{ steps.versions.outputs.wrapper_version }}
           INPUT_SKIP_AGENTS: ${{ inputs.skip_agents }}
           INPUT_SKIP_CODE: ${{ inputs.skip_code }}
@@ -420,6 +455,7 @@ jobs:
           INPUT_SKIP_BROWSER: ${{ inputs.skip_browser }}
           INPUT_SKIP_MCP: ${{ inputs.skip_mcp }}
           INPUT_SKIP_SANDBOX: ${{ inputs.skip_sandbox }}
+          INPUT_SKIP_DEPLOY: ${{ inputs.skip_deploy }}
           INPUT_SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
         run: |
           set -euo pipefail
@@ -430,6 +466,7 @@ jobs:
           skip_browser="${INPUT_SKIP_BROWSER}"
           skip_mcp="${INPUT_SKIP_MCP}"
           skip_sandbox="${INPUT_SKIP_SANDBOX}"
+          skip_deploy="${INPUT_SKIP_DEPLOY}"
           skip_wrapper="${INPUT_SKIP_WRAPPER}"
           if [ "$skip_agents" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonaiagents/${AGENTS_VERSION}/json" >/dev/null && skip_agents=true || true
@@ -452,6 +489,9 @@ jobs:
           if [ "$skip_sandbox" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonai-sandbox/${SANDBOX_VERSION}/json" >/dev/null && skip_sandbox=true || true
           fi
+          if [ "$skip_deploy" != "true" ]; then
+            curl -fsSL "https://pypi.org/pypi/praisonai-deploy/${DEPLOY_VERSION}/json" >/dev/null && skip_deploy=true || true
+          fi
           if [ "$skip_wrapper" != "true" ]; then
             curl -fsSL "https://pypi.org/pypi/praisonai/${WRAPPER_VERSION}/json" >/dev/null && skip_wrapper=true || true
           fi
@@ -462,8 +502,9 @@ jobs:
           echo "skip_browser=${skip_browser}" >> "$GITHUB_OUTPUT"
           echo "skip_mcp=${skip_mcp}" >> "$GITHUB_OUTPUT"
           echo "skip_sandbox=${skip_sandbox}" >> "$GITHUB_OUTPUT"
+          echo "skip_deploy=${skip_deploy}" >> "$GITHUB_OUTPUT"
           echo "skip_wrapper=${skip_wrapper}" >> "$GITHUB_OUTPUT"
-          if [ "$skip_agents" = "true" ] && [ "$skip_code" = "true" ] && [ "$skip_bot" = "true" ] && [ "$skip_train" = "true" ] && [ "$skip_browser" = "true" ] && [ "$skip_mcp" = "true" ] && [ "$skip_sandbox" = "true" ] && [ "$skip_wrapper" = "true" ]; then
+          if [ "$skip_agents" = "true" ] && [ "$skip_code" = "true" ] && [ "$skip_bot" = "true" ] && [ "$skip_train" = "true" ] && [ "$skip_browser" = "true" ] && [ "$skip_mcp" = "true" ] && [ "$skip_sandbox" = "true" ] && [ "$skip_deploy" = "true" ] && [ "$skip_wrapper" = "true" ]; then
             echo "All target versions already on PyPI — nothing to publish."
           fi
 
@@ -477,6 +518,7 @@ jobs:
           steps.pypi_exists.outputs.skip_browser == 'true' &&
           steps.pypi_exists.outputs.skip_mcp == 'true' &&
           steps.pypi_exists.outputs.skip_sandbox == 'true' &&
+          steps.pypi_exists.outputs.skip_deploy == 'true' &&
           steps.pypi_exists.outputs.skip_wrapper == 'true'
         run: echo "Idempotent skip — target versions already on PyPI."
 
@@ -1001,6 +1043,76 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
+      - name: Publish praisonai-deploy
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_deploy != true &&
+          steps.pypi_exists.outputs.skip_deploy != 'true'
+        working-directory: src/praisonai-deploy
+        env:
+          NEW_VERSION: ${{ steps.versions.outputs.deploy_version }}
+          CURRENT: ${{ steps.versions.outputs.current_deploy }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          new = os.environ["NEW_VERSION"]
+          current = os.environ["CURRENT"]
+          pyproject = Path("pyproject.toml")
+          content = pyproject.read_text()
+          pyproject.write_text(content.replace(f'version = "{current}"', f'version = "{new}"', 1))
+          version_py = Path("praisonai_deploy/_version.py")
+          version_content = version_py.read_text()
+          version_py.write_text(re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new}"', version_content, count=1))
+          PY
+
+          rm -rf dist
+          uv lock
+          uv build
+          uv publish
+
+      - name: Wait for praisonai-deploy on PyPI
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_deploy != true &&
+          steps.pypi_exists.outputs.skip_deploy != 'true'
+        run: |
+          set -euo pipefail
+          PACKAGE="praisonai-deploy"
+          VERSION="${{ steps.versions.outputs.deploy_version }}"
+          MAX_WAIT=600
+          INTERVAL=30
+          START=$(date +%s)
+
+          while true; do
+            if curl -fsSL "https://pypi.org/pypi/${PACKAGE}/${VERSION}/json" >/dev/null; then
+              echo "✅ ${PACKAGE}==${VERSION} is available on PyPI"
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "❌ Timeout waiting for ${PACKAGE}==${VERSION} on PyPI"
+              exit 1
+            fi
+            echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
+            sleep "$INTERVAL"
+          done
+
+      - name: Commit praisonai-deploy version bump
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_deploy != true &&
+          steps.pypi_exists.outputs.skip_deploy != 'true'
+        run: |
+          set -euo pipefail
+          git add src/praisonai-deploy/pyproject.toml src/praisonai-deploy/uv.lock src/praisonai-deploy/praisonai_deploy/_version.py
+          git diff --cached --quiet && { echo "No deploy files to commit"; exit 0; }
+          git commit -m "Bump praisonai-deploy to ${{ steps.versions.outputs.deploy_version }}"
+          git pull --rebase origin main
+          git push origin main
+
       - name: Bump and release wrapper
         if: >-
           inputs.dry_run != true &&
@@ -1016,6 +1128,7 @@ jobs:
             --browser-pin "${{ steps.versions.outputs.browser_version }}" \
             --mcp-pin "${{ steps.versions.outputs.mcp_version }}" \
             --sandbox-pin "${{ steps.versions.outputs.sandbox_version }}" \
+            --deploy-pin "${{ steps.versions.outputs.deploy_version }}" \
             --wait --max-wait 600 --no-add-all
 
       - name: Publish praisonai wrapper to PyPI
@@ -1064,6 +1177,7 @@ jobs:
           BROWSER="${{ steps.versions.outputs.browser_version }}"
           MCP="${{ steps.versions.outputs.mcp_version }}"
           SANDBOX="${{ steps.versions.outputs.sandbox_version }}"
+          DEPLOY="${{ steps.versions.outputs.deploy_version }}"
           WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
 
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
@@ -1092,6 +1206,10 @@ jobs:
 
           if [ "${{ inputs.skip_sandbox }}" != "true" ]; then
             echo "✅ praisonai-sandbox==${SANDBOX}"
+          fi
+
+          if [ "${{ inputs.skip_deploy }}" != "true" ]; then
+            echo "✅ praisonai-deploy==${DEPLOY}"
           fi
 
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then

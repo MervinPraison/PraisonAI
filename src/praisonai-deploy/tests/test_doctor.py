@@ -8,7 +8,7 @@ import subprocess
 
 def test_doctor_check_result_success():
     """Test DoctorCheckResult for successful check."""
-    from praisonai.deploy.doctor import DoctorCheckResult
+    from praisonai_deploy.doctor import DoctorCheckResult
     
     result = DoctorCheckResult(
         name="Python Version",
@@ -22,7 +22,7 @@ def test_doctor_check_result_success():
 
 def test_doctor_check_result_failure():
     """Test DoctorCheckResult for failed check."""
-    from praisonai.deploy.doctor import DoctorCheckResult
+    from praisonai_deploy.doctor import DoctorCheckResult
     
     result = DoctorCheckResult(
         name="Docker",
@@ -36,7 +36,7 @@ def test_doctor_check_result_failure():
 
 def test_doctor_report():
     """Test DoctorReport aggregation."""
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     checks = [
         DoctorCheckResult("Check 1", True, "OK"),
@@ -53,7 +53,7 @@ def test_doctor_report():
 
 def test_doctor_report_all_passed():
     """Test DoctorReport when all checks pass."""
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     checks = [
         DoctorCheckResult("Check 1", True, "OK"),
@@ -67,7 +67,7 @@ def test_doctor_report_all_passed():
 @patch('subprocess.run')
 def test_check_python_version_success(mock_run):
     """Test Python version check success."""
-    from praisonai.deploy.doctor import check_python_version
+    from praisonai_deploy.doctor import check_python_version
     
     mock_run.return_value = Mock(
         returncode=0,
@@ -83,7 +83,7 @@ def test_check_python_version_success(mock_run):
 @patch('sys.version_info', (3, 7, 0))
 def test_check_python_version_old():
     """Test Python version check with old version."""
-    from praisonai.deploy.doctor import check_python_version
+    from praisonai_deploy.doctor import check_python_version
     
     # This test verifies the function runs; actual version check depends on sys.version_info
     result = check_python_version()
@@ -94,7 +94,7 @@ def test_check_python_version_old():
 @patch('subprocess.run')
 def test_check_docker_available_success(mock_run):
     """Test Docker availability check success."""
-    from praisonai.deploy.doctor import check_docker_available
+    from praisonai_deploy.doctor import check_docker_available
     
     mock_run.return_value = Mock(
         returncode=0,
@@ -108,7 +108,7 @@ def test_check_docker_available_success(mock_run):
 @patch('subprocess.run')
 def test_check_docker_available_not_found(mock_run):
     """Test Docker availability check when not installed."""
-    from praisonai.deploy.doctor import check_docker_available
+    from praisonai_deploy.doctor import check_docker_available
     
     mock_run.side_effect = FileNotFoundError()
     
@@ -120,7 +120,7 @@ def test_check_docker_available_not_found(mock_run):
 @patch('socket.socket')
 def test_check_port_available_success(mock_socket):
     """Test port availability check success."""
-    from praisonai.deploy.doctor import check_port_available
+    from praisonai_deploy.doctor import check_port_available
     
     # connect_ex returns non-zero when port is NOT in use (available)
     mock_sock = MagicMock()
@@ -134,7 +134,7 @@ def test_check_port_available_success(mock_socket):
 @patch('socket.socket')
 def test_check_port_available_in_use(mock_socket):
     """Test port availability check when port in use."""
-    from praisonai.deploy.doctor import check_port_available
+    from praisonai_deploy.doctor import check_port_available
     
     mock_sock = MagicMock()
     mock_sock.connect_ex.return_value = 0
@@ -147,7 +147,7 @@ def test_check_port_available_in_use(mock_socket):
 @patch('subprocess.run')
 def test_check_aws_cli_success(mock_run):
     """Test AWS CLI check success."""
-    from praisonai.deploy.doctor import check_aws_cli
+    from praisonai_deploy.doctor import check_aws_cli
     
     mock_run.return_value = Mock(
         returncode=0,
@@ -163,7 +163,7 @@ def test_check_aws_cli_success(mock_run):
 @patch('subprocess.run')
 def test_check_aws_cli_not_configured(mock_run):
     """Test AWS CLI check when not configured."""
-    from praisonai.deploy.doctor import check_aws_cli
+    from praisonai_deploy.doctor import check_aws_cli
     
     mock_run.side_effect = subprocess.CalledProcessError(1, 'aws')
     
@@ -175,7 +175,7 @@ def test_check_aws_cli_not_configured(mock_run):
 @patch('subprocess.run')
 def test_check_azure_cli_success(mock_run):
     """Test Azure CLI check success."""
-    from praisonai.deploy.doctor import check_azure_cli
+    from praisonai_deploy.doctor import check_azure_cli
     
     mock_run.return_value = Mock(
         returncode=0,
@@ -190,7 +190,7 @@ def test_check_azure_cli_success(mock_run):
 @patch('subprocess.run')
 def test_check_azure_cli_not_logged_in(mock_run):
     """Test Azure CLI check when not logged in."""
-    from praisonai.deploy.doctor import check_azure_cli
+    from praisonai_deploy.doctor import check_azure_cli
     
     mock_run.side_effect = subprocess.CalledProcessError(1, 'az')
     
@@ -202,7 +202,7 @@ def test_check_azure_cli_not_logged_in(mock_run):
 @patch('subprocess.run')
 def test_check_gcp_cli_success(mock_run):
     """Test GCP CLI check success."""
-    from praisonai.deploy.doctor import check_gcp_cli
+    from praisonai_deploy.doctor import check_gcp_cli
     
     mock_run.return_value = Mock(
         returncode=0,
@@ -217,7 +217,7 @@ def test_check_gcp_cli_success(mock_run):
 @patch('subprocess.run')
 def test_check_gcp_cli_not_configured(mock_run):
     """Test GCP CLI check when not configured."""
-    from praisonai.deploy.doctor import check_gcp_cli
+    from praisonai_deploy.doctor import check_gcp_cli
     
     mock_run.side_effect = subprocess.CalledProcessError(1, 'gcloud')
     
@@ -226,11 +226,11 @@ def test_check_gcp_cli_not_configured(mock_run):
     assert "gcloud init" in result.fix_suggestion
 
 
-@patch('praisonai.deploy.doctor.check_python_version')
-@patch('praisonai.deploy.doctor.check_port_available')
+@patch('praisonai_deploy.doctor.check_python_version')
+@patch('praisonai_deploy.doctor.check_port_available')
 def test_run_local_checks(mock_port, mock_python):
     """Test running local checks."""
-    from praisonai.deploy.doctor import run_local_checks, DoctorCheckResult
+    from praisonai_deploy.doctor import run_local_checks, DoctorCheckResult
     
     mock_python.return_value = DoctorCheckResult("Python", True, "OK")
     mock_port.return_value = DoctorCheckResult("Port", True, "Available")
@@ -240,10 +240,10 @@ def test_run_local_checks(mock_port, mock_python):
     assert report.passed_checks >= 2
 
 
-@patch('praisonai.deploy.doctor.check_aws_cli')
+@patch('praisonai_deploy.doctor.check_aws_cli')
 def test_run_aws_checks(mock_aws):
     """Test running AWS checks."""
-    from praisonai.deploy.doctor import run_aws_checks, DoctorCheckResult
+    from praisonai_deploy.doctor import run_aws_checks, DoctorCheckResult
     
     mock_aws.return_value = DoctorCheckResult("AWS CLI", True, "Configured")
     
@@ -251,10 +251,10 @@ def test_run_aws_checks(mock_aws):
     assert report.total_checks >= 1
 
 
-@patch('praisonai.deploy.doctor.check_azure_cli')
+@patch('praisonai_deploy.doctor.check_azure_cli')
 def test_run_azure_checks(mock_azure):
     """Test running Azure checks."""
-    from praisonai.deploy.doctor import run_azure_checks, DoctorCheckResult
+    from praisonai_deploy.doctor import run_azure_checks, DoctorCheckResult
     
     mock_azure.return_value = DoctorCheckResult("Azure CLI", True, "Logged in")
     
@@ -262,10 +262,10 @@ def test_run_azure_checks(mock_azure):
     assert report.total_checks >= 1
 
 
-@patch('praisonai.deploy.doctor.check_gcp_cli')
+@patch('praisonai_deploy.doctor.check_gcp_cli')
 def test_run_gcp_checks(mock_gcp):
     """Test running GCP checks."""
-    from praisonai.deploy.doctor import run_gcp_checks, DoctorCheckResult
+    from praisonai_deploy.doctor import run_gcp_checks, DoctorCheckResult
     
     mock_gcp.return_value = DoctorCheckResult("GCP CLI", True, "Configured")
     
@@ -273,13 +273,13 @@ def test_run_gcp_checks(mock_gcp):
     assert report.total_checks >= 1
 
 
-@patch('praisonai.deploy.doctor.run_local_checks')
-@patch('praisonai.deploy.doctor.run_aws_checks')
-@patch('praisonai.deploy.doctor.run_azure_checks')
-@patch('praisonai.deploy.doctor.run_gcp_checks')
+@patch('praisonai_deploy.doctor.run_local_checks')
+@patch('praisonai_deploy.doctor.run_aws_checks')
+@patch('praisonai_deploy.doctor.run_azure_checks')
+@patch('praisonai_deploy.doctor.run_gcp_checks')
 def test_run_all_checks(mock_gcp, mock_azure, mock_aws, mock_local):
     """Test running all checks."""
-    from praisonai.deploy.doctor import run_all_checks, DoctorReport, DoctorCheckResult
+    from praisonai_deploy.doctor import run_all_checks, DoctorReport, DoctorCheckResult
     
     mock_local.return_value = DoctorReport([DoctorCheckResult("Local", True, "OK")])
     mock_aws.return_value = DoctorReport([DoctorCheckResult("AWS", True, "OK")])
@@ -290,11 +290,11 @@ def test_run_all_checks(mock_gcp, mock_azure, mock_aws, mock_local):
     assert report.total_checks >= 4
 
 
-@patch('praisonai.deploy.doctor.validate_agents_yaml')
+@patch('praisonai_deploy.doctor.validate_agents_yaml')
 def test_check_agents_yaml_valid(mock_validate):
     """Test agents.yaml validation check success."""
-    from praisonai.deploy.doctor import check_agents_yaml
-    from praisonai.deploy.models import DeployConfig, DeployType
+    from praisonai_deploy.doctor import check_agents_yaml
+    from praisonai_deploy.models import DeployConfig, DeployType
     
     mock_validate.return_value = DeployConfig(type=DeployType.API)
     
@@ -302,10 +302,10 @@ def test_check_agents_yaml_valid(mock_validate):
     assert result.passed is True
 
 
-@patch('praisonai.deploy.doctor.validate_agents_yaml')
+@patch('praisonai_deploy.doctor.validate_agents_yaml')
 def test_check_agents_yaml_invalid(mock_validate):
     """Test agents.yaml validation check failure."""
-    from praisonai.deploy.doctor import check_agents_yaml
+    from praisonai_deploy.doctor import check_agents_yaml
     
     mock_validate.side_effect = ValueError("Invalid config")
     
@@ -315,7 +315,7 @@ def test_check_agents_yaml_invalid(mock_validate):
 
 def test_check_agents_yaml_not_found():
     """Test agents.yaml validation check when file not found."""
-    from praisonai.deploy.doctor import check_agents_yaml
+    from praisonai_deploy.doctor import check_agents_yaml
     
     result = check_agents_yaml("/nonexistent/agents.yaml")
     assert result.passed is False

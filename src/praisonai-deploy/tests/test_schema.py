@@ -8,7 +8,7 @@ import os
 
 def test_validate_agents_yaml_with_deploy_api():
     """Test YAML validation with API deploy config."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -43,7 +43,7 @@ deploy:
 
 def test_validate_agents_yaml_with_deploy_docker():
     """Test YAML validation with Docker deploy config."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -80,7 +80,7 @@ deploy:
 
 def test_validate_agents_yaml_with_deploy_cloud_aws():
     """Test YAML validation with AWS cloud deploy config."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -118,7 +118,7 @@ deploy:
 
 def test_validate_agents_yaml_with_deploy_cloud_azure():
     """Test YAML validation with Azure cloud deploy config."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -155,7 +155,7 @@ deploy:
 
 def test_validate_agents_yaml_with_deploy_cloud_gcp():
     """Test YAML validation with GCP cloud deploy config."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -191,7 +191,7 @@ deploy:
 
 def test_validate_agents_yaml_no_deploy_section():
     """Test YAML validation when no deploy section present."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -217,7 +217,7 @@ agents:
 
 def test_validate_agents_yaml_invalid_type():
     """Test YAML validation with invalid deploy type."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -246,7 +246,7 @@ deploy:
 
 def test_validate_agents_yaml_missing_required_config():
     """Test YAML validation with missing required config for type."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     yaml_content = """
 name: Test Agent
@@ -275,7 +275,7 @@ deploy:
 
 def test_validate_agents_yaml_file_not_found():
     """Test YAML validation with non-existent file."""
-    from praisonai.deploy.schema import validate_agents_yaml
+    from praisonai_deploy.schema import validate_agents_yaml
     
     with pytest.raises(FileNotFoundError):
         validate_agents_yaml("/nonexistent/file.yaml")
@@ -283,8 +283,8 @@ def test_validate_agents_yaml_file_not_found():
 
 def test_generate_sample_yaml_api():
     """Test generating sample YAML for API deploy."""
-    from praisonai.deploy.schema import generate_sample_yaml
-    from praisonai.deploy.models import DeployType
+    from praisonai_deploy.schema import generate_sample_yaml
+    from praisonai_deploy.models import DeployType
     
     yaml_str = generate_sample_yaml(DeployType.API)
     assert "type: api" in yaml_str
@@ -295,8 +295,8 @@ def test_generate_sample_yaml_api():
 
 def test_generate_sample_yaml_docker():
     """Test generating sample YAML for Docker deploy."""
-    from praisonai.deploy.schema import generate_sample_yaml
-    from praisonai.deploy.models import DeployType
+    from praisonai_deploy.schema import generate_sample_yaml
+    from praisonai_deploy.models import DeployType
     
     yaml_str = generate_sample_yaml(DeployType.DOCKER)
     assert "type: docker" in yaml_str
@@ -307,8 +307,8 @@ def test_generate_sample_yaml_docker():
 
 def test_generate_sample_yaml_cloud_aws():
     """Test generating sample YAML for AWS cloud deploy."""
-    from praisonai.deploy.schema import generate_sample_yaml
-    from praisonai.deploy.models import DeployType, CloudProvider
+    from praisonai_deploy.schema import generate_sample_yaml
+    from praisonai_deploy.models import DeployType, CloudProvider
     
     yaml_str = generate_sample_yaml(DeployType.CLOUD, CloudProvider.AWS)
     assert "type: cloud" in yaml_str
@@ -319,8 +319,8 @@ def test_generate_sample_yaml_cloud_aws():
 
 def test_generate_sample_yaml_cloud_azure():
     """Test generating sample YAML for Azure cloud deploy."""
-    from praisonai.deploy.schema import generate_sample_yaml
-    from praisonai.deploy.models import DeployType, CloudProvider
+    from praisonai_deploy.schema import generate_sample_yaml
+    from praisonai_deploy.models import DeployType, CloudProvider
     
     yaml_str = generate_sample_yaml(DeployType.CLOUD, CloudProvider.AZURE)
     assert "type: cloud" in yaml_str
@@ -330,8 +330,8 @@ def test_generate_sample_yaml_cloud_azure():
 
 def test_generate_sample_yaml_cloud_gcp():
     """Test generating sample YAML for GCP cloud deploy."""
-    from praisonai.deploy.schema import generate_sample_yaml
-    from praisonai.deploy.models import DeployType, CloudProvider
+    from praisonai_deploy.schema import generate_sample_yaml
+    from praisonai_deploy.models import DeployType, CloudProvider
     
     yaml_str = generate_sample_yaml(DeployType.CLOUD, CloudProvider.GCP)
     assert "type: cloud" in yaml_str
