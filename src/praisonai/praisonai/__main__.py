@@ -112,25 +112,58 @@ def _get_typer_commands():
         return _typer_commands_cache
 
 
-def _find_first_command(argv):
+def _iter_argv_tokens(argv, value_opts=None):
+    """Classify each ``argv`` token, yielding ``(arg, name, kind)``.
+
+    Single source of truth for "which tokens are flags, and which following
+    token is consumed as a flag's value". ``kind`` is one of:
+
+      - ``"flag"``    — a dash-prefixed option token. ``name`` is its option
+                        name (``--foo=bar`` → ``--foo``, otherwise ``arg``).
+      - ``"value"``   — a token consumed as the *preceding* option's value.
+                        ``name`` is ``None``.
+      - ``"pos"``     — a plain positional token. ``name`` is ``None``.
+
+    ``value_opts`` is the set of option names that consume a following value
+    (e.g. ``--model gpt-4o``). When supplied, the token following such an option
+    is classified ``"value"`` so a value beginning with a dash (``--session
+    -abc``, ``--output -json``) is not mis-classified as a separate flag.
+    ``--opt=value`` forms carry their value inline and need no lookahead.
+    Without ``value_opts`` every dash-prefixed token is a ``"flag"`` and no
+    token is consumed as a value (the original conservative behaviour).
+    """
+    value_opts = value_opts or set()
+    expect_value = False
+    for arg in argv:
+        if expect_value:
+            expect_value = False
+            yield arg, None, "value"
+            continue
+        if arg.startswith("-"):
+            name = arg.split("=", 1)[0]
+            if "=" not in arg and name in value_opts:
+                expect_value = True
+            yield arg, name, "flag"
+        else:
+            yield arg, None, "pos"
+
+
+def _find_first_command(argv, value_opts=None):
     """Find the first non-flag argument in argv.
 
     Skips global flags (--json, --verbose, etc.) and their values.
     Returns the first positional arg, or None if only flags are present.
-    """
-    # Flags that consume a following value
-    VALUE_FLAGS = {"--output-format", "-o"}
 
-    skip_next = False
-    for arg in argv:
-        if skip_next:
-            skip_next = False
-            continue
-        if arg.startswith("-"):
-            if arg in VALUE_FLAGS:
-                skip_next = True
-            continue
-        return arg  # First non-flag arg
+    ``value_opts`` (the set of value-consuming option names) is shared with the
+    other routing walks via :func:`_iter_argv_tokens` so value-consumption
+    semantics stay in lockstep. When omitted it falls back to the minimal
+    static set of value flags historically recognised here.
+    """
+    if value_opts is None:
+        value_opts = {"--output-format", "-o"}
+    for arg, _name, kind in _iter_argv_tokens(argv, value_opts):
+        if kind == "pos":
+            return arg  # First non-flag arg
     return None
 
 
@@ -145,19 +178,11 @@ def _flag_names(argv, value_opts=None):
     lookahead. Without ``value_opts`` the original conservative behaviour holds:
     every dash-prefixed token is reported as an option name.
     """
-    value_opts = value_opts or set()
-    names = []
-    expect_value = False
-    for arg in argv:
-        if expect_value:
-            expect_value = False
-            continue
-        if arg.startswith("-"):
-            name = arg.split("=", 1)[0]
-            names.append(name)
-            if "=" not in arg and name in value_opts:
-                expect_value = True
-    return names
+    return [
+        name
+        for _arg, name, kind in _iter_argv_tokens(argv, value_opts)
+        if kind == "flag"
+    ]
 
 
 def _looks_like_bare_prompt(argv, first_cmd):
@@ -223,19 +248,11 @@ def _build_run_argv(argv, value_opts):
     """
     positionals = []
     flags = []
-    expect_value = False
-    for arg in argv:
-        if expect_value:
+    for arg, _name, kind in _iter_argv_tokens(argv, value_opts):
+        if kind == "pos":
+            positionals.append(arg)
+        else:
             flags.append(arg)
-            expect_value = False
-            continue
-        if arg.startswith("-"):
-            flags.append(arg)
-            name = arg.split("=", 1)[0]
-            if "=" not in arg and name in value_opts:
-                expect_value = True
-            continue
-        positionals.append(arg)
     prompt = " ".join(positionals)
     return ["run", prompt, *flags]
 
