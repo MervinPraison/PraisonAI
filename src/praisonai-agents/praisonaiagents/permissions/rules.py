@@ -227,7 +227,12 @@ class PersistentApproval:
         if not self.is_valid():
             return False
         
-        if self.agent_name and agent_name and self.agent_name != agent_name:
+        # An approval scoped to a specific agent must never match a call that
+        # can't prove it's that agent — including calls with no agent_name at
+        # all. ``agent_name != self.agent_name`` covers both "different name"
+        # and "no name" (None != "trusted-agent" is True), closing the bypass
+        # while leaving unscoped approvals (self.agent_name is None) unaffected.
+        if self.agent_name is not None and agent_name != self.agent_name:
             return False
         
         if fnmatch.fnmatch(target, self.pattern):

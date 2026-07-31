@@ -140,6 +140,7 @@ class SubagentDelegator:
         
         # State
         self._tasks: Dict[str, DelegationTask] = {}
+        self._running_asyncio_tasks: Dict[str, "asyncio.Task"] = {}
         self._running_count: int = 0
         self._total_count: int = 0
         self._task_counter: int = 0
@@ -220,9 +221,37 @@ class SubagentDelegator:
         self._tasks[task_id] = task
         self._total_count += 1
         
-        # Execute with concurrency control
+        # Execute with concurrency control. Wrap in a real asyncio.Task so
+        # cancel_task/cancel_all can actually propagate cancellation to the
+        # awaited subagent coroutine instead of only flipping a status enum.
         async with self._get_semaphore():
-            return await self._execute_task(task)
+            # If cancelled while queued on the semaphore, don't start the work.
+            if task.status == DelegationStatus.CANCELLED:
+                return DelegationResult(
+                    task_id=task.task_id,
+                    agent_name=task.agent_name,
+                    success=False,
+                    error="Task was cancelled",
+                )
+            exec_task = asyncio.ensure_future(self._execute_task(task))
+            self._running_asyncio_tasks[task_id] = exec_task
+            try:
+                return await exec_task
+            except asyncio.CancelledError:
+                # Distinguish a delegator-initiated cancel (via cancel_task/cancel_all,
+                # which sets status=CANCELLED) from an external/cooperative cancel of
+                # the caller. Only the former is swallowed into a result; an external
+                # cancel must propagate so wait_for/shutdown behave correctly.
+                if task.status == DelegationStatus.CANCELLED:
+                    return DelegationResult(
+                        task_id=task.task_id,
+                        agent_name=task.agent_name,
+                        success=False,
+                        error="Task was cancelled",
+                    )
+                raise
+            finally:
+                self._running_asyncio_tasks.pop(task_id, None)
     
     async def delegate_parallel(
         self,
@@ -282,14 +311,25 @@ class SubagentDelegator:
             True if task was cancelled
         """
         task = self._tasks.get(task_id)
-        if not task:
+        # Only terminal tasks are un-cancellable; PENDING/RUNNING can be cancelled.
+        _terminal = (
+            DelegationStatus.COMPLETED,
+            DelegationStatus.FAILED,
+            DelegationStatus.CANCELLED,
+            DelegationStatus.TIMEOUT,
+        )
+        if not task or task.status in _terminal:
             return False
         
-        if task.status == DelegationStatus.RUNNING:
-            task.status = DelegationStatus.CANCELLED
-            return True
+        # Mark cancelled first so a PENDING task (still waiting on the semaphore)
+        # or a RUNNING coroutine both observe CANCELLED and refuse to complete.
+        task.status = DelegationStatus.CANCELLED
         
-        return False
+        # Propagate cancellation to the actual coroutine if it is already running.
+        asyncio_task = self._running_asyncio_tasks.get(task_id)
+        if asyncio_task is not None:
+            asyncio_task.cancel()
+        return True
     
     async def cancel_all(self) -> int:
         """
@@ -299,9 +339,8 @@ class SubagentDelegator:
             Number of tasks cancelled
         """
         cancelled = 0
-        for task in self._tasks.values():
-            if task.status == DelegationStatus.RUNNING:
-                task.status = DelegationStatus.CANCELLED
+        for task_id in list(self._tasks.keys()):
+            if await self.cancel_task(task_id):
                 cancelled += 1
         return cancelled
     
@@ -337,6 +376,15 @@ class SubagentDelegator:
         import time
         start_time = time.time()
         
+        # A cancel may have landed between scheduling and execution; honour it.
+        if task.status == DelegationStatus.CANCELLED:
+            return DelegationResult(
+                task_id=task.task_id,
+                agent_name=task.agent_name,
+                success=False,
+                error="Task was cancelled",
+            )
+        
         task.status = DelegationStatus.RUNNING
         self._running_count += 1
         
@@ -356,7 +404,9 @@ class SubagentDelegator:
                     timeout=task.timeout_seconds,
                 )
                 task.result = result
-                task.status = DelegationStatus.COMPLETED
+                # Don't clobber a cancellation that landed while we were running.
+                if task.status != DelegationStatus.CANCELLED:
+                    task.status = DelegationStatus.COMPLETED
                 
             except asyncio.TimeoutError:
                 task.status = DelegationStatus.TIMEOUT
