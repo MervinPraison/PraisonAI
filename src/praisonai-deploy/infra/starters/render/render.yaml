@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: praisonai-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PRAISONAI_API_AUTH
+        value: enabled

@@ -1,0 +1,11 @@
+{{- if and (not .Values.agents.existingConfigMap) (not .Values.agents.configMapName) .Values.agents.content }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "praisonai-agents-api.agentsConfigMapName" . }}
+  labels:
+    {{- include "praisonai-agents-api.labels" . | nindent 4 }}
+data:
+  {{ .Values.agents.fileName }}: |
+{{ .Values.agents.content | indent 4 }}
+{{- end }}

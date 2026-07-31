@@ -1,0 +1,87 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mervinpraison/praisonai
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+## Agents file mounted into the API container (ConfigMap by default).
+agents:
+  fileName: agents.yaml
+  ## Inline agents.yaml content. When empty, chart expects agents.configMapName or agents.existingConfigMap.
+  content: |
+    agents:
+      - name: assistant
+        role: General assistant
+        goal: Help users with their tasks
+        backstory: You are a helpful AI assistant.
+    deploy:
+      type: api
+      api:
+        host: 0.0.0.0
+        port: 8005
+        auth_enabled: true
+  configMapName: ""
+  existingConfigMap: ""
+
+api:
+  port: 8005
+  ## Generated server entrypoint (matches praisonai-deploy api.py output shape).
+  serverFile: api_server.py
+
+auth:
+  enabled: true
+  existingSecret: ""
+  secretKey: PRAISONAI_API_TOKEN
+  token: ""
+
+postgres:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  port: 5432
+  database: praisonai
+  username: praisonai
+  auth:
+    existingSecret: ""
+    password: ""
+    secretKey: password
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+
+service:
+  type: ClusterIP
+  port: 8005
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+probes:
+  enabled: true
+  path: /health
+
+env: []
+
+resources: {}
+
+serviceAccount:
+  create: true
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

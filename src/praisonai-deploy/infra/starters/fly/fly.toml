@@ -1,0 +1,36 @@
+# Fly.io starter — requires flyctl and FLY_API_TOKEN
+#   fly launch --no-deploy
+#   fly secrets set OPENAI_API_KEY=...
+#   fly deploy
+
+app = "praisonai-agents"
+primary_region = "lhr"
+
+[build]
+  image = "ghcr.io/mervinpraison/praisonai:latest"
+
+[env]
+  PRAISONAI_API_AUTH = "enabled"
+
+[[services]]
+  internal_port = 8005
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [services.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "2s"
+    method = "GET"
+    path = "/health"

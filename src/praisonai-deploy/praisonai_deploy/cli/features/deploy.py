@@ -473,6 +473,96 @@ class DeployHandler:
         """Print data as JSON."""
         print(json.dumps(data, indent=2))
 
+    def handle_compose_up(self, args):
+        """Start Docker Compose agents stack."""
+        from praisonai_deploy.compose import compose_up
+
+        detach = not getattr(args, 'foreground', False)
+        stack_dir = getattr(args, 'stack_dir', None)
+        result = compose_up(args.file, stack_dir=stack_dir, detach=detach)
+
+        if args.json:
+            self._print_json(result.model_dump())
+        elif result.success:
+            console.print(f"[bold green]✅ {result.message}[/bold green]")
+            if result.url:
+                console.print(f"[bold cyan]🔗 URL:[/bold cyan] {result.url}")
+        else:
+            console.print(f"[bold red]❌ {result.message}[/bold red]")
+            if result.error:
+                console.print(f"[red]{result.error}[/red]")
+            sys.exit(1)
+
+    def handle_compose_down(self, args):
+        """Stop Docker Compose agents stack."""
+        from praisonai_deploy.compose import compose_down
+
+        stack_dir = getattr(args, 'stack_dir', None)
+        volumes = getattr(args, 'volumes', False)
+        result = compose_down(args.file, stack_dir=stack_dir, volumes=volumes)
+
+        if args.json:
+            self._print_json(result.model_dump())
+        elif result.success:
+            console.print(f"[bold green]✅ {result.message}[/bold green]")
+        else:
+            console.print(f"[bold red]❌ {result.message}[/bold red]")
+            if result.error:
+                console.print(f"[red]{result.error}[/red]")
+            sys.exit(1)
+
+    def handle_create(self, args):
+        """Scaffold project from starter template."""
+        from praisonai_deploy.starters import create_from_template, list_templates
+
+        template = args.template
+        directory = getattr(args, 'directory', '.') or '.'
+        result = create_from_template(template, directory)
+
+        if args.json:
+            self._print_json(result.model_dump())
+        elif result.success:
+            console.print(f"[bold green]✅ {result.message}[/bold green]")
+            if result.metadata.get('description'):
+                console.print(f"[dim]{result.metadata['description']}[/dim]")
+            console.print("\n[bold]Next steps:[/bold]")
+            console.print("  1. cd into the project directory")
+            console.print("  2. Set OPENAI_API_KEY (and other secrets)")
+            console.print("  3. praisonai deploy compose up  OR  praisonai deploy run")
+        else:
+            console.print(f"[bold red]❌ {result.message}[/bold red]")
+            if result.error:
+                console.print(f"[red]{result.error}[/red]")
+                available = list_templates()
+                if available:
+                    names = ", ".join(t['name'] for t in available)
+                    console.print(f"[dim]Available templates: {names}[/dim]")
+            sys.exit(1)
+
+    def handle_helm(self, args):
+        """Thin helm upgrade wrapper for repo-infra charts."""
+        from praisonai_deploy.helm import helm_upgrade_install
+
+        chart_dir = getattr(args, 'chart_dir', None)
+        install = getattr(args, 'install', True)
+        result = helm_upgrade_install(
+            chart=args.chart,
+            release=getattr(args, 'release', 'praisonai'),
+            namespace=getattr(args, 'namespace', 'default'),
+            chart_dir=chart_dir,
+            install=install,
+        )
+
+        if args.json:
+            self._print_json(result.model_dump())
+        elif result.success:
+            console.print(f"[bold green]✅ {result.message}[/bold green]")
+        else:
+            console.print(f"[bold red]❌ {result.message}[/bold red]")
+            if result.error:
+                console.print(f"[red]{result.error}[/red]")
+            sys.exit(1)
+
 
 def handle_deploy_command(args):
     """
@@ -501,7 +591,10 @@ def handle_deploy_command(args):
         print("  praisonai deploy status [--file FILE]")
         print("  praisonai deploy destroy [--file FILE] [--yes]")
         print("  praisonai deploy docker [FILE] [--tag TAG]")
-        print("  praisonai deploy aws|gcp|azure [FILE]")
+        print("  praisonai deploy compose up|down [--file FILE]")
+        print("  praisonai deploy create --template NAME [--dir DIR]")
+        print("  praisonai deploy helm --chart gateway|agents-api")
+        print("  praisonai deploy aws|gcp|azure|fly|railway|render [FILE]")
         return 1
 
     subcommand = args[0]
@@ -529,6 +622,16 @@ def handle_deploy_command(args):
     deploy_args.registry = None
     deploy_args.service_name = None
     deploy_args.subscription_id = None
+    deploy_args.stack_dir = None
+    deploy_args.foreground = False
+    deploy_args.volumes = False
+    deploy_args.template = None
+    deploy_args.directory = '.'
+    deploy_args.chart = None
+    deploy_args.release = 'praisonai'
+    deploy_args.namespace = 'default'
+    deploy_args.chart_dir = None
+    deploy_args.install = True
 
     value_flags = {
         '--file': 'file', '-f': 'file',
@@ -545,8 +648,18 @@ def handle_deploy_command(args):
         '--registry': 'registry',
         '--service-name': 'service_name',
         '--subscription-id': 'subscription_id',
+        '--stack-dir': 'stack_dir',
+        '--template': 'template',
+        '--dir': 'directory', '-d': 'directory',
+        '--chart': 'chart',
+        '--release': 'release', '-r': 'release',
+        '--namespace': 'namespace', '-n': 'namespace',
+        '--chart-dir': 'chart_dir',
     }
-    bool_flags = {'--json', '--all', '--verbose', '-v', '--background', '--yes', '-y', '--force', '--push'}
+    bool_flags = {
+        '--json', '--all', '--verbose', '-v', '--background', '--yes', '-y', '--force', '--push',
+        '--foreground', '--volumes', '--no-install',
+    }
 
     i = 0
     while i < len(sub_args):
@@ -577,6 +690,12 @@ def handle_deploy_command(args):
                 deploy_args.force = True
             elif arg == '--push':
                 deploy_args.push = True
+            elif arg == '--foreground':
+                deploy_args.foreground = True
+            elif arg == '--volumes':
+                deploy_args.volumes = True
+            elif arg == '--no-install':
+                deploy_args.install = False
             i += 1
         elif not arg.startswith('-'):
             deploy_args.file = arg
@@ -597,6 +716,43 @@ def handle_deploy_command(args):
 
     if subcommand in dispatch:
         method = dispatch[subcommand]
+    elif subcommand == 'compose':
+        if not sub_args:
+            print("Usage: praisonai deploy compose up|down")
+            return 1
+        action = sub_args[0]
+        sub_args = sub_args[1:]
+        # Re-parse flags for compose subcommand
+        i = 0
+        while i < len(sub_args):
+            arg = sub_args[i]
+            if arg in value_flags:
+                if i + 1 >= len(sub_args):
+                    print(f"Error: option '{arg}' requires a value")
+                    return 1
+                setattr(deploy_args, value_flags[arg], sub_args[i + 1])
+                i += 2
+            elif arg in bool_flags:
+                if arg == '--json':
+                    deploy_args.json = True
+                elif arg == '--foreground':
+                    deploy_args.foreground = True
+                elif arg == '--volumes':
+                    deploy_args.volumes = True
+                i += 1
+            else:
+                i += 1
+        if action == 'up':
+            method = handler.handle_compose_up
+        elif action == 'down':
+            method = handler.handle_compose_down
+        else:
+            print(f"Unknown compose action: {action}")
+            return 1
+    elif subcommand == 'create':
+        method = handler.handle_create
+    elif subcommand == 'helm':
+        method = handler.handle_helm
     elif subcommand == 'docker':
         deploy_args.type = 'docker'
         method = handler.handle_deploy
@@ -609,13 +765,13 @@ def handle_deploy_command(args):
             print("Error: cloud deploy requires --provider aws|azure|gcp")
             return 1
         method = handler.handle_deploy
-    elif subcommand in ('aws', 'gcp', 'azure'):
+    elif subcommand in ('aws', 'gcp', 'azure', 'fly', 'railway', 'render'):
         deploy_args.type = 'cloud'
         deploy_args.provider = subcommand
         method = handler.handle_deploy
     else:
         print(f"Unknown deploy subcommand: {subcommand}")
-        print("Available: run, doctor, init, validate, plan, status, destroy, api, cloud, docker, aws, gcp, azure")
+        print("Available: run, doctor, init, validate, plan, status, destroy, api, cloud, docker, compose, create, helm, aws, gcp, azure, fly, railway, render")
         return 1
 
     try:

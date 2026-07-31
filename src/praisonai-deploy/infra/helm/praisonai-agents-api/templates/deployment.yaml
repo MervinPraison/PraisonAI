@@ -1,0 +1,122 @@
+{{- include "praisonai-agents-api.validateAuth" . -}}
+{{- include "praisonai-agents-api.validatePostgres" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "praisonai-agents-api.fullname" . }}
+  labels:
+    {{- include "praisonai-agents-api.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "praisonai-agents-api.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "praisonai-agents-api.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "praisonai-agents-api.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: generate-api-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - python
+            - -c
+            - |
+              import pathlib
+              from praisonai_deploy.api import generate_api_server_code
+              from praisonai_deploy.models import APIConfig
+              agents = "/config/{{ .Values.agents.fileName }}"
+              code = generate_api_server_code(agents, APIConfig(host="0.0.0.0", port={{ .Values.api.port }}))
+              pathlib.Path("/work/{{ .Values.api.serverFile }}").write_text(code)
+          volumeMounts:
+            - name: agents-config
+              mountPath: /config
+              readOnly: true
+            - name: api-work
+              mountPath: /work
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "/work/{{ .Values.api.serverFile }}"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          env:
+            - name: PRAISONAI_API_AUTH
+              value: {{ ternary "enabled" "disabled" .Values.auth.enabled | quote }}
+            {{- if .Values.auth.enabled }}
+            - name: PRAISONAI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "praisonai-agents-api.authSecretName" . }}
+                  key: {{ .Values.auth.secretKey }}
+            {{- end }}
+            {{- if .Values.postgres.enabled }}
+            - name: DATABASE_URL
+              value: postgresql://{{ .Values.postgres.username }}@{{ include "praisonai-agents-api.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "praisonai-agents-api.postgresSecretName" . }}
+                  key: {{ .Values.postgres.auth.secretKey }}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: agents-config
+              mountPath: /config
+              readOnly: true
+            - name: api-work
+              mountPath: /work
+          {{- if .Values.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: agents-config
+          configMap:
+            name: {{ include "praisonai-agents-api.agentsConfigMapName" . }}
+        - name: api-work
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

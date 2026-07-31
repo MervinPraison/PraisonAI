@@ -1,0 +1,29 @@
+1. Get the API URL:
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl port-forward svc/{{ include "praisonai-agents-api.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl http://127.0.0.1:{{ .Values.service.port }}/health
+{{- end }}
+
+2. Health check:
+   GET /health
+
+3. Chat endpoint:
+   POST /chat  {"message": "Hello"}
+
+{{- if .Values.auth.enabled }}
+
+4. Authentication:
+   Set header Authorization: Bearer $PRAISONAI_API_TOKEN
+   Secret: {{ include "praisonai-agents-api.authSecretName" . }}
+{{- end }}
+
+{{- if .Values.postgres.enabled }}
+
+5. Postgres (in-cluster):
+   Service: {{ include "praisonai-agents-api.fullname" . }}-postgres:{{ .Values.postgres.port }}
+{{- end }}

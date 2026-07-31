@@ -27,6 +27,19 @@ praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai
 
 Console script: `praisonai-deploy = praisonai_deploy.__main__:main`
 
+## Repo infra (not shipped in PyPI wheel)
+
+K8s manifests, compose stacks, and starter templates live under package-adjacent `infra/` trees — **not** in the `praisonai-deploy` wheel.
+
+| Path | Runtime owner | Notes |
+|------|---------------|-------|
+| [`../../praisonai-bot/infra/helm/praisonai-gateway/`](../../praisonai-bot/infra/helm/praisonai-gateway/) | `praisonai-bot` (C9) | Gateway Helm chart — primary owner is bot manifest |
+| [`../../praisonai-deploy/infra/helm/praisonai-agents-api/`](../../praisonai-deploy/infra/helm/praisonai-agents-api/) | C14 | Platform Helm (API + Postgres) |
+| [`../../praisonai-deploy/infra/compose/agents-stack/`](../../praisonai-deploy/infra/compose/agents-stack/) | C14 CLI | Docker Compose prod stack (`praisonai deploy compose up/down`) |
+| [`../../praisonai-deploy/infra/starters/`](../../praisonai-deploy/infra/starters/) | C14 CLI | Starter templates (`praisonai deploy create --template`) |
+
+CLI: `praisonai deploy helm --chart gateway|agents-api` wraps `helm upgrade` over these checkout paths.
+
 ## Wrapper shims
 
 | Shim | Target |

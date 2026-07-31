@@ -1,0 +1,54 @@
+# Production-like stack: PraisonAI agents API + pgvector Postgres.
+# Used by: praisonai deploy compose up/down
+#
+# Requires agents.yaml in the project directory (or set AGENTS_FILE).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-praisonai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai}
+      POSTGRES_DB: ${POSTGRES_DB:-praisonai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-praisonai} -d ${POSTGRES_DB:-praisonai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  api:
+    image: ${PRAISONAI_IMAGE:-ghcr.io/mervinpraison/praisonai:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+    command:
+      - python
+      - /app/api_server.py
+    ports:
+      - "${API_PORT:-8005}:8005"
+    environment:
+      PRAISONAI_API_AUTH: ${PRAISONAI_API_AUTH:-enabled}
+      PRAISONAI_API_TOKEN: ${PRAISONAI_API_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-praisonai}:${POSTGRES_PASSWORD:-praisonai}@postgres:5432/${POSTGRES_DB:-praisonai}
+    volumes:
+      - ${AGENTS_FILE:-./agents.yaml}:/app/agents.yaml:ro
+      - ./api_server.py:/app/api_server.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:

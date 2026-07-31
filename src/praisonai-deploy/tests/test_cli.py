@@ -388,3 +388,66 @@ def test_build_deploy_config_from_args_cloud_yaml_wins_when_cli_unset():
         assert config.cloud.project_id == "proj-123"
     finally:
         os.unlink(yaml_path)
+
+
+def test_handle_deploy_command_compose_up_dispatch():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_compose_up") as mock_up:
+        code = handle_deploy_command(["compose", "up", "--file", "agents.yaml", "--stack-dir", "/tmp/stack"])
+        assert code == 0
+        mock_up.assert_called_once()
+        args = mock_up.call_args[0][0]
+        assert args.file == "agents.yaml"
+        assert args.stack_dir == "/tmp/stack"
+
+
+def test_handle_deploy_command_compose_down_volumes():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_compose_down") as mock_down:
+        code = handle_deploy_command(["compose", "down", "--volumes"])
+        assert code == 0
+        mock_down.assert_called_once()
+        assert mock_down.call_args[0][0].volumes is True
+
+
+def test_handle_deploy_command_create_dispatch():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_create") as mock_create:
+        code = handle_deploy_command(["create", "--template", "docker-api", "--dir", "/tmp/out"])
+        assert code == 0
+        mock_create.assert_called_once()
+        args = mock_create.call_args[0][0]
+        assert args.template == "docker-api"
+        assert args.directory == "/tmp/out"
+
+
+def test_handle_deploy_command_helm_dispatch():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_helm") as mock_helm:
+        code = handle_deploy_command([
+            "helm", "--chart", "gateway", "--release", "gw", "--namespace", "prod", "--no-install",
+        ])
+        assert code == 0
+        mock_helm.assert_called_once()
+        args = mock_helm.call_args[0][0]
+        assert args.chart == "gateway"
+        assert args.release == "gw"
+        assert args.namespace == "prod"
+        assert args.install is False
+
+
+def test_handle_deploy_command_fly_provider():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_deploy") as mock_deploy:
+        code = handle_deploy_command(["fly", "agents.yaml", "--region", "lhr"])
+        assert code == 0
+        mock_deploy.assert_called_once()
+        args = mock_deploy.call_args[0][0]
+        assert args.type == "cloud"
+        assert args.provider == "fly"
+        assert args.region == "lhr"

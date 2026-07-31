@@ -123,6 +123,20 @@ flowchart TB
 | 2g | `src/praisonai-deploy/` | Deploy API/Docker/cloud, `deploy` CLI, scheduler integration | **`praisonai` as a PyPI dependency** (lazy `_plugin_registry` via `_code_bridge`) |
 | 3 | `src/praisonai/` | `framework_adapters/`, serve, dashboard, async jobs API | — |
 
+### Repo infra (not PyPI)
+
+Deployment packaging that stays in the git checkout, not in any tier-2 wheel:
+
+| Path | Runtime owner | Orchestration |
+|------|---------------|---------------|
+| `src/praisonai-bot/infra/helm/praisonai-gateway/` | `praisonai-bot` (gateway) | C14 `deploy helm` wrapper |
+| `src/praisonai-deploy/infra/helm/praisonai-agents-api/` | Generated API from C14 | C14 cross-link |
+| `src/praisonai-deploy/infra/compose/agents-stack/` | Docker Compose | `praisonai deploy compose up/down` |
+| `src/praisonai-deploy/infra/starters/` | Starter scaffolds | `praisonai deploy create --template` |
+| `docker/` | Mixed (wrapper/bot dev stacks) | Not C14 — see bot manifest for `docker/bots/` |
+
+Same boundary as C14: Helm/K8s manifests are **repo infra**, not `pip install praisonai-deploy` content.
+
 **Config kernel:** Phase 0 `praisonai/common/` was skipped; shared config lives in
 `praisonai_code/cli/configuration/` and is reached by the bot tier via lazy
 `_code_bridge` (see `src/praisonai/tests/CONFIG_KERNEL.md`).
