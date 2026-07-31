@@ -2054,14 +2054,17 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         Launch all agents as a single API endpoint (HTTP) or an MCP server. 
         In HTTP mode, the endpoint accepts a query and processes it through all agents in sequence.
-        In MCP mode, an MCP server is started, exposing a tool to run the agent workflow.
+        In MCP mode, serving is delegated to the ``praisonai-mcp`` agent adapter
+        (``serve_agents``), publishing ``ask_{agent_name}`` per agent plus
+        ``list_agents`` — the same path used by ``Agent.launch(protocol="mcp")``.
         
         Args:
-            path: API endpoint path (default: '/agents') for HTTP, or base path for MCP.
+            path: API endpoint path (default: '/agents') for HTTP. Ignored in MCP mode.
             port: Server port (default: 8000)
             host: Server host (default: '0.0.0.0')
             debug: Enable debug mode for uvicorn (default: False)
-            protocol: "http" to launch as FastAPI, "mcp" to launch as MCP server.
+            protocol: "http" to launch as FastAPI, "mcp" to serve over MCP via
+                ``praisonai-mcp`` (install with ``pip install praisonai-mcp``).
             
         Returns:
             None
@@ -2324,144 +2327,26 @@ class AgentTeam(SpawnAnnounceProtocol):
                 logging.warning("No agents to launch for MCP mode. Add agents to the Agents instance first.")
                 return
 
+            # Delegate to the praisonai-mcp agent adapter so multi-agent MCP
+            # serving shares one blessed entry point with the single-agent
+            # Agent.launch(protocol="mcp") path (both go through serve_agents).
+            # praisonai-mcp is an optional dependency imported lazily so core
+            # keeps no hard dependency on it.
             try:
-                import uvicorn
-                from mcp.server.fastmcp import FastMCP
-                from mcp.server.sse import SseServerTransport
-                from starlette.applications import Starlette
-                from starlette.requests import Request
-                from starlette.routing import Mount, Route
-                # from mcp.server import Server as MCPServer # Not directly needed if using FastMCP's server
-                import threading
-                import time
-                import inspect
-                import asyncio
-                # logging is already imported at the module level
-                
-            except ImportError as e:
-                missing_module = str(e).split("No module named '")[-1].rstrip("'")
-                display_error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
-                logging.error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
-                print(f"\nTo add MCP capabilities, install the required dependencies:")
-                print(f"pip install {missing_module} mcp praison-mcp starlette uvicorn")
-                print("\nOr install all MCP dependencies with relevant packages.")
+                from praisonai_mcp import serve_agents
+
+                # Keep the call inside the ImportError guard: serve_agents()
+                # lazily imports its transport backend, so a praisonai-mcp
+                # installed without its optional transport extras surfaces the
+                # missing dependency here rather than at the import line above.
+                # Handling it in one place yields a single actionable install
+                # message instead of an uncaught traceback.
+                return serve_agents(self.agents, host=host, port=port)
+            except ImportError:
+                display_error("MCP serving requires the 'praisonai-mcp' package.")
+                logging.error("MCP serving requires the 'praisonai-mcp' package.")
+                print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
                 return None
-
-            mcp_instance = FastMCP("praisonai_workflow_mcp_server")
-
-            # Determine the MCP tool name for the workflow based on self.name
-            actual_mcp_tool_name = (f"execute_{self.name.lower().replace(' ', '_').replace('-', '_')}_workflow" if self.name 
-                                    else "execute_workflow")
-
-            @mcp_instance.tool(name=actual_mcp_tool_name)
-            async def execute_workflow_tool(query: str) -> str: # Renamed for clarity
-                """Executes the defined agent workflow with the given query."""
-                logging.info(f"MCP tool '{actual_mcp_tool_name}' called with query: {query}")
-                current_input = query
-                final_response = "No agents in workflow or workflow did not produce a final response."
-
-                for agent_instance in self.agents:
-                    try:
-                        logging.debug(f"Processing with agent: {agent_instance.display_name}")
-                        if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
-                            response = await agent_instance.achat(current_input, tools=agent_instance.tools, task_name=None, task_description=None, task_id=None)
-                        elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
-                            # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
-                            from ..trace.context_events import copy_context_to_callable
-                            loop = asyncio.get_running_loop()
-                            response = await loop.run_in_executor(None, copy_context_to_callable(lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools)))
-                        else:
-                            logging.warning(f"Agent {agent_instance.display_name} has no suitable chat or achat method.")
-                            response = f"Error: Agent {agent_instance.display_name} has no callable chat method."
-                        
-                        current_input = response if response is not None else "Agent returned no response."
-                        final_response = current_input # Keep track of the last valid response
-                        logging.debug(f"Agent {agent_instance.display_name} responded. Current intermediate output: {current_input}")
-
-                    except Exception as e:
-                        logging.error(f"Error during agent {agent_instance.display_name} execution in MCP workflow: {str(e)}", exc_info=True)
-                        current_input = f"Error from agent {agent_instance.display_name}: {str(e)}"
-                        final_response = current_input # Update final response to show error
-                        # Optionally break or continue based on desired error handling for the workflow
-                        # For now, we continue, and the error is passed to the next agent or returned.
-                
-                logging.info(f"MCP tool '{actual_mcp_tool_name}' completed. Final response: {final_response}")
-                return final_response
-
-            base_mcp_path = path.rstrip('/')
-            sse_mcp_path = f"{base_mcp_path}/sse"
-            messages_mcp_path_prefix = f"{base_mcp_path}/messages"
-            if not messages_mcp_path_prefix.endswith('/'):
-                messages_mcp_path_prefix += '/'
-
-            sse_transport_mcp = SseServerTransport(messages_mcp_path_prefix)
-
-            async def handle_mcp_sse_connection(request: Request) -> None:
-                logging.debug(f"MCP SSE connection request from {request.client} for path {request.url.path}")
-                async with sse_transport_mcp.connect_sse(
-                        request.scope, request.receive, request._send,
-                ) as (read_stream, write_stream):
-                    await mcp_instance._mcp_server.run(
-                        read_stream, write_stream, mcp_instance._mcp_server.create_initialization_options(),
-                    )
-            
-            starlette_mcp_app = Starlette(
-                debug=debug,
-                routes=[
-                    Route(sse_mcp_path, endpoint=handle_mcp_sse_connection),
-                    Mount(messages_mcp_path_prefix, app=sse_transport_mcp.handle_post_message),
-                ],
-            )
-
-            print(f"🚀 Agents MCP Workflow server starting on http://{host}:{port}")
-            print(f"📡 MCP SSE endpoint available at {sse_mcp_path}")
-            print(f"📢 MCP messages post to {messages_mcp_path_prefix}")
-            # Instead of trying to extract tool names, hardcode the known tool name
-            mcp_tool_names = [actual_mcp_tool_name]  # Use the determined dynamic tool name
-            print(f"🛠️ Available MCP tools: {', '.join(mcp_tool_names)}")
-            agent_names_in_workflow = ", ".join([a.display_name for a in self.agents])
-            print(f"🔄 Agents in MCP workflow: {agent_names_in_workflow}")
-
-            def run_praison_mcp_server():
-                try:
-                    uvicorn.run(starlette_mcp_app, host=host, port=port, log_level="debug" if debug else "info")
-                except Exception as e:
-                    logging.error(f"Error starting Agents MCP server: {str(e)}", exc_info=True)
-                    print(f"❌ Error starting Agents MCP server: {str(e)}")
-
-            mcp_server_thread = threading.Thread(target=run_praison_mcp_server, daemon=True)
-            mcp_server_thread.start()
-            time.sleep(0.5) 
-
-            import inspect 
-            stack = inspect.stack()
-            if len(stack) > 1 and stack[1].filename.endswith('.py'):
-                caller_frame = stack[1]
-                caller_line = caller_frame.lineno
-                try:
-                    with open(caller_frame.filename, 'r') as f:
-                        lines = f.readlines()
-                    has_more_launches = False
-                    for line_content in lines[caller_line:]:
-                        if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                            has_more_launches = True
-                            break
-                    if not has_more_launches:
-                        try:
-                            print("\nAgents MCP server running. Press Ctrl+C to stop.")
-                            while True:
-                                time.sleep(1)
-                        except KeyboardInterrupt:
-                            print("\nAgents MCP Server stopped")
-                except Exception as e:
-                    logging.error(f"Error in Agents MCP launch detection: {e}")
-                    try:
-                        print("\nKeeping Agents MCP server alive. Press Ctrl+C to stop.")
-                        while True:
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nAgents MCP Server stopped")
-            return None
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
             return None

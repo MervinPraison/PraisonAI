@@ -1740,75 +1740,31 @@ Write the complete compiled report:"""
 
     def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):
         """
-        Launch MCP server (internal implementation).
-        
-        NOTE: This implementation will be moved to wrapper layer in future version.
-        For now, it maintains backward compatibility while following lazy import patterns.
+        Launch this single agent as an MCP server.
+
+        Delegates to the ``praisonai-mcp`` agent adapter via ``serve_agents([self])``
+        so that ``Agent.launch(protocol="mcp")`` and
+        ``PraisonAIAgents.launch(protocol="mcp")`` share one code path and one
+        vocabulary (publishing ``ask_{agent_name}`` + ``list_agents``). The mcp
+        package is an optional dependency imported lazily here so core keeps no
+        hard dependency on it.
         """
-        # For now, delegate to the existing MCP implementation 
-        # This will be extracted to a proper adapter in the future
         try:
-            import uvicorn
-            from mcp.server.fastmcp import FastMCP
-            from mcp.server.sse import SseServerTransport
-            from starlette.applications import Starlette
-            from starlette.routing import Mount
-            import threading
-            import time
-            import asyncio
-            
-            mcp_server_instance_name = f"{self.name}_mcp_server" if self.name else "agent_mcp_server"
-            mcp = FastMCP(mcp_server_instance_name)
+            from praisonai_mcp import serve_agents
 
-            # Determine the MCP tool name based on self.name
-            actual_mcp_tool_name = f"execute_{self.name.lower().replace(' ', '_').replace('-', '_')}_task" if self.name else "execute_task"
-
-            @mcp.tool(name=actual_mcp_tool_name)
-            async def execute_agent_task(prompt: str) -> str:
-                """Executes the agent's primary task with the given prompt."""
-                try:
-                    if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
-                        response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
-                    elif hasattr(self, 'chat'):
-                        from ..trace.context_events import copy_context_to_callable
-                        loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(None, copy_context_to_callable(lambda p=prompt: self.chat(p, tools=self.tools)))
-                    else:
-                        return f"Error: Agent {self.name} misconfigured for MCP."
-                    return response if response is not None else "Agent returned no response."
-                except Exception as e:
-                    return f"Error executing task: {str(e)}"
-
-            # Create and run MCP server
-            base_path = (path or "/mcp").rstrip("/") or "/mcp"
-            transport = SseServerTransport(f"{base_path}/sse")
-            starlette_app = Starlette(
-                routes=[Mount(base_path, mcp.sse_app())]
+            # Keep the call inside the ImportError guard: serve_agents() lazily
+            # imports its transport backend, so a package that is installed
+            # without its optional transport extras surfaces the missing
+            # dependency here rather than at the import line above. Catching it
+            # in the same place yields one actionable install message instead of
+            # an uncaught traceback.
+            return serve_agents([self], host=host, port=port)
+        except ImportError:
+            _get_display_functions()['display_error'](
+                "MCP serving requires the 'praisonai-mcp' package."
             )
-
-            def run_mcp_server():
-                try:
-                    uvicorn.run(starlette_app, host=host, port=port, log_level="debug" if debug else "info")
-                except Exception as e:
-                    logging.error(f"Error starting MCP server: {str(e)}", exc_info=True)
-
-            server_thread = threading.Thread(target=run_mcp_server, daemon=True)
-            server_thread.start()
-            self._safe_sleep(0.5)
-
-            try:
-                print("\nKeeping MCP server alive. Press Ctrl+C to stop.")
-                while True:
-                    self._safe_sleep(1)
-            except KeyboardInterrupt:
-                print("\nMCP Server stopped")
+            print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
             return None
-            
-        except ImportError as e:
-            missing_module = str(e).split("No module named '")[-1].rstrip("'")
-            _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for MCP mode.")
-            print(f"\nTo add MCP capabilities, install: pip install {missing_module}")
-            return None 
 
     async def _emit_retry_hook_async(self, tool_name, attempt, delay_ms, error, max_attempts, error_type):
         """Emit ON_RETRY hook event (async version).
