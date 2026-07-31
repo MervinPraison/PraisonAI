@@ -1,11 +1,41 @@
 """
 Docker deployment functionality.
 """
+import os
 import subprocess
 import json
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from pathlib import Path
 from .models import DockerConfig, DeployResult, DeployStatus, DestroyResult, ServiceState
+
+# Environment variables commonly required inside deployed containers.
+RUNTIME_ENV_KEYS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "PRAISONAI_API_TOKEN",
+)
+
+
+def resolve_docker_paths(agents_file: str) -> Tuple[str, str, Path]:
+    """Return build context directory, agents basename, and resolved agents path."""
+    agents_path = Path(agents_file).resolve()
+    return str(agents_path.parent), agents_path.name, agents_path
+
+
+def docker_container_name(config: DockerConfig) -> str:
+    """Stable container name for a Docker deploy config."""
+    return f"{config.image_name}-{config.tag}".replace(':', '-')
+
+
+def collect_runtime_env_vars(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Collect host env vars to pass through to containers."""
+    env_vars = {key: os.environ[key] for key in RUNTIME_ENV_KEYS if os.environ.get(key)}
+    if extra:
+        env_vars.update(extra)
+    return env_vars
 
 
 def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None) -> str:
@@ -21,6 +51,8 @@ def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None)
     """
     if config is None:
         config = DockerConfig()
+
+    agents_basename = Path(agents_file).name
     
     # Build expose statements
     expose_lines = "\n".join([f"EXPOSE {port}" for port in config.expose])
@@ -29,9 +61,9 @@ def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None)
 
 WORKDIR /app
 
-# Copy application files
-COPY {agents_file} /app/{agents_file}
-COPY . /app/
+# Copy application files (use basename so absolute host paths work in build context)
+COPY {agents_basename} /app/{agents_basename}
+COPY api_server.py /app/api_server.py
 
 # Install dependencies
 RUN pip install --no-cache-dir praisonai flask flask-cors gunicorn
@@ -135,7 +167,8 @@ def build_docker_image(config: DockerConfig, build_context: str = ".") -> Deploy
 def run_docker_container(
     config: DockerConfig,
     env_vars: Optional[Dict[str, str]] = None,
-    detached: bool = True
+    detached: bool = True,
+    replace_existing: bool = True,
 ) -> DeployResult:
     """
     Run Docker container.
@@ -170,7 +203,13 @@ def run_docker_container(
                 cmd.extend(['-e', f"{key}={value}"])
         
         # Add container name
-        container_name = f"{config.image_name}-{config.tag}".replace(':', '-')
+        container_name = docker_container_name(config)
+        if replace_existing:
+            subprocess.run(
+                ['docker', 'rm', '-f', container_name],
+                capture_output=True,
+                timeout=30,
+            )
         cmd.extend(['--name', container_name])
         
         cmd.append(image_tag)
@@ -285,20 +324,39 @@ def stop_docker_container(container_id: str) -> bool:
         return False
 
 
-def save_dockerfile(agents_file: str, config: Optional[DockerConfig] = None, output_path: str = "Dockerfile"):
+def save_dockerfile(
+    agents_file: str,
+    config: Optional[DockerConfig] = None,
+    output_path: Optional[str] = None,
+):
     """
     Save generated Dockerfile to file.
     
     Args:
-        agents_file: Path to agents.yaml file
+        agents_file: Path to agents.yaml file (basename used in COPY instructions)
         config: Docker configuration
-        output_path: Path to save Dockerfile
+        output_path: Path to save Dockerfile (defaults to agents file directory)
     """
-    dockerfile_content = generate_dockerfile(agents_file, config)
-    
+    build_context, agents_basename, _ = resolve_docker_paths(agents_file)
+    dockerfile_content = generate_dockerfile(agents_basename, config)
+
+    if output_path is None:
+        output_path = str(Path(build_context) / "Dockerfile")
+
     path = Path(output_path)
     with open(path, 'w') as f:
         f.write(dockerfile_content)
+
+
+def prepare_docker_build_context(agents_file: str, api_server_code: str) -> str:
+    """Write Dockerfile and api_server.py next to the agents file; return build context."""
+    build_context, _, agents_path = resolve_docker_paths(agents_file)
+    api_server_path = Path(build_context) / "api_server.py"
+    with open(api_server_path, 'w') as f:
+        f.write(api_server_code)
+    if not agents_path.exists():
+        raise FileNotFoundError(f"Agents file not found: {agents_file}")
+    return build_context
 
 
 def get_docker_container_status(config: DockerConfig) -> DeployStatus:
@@ -312,7 +370,7 @@ def get_docker_container_status(config: DockerConfig) -> DeployStatus:
         DeployStatus with container information
     """
     try:
-        container_name = f"{config.image_name}-{config.tag}".replace(':', '-')
+        container_name = docker_container_name(config)
         
         result = subprocess.run(
             ['docker', 'inspect', container_name, '--format', '{{json .}}'],
@@ -396,7 +454,7 @@ def remove_docker_container(config: DockerConfig, force: bool = False) -> Destro
         DestroyResult with removal information
     """
     try:
-        container_name = f"{config.image_name}-{config.tag}".replace(':', '-')
+        container_name = docker_container_name(config)
         deleted_resources = []
         
         # Stop container first

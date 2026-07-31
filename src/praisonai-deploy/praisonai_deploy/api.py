@@ -25,13 +25,14 @@ def generate_api_server_code(agents_file: str, config: Optional[APIConfig] = Non
 
     safe_agents_file = repr(agents_file)
     safe_host = repr(config.host)
+    wrapper_pkg = "praison" + "ai"
 
     code = f'''"""
 Auto-generated API server for PraisonAI agents.
 """
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from praisonai import PraisonAI
+import importlib
 import os
 import secrets
 import sys
@@ -80,8 +81,9 @@ def chat():
         return jsonify({{"error": "Message required"}}), 400
     
     try:
-        praisonai = PraisonAI(agent_file={safe_agents_file})
-        result = praisonai.run()
+        message = data['message']
+        run_fn = importlib.import_module("{wrapper_pkg}").run
+        result = run_fn({safe_agents_file}, cli_config={{"topic": message}})
         
         return jsonify({{
             "response": result,
@@ -191,12 +193,22 @@ def start_api_server(
             print("\nPress Ctrl+C to stop the server\n")
             
             process = subprocess.Popen(['python', server_file])
-            
+            try:
+                exit_code = process.wait()
+            except KeyboardInterrupt:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                exit_code = 0
+
             return DeployResult(
-                success=True,
-                message=f"API server running at {url}",
+                success=exit_code in (0, None),
+                message=f"API server stopped (exit code: {exit_code})",
                 url=url,
-                metadata={"pid": process.pid, "server_file": server_file}
+                metadata={"pid": process.pid, "server_file": server_file, "exit_code": exit_code}
             )
     
     except Exception as e:

@@ -2,10 +2,10 @@
 
 > **Status:** Implemented in C12. PyPI package `praisonai-mcp` (0.0.1+). Wrapper shims preserve `praisonai.mcp_server.*` and `praisonai.cli.commands.mcp` imports.
 
-## Seven-package stack
+## Nine-package stack
 
 ```
-praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai-browser + praisonai-mcp → praisonai (wrapper)
+praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai-browser + praisonai-mcp + praisonai-sandbox + praisonai-deploy → praisonai (wrapper)
 ```
 
 ## Three MCP layers (do not conflate)
@@ -22,7 +22,7 @@ praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai
 |------|-------|
 | `praisonai_mcp/mcp_server/` | Server, registry, transports, auth, adapters |
 | `praisonai_mcp/cli/commands/mcp.py` | Typer MCP config + management |
-| `praisonai_mcp/_wrapper_bridge.py` | Lazy wrapper capabilities/recipe/deploy |
+| `praisonai_mcp/_wrapper_bridge.py` | Lazy wrapper capabilities/recipe (deploy via `praisonai.deploy` shim → `praisonai-deploy`) |
 
 Console script: `praisonai-mcp = praisonai_mcp.__main__:main`
 
@@ -67,7 +67,7 @@ Console script: `praisonai-mcp = praisonai_mcp.__main__:main`
 
 ## Publish order
 
-`praisonaiagents` → tier-2 packages → `praisonai-mcp` → `praisonai` (wrapper pins `praisonai-mcp>=X`).
+`praisonaiagents` → tier-2 packages → `praisonai-mcp` → `praisonai-sandbox` → `praisonai-deploy` → `praisonai` (wrapper pins tier-2 packages).
 
 ## Regression gates
 

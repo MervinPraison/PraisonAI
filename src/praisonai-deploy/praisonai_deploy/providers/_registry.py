@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..._registry import PluginRegistry
+from praisonai_deploy._plugin_registry import PluginRegistry
 
 
 def _aws_loader():

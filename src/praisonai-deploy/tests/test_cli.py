@@ -6,11 +6,11 @@ import tempfile
 import os
 
 
-@patch('praisonai.deploy.Deploy')
+@patch('praisonai_deploy.Deploy')
 def test_deploy_command_api(mock_deploy_class):
     """Test deploy command with API type."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.models import DeployResult
     
     mock_deploy = Mock()
     mock_deploy.deploy.return_value = DeployResult(success=True, message="Started", url="http://localhost:8005", metadata={})
@@ -32,11 +32,11 @@ def test_deploy_command_api(mock_deploy_class):
     mock_deploy.deploy.assert_called_once()
 
 
-@patch('praisonai.deploy.Deploy')
+@patch('praisonai_deploy.Deploy')
 def test_deploy_command_docker(mock_deploy_class):
     """Test deploy command with Docker type."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.models import DeployResult
     
     mock_deploy = Mock()
     mock_deploy.deploy.return_value = DeployResult(success=True, message="Built successfully", metadata={})
@@ -58,11 +58,11 @@ def test_deploy_command_docker(mock_deploy_class):
     mock_deploy.deploy.assert_called_once()
 
 
-@patch('praisonai.deploy.Deploy')
+@patch('praisonai_deploy.Deploy')
 def test_deploy_command_cloud_aws(mock_deploy_class):
     """Test deploy command with AWS cloud type."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.models import DeployResult
     
     mock_deploy = Mock()
     mock_deploy.deploy.return_value = DeployResult(success=True, message="Deployed", url="https://test.execute-api.us-east-1.amazonaws.com", metadata={})
@@ -86,11 +86,11 @@ def test_deploy_command_cloud_aws(mock_deploy_class):
     mock_deploy.deploy.assert_called_once()
 
 
-@patch('praisonai.deploy.Deploy')
+@patch('praisonai_deploy.Deploy')
 def test_deploy_command_from_yaml(mock_deploy_class):
     """Test deploy command loading config from YAML."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.models import DeployResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.models import DeployResult
     
     mock_deploy = Mock()
     mock_deploy.deploy.return_value = DeployResult(success=True, message="Deployed", metadata={})
@@ -104,11 +104,11 @@ def test_deploy_command_from_yaml(mock_deploy_class):
     mock_deploy_class.from_yaml.assert_called_once()
 
 
-@patch('praisonai.deploy.doctor.run_all_checks')
+@patch('praisonai_deploy.doctor.run_all_checks')
 def test_doctor_command_all(mock_run_all):
     """Test doctor command with --all flag."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     mock_run_all.return_value = DoctorReport([
         DoctorCheckResult("Check 1", True, "OK"),
@@ -123,11 +123,11 @@ def test_doctor_command_all(mock_run_all):
     mock_run_all.assert_called_once()
 
 
-@patch('praisonai.deploy.doctor.run_aws_checks')
+@patch('praisonai_deploy.doctor.run_aws_checks')
 def test_doctor_command_aws(mock_run_aws):
     """Test doctor command with AWS provider."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     mock_run_aws.return_value = DoctorReport([
         DoctorCheckResult("AWS CLI", True, "Configured")
@@ -141,11 +141,11 @@ def test_doctor_command_aws(mock_run_aws):
     mock_run_aws.assert_called_once()
 
 
-@patch('praisonai.deploy.doctor.run_azure_checks')
+@patch('praisonai_deploy.doctor.run_azure_checks')
 def test_doctor_command_azure(mock_run_azure):
     """Test doctor command with Azure provider."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     mock_run_azure.return_value = DoctorReport([
         DoctorCheckResult("Azure CLI", True, "Logged in")
@@ -159,11 +159,11 @@ def test_doctor_command_azure(mock_run_azure):
     mock_run_azure.assert_called_once()
 
 
-@patch('praisonai.deploy.doctor.run_gcp_checks')
+@patch('praisonai_deploy.doctor.run_gcp_checks')
 def test_doctor_command_gcp(mock_run_gcp):
     """Test doctor command with GCP provider."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.doctor import DoctorReport, DoctorCheckResult
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.doctor import DoctorReport, DoctorCheckResult
     
     mock_run_gcp.return_value = DoctorReport([
         DoctorCheckResult("GCP CLI", True, "Configured")
@@ -179,7 +179,7 @@ def test_doctor_command_gcp(mock_run_gcp):
 
 def test_init_command():
     """Test init command generates sample YAML."""
-    from praisonai.cli.features.deploy import DeployHandler
+    from praisonai_deploy.cli.features.deploy import DeployHandler
     
     with tempfile.TemporaryDirectory() as tmpdir:
         yaml_path = os.path.join(tmpdir, "agents.yaml")
@@ -195,11 +195,11 @@ def test_init_command():
             assert "deploy:" in content
 
 
-@patch('praisonai.deploy.schema.validate_agents_yaml')
+@patch('praisonai_deploy.schema.validate_agents_yaml')
 def test_validate_command_success(mock_validate):
     """Test validate command with valid YAML."""
-    from praisonai.cli.features.deploy import DeployHandler
-    from praisonai.deploy.models import DeployConfig, DeployType
+    from praisonai_deploy.cli.features.deploy import DeployHandler
+    from praisonai_deploy.models import DeployConfig, DeployType
     
     mock_validate.return_value = DeployConfig(type=DeployType.API)
     
@@ -211,11 +211,11 @@ def test_validate_command_success(mock_validate):
     mock_validate.assert_called_once()
 
 
-@patch('praisonai.deploy.schema.validate_agents_yaml')
+@patch('praisonai_deploy.schema.validate_agents_yaml')
 def test_validate_command_failure(mock_validate):
     """Test validate command with invalid YAML."""
     import pytest
-    from praisonai.cli.features.deploy import DeployHandler
+    from praisonai_deploy.cli.features.deploy import DeployHandler
     
     mock_validate.side_effect = ValueError("Invalid config")
     
@@ -228,10 +228,10 @@ def test_validate_command_failure(mock_validate):
     mock_validate.assert_called_once()
 
 
-@patch('praisonai.deploy.Deploy')
+@patch('praisonai_deploy.Deploy')
 def test_plan_command(mock_deploy_class):
     """Test plan command."""
-    from praisonai.cli.features.deploy import DeployHandler
+    from praisonai_deploy.cli.features.deploy import DeployHandler
     
     mock_deploy = Mock()
     mock_deploy.plan.return_value = {"service_name": "test", "region": "us-east-1"}
@@ -247,7 +247,7 @@ def test_plan_command(mock_deploy_class):
 
 def test_deploy_handler_json_output():
     """Test deploy handler with JSON output."""
-    from praisonai.cli.features.deploy import DeployHandler
+    from praisonai_deploy.cli.features.deploy import DeployHandler
     
     handler = DeployHandler()
     
@@ -255,3 +255,66 @@ def test_deploy_handler_json_output():
         mock_json.return_value = '{"success": true}'
         handler._print_json({"success": True})
         mock_json.assert_called_once()
+
+
+@patch('praisonai_deploy.cli.features.deploy.DeployHandler.handle_deploy')
+def test_handle_deploy_command_api_alias(mock_handle):
+    """api subcommand maps to handle_deploy with type=api."""
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    rc = handle_deploy_command(["api", "agents.yaml"])
+    assert rc == 0
+    args = mock_handle.call_args[0][0]
+    assert args.type == "api"
+    assert args.file == "agents.yaml"
+
+
+@patch('praisonai_deploy.cli.features.deploy.DeployHandler.handle_deploy')
+def test_handle_deploy_command_cloud_alias(mock_handle):
+    """cloud subcommand maps to handle_deploy with type=cloud and provider."""
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    rc = handle_deploy_command(["cloud", "agents.yaml", "--provider", "aws"])
+    assert rc == 0
+    args = mock_handle.call_args[0][0]
+    assert args.type == "cloud"
+    assert args.provider == "aws"
+
+
+def test_build_deploy_config_from_args_merges_docker_yaml():
+    """CLI docker shortcut should merge deploy.docker from YAML."""
+    from unittest.mock import Mock
+    import yaml
+    from praisonai_deploy.cli.features.deploy import _build_deploy_config_from_args
+    from praisonai_deploy.models import DeployType
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump({
+            "agents": {"a": {"role": "test", "goal": "g", "backstory": "b"}},
+            "deploy": {
+                "type": "docker",
+                "docker": {
+                    "image_name": "from-yaml",
+                    "tag": "v1.0.0",
+                    "expose": [9000],
+                },
+            },
+        }, f)
+        yaml_path = f.name
+
+    try:
+        args = Mock(
+            type="docker",
+            file=yaml_path,
+            image_name="praisonai-app",
+            tag="latest",
+            registry=None,
+            push=False,
+        )
+        config = _build_deploy_config_from_args(args)
+        assert config.type == DeployType.DOCKER
+        assert config.docker.image_name == "praisonai-app"
+        assert config.docker.tag == "latest"
+        assert config.docker.expose == [9000]
+    finally:
+        os.unlink(yaml_path)

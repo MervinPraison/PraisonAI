@@ -24,6 +24,7 @@ _SIBLINGS: dict[str, str] = {
     "praisonai_browser": "praisonai-browser",
     "praisonai_mcp": "praisonai-mcp",
     "praisonai_sandbox": "praisonai-sandbox",
+    "praisonai_deploy": "praisonai-deploy",
 }
 
 
@@ -82,3 +83,8 @@ def ensure_praisonai_mcp() -> None:
 def ensure_praisonai_sandbox() -> None:
     """Ensure ``praisonai_sandbox`` can be imported in monorepo dev layouts."""
     _ensure_sibling("praisonai_sandbox")
+
+
+def ensure_praisonai_deploy() -> None:
+    """Ensure ``praisonai_deploy`` can be imported in monorepo dev layouts."""
+    _ensure_sibling("praisonai_deploy")

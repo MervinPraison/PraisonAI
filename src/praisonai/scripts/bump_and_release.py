@@ -94,6 +94,11 @@ def get_praisonai_sandbox_dir() -> Path:
     return get_project_root() / "src/praisonai-sandbox"
 
 
+def get_praisonai_deploy_dir() -> Path:
+    """Get the praisonai-deploy package directory."""
+    return get_project_root() / "src/praisonai-deploy"
+
+
 def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
     """Run a command and print it."""
     if not silent:
@@ -218,6 +223,8 @@ def bump_version(
     mcp_pin_only: bool = False,
     sandbox_version: Optional[str] = None,
     sandbox_pin_only: bool = False,
+    deploy_version: Optional[str] = None,
+    deploy_pin_only: bool = False,
 ):
     """Bump version in all required files."""
     root = get_project_root()
@@ -228,6 +235,7 @@ def bump_version(
     browser_dir = get_praisonai_browser_dir()
     mcp_dir = get_praisonai_mcp_dir()
     sandbox_dir = get_praisonai_sandbox_dir()
+    deploy_dir = get_praisonai_deploy_dir()
     print(f"\n🚀 Bumping PraisonAI version to {new_version}\n")
     
     # 1. Update version.py (single source of truth)
@@ -240,7 +248,7 @@ def bump_version(
     
     # 2. Update deploy/docker.py (Docker deployment scripts)
     print("\n🐳 Deploy Scripts:")
-    docker_deploy_file = praisonai_dir / "praisonai/deploy/docker.py"
+    docker_deploy_file = deploy_dir / "praisonai_deploy/docker.py"
     if docker_deploy_file.exists():
         update_file(
             docker_deploy_file,
@@ -438,6 +446,32 @@ def bump_version(
             root,
         )
 
+    if deploy_version:
+        if deploy_pin_only:
+            print(f"\n📦 Pinning praisonai-deploy dependency to >={deploy_version}:")
+        else:
+            print(f"\n📦 Bumping praisonai-deploy to {deploy_version}:")
+            update_file(
+                deploy_dir / "pyproject.toml",
+                [(r'(?m)^version = "[^"]+"', f'version = "{deploy_version}"')],
+                root,
+            )
+            update_file(
+                deploy_dir / "praisonai_deploy/_version.py",
+                [(r'__version__ = "[^"]+"', f'__version__ = "{deploy_version}"')],
+                root,
+            )
+        update_file(
+            praisonai_dir / "pyproject.toml",
+            [
+                (
+                    r'"praisonai-deploy(?:>=[0-9.]+)?"',
+                    f'"praisonai-deploy>={deploy_version}"',
+                )
+            ],
+            root,
+        )
+
     print("\n✨ Version bump complete!")
 
 
@@ -452,11 +486,12 @@ def validate_dependencies(
     browser_version: Optional[str] = None,
     mcp_version: Optional[str] = None,
     sandbox_version: Optional[str] = None,
+    deploy_version: Optional[str] = None,
 ) -> bool:
     """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
 
-    if agents_version or code_version or bot_version or train_version or browser_version or mcp_version or sandbox_version:
+    if agents_version or code_version or bot_version or train_version or browser_version or mcp_version or sandbox_version or deploy_version:
         lock_cmd = ["uv", "lock", "--frozen"]
         if agents_version:
             lock_cmd.extend(["--upgrade-package", f"praisonaiagents=={agents_version}"])
@@ -472,6 +507,8 @@ def validate_dependencies(
             lock_cmd.extend(["--upgrade-package", f"praisonai-mcp=={mcp_version}"])
         if sandbox_version:
             lock_cmd.extend(["--upgrade-package", f"praisonai-sandbox=={sandbox_version}"])
+        if deploy_version:
+            lock_cmd.extend(["--upgrade-package", f"praisonai-deploy=={deploy_version}"])
     elif use_frozen:
         lock_cmd = ["uv", "lock", "--frozen"]
     else:
@@ -541,7 +578,7 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
     
     release_files = [
         "src/praisonai/praisonai/version.py",
-        "src/praisonai/praisonai/deploy/docker.py",
+        "src/praisonai-deploy/praisonai_deploy/docker.py",
         "docker/Dockerfile", 
         "docker/Dockerfile.chat",
         "docker/Dockerfile.dev", 
@@ -570,6 +607,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "src/praisonai-sandbox/pyproject.toml",
         "src/praisonai-sandbox/praisonai_sandbox/_version.py",
         "src/praisonai-sandbox/uv.lock",
+        "src/praisonai-deploy/pyproject.toml",
+        "src/praisonai-deploy/praisonai_deploy/_version.py",
+        "src/praisonai-deploy/uv.lock",
     ]
     
     # Filter to only existing files to avoid git errors
@@ -748,9 +788,19 @@ Examples:
         help="Wait for the specified praisonai-sandbox version to be available on PyPI"
     )
     parser.add_argument(
+        "--deploy-pin",
+        help="Pin praisonai-deploy>= in wrapper pyproject only (after CI deploy publish)",
+        default=None
+    )
+    parser.add_argument(
+        "--wait-deploy",
+        action="store_true",
+        help="Wait for the specified praisonai-deploy version to be available on PyPI"
+    )
+    parser.add_argument(
         "--wait-all",
         action="store_true",
-        help="Wait for agents, code, bot, train, browser, mcp, and sandbox versions on PyPI (needs --agents and pins)",
+        help="Wait for agents, code, bot, train, browser, mcp, sandbox, and deploy versions on PyPI (needs --agents and pins)",
     )
     parser.add_argument(
         "--force", "-f",
@@ -805,6 +855,7 @@ Examples:
     browser_version = args.browser_pin
     mcp_version = args.mcp_pin
     sandbox_version = args.sandbox_pin
+    deploy_version = args.deploy_pin
     if code_version and not re.match(r'^\d+\.\d+\.\d+$', code_version):
         print(f"❌ Invalid code version format: {code_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.3)")
@@ -834,6 +885,11 @@ Examples:
         print(f"❌ Invalid sandbox version format: {sandbox_version}")
         print("   Expected format: X.Y.Z (e.g., 0.0.1)")
         sys.exit(1)
+
+    if deploy_version and not re.match(r'^\d+\.\d+\.\d+$', deploy_version):
+        print(f"❌ Invalid deploy version format: {deploy_version}")
+        print("   Expected format: X.Y.Z (e.g., 0.0.1)")
+        sys.exit(1)
     
     # Pre-flight checks
     print("\n🔍 Pre-flight checks...")
@@ -857,6 +913,7 @@ Examples:
     wait_browser = args.wait_browser or args.wait_all
     wait_mcp = args.wait_mcp or args.wait_all
     wait_sandbox = args.wait_sandbox or args.wait_all
+    wait_deploy = args.wait_deploy or args.wait_all
 
     if wait_agents and args.agents:
         if not wait_for_pypi_version("praisonaiagents", args.agents, max_wait=args.max_wait):
@@ -893,6 +950,11 @@ Examples:
         if not wait_for_pypi_version("praisonai-sandbox", sandbox_version, max_wait=args.max_wait):
             print("\n💡 Tip: Check if praisonai-sandbox was published successfully")
             sys.exit(1)
+
+    if wait_deploy and deploy_version:
+        if not wait_for_pypi_version("praisonai-deploy", deploy_version, max_wait=args.max_wait):
+            print("\n💡 Tip: Check if praisonai-deploy was published successfully")
+            sys.exit(1)
     
     # Run bump version
     bump_version(
@@ -910,6 +972,8 @@ Examples:
         mcp_pin_only=bool(args.mcp_pin),
         sandbox_version=sandbox_version,
         sandbox_pin_only=bool(args.sandbox_pin),
+        deploy_version=deploy_version,
+        deploy_pin_only=bool(args.deploy_pin),
     )
     
     # Patch releases (--agents set): frozen targeted upgrade only.
@@ -925,6 +989,7 @@ Examples:
         browser_version=browser_version,
         mcp_version=mcp_version,
         sandbox_version=sandbox_version,
+        deploy_version=deploy_version,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")

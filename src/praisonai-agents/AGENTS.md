@@ -140,7 +140,7 @@ The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends,
 
 **Monorepo bootstrap:** `praisonai._bootstrap.ensure_praisonai_code()` adds sibling `src/praisonai-code` to `sys.path` so `PYTHONPATH=src/praisonai-agents:src/praisonai` works without an explicit code entry.
 
-**Install order (CI and local dev):** `praisonai-agents` → `praisonai-code` → `praisonai` (see `.github/actions/install-monorepo-packages`).
+**Install order (CI and local dev):** `praisonai-agents` → `praisonai-code` → `praisonai-bot` → `praisonai-train` → `praisonai-browser` → `praisonai-mcp` → `praisonai-sandbox` → `praisonai-deploy` → `praisonai` (see `.github/actions/install-monorepo-packages`).
 
 **Invocation paths that must remain valid:**
 

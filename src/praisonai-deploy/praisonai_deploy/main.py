@@ -7,7 +7,8 @@ from .schema import validate_agents_yaml
 from .api import start_api_server, generate_api_server_code
 from .docker import (
     build_docker_image, run_docker_container, push_docker_image, save_dockerfile,
-    get_docker_container_status, remove_docker_container
+    get_docker_container_status, remove_docker_container,
+    prepare_docker_build_context, collect_runtime_env_vars, resolve_docker_paths,
 )
 from .providers import get_provider
 
@@ -27,7 +28,7 @@ class Deploy:
         result = deploy.deploy()
         
         # Programmatic
-        from praisonai.deploy import Deploy, DeployConfig, DeployType
+        from praisonai_deploy import Deploy, DeployConfig, DeployType
         
         config = DeployConfig(type=DeployType.API)
         deploy = Deploy(config, agents_file="agents.yaml")
@@ -99,28 +100,35 @@ class Deploy:
     
     def _deploy_docker(self) -> DeployResult:
         """Deploy as Docker container."""
-        # Generate and save Dockerfile
-        save_dockerfile(self.agents_file, self.config.docker)
-        
-        # Generate API server code
-        api_code = generate_api_server_code(self.agents_file, None)
-        with open("api_server.py", 'w') as f:
-            f.write(api_code)
-        
-        # Build image
-        build_result = build_docker_image(self.config.docker)
-        
+        from .models import APIConfig
+
+        _, agents_basename, _ = resolve_docker_paths(self.agents_file)
+        docker_cfg = self.config.docker
+        assert docker_cfg is not None
+
+        api_config = self.config.api or APIConfig(
+            host="0.0.0.0",
+            port=docker_cfg.expose[0] if docker_cfg.expose else 8005,
+            auth_enabled=False,
+        )
+
+        save_dockerfile(self.agents_file, docker_cfg)
+        api_code = generate_api_server_code(agents_basename, api_config)
+        build_context = prepare_docker_build_context(self.agents_file, api_code)
+
+        build_result = build_docker_image(docker_cfg, build_context)
+
         if not build_result.success:
             return build_result
-        
-        # Push if configured
-        if self.config.docker.push and self.config.docker.registry:
-            push_result = push_docker_image(self.config.docker)
+
+        if docker_cfg.push and docker_cfg.registry:
+            push_result = push_docker_image(docker_cfg)
             if not push_result.success:
                 return push_result
-        
-        # Run container
-        return run_docker_container(self.config.docker)
+
+        env_vars = collect_runtime_env_vars()
+
+        return run_docker_container(docker_cfg, env_vars=env_vars, replace_existing=True)
     
     def _deploy_cloud(self) -> DeployResult:
         """Deploy to cloud provider."""

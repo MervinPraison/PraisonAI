@@ -7,8 +7,8 @@ import subprocess
 
 def test_base_provider_interface():
     """Test BaseProvider abstract interface."""
-    from praisonai.deploy.providers.base import BaseProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.base import BaseProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     assert hasattr(BaseProvider, 'deploy')
     assert hasattr(BaseProvider, 'doctor')
@@ -18,8 +18,8 @@ def test_base_provider_interface():
 @patch('subprocess.run')
 def test_aws_provider_doctor_success(mock_run):
     """Test AWS provider doctor check success."""
-    from praisonai.deploy.providers.aws import AWSProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.aws import AWSProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -41,8 +41,8 @@ def test_aws_provider_doctor_success(mock_run):
 @patch('subprocess.run')
 def test_aws_provider_plan(mock_run):
     """Test AWS provider plan generation."""
-    from praisonai.deploy.providers.aws import AWSProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.aws import AWSProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -64,8 +64,8 @@ def test_aws_provider_plan(mock_run):
 @patch('subprocess.run')
 def test_aws_provider_deploy_success(mock_run):
     """Test AWS provider deploy success."""
-    from praisonai.deploy.providers.aws import AWSProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.aws import AWSProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -88,8 +88,8 @@ def test_aws_provider_deploy_success(mock_run):
 @patch('subprocess.run')
 def test_aws_provider_deploy_failure(mock_run):
     """Test AWS provider deploy failure."""
-    from praisonai.deploy.providers.aws import AWSProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.aws import AWSProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -109,8 +109,8 @@ def test_aws_provider_deploy_failure(mock_run):
 @patch('subprocess.run')
 def test_azure_provider_doctor_success(mock_run):
     """Test Azure provider doctor check success."""
-    from praisonai.deploy.providers.azure import AzureProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -133,8 +133,8 @@ def test_azure_provider_doctor_success(mock_run):
 @patch('subprocess.run')
 def test_azure_provider_plan(mock_run):
     """Test Azure provider plan generation."""
-    from praisonai.deploy.providers.azure import AzureProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -154,8 +154,8 @@ def test_azure_provider_plan(mock_run):
 @patch('subprocess.run')
 def test_azure_provider_deploy_success(mock_run):
     """Test Azure provider deploy success."""
-    from praisonai.deploy.providers.azure import AzureProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -179,8 +179,8 @@ def test_azure_provider_deploy_success(mock_run):
 @patch('subprocess.run')
 def test_azure_provider_deploy_failure(mock_run):
     """Test Azure provider deploy failure."""
-    from praisonai.deploy.providers.azure import AzureProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -200,8 +200,8 @@ def test_azure_provider_deploy_failure(mock_run):
 @patch('subprocess.run')
 def test_gcp_provider_doctor_success(mock_run):
     """Test GCP provider doctor check success."""
-    from praisonai.deploy.providers.gcp import GCPProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.gcp import GCPProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,
@@ -224,8 +224,8 @@ def test_gcp_provider_doctor_success(mock_run):
 @patch('subprocess.run')
 def test_gcp_provider_plan(mock_run):
     """Test GCP provider plan generation."""
-    from praisonai.deploy.providers.gcp import GCPProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.gcp import GCPProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,
@@ -245,8 +245,8 @@ def test_gcp_provider_plan(mock_run):
 @patch('subprocess.run')
 def test_gcp_provider_deploy_success(mock_run):
     """Test GCP provider deploy success."""
-    from praisonai.deploy.providers.gcp import GCPProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.gcp import GCPProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,
@@ -271,8 +271,8 @@ def test_gcp_provider_deploy_success(mock_run):
 @patch('subprocess.run')
 def test_gcp_provider_deploy_failure(mock_run):
     """Test GCP provider deploy failure."""
-    from praisonai.deploy.providers.gcp import GCPProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers.gcp import GCPProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,
@@ -291,9 +291,9 @@ def test_gcp_provider_deploy_failure(mock_run):
 
 def test_get_provider_aws():
     """Test getting AWS provider."""
-    from praisonai.deploy.providers import get_provider
-    from praisonai.deploy.providers.aws import AWSProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers import get_provider
+    from praisonai_deploy.providers.aws import AWSProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AWS,
@@ -307,9 +307,9 @@ def test_get_provider_aws():
 
 def test_get_provider_azure():
     """Test getting Azure provider."""
-    from praisonai.deploy.providers import get_provider
-    from praisonai.deploy.providers.azure import AzureProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers import get_provider
+    from praisonai_deploy.providers.azure import AzureProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.AZURE,
@@ -324,9 +324,9 @@ def test_get_provider_azure():
 
 def test_get_provider_gcp():
     """Test getting GCP provider."""
-    from praisonai.deploy.providers import get_provider
-    from praisonai.deploy.providers.gcp import GCPProvider
-    from praisonai.deploy.models import CloudConfig, CloudProvider
+    from praisonai_deploy.providers import get_provider
+    from praisonai_deploy.providers.gcp import GCPProvider
+    from praisonai_deploy.models import CloudConfig, CloudProvider
     
     config = CloudConfig(
         provider=CloudProvider.GCP,

@@ -21,10 +21,11 @@ PYPI_NAMES = {
     "browser": "praisonai-browser",
     "mcp": "praisonai-mcp",
     "sandbox": "praisonai-sandbox",
+    "deploy": "praisonai-deploy",
     "wrapper": "praisonai",
 }
 
-PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "wrapper")
+PACKAGE_KEYS = ("agents", "code", "bot", "train", "browser", "mcp", "sandbox", "deploy", "wrapper")
 
 # Path prefixes used to detect which packages changed in git (longest match wins).
 PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
@@ -35,6 +36,7 @@ PACKAGE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "browser": ("src/praisonai-browser/",),
     "mcp": ("src/praisonai-mcp/",),
     "sandbox": ("src/praisonai-sandbox/",),
+    "deploy": ("src/praisonai-deploy/",),
     "wrapper": ("src/praisonai/", "docker/"),
 }
 
@@ -69,6 +71,10 @@ def mcp_dir() -> Path:
 
 def sandbox_dir() -> Path:
     return project_root() / "src/praisonai-sandbox"
+
+
+def deploy_dir() -> Path:
+    return project_root() / "src/praisonai-deploy"
 
 
 def wrapper_dir() -> Path:
@@ -133,6 +139,7 @@ def read_current_versions() -> dict[str, str]:
         "browser": read_pyproject_version(browser_dir() / "pyproject.toml"),
         "mcp": read_pyproject_version(mcp_dir() / "pyproject.toml"),
         "sandbox": read_pyproject_version(sandbox_dir() / "pyproject.toml"),
+        "deploy": read_pyproject_version(deploy_dir() / "pyproject.toml"),
         "wrapper": read_wrapper_version(),
     }
 
@@ -272,6 +279,16 @@ def bump_sandbox_files(new_version: str) -> None:
     current = read_pyproject_version(path)
     write_pyproject_version(path, current, new_version)
     version_py = sandbox_dir() / "praisonai_sandbox/_version.py"
+    version_py.write_text(
+        re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
+    )
+
+
+def bump_deploy_files(new_version: str) -> None:
+    path = deploy_dir() / "pyproject.toml"
+    current = read_pyproject_version(path)
+    write_pyproject_version(path, current, new_version)
+    version_py = deploy_dir() / "praisonai_deploy/_version.py"
     version_py.write_text(
         re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', version_py.read_text(), count=1)
     )

@@ -187,7 +187,6 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "n8n": (".commands.n8n", "app", "n8n visual workflow editor integration"),
     "knowledge": (".commands.knowledge", "app", "Knowledge base management (legacy)"),
     "rag": (".commands.rag", "app", "RAG commands (legacy - use index/query instead)"),
-    "deploy": (".commands.deploy", "app", "Deployment management"),
     "agents": (".commands.agents", "app", "Agent management"),
     "agent": (".commands.agent", "app", "Custom agent definitions management"),
     "command": (".commands.command", "app", "Custom command definitions management"),
@@ -294,6 +293,11 @@ _TRAIN_RESIDENT_COMMANDS = frozenset({
     "train",
 })
 
+# C14: Deploy commands implemented in ``praisonai_deploy.cli.commands.*``.
+_DEPLOY_RESIDENT_COMMANDS = frozenset({
+    "deploy",
+})
+
 # C11: Browser automation commands implemented in ``praisonai_browser.cli.commands.*``.
 # ``get_command()`` loads them via ``praisonai_browser.cli.commands.{name}`` when the
 # browser package is installed; standalone ``praisonai-code`` hides them from ``--help``.
@@ -321,6 +325,7 @@ from praisonai_code._bot_bridge import bot_package_available
 from praisonai_code._train_bridge import train_package_available
 from praisonai_code._browser_bridge import browser_package_available
 from praisonai_code._mcp_bridge import mcp_package_available
+from praisonai_code._deploy_bridge import deploy_package_available
 
 
 class LazyCommandGroup(TyperGroup):
@@ -339,6 +344,7 @@ class LazyCommandGroup(TyperGroup):
         train_ok = train_package_available()
         browser_ok = browser_package_available()
         mcp_ok = mcp_package_available()
+        deploy_ok = deploy_package_available()
         commands.update(
             name for name in _LAZY_COMMANDS
             if (wrapper_ok or name not in _WRAPPER_RESIDENT_COMMANDS)
@@ -346,7 +352,10 @@ class LazyCommandGroup(TyperGroup):
             and (train_ok or name not in _TRAIN_RESIDENT_COMMANDS)
             and (browser_ok or name not in _BROWSER_RESIDENT_COMMANDS)
             and (mcp_ok or name not in _MCP_RESIDENT_COMMANDS)
+            and (deploy_ok or name not in _DEPLOY_RESIDENT_COMMANDS)
         )
+        if deploy_ok:
+            commands.update(_DEPLOY_RESIDENT_COMMANDS)
         commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add retrieval commands (these are registered via register_commands)
@@ -382,6 +391,19 @@ class LazyCommandGroup(TyperGroup):
         existing = super().get_command(ctx, name)
         if existing is not None:
             return existing
+
+        if name in _DEPLOY_RESIDENT_COMMANDS:
+            if not deploy_package_available():
+                return None
+            try:
+                module = importlib.import_module(f"praisonai_deploy.cli.commands.{name}")
+                sub_app = getattr(module, "app")
+                if isinstance(sub_app, click.Command):
+                    return sub_app
+                return typer_get_command(sub_app)
+            except (ImportError, AttributeError) as e:
+                typer.echo(f"Error loading command '{name}': {e}", err=True)
+                return None
         
         # Check regular lazy commands
         if name in _LAZY_COMMANDS:
@@ -957,6 +979,7 @@ def get_command_names():
     # the main wrapper at invocation time via ``_WRAPPER_RESIDENT_COMMANDS``).
     # Special commands with custom handling (tui, queue)
     names.update(_SPECIAL_COMMANDS.keys())
+    names.update(_DEPLOY_RESIDENT_COMMANDS)
     # Inline special commands handled outside the registries
     names.update({"app", "standardise", "standardize"})
     # Dynamically registered retrieval commands (no static module entry)

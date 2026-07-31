@@ -1,0 +1,59 @@
+[project]
+name = "praisonai-deploy"
+version = "0.0.1"
+description = "Deployment for PraisonAI — API, Docker, and cloud (AWS, Azure, GCP) deployments extracted from the praisonai wrapper."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.15"
+authors = [
+    { name = "Mervin Praison" }
+]
+dependencies = [
+    "praisonaiagents>=1.6.126",
+    "rich>=13.7",
+    "typer>=0.12.0",
+    "click>=8.4.2",
+    "PyYAML>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+]
+all = [
+    "praisonai-deploy[api]",
+]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[project.scripts]
+praisonai-deploy = "praisonai_deploy.__main__:main"
+
+[project.entry-points."praisonai.deploy.providers"]
+aws = "praisonai_deploy.providers.aws:AWSProvider"
+azure = "praisonai_deploy.providers.azure:AzureProvider"
+gcp = "praisonai_deploy.providers.gcp:GCPProvider"
+
+[tool.uv.sources]
+praisonaiagents = { path = "../praisonai-agents" }
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonai_deploy*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+    "network: marks tests requiring network access",
+    "integration: marks integration tests",
+]
