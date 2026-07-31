@@ -283,5 +283,47 @@ def test_transient_failure_expires_after_grace_window():
     assert registry._availability_cache.get("grace_tool", (True, 0))[0] is False
 
 
+def test_overwrite_replacement_does_not_inherit_last_good():
+    """Replacing a healthy tool must not let a broken replacement ride its grace window."""
+
+    registry = get_registry()
+    registry.clear()
+
+    class HealthyTool(BaseTool):
+        name = "swap_tool"
+        description = "Healthy tool"
+
+        def run(self, **kwargs):
+            return "ok"
+
+        def check_availability(self):
+            return True, ""
+
+    class BrokenReplacement(BaseTool):
+        name = "swap_tool"
+        description = "Broken replacement"
+
+        def run(self, **kwargs):
+            return "boom"
+
+        def check_availability(self):
+            raise RuntimeError("never healthy")
+
+    # Register healthy tool and record a successful probe.
+    registry.register(HealthyTool(), name="swap_tool")
+    available = registry.list_available_tools(ttl_seconds=0)
+    assert any(getattr(t, "name", None) == "swap_tool" for t in available)
+    assert "swap_tool" in registry._availability_last_success
+
+    # Replace under the same name with a tool that always fails its probe.
+    registry.register(BrokenReplacement(), name="swap_tool", overwrite=True)
+
+    # Stale success state must be evicted so the replacement is NOT served.
+    assert "swap_tool" not in registry._availability_last_success
+    available = registry.list_available_tools(ttl_seconds=0)
+    assert not any(getattr(t, "name", None) == "swap_tool" for t in available)
+    assert registry._availability_cache.get("swap_tool", (True, 0))[0] is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -147,10 +147,19 @@ class ToolRegistry:
                 raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
             
             # Check for existing tool
-            if tool_name in self._tools and not overwrite:
+            existing = self._tools.get(tool_name)
+            if existing is not None and not overwrite:
                 logging.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
-            
+
+            # Replacing a different tool instance under the same name must not
+            # inherit the previous tool's availability state, otherwise a broken
+            # replacement could be served as available within the grace window on
+            # its very first (failing) probe. Evict the stale cache + last-success.
+            if existing is not None and existing.tool is not tool:
+                self._availability_cache.pop(tool_name, None)
+                self._availability_last_success.pop(tool_name, None)
+
             # Create tool entry with optional dynamic override and trust level
             entry = ToolEntry(
                 tool=tool,
