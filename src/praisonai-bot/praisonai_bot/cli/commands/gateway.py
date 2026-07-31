@@ -25,6 +25,12 @@ def gateway_start(
         "--preflight/--no-preflight",
         help="Validate channel credentials before starting (fail fast on bad tokens)",
     ),
+    strict_tools: bool = typer.Option(
+        True,
+        "--strict-tools/--no-strict-tools",
+        help="Fail fast if any tool named in the config cannot be resolved. "
+        "Use --no-strict-tools to skip unresolved tools and start anyway (#3553)",
+    ),
     openai_api: bool = typer.Option(
         False,
         "--openai-api",
@@ -148,6 +154,15 @@ def gateway_start(
                     "PRAISONAI_SSL_CA_BUNDLE to your corporate CA, or pass "
                     "--no-preflight to skip this check."
                 )
+
+    # Tool pre-flight: a tool named in the config that cannot be resolved (a
+    # typo, an uninstalled optional package, or a gated local tools.py) is
+    # otherwise silently skipped — the bot starts quietly under-powered with
+    # only a log warning an operator never sees (#3553). Mirror the credential
+    # pre-flight: fail fast by default with a per-name reason + fix hint, or
+    # warn-and-continue under --no-strict-tools.
+    if config and os.path.exists(config):
+        _preflight_tools(config, strict_tools=strict_tools)
 
     handler = GatewayHandler()
     # Pass True only when the flag is set so an unset flag does not override a
@@ -532,6 +547,63 @@ def _is_ssl_error(result) -> bool:
             "ssl: certificate",
         )
     )
+
+
+def _preflight_tools(config: str, strict_tools: bool = True) -> None:
+    """Validate that every tool named in the config can be resolved (#3553).
+
+    An unresolved tool reference (typo, uninstalled optional package, or a
+    local ``tools.py`` gated behind ``PRAISONAI_ALLOW_LOCAL_TOOLS``) is
+    otherwise silently dropped, leaving a quietly under-powered agent. This
+    mirrors the credential pre-flight: in strict mode (default) it prints a
+    per-name reason + fix hint and aborts; ``strict_tools=False`` (or
+    ``strict_tools: false`` in the YAML) warns and continues.
+
+    The CLI ``--strict-tools/--no-strict-tools`` flag wins over the YAML
+    ``strict_tools:`` key only when set to non-strict — an explicit YAML
+    ``strict_tools: false`` also disables the gate so operators can opt into a
+    partial tool set from config alone.
+    """
+    import yaml
+
+    try:
+        with open(config) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive; start will surface it
+        return
+
+    if cfg.get("strict_tools") is False:
+        strict_tools = False
+
+    try:
+        from praisonai_bot._code_bridge import import_code_module
+
+        resolver_mod = import_code_module("praisonai_code.tool_resolver")
+    except Exception:  # pragma: no cover — resolver unavailable in lean install
+        return
+
+    unresolved = resolver_mod.validate_yaml_tools(cfg)
+    if not unresolved:
+        return
+
+    reasons = []
+    for name in sorted(unresolved):
+        if str(name).startswith("toolset:"):
+            reasons.append(f"    - {name} not found (unknown toolset)")
+        else:
+            reasons.append(f"    - {resolver_mod.describe_unresolved(name)}")
+
+    if strict_tools:
+        print("\n\u2717 Tool pre-flight failed:")
+        print("\n".join(reasons))
+        print(
+            "  Fix the names in your config, or start with --no-strict-tools "
+            "to run without them."
+        )
+        raise typer.Exit(78)
+
+    print("\n\u26a0 Tool pre-flight (non-strict) — starting without:")
+    print("\n".join(reasons))
 
 
 def _load_channels(config: str) -> dict:

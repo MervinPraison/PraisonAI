@@ -174,6 +174,80 @@ class TestGapG3ChannelBotTools:
         assert isinstance(agent_tools, list)
 
 
+class TestToolPreflight:
+    """Test the #3553 start-time tool pre-flight gate."""
+
+    def test_describe_unresolved_suggests_close_match(self):
+        """describe_unresolved offers a 'did you mean' for a typo."""
+        from praisonai_code.tool_resolver import ToolResolver
+
+        resolver = ToolResolver()
+        available = list(resolver.list_available().keys())
+        if "read_file" not in available:
+            import pytest
+
+            pytest.skip("read_file tool not discoverable in this environment")
+
+        msg = resolver.describe_unresolved("read_fil")
+        assert "read_file" in msg
+        assert "Did you mean" in msg
+
+    def test_describe_unresolved_falls_back_to_generic_hint(self):
+        """A wholly unknown name still yields an actionable hint."""
+        from praisonai_code.tool_resolver import ToolResolver
+
+        resolver = ToolResolver()
+        msg = resolver.describe_unresolved("totally_made_up_xyz_123")
+        assert "totally_made_up_xyz_123" in msg
+        assert "not found" in msg
+
+    def test_preflight_tools_strict_fails_fast(self, tmp_path):
+        """A mistyped tool aborts start (exit 78) in strict mode."""
+        import typer
+        from praisonai_bot.cli.commands.gateway import _preflight_tools
+
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text(
+            "agents:\n  a:\n    instructions: hi\n    tools: [totally_made_up_xyz_123]\n"
+        )
+
+        with __import__("pytest").raises(typer.Exit) as exc:
+            _preflight_tools(str(cfg), strict_tools=True)
+        assert exc.value.exit_code == 78
+
+    def test_preflight_tools_non_strict_continues(self, tmp_path):
+        """--no-strict-tools warns but does not abort."""
+        from praisonai_bot.cli.commands.gateway import _preflight_tools
+
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text(
+            "agents:\n  a:\n    instructions: hi\n    tools: [totally_made_up_xyz_123]\n"
+        )
+
+        _preflight_tools(str(cfg), strict_tools=False)
+
+    def test_preflight_tools_yaml_opt_out(self, tmp_path):
+        """strict_tools: false in the YAML disables the fail-fast gate."""
+        from praisonai_bot.cli.commands.gateway import _preflight_tools
+
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text(
+            "strict_tools: false\n"
+            "agents:\n  a:\n    instructions: hi\n    tools: [totally_made_up_xyz_123]\n"
+        )
+
+        _preflight_tools(str(cfg), strict_tools=True)
+
+    def test_preflight_tools_ok_when_all_resolve(self, tmp_path):
+        """No error when every named tool resolves (or none are named)."""
+        from praisonai_bot.cli.commands.gateway import _preflight_tools
+
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text("agents:\n  a:\n    instructions: hi\n")
+
+        _preflight_tools(str(cfg), strict_tools=True)
+
+
 class TestToolResolverIntegration:
     """Integration tests for ToolResolver with gateway."""
 
