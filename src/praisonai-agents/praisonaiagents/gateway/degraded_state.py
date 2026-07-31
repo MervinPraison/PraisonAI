@@ -41,7 +41,10 @@ class DegradedOwner:
         owner_id: Stable identity, e.g. ``telegram:main``, ``openai``, ``mcp:notion``.
         state: ``cold`` (no last-known-good) or ``stale`` (reusing last-known-good).
         reason: Redacted, operator-safe explanation — never leaks token/secret material.
-        retry_hint: The exact next action, e.g. ``praisonai gateway doctor --fix``.
+        retry_hint: The exact next action, and it MUST name a command that
+            exists — e.g. ``praisonai gateway doctor --fix`` (implemented in the
+            wrapper CLI as a detect → repair → re-validate loop). Never point an
+            operator at a non-existent command.
     """
 
     owner_kind: str

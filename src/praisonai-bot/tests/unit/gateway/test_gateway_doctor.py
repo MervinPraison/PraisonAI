@@ -554,6 +554,71 @@ def test_gateway_test_check_inbound_fails(monkeypatch, tmp_path):
     assert "inbound" in result.stdout
 
 
+def test_doctor_fix_mints_strong_token_and_revalidates(monkeypatch, tmp_path):
+    """`gateway doctor --fix` mints a strong token and re-validates it cleared (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    calls = {"n": 0}
+
+    def _weak_then_strong(_cfg):
+        calls["n"] += 1
+        return "weak: gateway.auth_token" if calls["n"] == 1 else None
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        _weak_then_strong,
+    )
+
+    saved = {}
+
+    def _fake_save(env_vars):
+        saved.update(env_vars)
+        return tmp_path / ".env"
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars", _fake_save
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels: {}\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix"])
+    assert result.exit_code == 0, result.stdout
+    assert "GATEWAY_AUTH_TOKEN" in saved and len(saved["GATEWAY_AUTH_TOKEN"]) >= 32
+    assert "generated a strong token" in result.stdout
+    assert "re-validated" in result.stdout
+
+
+def test_doctor_fix_dry_run_writes_nothing(monkeypatch, tmp_path):
+    """`--fix --dry-run` previews the repair without minting/writing (#3554)."""
+    typer_testing = pytest.importorskip("typer.testing")
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.commands.gateway._check_gateway_secret_strength",
+        lambda _cfg: "weak: gateway.auth_token",
+    )
+
+    def _must_not_save(env_vars):  # pragma: no cover - must not run
+        raise AssertionError("--dry-run must not write env vars")
+
+    monkeypatch.setattr(
+        "praisonai_bot.cli.features.onboard._save_env_vars", _must_not_save
+    )
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text("channels: {}\n")
+
+    from praisonai_bot.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["doctor", "--config", str(cfg), "--fix", "--dry-run"])
+    assert result.exit_code == 1  # still weak, nothing repaired
+    assert "would mint" in result.stdout
+
+
 def test_gateway_sessions_list_cli(tmp_path, monkeypatch):
     typer_testing = pytest.importorskip("typer.testing")
     import json
