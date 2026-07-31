@@ -89,8 +89,12 @@ class LLMGuardrail:
                 raw_text = task_output.raw
 
             if not self.llm:
-                self.logger.warning("No LLM provided for guardrail validation")
-                return True, task_output
+                # Fail-closed: without an LLM the guardrail cannot validate, so
+                # block the output rather than silently rubber-stamping it.
+                self.logger.error(
+                    "No LLM available for guardrail validation - failing closed"
+                )
+                return False, "Guardrail validation unavailable: no LLM configured"
             
             # Create validation prompt
             validation_prompt = f"""
@@ -118,8 +122,14 @@ Your response:"""
                 # For simple callable LLMs
                 response = self.llm(validation_prompt)
             else:
-                self.logger.error(f"Unsupported LLM type: {type(self.llm)}")
-                return True, task_output
+                # Fail-closed: an unusable LLM cannot validate, so block.
+                self.logger.error(
+                    f"Unsupported LLM type: {type(self.llm)} - failing closed"
+                )
+                return False, (
+                    f"Guardrail validation unavailable: "
+                    f"unsupported LLM type {type(self.llm)}"
+                )
             
             # Parse response
             response = str(response).strip()
