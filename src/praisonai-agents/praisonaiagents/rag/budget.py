@@ -64,6 +64,19 @@ _RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     "command-r-plus": 128000,
 }
 
+# Guard the invariant that RAG-only extras never silently shadow canonical
+# entries. If a key is later added to the canonical budgeter table, it should be
+# removed from _RAG_EXTRA_CONTEXT_WINDOWS so the single source of truth stays
+# authoritative (this is exactly the drift that #3567 fixed). Mirrors the same
+# assertion in eval/tokens.py.
+_overlapping_keys = set(_RAG_EXTRA_CONTEXT_WINDOWS) & {
+    k for k in _CANONICAL_LIMITS if k != "default"
+}
+assert not _overlapping_keys, (
+    "_RAG_EXTRA_CONTEXT_WINDOWS keys overlap with canonical MODEL_LIMITS; remove "
+    f"the duplicate(s) from the RAG table: {sorted(_overlapping_keys)}"
+)
+
 # Single source of truth for exact context-window values: canonical budgeter
 # table takes precedence, with RAG-specific extras layered underneath. This
 # mirrors how eval/tokens.py merges eval-specific extras onto the canonical
