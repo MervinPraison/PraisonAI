@@ -308,12 +308,14 @@ class Handoff:
     - Cycle detection and depth limiting
     - Configurable context policies
     """
-    
-    # Class-level semaphore for concurrency control
-    _semaphore: Optional[asyncio.Semaphore] = None
-    _sync_semaphore: Optional[threading.Semaphore] = None
-    _semaphore_lock: threading.Lock = threading.Lock()  # Lock for semaphore initialization
-    
+
+    # Class-level lock guarding lazy creation of each instance's async
+    # semaphore. The semaphore itself is per-instance (so every Handoff
+    # enforces its own max_concurrent), but the brief init critical section is
+    # only ever touched under this shared threading.Lock, which keeps
+    # double-checked lazy creation thread-safe without a per-instance lock.
+    _semaphore_lock: threading.Lock = threading.Lock()
+
     def __init__(
         self,
         agent: 'Agent',
@@ -344,10 +346,40 @@ class Handoff:
         self.input_type = input_type
         self.input_filter = input_filter
         self.config = config or HandoffConfig()
+
+        # Instance-level concurrency control. Each Handoff enforces its own
+        # max_concurrent instead of sharing one process-wide semaphore, so
+        # different handoffs don't silently override each other's limits based
+        # on execution order. The async semaphore is created lazily (and
+        # recreated if bound to a stale event loop) since it binds to the
+        # running loop on first use.
+        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._semaphore_loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Override config callback if on_handoff provided directly
         if on_handoff and not self.config.on_handoff:
             self.config.on_handoff = on_handoff
+
+    def _get_semaphore(self) -> Optional[asyncio.Semaphore]:
+        """Return this handoff's async semaphore, bound to the current loop.
+
+        Returns None when concurrency limiting is disabled (max_concurrent <= 0).
+        The semaphore is created lazily and recreated if the running event loop
+        differs from the one it was originally bound to, so a process that calls
+        asyncio.run(...) more than once doesn't crash with a "bound to a
+        different event loop" RuntimeError.
+        """
+        if self.config.max_concurrent <= 0:
+            return None
+        try:
+            current_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            current_loop = None
+        with self._semaphore_lock:
+            if self._semaphore is None or self._semaphore_loop is not current_loop:
+                self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+                self._semaphore_loop = current_loop
+            return self._semaphore
         
     @property
     def tool_name(self) -> str:
@@ -717,11 +749,8 @@ class Handoff:
         Returns:
             HandoffResult with response or error
         """
-        # Initialize semaphore if needed (thread-safe)
-        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            with Handoff._semaphore_lock:  # Thread-safe initialization
-                if Handoff._semaphore is None:  # Double-check after acquiring lock
-                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        # Per-instance semaphore, bound to the current event loop
+        semaphore = self._get_semaphore()
         
         start_time = time.time()
         kwargs = context or {}
@@ -782,8 +811,8 @@ class Handoff:
                 _pop_handoff()
         
         try:
-            if self.config.max_concurrent > 0 and Handoff._semaphore:
-                async with Handoff._semaphore:
+            if semaphore is not None:
+                async with semaphore:
                     if self.config.timeout_seconds > 0:
                         result = await asyncio.wait_for(
                             _execute(),
@@ -1523,11 +1552,8 @@ class TypedHandoff(Handoff, Generic[T]):
         if isinstance(payload, str):
             return await super().execute_async(source_agent, payload, context)
         
-        # Initialize semaphore if needed (thread-safe)
-        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            with Handoff._semaphore_lock:
-                if Handoff._semaphore is None:
-                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        # Per-instance semaphore, bound to the current event loop
+        semaphore = self._get_semaphore()
         
         start_time = time.time()
         kwargs = context or {}
@@ -1587,8 +1613,8 @@ class TypedHandoff(Handoff, Generic[T]):
                 _pop_handoff()
         
         try:
-            if self.config.max_concurrent > 0 and Handoff._semaphore:
-                async with Handoff._semaphore:
+            if semaphore is not None:
+                async with semaphore:
                     if self.config.timeout_seconds > 0:
                         result = await asyncio.wait_for(
                             _execute(),
