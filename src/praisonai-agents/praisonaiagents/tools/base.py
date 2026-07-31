@@ -21,7 +21,7 @@ import json
 import logging
 import copy
 
-from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
+from .schema import build_parameters_schema
 
 
 class ToolValidationError(Exception):
