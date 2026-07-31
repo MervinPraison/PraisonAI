@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import hashlib
-import json
 from praisonaiagents._logging import get_logger
 import os
 from typing import Dict, List, Optional, Set
@@ -226,9 +224,8 @@ class ApprovalRegistry:
 
     @staticmethod
     def _approval_cache_key(tool_name: str, arguments: Dict) -> str:
-        payload = json.dumps(arguments or {}, sort_keys=True, default=str)
-        digest = hashlib.sha256(payload.encode()).hexdigest()[:16]
-        return f"{tool_name}:{digest}"
+        from .utils import hash_tool_args
+        return f"{tool_name}:{hash_tool_args(arguments)}"
 
     def mark_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> None:
         approved = self._approved_context.get(set())
