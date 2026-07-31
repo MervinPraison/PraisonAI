@@ -653,6 +653,26 @@ class TestToolPairPreservation:
         compacted, _ = compactor.compact(self._conversation_with_pairs())
         assert not self._has_orphan_tool(compacted)
 
+    def test_truncate_preserves_pairs(self):
+        # TRUNCATE is the default strategy: it must also keep tool pairs intact,
+        # both at the recent-window boundary and while dropping older messages
+        # one pair at a time to hit the target budget.
+        compactor = ContextCompactor(max_tokens=200, target_tokens=150,
+                                     strategy=CompactionStrategy.TRUNCATE,
+                                     preserve_recent=2)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+    def test_truncate_drops_tool_pair_together(self):
+        # A tight budget forces the truncate loop to shed older messages. The
+        # assistant tool_calls message and its result must be dropped together,
+        # never leaving an orphaned tool result at the head of the window.
+        compactor = ContextCompactor(max_tokens=50, target_tokens=30,
+                                     strategy=CompactionStrategy.TRUNCATE,
+                                     preserve_recent=4)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

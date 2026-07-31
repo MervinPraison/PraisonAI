@@ -528,25 +528,49 @@ class ContextCompactor:
         # Always keep system messages
         result.extend(system_msgs)
         
-        # Keep recent messages
-        recent = other_msgs[-self.preserve_recent:] if other_msgs else []
+        # Keep recent messages. Snap the boundary outward so a tool result at
+        # the head of the kept window is never orphaned from its assistant
+        # tool_calls message (strict providers 400 on an orphaned tool result).
+        if other_msgs and len(other_msgs) > self.preserve_recent:
+            cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            cut = 0
+        recent = other_msgs[cut:]
         
         # Add recent messages
         result.extend(recent)
         
-        # If still over limit, truncate more
+        # If still over limit, truncate more. Drop the whole leading tool pair
+        # together (an assistant tool_calls message plus its tool results) so we
+        # never leave an orphaned tool result at the head of the kept window.
         while self.count_total_tokens(result) > self.target_tokens and len(result) > 1:
-            # Remove oldest message (respecting preserve_system setting)
-            removed = False
+            # Find the oldest droppable (non-system when preserved) message.
+            start = None
             for i, msg in enumerate(result):
-                # Skip system messages only if preserve_system is True
                 if not (self.preserve_system and msg.get("role") == "system"):
-                    result.pop(i)
-                    removed = True
+                    start = i
                     break
-            if not removed:
+            if start is None:
                 # Only system messages remain but still over budget — stop to avoid infinite loop
                 break
+
+            # If the oldest droppable message emits tool_calls, drop it together
+            # with all of its immediately-following tool results.
+            drop_ids = set()
+            for tc in (result[start].get("tool_calls") or []):
+                if isinstance(tc, dict) and tc.get("id"):
+                    drop_ids.add(tc["id"])
+            end = start + 1
+            while (
+                drop_ids
+                and end < len(result)
+                and result[end].get("role") == "tool"
+                and result[end].get("tool_call_id") in drop_ids
+            ):
+                end += 1
+            del result[start:end]
         
         return result
     
