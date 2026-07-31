@@ -213,6 +213,10 @@ class TestPersistentApproval:
         
         assert approval.matches("anything", agent_name="agent_1") is True
         assert approval.matches("anything", agent_name="agent_2") is False
+        # Regression: an agent-scoped approval must NOT match an unnamed caller
+        # (agent_name=None), otherwise a scoped grant leaks to anonymous callers.
+        assert approval.matches("anything", agent_name=None) is False
+        assert approval.matches("anything") is False
 
 
 class TestDoomLoopDetector:

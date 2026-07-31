@@ -27,8 +27,8 @@ class LLMGuardrail:
             llm: The LLM instance to use for validation (can be string or LLM instance)
         """
         self.description = description
-        self.llm = self._initialize_llm(llm)
         self.logger = get_logger(__name__)
+        self.llm = self._initialize_llm(llm)
     
     def _initialize_llm(self, llm: Any) -> Any:
         """Initialize the LLM instance from string identifier or existing instance.
@@ -88,7 +88,7 @@ class LLMGuardrail:
             else:
                 raw_text = task_output.raw
 
-            if not self.llm:
+            if self.llm is None:
                 # Fail-closed: without an LLM the guardrail cannot validate, so
                 # block the output rather than silently rubber-stamping it.
                 self.logger.error(
