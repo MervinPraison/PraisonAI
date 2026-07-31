@@ -9,7 +9,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-praisonai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai}
+      # No default password: set POSTGRES_PASSWORD in .env (compose fails fast if unset).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-praisonai}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -18,8 +19,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Bind to loopback by default so Postgres is not exposed on all host interfaces.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
 
   api:
     image: ${PRAISONAI_IMAGE:-ghcr.io/mervinpraison/praisonai:latest}
@@ -39,7 +41,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-praisonai}:${POSTGRES_PASSWORD:-praisonai}@postgres:5432/${POSTGRES_DB:-praisonai}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-praisonai}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-praisonai}
     volumes:
       - ${AGENTS_FILE:-./agents.yaml}:/app/agents.yaml:ro
       - ./api_server.py:/app/api_server.py:ro

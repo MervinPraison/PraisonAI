@@ -4,6 +4,8 @@ Docker Compose stack orchestration for production-like agent deployments.
 from __future__ import annotations
 
 import os
+import re
+import secrets
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,7 +65,40 @@ def prepare_compose_project(
     if not env_file.exists() and env_example is not None:
         shutil.copy2(env_example, env_file)
 
+    _ensure_postgres_password(env_file)
+
     return compose_dir
+
+
+def _ensure_postgres_password(env_file: Path) -> None:
+    """
+    Guarantee a strong POSTGRES_PASSWORD in the project .env.
+
+    The shipped .env.example intentionally has no default password (so the DB is
+    never brought up with a repo-known credential). To keep the CLI usable, we
+    generate a strong random value on first run when it is missing or empty.
+    """
+    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+    pattern = re.compile(r"^\s*POSTGRES_PASSWORD\s*=\s*(.*)$")
+
+    for line in lines:
+        match = pattern.match(line)
+        if match and match.group(1).strip():
+            return  # already set to a non-empty value
+
+    generated = f"POSTGRES_PASSWORD={secrets.token_urlsafe(24)}"
+    new_lines = []
+    replaced = False
+    for line in lines:
+        if pattern.match(line) and not replaced:
+            new_lines.append(generated)
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        new_lines.append(generated)
+
+    env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
 def compose_up(

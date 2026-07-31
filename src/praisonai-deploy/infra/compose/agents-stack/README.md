@@ -36,7 +36,11 @@ The CLI generates `api_server.py` in your project directory before `docker compo
 |----------|---------|-------|
 | `AGENTS_FILE` | `./agents.yaml` | Mounted into the API container |
 | `API_PORT` | `8005` | Host port for the API |
-| `POSTGRES_PASSWORD` | `praisonai` | Change in production |
+| `POSTGRES_BIND` | `127.0.0.1` | Host interface for the Postgres port; keep loopback unless remote access is required |
+| `POSTGRES_PORT` | `5432` | Host port for Postgres |
+| `POSTGRES_PASSWORD` | — | **Required** — no default; compose fails fast if unset. Generate with `openssl rand -hex 24` |
 | `OPENAI_API_KEY` | — | Passed through to the API container |
+
+> Security: Postgres binds to `127.0.0.1` by default and has no default password. The CLI auto-generates a strong `POSTGRES_PASSWORD` in your project `.env` on first `compose up` when it is empty.
 
 See [`PRAISONAI_DEPLOY_MANIFEST.md`](../../../src/praisonai/tests/PRAISONAI_DEPLOY_MANIFEST.md) for package boundaries.

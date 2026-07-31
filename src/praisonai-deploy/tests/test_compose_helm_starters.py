@@ -218,3 +218,50 @@ def test_create_from_template_unknown_template():
     assert not result.success
     assert "Unknown template" in result.message
 
+
+def test_compose_env_example_has_no_default_postgres_password():
+    """Security: shipped .env.example must not carry a repo-known DB password."""
+    stack = resolve_compose_stack_dir()
+    env_example = (stack / ".env.example").read_text(encoding="utf-8")
+    for line in env_example.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("POSTGRES_PASSWORD="):
+            value = stripped.split("=", 1)[1].strip()
+            assert value == "", f"POSTGRES_PASSWORD must be empty, got {value!r}"
+
+
+def test_compose_postgres_binds_loopback_by_default():
+    """Security: Postgres must not be published on all interfaces by default."""
+    stack = resolve_compose_stack_dir()
+    compose = (stack / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "POSTGRES_BIND:-127.0.0.1" in compose
+
+
+def test_compose_requires_explicit_postgres_password():
+    """Security: no default password baked into the compose file."""
+    stack = resolve_compose_stack_dir()
+    compose = (stack / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "POSTGRES_PASSWORD:-praisonai" not in compose
+    assert "POSTGRES_PASSWORD:?" in compose
+
+
+def test_prepare_compose_project_generates_postgres_password(tmp_path):
+    from praisonai_deploy.compose import prepare_compose_project
+
+    agents = tmp_path / "agents.yaml"
+    agents.write_text(
+        "agents:\n  - name: a\n    role: r\n    goal: g\n    backstory: b\n"
+        "deploy:\n  type: api\n",
+        encoding="utf-8",
+    )
+    project = prepare_compose_project(str(agents), project_dir=tmp_path / "work")
+    env_text = (project / ".env").read_text(encoding="utf-8")
+    pw_lines = [
+        line for line in env_text.splitlines()
+        if line.strip().startswith("POSTGRES_PASSWORD=")
+    ]
+    assert len(pw_lines) == 1
+    value = pw_lines[0].split("=", 1)[1].strip()
+    assert value and value != "change-me"
+    assert len(value) >= 16
+
