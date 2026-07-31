@@ -824,7 +824,59 @@ class ToolResolver:
                             missing.append(f"toolset:{toolset_name}")
         
         return list(set(missing))  # Remove duplicates
-    
+
+    def describe_unresolved(self, name: str) -> str:
+        """Explain why a tool name did not resolve, with an actionable fix hint.
+
+        Turns a bare "not found" into a per-name reason a start-time pre-flight
+        can surface instead of a silent skip (#3553): a close-match typo
+        suggestion (via stdlib :mod:`difflib`), or the local-tools-disabled hint
+        when ``PRAISONAI_ALLOW_LOCAL_TOOLS`` gates a project ``tools.py``.
+
+        Args:
+            name: The unresolved tool name.
+
+        Returns:
+            A single-line, human-readable reason + fix hint.
+        """
+        import difflib
+        import os
+
+        clean = (name or "").strip()
+
+        try:
+            available = list(self._discover_available().keys())
+        except Exception:  # pragma: no cover — defensive
+            available = []
+
+        # Exclude the exact name from typo candidates: a built-in mapped tool
+        # can be listed by _discover_available() yet still fail to load (missing
+        # optional dependency), which would otherwise yield a useless
+        # "Did you mean '<same name>'?" instead of an install hint (#3553).
+        candidates = [candidate for candidate in available if candidate != clean]
+        suggestions = difflib.get_close_matches(clean, candidates, n=1, cutoff=0.7)
+        if suggestions:
+            return f"'{name}' not found. Did you mean '{suggestions[0]}'?"
+
+        # A project tools.py that is present but gated behind the opt-in env var
+        # is the other common "silent skip" cause — surface it explicitly.
+        if not os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS"):
+            try:
+                if Path(self._tools_py_path).exists():
+                    return (
+                        f"'{name}' not found. A local tools.py exists but local "
+                        f"tools are disabled; set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+                        f"to enable it."
+                    )
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        return (
+            f"'{name}' not found in any source. Check the spelling, install the "
+            f"package that provides it, or set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+            f"for a local tools.py."
+        )
+
     def clear_cache(self) -> None:
         """Clear both the local tools cache and resolve cache.
         
@@ -1289,6 +1341,19 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+
+def describe_unresolved(name: str, resolver: Optional[ToolResolver] = None) -> str:
+    """Explain why a tool name did not resolve, with an actionable fix hint.
+
+    Args:
+        name: The unresolved tool name.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+
+    Returns:
+        A single-line, human-readable reason + fix hint.
+    """
+    return (resolver or _get_default_resolver()).describe_unresolved(name)
 
 
 def resolve_toolsets(toolset_names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:
