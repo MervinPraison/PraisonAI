@@ -970,8 +970,12 @@ class ToolExecutionMixin:
                     logging.debug(f"Tool truncation skipped: {e}")
             
             # Emit tool call end event (truncation handled by context_events.py)
+            # Only stringify the result if the emitter is actually enabled; the
+            # default emitter is a disabled NoOp, so str(result) would otherwise
+            # re-serialise the whole structure for nothing on every tool call.
             _duration_ms = (_time.time() - _tool_start_time) * 1000
-            _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
+            if _trace_emitter.enabled:
+                _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, _duration_ms)
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
