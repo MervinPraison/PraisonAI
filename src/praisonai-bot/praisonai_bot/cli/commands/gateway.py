@@ -481,6 +481,91 @@ def _check_gateway_secret_strength(config_path: str):
     return str(WeakGatewaySecretError(field="gateway.auth_token"))
 
 
+def _config_has_explicit_weak_token(config_path: str) -> bool:
+    """True when gateway.yaml pins an explicit (non-``${ENV}``) weak auth_token.
+
+    Such a value is read verbatim at startup (``GatewayConfig.auth_token``) and
+    by :func:`_check_gateway_secret_strength`, so it takes precedence over the
+    ``GATEWAY_AUTH_TOKEN`` env var. Minting only into the env would leave the
+    weak YAML value active — the repair must rewrite the YAML too (#3554).
+    A ``${ENV}`` reference is NOT rewritten: it resolves from the env store the
+    env-var repair already fixes, so overwriting it would clobber operator
+    indirection.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return False
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return False
+
+    gw = cfg.get("gateway", cfg) or {}
+    raw_token = gw.get("auth_token")
+    if not raw_token or not isinstance(raw_token, str):
+        return False
+    if raw_token.startswith("${") and raw_token.endswith("}"):
+        return False
+
+    from praisonaiagents.gateway.protocols import is_weak_secret
+
+    return is_weak_secret(raw_token)
+
+
+def _persist_yaml_auth_token(config_path: str, new_token: str) -> None:
+    """Rewrite the ``gateway.auth_token`` in gateway.yaml in place (#3554)."""
+    import yaml
+
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+
+    if isinstance(cfg.get("gateway"), dict):
+        cfg["gateway"]["auth_token"] = new_token
+    else:
+        cfg["auth_token"] = new_token
+
+    with open(config_path, "w") as fh:
+        yaml.safe_dump(cfg, fh, default_flow_style=False, sort_keys=False)
+
+
+def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
+    """Mint a strong gateway auth token to repair a weak/missing one.
+
+    The safe, idempotent repair behind ``gateway doctor --fix``: the caller has
+    already detected a weak/absent ``gateway.auth_token`` (via
+    :func:`_check_gateway_secret_strength`); this generates a fresh
+    ``secrets.token_hex(16)`` value and persists it to ``~/.praisonai/.env`` (the
+    same store ``praisonai onboard`` uses) so it survives daemon restarts. The
+    new token is also exported into this process's environment so the caller can
+    immediately **re-validate** that the finding cleared.
+
+    When gateway.yaml pins an explicit (non-``${ENV}``) weak ``auth_token``, that
+    value wins over the env var at both startup and re-validation, so the same
+    strong token is ALSO written back into the YAML — otherwise ``--fix`` would
+    report success while the weak YAML value stays active (#3554). When
+    ``dry_run`` is True no token is minted or written.
+
+    Returns ``"would-repair"`` (dry-run preview) or ``"repaired"`` so the
+    ``doctor`` command can render a detect → repair → re-validate line.
+    """
+    if dry_run:
+        return "would-repair"
+
+    import os
+    import secrets as _secrets
+    from praisonai_bot.cli.features.onboard import _save_env_vars
+
+    new_token = _secrets.token_hex(16)
+    _save_env_vars({"GATEWAY_AUTH_TOKEN": new_token})
+    os.environ["GATEWAY_AUTH_TOKEN"] = new_token
+    if config_path and _config_has_explicit_weak_token(config_path):
+        _persist_yaml_auth_token(config_path, new_token)
+    return "repaired"
+
+
 from praisonai_bot.gateway.preflight import (  # noqa: E402 — re-exported for tests/CLI
     apply_probe_ca_bundle as _apply_probe_ca_bundle,
     check_duplicates as _check_duplicates,
@@ -710,6 +795,16 @@ def gateway_doctor(
         "--turn",
         help="Run one live inbound agent turn offline (requires LLM API key)",
     ),
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help="Repair safe findings (mint a strong gateway auth token when weak/missing), then re-validate",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="With --fix, preview repairs without writing anything",
+    ),
 ):
     """Validate every configured channel's credentials (pre-flight check).
 
@@ -721,8 +816,15 @@ def gateway_doctor(
     ``BotSessionManager.chat`` (including ``allow_shell`` setup). It does
     **not** exercise Slack Bolt/socket handlers or @mention routing.
 
+    ``--fix`` performs the safe, idempotent repair its own retry hints promise:
+    when ``gateway.auth_token`` is weak/missing it mints a strong token
+    (persisted to ``~/.praisonai/.env``) and **re-validates** that the finding
+    cleared. Pair with ``--dry-run`` to preview without writing.
+
     Examples:
         praisonai gateway doctor
+        praisonai gateway doctor --fix
+        praisonai gateway doctor --fix --dry-run
         praisonai gateway doctor --config my-gateway.yaml --json
         praisonai gateway doctor --config gateway.yaml --channel slack --turn "Say OK"
     """
@@ -730,12 +832,32 @@ def gateway_doctor(
     import json
 
     gateway_secret_error = _check_gateway_secret_strength(config)
+
+    fix_report = None
+    if fix and gateway_secret_error:
+        action = _repair_gateway_secret(dry_run=dry_run, config_path=config)
+        if action == "would-repair":
+            fix_report = "gateway_auth_token: weak → would mint a strong token (--dry-run)"
+        elif action == "repaired":
+            gateway_secret_error = _check_gateway_secret_strength(config)
+            if gateway_secret_error is None:
+                fix_report = (
+                    "gateway_auth_token: weak → generated a strong token… done\n"
+                    "re-validated: gateway_auth_token now strong"
+                )
+            else:
+                fix_report = "gateway_auth_token: repair attempted but still weak"
+        if fix_report and not json_output:
+            print(fix_report)
+
     channels = _load_channels(config)
 
     if not channels:
         payload: dict = {"probes": {}}
         if gateway_secret_error:
             payload["gateway_auth_token"] = "weak"
+        if fix_report:
+            payload["fix"] = fix_report
         if json_output:
             print(json.dumps(payload, indent=2))
         else:
@@ -758,6 +880,8 @@ def gateway_doctor(
         payload["secrets"] = availability
     if gateway_secret_error:
         payload["gateway_auth_token"] = "weak"
+    if fix_report:
+        payload["fix"] = fix_report
 
     if not json_output:
         _print_secret_availability(availability)
