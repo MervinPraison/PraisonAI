@@ -43,13 +43,29 @@ class FlyProvider(BaseProvider):
     """Deploy to Fly.io via flyctl."""
 
     def doctor(self) -> DoctorReport:
+        import os
+
         checks = [_check_cli("flyctl", ["version"])]
-        token = __import__("os").environ.get("FLY_API_TOKEN")
+        token = os.environ.get("FLY_API_TOKEN") or os.environ.get("FLY_ACCESS_TOKEN")
+        authed = bool(token)
+        # A `fly auth login` session stores the token in the flyctl config
+        # rather than the environment, so fall back to `fly auth whoami`.
+        if not authed:
+            try:
+                result = subprocess.run(
+                    ["flyctl", "auth", "whoami"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                authed = result.returncode == 0
+            except Exception:
+                authed = False
         checks.append(DoctorCheckResult(
-            name="FLY_API_TOKEN",
-            passed=bool(token),
-            message="Set" if token else "Not set",
-            fix_suggestion="export FLY_API_TOKEN=... or fly auth login",
+            name="Fly authentication",
+            passed=authed,
+            message="Authenticated" if authed else "Not authenticated",
+            fix_suggestion="export FLY_API_TOKEN=... or run: fly auth login",
         ))
         return DoctorReport(checks=checks)
 

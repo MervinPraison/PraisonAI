@@ -11,13 +11,39 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from ._infra import DEFAULT_STACK_NAME, resolve_compose_stack_dir
+from ._infra import resolve_compose_stack_dir
 from .api import generate_api_server_code
 from .docker import collect_runtime_env_vars
 from .models import APIConfig, DeployResult
 from .schema import validate_agents_yaml
 
 COMPOSE_PROJECT_DIR = ".praisonai-compose"
+DEFAULT_API_PORT = "8005"
+# Generous timeout to accommodate first-run image pulls while still preventing
+# an unresponsive Docker daemon from hanging the CLI indefinitely.
+COMPOSE_TIMEOUT_SECONDS = 600
+
+
+def _resolve_api_port(env: dict, project_dir: Optional[Path] = None) -> str:
+    """Resolve the effective host API port used by the compose stack.
+
+    Precedence: the runtime ``env`` passed to docker compose, then the project
+    ``.env``, then ``DEFAULT_API_PORT`` — so the reported URL matches the port
+    the stack actually publishes.
+    """
+    value = env.get("API_PORT")
+    if value:
+        return str(value)
+    if project_dir is not None:
+        env_file = Path(project_dir) / ".env"
+        if env_file.is_file():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("API_PORT="):
+                    candidate = stripped.split("=", 1)[1].split("#", 1)[0].strip().strip('"').strip("'")
+                    if candidate:
+                        return candidate
+    return DEFAULT_API_PORT
 
 
 def resolve_stack_dir(
@@ -66,8 +92,37 @@ def prepare_compose_project(
         shutil.copy2(env_example, env_file)
 
     _ensure_postgres_password(env_file)
+    _restrict_env_permissions(env_file)
 
     return compose_dir
+
+
+def _restrict_env_permissions(env_file: Path) -> None:
+    """Restrict a secret-bearing .env to owner read/write (0600) on POSIX."""
+    if os.name != "posix" or not env_file.exists():
+        return
+    try:
+        env_file.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _env_password_value(raw: str) -> str:
+    """Return the effective POSTGRES_PASSWORD value from a raw dotenv RHS.
+
+    Strips inline comments (for unquoted values), surrounding quotes, and
+    whitespace so a ``POSTGRES_PASSWORD= # comment`` or ``POSTGRES_PASSWORD=""``
+    line is correctly treated as empty.
+    """
+    value = raw.strip()
+    if value[:1] in ('"', "'"):
+        quote = value[0]
+        end = value.find(quote, 1)
+        return value[1:end] if end != -1 else value[1:]
+    # Unquoted: an unescaped '#' starts an inline comment.
+    if "#" in value:
+        value = value.split("#", 1)[0]
+    return value.strip()
 
 
 def _ensure_postgres_password(env_file: Path) -> None:
@@ -77,26 +132,27 @@ def _ensure_postgres_password(env_file: Path) -> None:
     The shipped .env.example intentionally has no default password (so the DB is
     never brought up with a repo-known credential). To keep the CLI usable, we
     generate a strong random value on first run when it is missing or empty.
+
+    The *effective* value is the last non-empty ``POSTGRES_PASSWORD`` assignment
+    (matching how docker compose resolves duplicate keys), so a later empty
+    override does not leave the DB with an empty password.
     """
     lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
-    pattern = re.compile(r"^\s*POSTGRES_PASSWORD\s*=\s*(.*)$")
+    pattern = re.compile(r"^\s*POSTGRES_PASSWORD\s*=(.*)$")
 
+    effective = ""
     for line in lines:
         match = pattern.match(line)
-        if match and match.group(1).strip():
-            return  # already set to a non-empty value
+        if match:
+            effective = _env_password_value(match.group(1))
+    if effective:
+        return  # already set to a non-empty effective value
 
     generated = f"POSTGRES_PASSWORD={secrets.token_urlsafe(24)}"
-    new_lines = []
-    replaced = False
-    for line in lines:
-        if pattern.match(line) and not replaced:
-            new_lines.append(generated)
-            replaced = True
-        else:
-            new_lines.append(line)
-    if not replaced:
-        new_lines.append(generated)
+    # Drop every existing POSTGRES_PASSWORD assignment and append a single
+    # generated one so there is exactly one, non-empty effective value.
+    new_lines = [line for line in lines if not pattern.match(line)]
+    new_lines.append(generated)
 
     env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
@@ -126,7 +182,10 @@ def compose_up(
         if detach:
             cmd.append("-d")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=env,
+            timeout=COMPOSE_TIMEOUT_SECONDS,
+        )
         if result.returncode != 0:
             return DeployResult(
                 success=False,
@@ -134,7 +193,7 @@ def compose_up(
                 error=(result.stderr or result.stdout or "").strip(),
             )
 
-        port = os.environ.get("API_PORT", "8005")
+        port = _resolve_api_port(env, project_dir)
         url = f"http://127.0.0.1:{port}"
         return DeployResult(
             success=True,
@@ -172,7 +231,10 @@ def compose_down(
         if volumes:
             cmd.append("-v")
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=COMPOSE_TIMEOUT_SECONDS,
+        )
         if result.returncode != 0:
             return DeployResult(
                 success=False,

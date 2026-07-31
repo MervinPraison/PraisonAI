@@ -29,7 +29,7 @@ praisonai deploy helm --chart agents-api --release praisonai-api
 - **Auth** — `PRAISONAI_API_TOKEN` secret (fail-fast if enabled without secret)
 - **Ingress** — optional
 
-Gateway-only deployments should use [`../praisonai-gateway/`](../praisonai-gateway/) instead.
+Gateway-only deployments should use [`praisonai-gateway`](../../../../praisonai-bot/infra/helm/praisonai-gateway/) instead.
 
 ## CI
 

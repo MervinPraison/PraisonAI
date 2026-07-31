@@ -1,7 +1,11 @@
+# Deploys the prebuilt PraisonAI image (no Dockerfile required).
+# Pin a version tag instead of `latest` for production deployments.
 services:
   - type: web
     name: praisonai-api
-    runtime: docker
+    runtime: image
+    image:
+      url: ghcr.io/mervinpraison/praisonai:latest
     plan: starter
     healthCheckPath: /health
     envVars:

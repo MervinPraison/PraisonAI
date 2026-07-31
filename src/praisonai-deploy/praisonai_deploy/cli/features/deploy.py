@@ -147,8 +147,10 @@ class DeployHandler:
                 elif args.provider == 'gcp':
                     report = run_gcp_checks()
                 else:
-                    console.print(f"[red]Unknown provider: {args.provider}[/red]")
-                    sys.exit(1)
+                    report = self._provider_doctor(args.provider)
+                    if report is None:
+                        console.print(f"[red]Unknown provider: {args.provider}[/red]")
+                        sys.exit(1)
             else:
                 report = run_local_checks(agents_file=args.file)
             
@@ -473,95 +475,144 @@ class DeployHandler:
         """Print data as JSON."""
         print(json.dumps(data, indent=2))
 
+    def _provider_doctor(self, provider: str):
+        """Run ``doctor()`` for a registered cloud provider (fly/railway/render/...).
+
+        Returns a ``DoctorReport`` when the provider is registered, otherwise ``None``.
+        """
+        try:
+            from praisonai_deploy.models import CloudConfig, CloudProvider
+            from praisonai_deploy.providers import get_provider
+        except Exception:
+            return None
+        try:
+            config = CloudConfig(
+                provider=CloudProvider(provider),
+                region='us-east-1',
+                service_name='praisonai-service',
+            )
+            return get_provider(config).doctor()
+        except Exception:
+            return None
+
+    def _handle_unexpected(self, args, exc):
+        """Report an unexpected handler error the same way as the other handlers."""
+        if getattr(args, 'json', False):
+            self._print_json({"success": False, "error": str(exc)})
+        else:
+            console.print(f"[bold red]❌ {exc}[/bold red]")
+        sys.exit(1)
+
     def handle_compose_up(self, args):
         """Start Docker Compose agents stack."""
-        from praisonai_deploy.compose import compose_up
+        try:
+            from praisonai_deploy.compose import compose_up
 
-        detach = not getattr(args, 'foreground', False)
-        stack_dir = getattr(args, 'stack_dir', None)
-        result = compose_up(args.file, stack_dir=stack_dir, detach=detach)
+            detach = not getattr(args, 'foreground', False)
+            stack_dir = getattr(args, 'stack_dir', None)
+            result = compose_up(args.file, stack_dir=stack_dir, detach=detach)
 
-        if args.json:
-            self._print_json(result.model_dump())
-        elif result.success:
-            console.print(f"[bold green]✅ {result.message}[/bold green]")
-            if result.url:
-                console.print(f"[bold cyan]🔗 URL:[/bold cyan] {result.url}")
-        else:
-            console.print(f"[bold red]❌ {result.message}[/bold red]")
-            if result.error:
-                console.print(f"[red]{result.error}[/red]")
-            sys.exit(1)
+            if args.json:
+                self._print_json(result.model_dump())
+            elif result.success:
+                console.print(f"[bold green]✅ {result.message}[/bold green]")
+                if result.url:
+                    console.print(f"[bold cyan]🔗 URL:[/bold cyan] {result.url}")
+            else:
+                console.print(f"[bold red]❌ {result.message}[/bold red]")
+                if result.error:
+                    console.print(f"[red]{result.error}[/red]")
+                sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            self._handle_unexpected(args, e)
 
     def handle_compose_down(self, args):
         """Stop Docker Compose agents stack."""
-        from praisonai_deploy.compose import compose_down
+        try:
+            from praisonai_deploy.compose import compose_down
 
-        stack_dir = getattr(args, 'stack_dir', None)
-        volumes = getattr(args, 'volumes', False)
-        result = compose_down(args.file, stack_dir=stack_dir, volumes=volumes)
+            stack_dir = getattr(args, 'stack_dir', None)
+            volumes = getattr(args, 'volumes', False)
+            result = compose_down(args.file, stack_dir=stack_dir, volumes=volumes)
 
-        if args.json:
-            self._print_json(result.model_dump())
-        elif result.success:
-            console.print(f"[bold green]✅ {result.message}[/bold green]")
-        else:
-            console.print(f"[bold red]❌ {result.message}[/bold red]")
-            if result.error:
-                console.print(f"[red]{result.error}[/red]")
-            sys.exit(1)
+            if args.json:
+                self._print_json(result.model_dump())
+            elif result.success:
+                console.print(f"[bold green]✅ {result.message}[/bold green]")
+            else:
+                console.print(f"[bold red]❌ {result.message}[/bold red]")
+                if result.error:
+                    console.print(f"[red]{result.error}[/red]")
+                sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            self._handle_unexpected(args, e)
 
     def handle_create(self, args):
         """Scaffold project from starter template."""
-        from praisonai_deploy.starters import create_from_template, list_templates
+        try:
+            from praisonai_deploy.starters import create_from_template, list_templates
 
-        template = args.template
-        directory = getattr(args, 'directory', '.') or '.'
-        result = create_from_template(template, directory)
+            template = args.template
+            directory = getattr(args, 'directory', '.') or '.'
+            force = getattr(args, 'force', False)
+            result = create_from_template(template, directory, force=force)
 
-        if args.json:
-            self._print_json(result.model_dump())
-        elif result.success:
-            console.print(f"[bold green]✅ {result.message}[/bold green]")
-            if result.metadata.get('description'):
-                console.print(f"[dim]{result.metadata['description']}[/dim]")
-            console.print("\n[bold]Next steps:[/bold]")
-            console.print("  1. cd into the project directory")
-            console.print("  2. Set OPENAI_API_KEY (and other secrets)")
-            console.print("  3. praisonai deploy compose up  OR  praisonai deploy run")
-        else:
-            console.print(f"[bold red]❌ {result.message}[/bold red]")
-            if result.error:
-                console.print(f"[red]{result.error}[/red]")
-                available = list_templates()
-                if available:
-                    names = ", ".join(t['name'] for t in available)
-                    console.print(f"[dim]Available templates: {names}[/dim]")
-            sys.exit(1)
+            if args.json:
+                self._print_json(result.model_dump())
+            elif result.success:
+                console.print(f"[bold green]✅ {result.message}[/bold green]")
+                if result.metadata.get('description'):
+                    console.print(f"[dim]{result.metadata['description']}[/dim]")
+                console.print("\n[bold]Next steps:[/bold]")
+                console.print("  1. cd into the project directory")
+                console.print("  2. Set OPENAI_API_KEY (and other secrets)")
+                console.print("  3. praisonai deploy compose up  OR  praisonai deploy run")
+            else:
+                console.print(f"[bold red]❌ {result.message}[/bold red]")
+                if result.error:
+                    console.print(f"[red]{result.error}[/red]")
+                    available = list_templates()
+                    if available:
+                        names = ", ".join(t['name'] for t in available)
+                        console.print(f"[dim]Available templates: {names}[/dim]")
+                sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            self._handle_unexpected(args, e)
 
     def handle_helm(self, args):
         """Thin helm upgrade wrapper for repo-infra charts."""
-        from praisonai_deploy.helm import helm_upgrade_install
+        try:
+            from praisonai_deploy.helm import helm_upgrade_install
 
-        chart_dir = getattr(args, 'chart_dir', None)
-        install = getattr(args, 'install', True)
-        result = helm_upgrade_install(
-            chart=args.chart,
-            release=getattr(args, 'release', 'praisonai'),
-            namespace=getattr(args, 'namespace', 'default'),
-            chart_dir=chart_dir,
-            install=install,
-        )
+            chart_dir = getattr(args, 'chart_dir', None)
+            install = getattr(args, 'install', True)
+            result = helm_upgrade_install(
+                chart=args.chart,
+                release=getattr(args, 'release', 'praisonai'),
+                namespace=getattr(args, 'namespace', 'default'),
+                chart_dir=chart_dir,
+                install=install,
+            )
 
-        if args.json:
-            self._print_json(result.model_dump())
-        elif result.success:
-            console.print(f"[bold green]✅ {result.message}[/bold green]")
-        else:
-            console.print(f"[bold red]❌ {result.message}[/bold red]")
-            if result.error:
-                console.print(f"[red]{result.error}[/red]")
-            sys.exit(1)
+            if args.json:
+                self._print_json(result.model_dump())
+            elif result.success:
+                console.print(f"[bold green]✅ {result.message}[/bold green]")
+            else:
+                console.print(f"[bold red]❌ {result.message}[/bold red]")
+                if result.error:
+                    console.print(f"[red]{result.error}[/red]")
+                sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            self._handle_unexpected(args, e)
 
 
 def handle_deploy_command(args):
@@ -599,6 +650,16 @@ def handle_deploy_command(args):
 
     subcommand = args[0]
     sub_args = args[1:]
+
+    # Extract the compose action (up|down) before generic flag parsing so the
+    # action token is never mistaken for a positional agents file.
+    compose_action = None
+    if subcommand == 'compose':
+        if not sub_args:
+            print("Usage: praisonai deploy compose up|down")
+            return 1
+        compose_action = sub_args[0]
+        sub_args = sub_args[1:]
 
     deploy_args = ap.Namespace()
     deploy_args.file = 'agents.yaml'
@@ -652,7 +713,7 @@ def handle_deploy_command(args):
         '--template': 'template',
         '--dir': 'directory', '-d': 'directory',
         '--chart': 'chart',
-        '--release': 'release', '-r': 'release',
+        '--release': 'release',
         '--namespace': 'namespace', '-n': 'namespace',
         '--chart-dir': 'chart_dir',
     }
@@ -717,37 +778,12 @@ def handle_deploy_command(args):
     if subcommand in dispatch:
         method = dispatch[subcommand]
     elif subcommand == 'compose':
-        if not sub_args:
-            print("Usage: praisonai deploy compose up|down")
-            return 1
-        action = sub_args[0]
-        sub_args = sub_args[1:]
-        # Re-parse flags for compose subcommand
-        i = 0
-        while i < len(sub_args):
-            arg = sub_args[i]
-            if arg in value_flags:
-                if i + 1 >= len(sub_args):
-                    print(f"Error: option '{arg}' requires a value")
-                    return 1
-                setattr(deploy_args, value_flags[arg], sub_args[i + 1])
-                i += 2
-            elif arg in bool_flags:
-                if arg == '--json':
-                    deploy_args.json = True
-                elif arg == '--foreground':
-                    deploy_args.foreground = True
-                elif arg == '--volumes':
-                    deploy_args.volumes = True
-                i += 1
-            else:
-                i += 1
-        if action == 'up':
+        if compose_action == 'up':
             method = handler.handle_compose_up
-        elif action == 'down':
+        elif compose_action == 'down':
             method = handler.handle_compose_down
         else:
-            print(f"Unknown compose action: {action}")
+            print(f"Unknown compose action: {compose_action}")
             return 1
     elif subcommand == 'create':
         method = handler.handle_create

@@ -412,6 +412,49 @@ def test_handle_deploy_command_compose_down_volumes():
         assert mock_down.call_args[0][0].volumes is True
 
 
+def test_handle_deploy_command_compose_up_default_file():
+    """`compose up` without --file must keep the default agents.yaml, not 'up'."""
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_compose_up") as mock_up:
+        code = handle_deploy_command(["compose", "up"])
+        assert code == 0
+        mock_up.assert_called_once()
+        assert mock_up.call_args[0][0].file == "agents.yaml"
+
+
+def test_handle_deploy_command_compose_down_default_file():
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_compose_down") as mock_down:
+        code = handle_deploy_command(["compose", "down"])
+        assert code == 0
+        mock_down.assert_called_once()
+        assert mock_down.call_args[0][0].file == "agents.yaml"
+
+
+def test_handle_deploy_command_region_short_flag():
+    """`-r` must still map to region (not silently dropped by a duplicate key)."""
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler.handle_deploy") as mock_deploy:
+        code = handle_deploy_command(["fly", "-r", "ams"])
+        assert code == 0
+        assert mock_deploy.call_args[0][0].region == "ams"
+
+
+def test_handle_deploy_command_doctor_fly_provider_routed():
+    """`doctor --provider fly` must reach the provider doctor, not 'Unknown provider'."""
+    from praisonai_deploy.cli.features.deploy import handle_deploy_command
+
+    with patch("praisonai_deploy.cli.features.deploy.DeployHandler._provider_doctor") as mock_pd:
+        from praisonai_deploy.doctor import DoctorReport
+        mock_pd.return_value = DoctorReport(checks=[])
+        code = handle_deploy_command(["doctor", "--provider", "fly", "--json"])
+        assert code == 0
+        mock_pd.assert_called_once_with("fly")
+
+
 def test_handle_deploy_command_create_dispatch():
     from praisonai_deploy.cli.features.deploy import handle_deploy_command
 

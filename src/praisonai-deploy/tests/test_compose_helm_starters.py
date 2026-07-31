@@ -266,3 +266,120 @@ def test_prepare_compose_project_generates_postgres_password(tmp_path):
     assert value and value != ("change" + "-me")
     assert len(value) >= 16
 
+
+def test_ensure_postgres_password_keeps_effective_nonempty_value(tmp_path):
+    """When the last assignment is non-empty, it is preserved as-is (no rewrite)."""
+    from praisonai_deploy.compose import _ensure_postgres_password, _env_password_value
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "POSTGRES_PASSWORD= # placeholder\nPOSTGRES_PASSWORD=real-secret-value\n",
+        encoding="utf-8",
+    )
+    _ensure_postgres_password(env_file)
+    lines = [
+        line for line in env_file.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("POSTGRES_PASSWORD=")
+    ]
+    # Effective (last) value is non-empty → left untouched.
+    assert any(_env_password_value(l.split("=", 1)[1]) == "real-secret-value" for l in lines)
+
+
+def test_ensure_postgres_password_regenerates_when_effective_empty(tmp_path):
+    """A trailing empty override makes the effective value empty → regenerate a strong one."""
+    from praisonai_deploy.compose import _ensure_postgres_password, _env_password_value
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "POSTGRES_PASSWORD=present\nPOSTGRES_PASSWORD= # comment\n",
+        encoding="utf-8",
+    )
+    _ensure_postgres_password(env_file)
+    lines = [
+        line for line in env_file.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("POSTGRES_PASSWORD=")
+    ]
+    # Exactly one assignment, with a non-empty, strong effective value.
+    assert len(lines) == 1
+    value = _env_password_value(lines[0].split("=", 1)[1])
+    assert value and value != "present"
+    assert len(value) >= 16
+
+
+def test_ensure_postgres_password_treats_quoted_empty_as_empty(tmp_path):
+    from praisonai_deploy.compose import _ensure_postgres_password, _env_password_value
+
+    env_file = tmp_path / ".env"
+    env_file.write_text('POSTGRES_PASSWORD=""\n', encoding="utf-8")
+    _ensure_postgres_password(env_file)
+    lines = [
+        line for line in env_file.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("POSTGRES_PASSWORD=")
+    ]
+    assert len(lines) == 1
+    value = _env_password_value(lines[0].split("=", 1)[1])
+    assert value and len(value) >= 16
+
+
+@pytest.mark.skipif(__import__("os").name != "posix", reason="POSIX file mode only")
+def test_prepare_compose_project_env_is_owner_only(tmp_path):
+    import stat
+
+    from praisonai_deploy.compose import prepare_compose_project
+
+    agents = tmp_path / "agents.yaml"
+    agents.write_text(
+        "agents:\n  - name: a\n    role: r\n    goal: g\n    backstory: b\n"
+        "deploy:\n  type: api\n",
+        encoding="utf-8",
+    )
+    project = prepare_compose_project(str(agents), project_dir=tmp_path / "work")
+    mode = stat.S_IMODE((project / ".env").stat().st_mode)
+    assert mode == 0o600
+
+
+def test_resolve_api_port_precedence(tmp_path):
+    from praisonai_deploy.compose import _resolve_api_port
+
+    # runtime env wins
+    assert _resolve_api_port({"API_PORT": "9100"}, tmp_path) == "9100"
+    # falls back to project .env
+    (tmp_path / ".env").write_text("API_PORT=9200\n", encoding="utf-8")
+    assert _resolve_api_port({}, tmp_path) == "9200"
+    # final default
+    assert _resolve_api_port({}, tmp_path / "missing") == "8005"
+
+
+def test_create_from_template_refuses_overwrite(tmp_path):
+    """Scaffolding must not silently clobber existing project files."""
+    from praisonai_deploy.starters import create_from_template, list_templates
+
+    templates = list_templates()
+    assert templates, "expected at least one starter template"
+    name = templates[0]["name"]
+
+    # First creation succeeds.
+    first = create_from_template(name, str(tmp_path))
+    assert first.success, first.error
+
+    # Second creation into the same dir must fail (conflict guard).
+    second = create_from_template(name, str(tmp_path))
+    assert not second.success
+    assert "already contains" in second.message
+
+    # force=True permits overwrite.
+    forced = create_from_template(name, str(tmp_path), force=True)
+    assert forced.success, forced.error
+
+
+def test_deployment_template_passes_helm_values_via_env():
+    """Helm init container must not interpolate values into Python source."""
+    chart = resolve_helm_chart_dir(AGENTS_API_CHART)
+    deployment = (chart / "templates" / "deployment.yaml").read_text(encoding="utf-8")
+    # Values are surfaced as env vars and read via os.environ, not inlined.
+    assert 'os.environ["PRAISONAI_AGENTS_FILE"]' in deployment
+    assert 'os.environ["PRAISONAI_SERVER_FILE"]' in deployment
+    assert "{{ .Values.agents.fileName }}" not in deployment
+    # DATABASE_URL carries the password via k8s env interpolation.
+    assert "$(POSTGRES_PASSWORD)" in deployment
+

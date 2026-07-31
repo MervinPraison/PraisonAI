@@ -27,8 +27,14 @@ def create_from_template(
     template: str,
     directory: str = ".",
     starters_root: Optional[str] = None,
+    force: bool = False,
 ) -> DeployResult:
-    """Copy a starter template into the target directory."""
+    """Copy a starter template into the target directory.
+
+    By default this refuses to overwrite existing files/directories in ``dest``
+    (so a hand-edited ``agents.yaml`` is never silently clobbered). Pass
+    ``force=True`` to replace conflicting entries.
+    """
     import shutil
 
     try:
@@ -53,6 +59,15 @@ def create_from_template(
 
         dest = Path(directory).expanduser().resolve()
         dest.mkdir(parents=True, exist_ok=True)
+
+        if not force:
+            conflicts = [item.name for item in src.iterdir() if (dest / item.name).exists()]
+            if conflicts:
+                return DeployResult(
+                    success=False,
+                    message=f"Target directory already contains: {', '.join(sorted(conflicts))}",
+                    error="Use an empty directory, remove the conflicting files, or pass --force to overwrite.",
+                )
 
         copied: List[str] = []
         for item in src.iterdir():

@@ -43,4 +43,4 @@ The CLI generates `api_server.py` in your project directory before `docker compo
 
 > Security: Postgres binds to `127.0.0.1` by default and has no default password. The CLI auto-generates a strong `POSTGRES_PASSWORD` in your project `.env` on first `compose up` when it is empty.
 
-See [`PRAISONAI_DEPLOY_MANIFEST.md`](../../../src/praisonai/tests/PRAISONAI_DEPLOY_MANIFEST.md) for package boundaries.
+See [`PRAISONAI_DEPLOY_MANIFEST.md`](../../../../praisonai/tests/PRAISONAI_DEPLOY_MANIFEST.md) for package boundaries.

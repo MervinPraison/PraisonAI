@@ -32,16 +32,25 @@ spec:
         - name: generate-api-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PRAISONAI_AGENTS_FILE
+              value: {{ .Values.agents.fileName | quote }}
+            - name: PRAISONAI_API_PORT
+              value: {{ .Values.api.port | quote }}
+            - name: PRAISONAI_SERVER_FILE
+              value: {{ .Values.api.serverFile | quote }}
           command:
             - python
             - -c
             - |
+              import os
               import pathlib
               from praisonai_deploy.api import generate_api_server_code
               from praisonai_deploy.models import APIConfig
-              agents = "/config/{{ .Values.agents.fileName }}"
-              code = generate_api_server_code(agents, APIConfig(host="0.0.0.0", port={{ .Values.api.port }}))
-              pathlib.Path("/work/{{ .Values.api.serverFile }}").write_text(code)
+              agents = "/config/" + os.environ["PRAISONAI_AGENTS_FILE"]
+              port = int(os.environ["PRAISONAI_API_PORT"])
+              code = generate_api_server_code(agents, APIConfig(host="0.0.0.0", port=port))
+              pathlib.Path("/work/" + os.environ["PRAISONAI_SERVER_FILE"]).write_text(code)
           volumeMounts:
             - name: agents-config
               mountPath: /config
@@ -67,13 +76,13 @@ spec:
                   key: {{ .Values.auth.secretKey }}
             {{- end }}
             {{- if .Values.postgres.enabled }}
-            - name: DATABASE_URL
-              value: postgresql://{{ .Values.postgres.username }}@{{ include "praisonai-agents-api.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "praisonai-agents-api.postgresSecretName" . }}
                   key: {{ .Values.postgres.auth.secretKey }}
+            - name: DATABASE_URL
+              value: postgresql://{{ .Values.postgres.username }}:$(POSTGRES_PASSWORD)@{{ include "praisonai-agents-api.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
             {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}

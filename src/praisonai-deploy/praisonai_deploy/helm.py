@@ -54,7 +54,7 @@ def helm_upgrade_install(
         for item in sets:
             cmd.extend(["--set", item])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             return DeployResult(
                 success=False,
