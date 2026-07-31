@@ -140,9 +140,12 @@ def start_api_server(
         # Generate server code
         server_code = generate_api_server_code(agents_file, config)
         
-        # Write to temporary file
+        # Write to a private, per-invocation temp directory (mode 0700) so the
+        # generated server file cannot be pre-created or replaced by another
+        # local user on a shared host before it is executed.
         import tempfile
-        server_file = os.path.join(tempfile.gettempdir(), f"praisonai_api_server.py")
+        server_dir = tempfile.mkdtemp(prefix="praisonai_api_")
+        server_file = os.path.join(server_dir, "praisonai_api_server.py")
         with open(server_file, 'w') as f:
             f.write(server_code)
         

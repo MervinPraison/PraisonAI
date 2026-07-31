@@ -109,7 +109,6 @@ class Deploy:
         api_config = self.config.api or APIConfig(
             host="0.0.0.0",
             port=docker_cfg.expose[0] if docker_cfg.expose else 8005,
-            auth_enabled=False,
         )
 
         save_dockerfile(self.agents_file, docker_cfg)
