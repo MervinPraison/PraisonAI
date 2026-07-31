@@ -12,6 +12,12 @@ from __future__ import annotations
 
 from praisonai_mcp._version import __version__
 
+# Canonical MCP tool/status naming constants, matching the SDK's ``list_*``
+# verb style and status vocabulary. Kept here so the approval-over-MCP and
+# session-listing follow-on work reference one source of truth.
+SESSION_LIST_TOOL = "list_sessions"
+STATUS_AWAITING_APPROVAL = "awaiting_approval"
+
 
 def serve_agents(
     agents,
@@ -70,4 +76,11 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["__version__", "MCPServer", "handle_mcp_command", "serve_agents"]
+__all__ = [
+    "__version__",
+    "MCPServer",
+    "handle_mcp_command",
+    "serve_agents",
+    "SESSION_LIST_TOOL",
+    "STATUS_AWAITING_APPROVAL",
+]
