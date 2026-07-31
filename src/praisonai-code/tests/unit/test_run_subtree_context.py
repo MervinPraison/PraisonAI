@@ -73,3 +73,27 @@ def test_run_wiring_noop_with_env_off_switch(monorepo, monkeypatch):
     _wire_subtree_context_hook(agent_config)
 
     assert "hooks" not in agent_config
+
+
+def _param_default(func, name):
+    import inspect
+
+    return inspect.signature(func).parameters[name].default
+
+
+def test_custom_agent_and_profiled_forward_no_rules():
+    """``--no-rules`` must reach the subtree hook on every non-interactive path.
+
+    ``_run_prompt`` already forwarded ``no_rules``; the custom-agent and
+    profiled paths dropped it, so ``praisonai run --no-rules --agent ...`` /
+    ``--profile`` still injected subtree rules. Guard that both now accept and
+    default ``no_rules`` so the opt-out propagates.
+    """
+    from praisonai_code.cli.commands.run import (
+        _run_custom_agent,
+        _run_prompt,
+        _run_prompt_profiled,
+    )
+
+    for fn in (_run_prompt, _run_custom_agent, _run_prompt_profiled):
+        assert _param_default(fn, "no_rules") is False
