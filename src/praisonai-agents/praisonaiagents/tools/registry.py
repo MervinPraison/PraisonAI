@@ -96,6 +96,11 @@ class ToolRegistry:
         # TTL cache for availability checks (tool_name -> (is_available, timestamp))
         self._availability_cache: Dict[str, tuple[bool, float]] = {}
         self._availability_cache_ttl: float = 30.0  # seconds
+        # Last successful probe timestamp per tool (tool_name -> timestamp).
+        # Used to serve last-good on a transient probe failure within the grace
+        # window so a flaky check doesn't strip a recently-healthy tool.
+        self._availability_last_success: Dict[str, float] = {}
+        self._availability_grace: float = 30.0  # seconds
     
     def register(
         self,
@@ -142,10 +147,19 @@ class ToolRegistry:
                 raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
             
             # Check for existing tool
-            if tool_name in self._tools and not overwrite:
+            existing = self._tools.get(tool_name)
+            if existing is not None and not overwrite:
                 logging.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
-            
+
+            # Replacing a different tool instance under the same name must not
+            # inherit the previous tool's availability state, otherwise a broken
+            # replacement could be served as available within the grace window on
+            # its very first (failing) probe. Evict the stale cache + last-success.
+            if existing is not None and existing.tool is not tool:
+                self._availability_cache.pop(tool_name, None)
+                self._availability_last_success.pop(tool_name, None)
+
             # Create tool entry with optional dynamic override and trust level
             entry = ToolEntry(
                 tool=tool,
@@ -175,8 +189,9 @@ class ToolRegistry:
         with self._lock:
             if name in self._tools:
                 del self._tools[name]
-                # Evict cache entry to prevent stale growth
+                # Evict cache entries to prevent stale growth
                 self._availability_cache.pop(name, None)
+                self._availability_last_success.pop(name, None)
                 return True
             return False
     
@@ -325,13 +340,26 @@ class ToolRegistry:
                         self._availability_cache[registered_name] = (is_available, current_time)
                         
                         if is_available:
+                            self._availability_last_success[registered_name] = current_time
                             available.append(entry.tool)
                         elif reason:
                             logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
-                        # Cache as unavailable on error
-                        self._availability_cache[registered_name] = (False, current_time)
+                        # A probe exception is inherently flaky (daemon busy, import
+                        # hiccup, network blip). Within the grace window of a recent
+                        # success, serve last-good and do NOT cache a durable negative
+                        # so a single transient failure can't strip a healthy tool.
+                        last_ok = self._availability_last_success.get(registered_name)
+                        if last_ok is not None and (current_time - last_ok) < self._availability_grace:
+                            logging.debug(
+                                f"Availability check failed for tool '{registered_name}' "
+                                f"but serving last-good within grace window: {e}"
+                            )
+                            available.append(entry.tool)
+                        else:
+                            logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
+                            # Sustained failure - cache as unavailable
+                            self._availability_cache[registered_name] = (False, current_time)
                 else:
                     # No availability check = always available
                     available.append(entry.tool)
@@ -472,6 +500,7 @@ class ToolRegistry:
         with self._lock:
             self._tools.clear()
             self._availability_cache.clear()
+            self._availability_last_success.clear()
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:
