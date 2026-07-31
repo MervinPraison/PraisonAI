@@ -9,7 +9,7 @@ kubectl create secret generic praisonai-api-auth \
   --from-literal=PRAISONAI_API_TOKEN="$(openssl rand -hex 16)"
 
 kubectl create secret generic praisonai-postgres-auth \
-  --from-literal=password="change-me"
+  --from-literal=password="$(openssl rand -base64 24)"
 
 helm install praisonai-api ./src/praisonai-deploy/infra/helm/praisonai-agents-api \
   --set auth.existingSecret=praisonai-api-auth \

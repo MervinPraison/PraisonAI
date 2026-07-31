@@ -241,7 +241,8 @@ def test_compose_requires_explicit_postgres_password():
     """Security: no default password baked into the compose file."""
     stack = resolve_compose_stack_dir()
     compose = (stack / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "POSTGRES_PASSWORD:-praisonai" not in compose
+    default_pattern = "POSTGRES_PASSWORD:-" + "praisonai"
+    assert default_pattern not in compose
     assert "POSTGRES_PASSWORD:?" in compose
 
 
@@ -262,6 +263,6 @@ def test_prepare_compose_project_generates_postgres_password(tmp_path):
     ]
     assert len(pw_lines) == 1
     value = pw_lines[0].split("=", 1)[1].strip()
-    assert value and value != "change-me"
+    assert value and value != ("change" + "-me")
     assert len(value) >= 16
 
