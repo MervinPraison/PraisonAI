@@ -62,6 +62,34 @@ RATE_LIMIT_WINDOW = 3600
 active_connections = 0
 client_ips = defaultdict(list)
 
+
+def _refresh_env_globals() -> None:
+    """Re-read env-derived config into module globals.
+
+    These globals are captured once at import. When ``.env`` is loaded later
+    (e.g. explicitly in ``main()``), the request-time handlers would otherwise
+    keep reading the stale import-time values. Refreshing them keeps a
+    ``.env``-only ``OPENAI_API_KEY`` / ``CALL_SERVER_TOKEN`` / rate-limit
+    working, matching the pre-existing import-time ``load_dotenv`` behaviour.
+    """
+    global OPENAI_API_KEY, PORT, NGROK_AUTH_TOKEN, PUBLIC
+    global CALL_SERVER_TOKEN, MAX_CONCURRENT_CONNECTIONS, MAX_REQUESTS_PER_WINDOW
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    PORT = int(os.getenv('PORT', 8090))
+    NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
+    PUBLIC = os.getenv('PUBLIC', 'false').lower() == 'true'
+    CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
+    MAX_CONCURRENT_CONNECTIONS = int(os.getenv('MAX_CONCURRENT_CONNECTIONS', '5'))
+    MAX_REQUESTS_PER_WINDOW = int(os.getenv('MAX_REQUESTS_PER_WINDOW', '100'))
+    # The included n8n invoke router captures CALL_SERVER_TOKEN in its own
+    # module at import; refresh it there too so its auth stays consistent.
+    try:
+        from . import agent_invoke as _agent_invoke
+        _agent_invoke.CALL_SERVER_TOKEN = CALL_SERVER_TOKEN
+    except Exception:
+        pass
+
+
 app = FastAPI()
 
 # Set up logging
@@ -396,9 +424,12 @@ def main(args=None):
     """Run the Praison AI Call Server."""
     # The ``praisonai call`` entry point runs a real server, so honour the
     # user's ``.env`` here (explicit run-time load, not an import-time side
-    # effect). Values captured at import are refreshed after loading.
+    # effect). Module globals were captured at import — before this load — so
+    # refresh the ones consumed at request time, otherwise a ``.env``-only
+    # ``OPENAI_API_KEY``/``CALL_SERVER_TOKEN``/rate-limit would be ignored.
     from dotenv import load_dotenv
     load_dotenv()
+    _refresh_env_globals()
     default_port = int(os.getenv('PORT', PORT))
     use_public_env = os.getenv('PUBLIC', 'false').lower() == 'true'
 

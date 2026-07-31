@@ -92,3 +92,35 @@ class TestAgentOSChatSessionIsolation:
         client.post(f"{prefix}/chat", json={"message": "b", "session_id": "s2"})
         # The shared template's history must stay empty; each request used a clone.
         assert template.chat_history == []
+
+    def test_agent_with_handoffs_is_not_cloned(self):
+        # ``clone_for_channel`` drops handoffs, so an agent configured with
+        # delegation must NOT be cloned — it stays on the shared template to
+        # preserve its handoff behaviour.
+        pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+        from praisonaiagents import Agent
+        from praisonai import AgentOS
+
+        specialist = Agent(name="specialist", instructions="Specialise")
+        template = Agent(
+            name="router", instructions="Route", handoffs=[specialist]
+        )
+        assert template.handoffs  # sanity: handoffs configured
+
+        seen = []
+
+        async def _fake_achat(self, message):
+            seen.append(id(self))
+            return f"echo:{message}"
+
+        type(template).achat = _fake_achat
+
+        os_app = AgentOS(agents=[template])
+        client = TestClient(os_app.get_app())
+        prefix = os_app.config.api_prefix
+
+        r = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "x"})
+        assert r.status_code == 200, r.text
+        # The shared template (with handoffs intact) handled the request.
+        assert seen[-1] == id(template)

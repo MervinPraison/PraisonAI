@@ -205,7 +205,12 @@ class AgentOS:
                 _supports_session_isolation,
                 _clone_agent,
             )
-            if _supports_session_isolation(template):
+            # ``clone_for_channel`` intentionally drops handoffs (nested Agents
+            # can't be safely deep-copied and would share RLocks). To avoid
+            # silently losing configured delegation, agents with handoffs stay
+            # on the shared template rather than being cloned.
+            has_handoffs = bool(getattr(template, "handoffs", None))
+            if _supports_session_isolation(template) and not has_handoffs:
                 try:
                     agent = _clone_agent(template)
                 except Exception as e:
