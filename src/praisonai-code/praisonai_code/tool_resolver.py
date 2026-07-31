@@ -849,7 +849,12 @@ class ToolResolver:
         except Exception:  # pragma: no cover — defensive
             available = []
 
-        suggestions = difflib.get_close_matches(clean, available, n=1, cutoff=0.7)
+        # Exclude the exact name from typo candidates: a built-in mapped tool
+        # can be listed by _discover_available() yet still fail to load (missing
+        # optional dependency), which would otherwise yield a useless
+        # "Did you mean '<same name>'?" instead of an install hint (#3553).
+        candidates = [candidate for candidate in available if candidate != clean]
+        suggestions = difflib.get_close_matches(clean, candidates, n=1, cutoff=0.7)
         if suggestions:
             return f"'{name}' not found. Did you mean '{suggestions[0]}'?"
 

@@ -247,6 +247,43 @@ class TestToolPreflight:
 
         _preflight_tools(str(cfg), strict_tools=True)
 
+    def test_preflight_loads_persisted_env_before_resolving(
+        self, tmp_path, monkeypatch
+    ):
+        """~/.praisonai/.env is loaded before resolution so a var set there
+        (e.g. PRAISONAI_ALLOW_LOCAL_TOOLS) is visible to the resolver — the
+        gate runs before GatewayHandler.start() does the same load (#3553)."""
+        from praisonai_bot.cli.commands import gateway as gw_cmd
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("PRAISONAI_PREFLIGHT_ENV_MARKER=1\n")
+        monkeypatch.setenv("PRAISONAI_ENV_FILE", str(env_file))
+        monkeypatch.delenv("PRAISONAI_PREFLIGHT_ENV_MARKER", raising=False)
+
+        cfg = tmp_path / "gateway.yaml"
+        cfg.write_text("agents:\n  a:\n    instructions: hi\n")
+
+        import os
+
+        gw_cmd._preflight_tools(str(cfg), strict_tools=True)
+        assert os.environ.get("PRAISONAI_PREFLIGHT_ENV_MARKER") == "1"
+
+    def test_describe_unresolved_does_not_suggest_same_name(self):
+        """A mapped-but-unloadable tool (returns None) yields an install/generic
+        hint, never a useless 'Did you mean <same name>?' (#3553)."""
+        from praisonai_code.tool_resolver import ToolResolver
+
+        resolver = ToolResolver()
+        available = list(resolver.list_available().keys())
+        if not available:
+            import pytest
+
+            pytest.skip("no discoverable tools in this environment")
+
+        name = available[0]
+        msg = resolver.describe_unresolved(name)
+        assert f"Did you mean '{name}'" not in msg
+
 
 class TestToolResolverIntegration:
     """Integration tests for ToolResolver with gateway."""

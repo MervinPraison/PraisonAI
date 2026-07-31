@@ -575,6 +575,17 @@ def _preflight_tools(config: str, strict_tools: bool = True) -> None:
     if cfg.get("strict_tools") is False:
         strict_tools = False
 
+    # Load ~/.praisonai/.env before resolving so a local tools.py enabled via
+    # PRAISONAI_ALLOW_LOCAL_TOOLS in that file is not falsely rejected — the
+    # gate runs before GatewayHandler.start() does the same load, and the
+    # runtime resolver would accept it (#3553). Idempotent; existing env wins.
+    try:
+        from praisonai_bot.cli.features.gateway import _load_praisonai_env_file
+
+        _load_praisonai_env_file()
+    except Exception:  # pragma: no cover — never block start on env-load
+        pass
+
     try:
         from praisonai_bot._code_bridge import import_code_module
 
