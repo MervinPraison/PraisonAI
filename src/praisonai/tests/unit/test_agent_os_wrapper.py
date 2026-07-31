@@ -47,7 +47,7 @@ class TestAgentAppNoDeprecationWarning:
 class TestAgentOSChatSessionIsolation:
     """Gap 1: /chat must isolate a per-request agent, not share one instance."""
 
-    def _client(self):
+    def _client(self, monkeypatch):
         pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
         from praisonaiagents import Agent
@@ -59,41 +59,42 @@ class TestAgentOSChatSessionIsolation:
         # avoid any real LLM call by stubbing achat on every clone.
         seen = []
 
-        async def _fake_achat(self, message):
+        async def _fake_achat(self, message, *args, **kwargs):
             seen.append((id(self), getattr(self, "_session_id", None), list(self.chat_history)))
             self.chat_history.append({"role": "user", "content": message})
             return f"echo:{message}"
 
-        # Bind the stub on the class so clones inherit it.
-        type(template).achat = _fake_achat
+        # Patch the stub on the class (clones inherit it) via monkeypatch so it
+        # is restored automatically after the test and cannot leak globally.
+        monkeypatch.setattr(type(template), "achat", _fake_achat, raising=False)
 
         os_app = AgentOS(agents=[template])
         client = TestClient(os_app.get_app())
         prefix = os_app.config.api_prefix
         return client, template, seen, prefix
 
-    def test_chat_clones_agent_per_request(self):
-        client, template, seen, prefix = self._client()
+    def test_chat_clones_agent_per_request(self, monkeypatch):
+        client, template, seen, prefix = self._client(monkeypatch)
         r1 = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "alice"})
         assert r1.status_code == 200, r1.text
         # The handling agent must not be the shared template instance.
         assert seen[-1][0] != id(template)
 
-    def test_chat_binds_session_id(self):
-        client, template, seen, prefix = self._client()
+    def test_chat_binds_session_id(self, monkeypatch):
+        client, template, seen, prefix = self._client(monkeypatch)
         r = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "bob"})
         assert r.status_code == 200, r.text
         assert seen[-1][1] == "bob"
         assert r.json()["session_id"] == "bob"
 
-    def test_template_history_not_mutated_across_requests(self):
-        client, template, seen, prefix = self._client()
+    def test_template_history_not_mutated_across_requests(self, monkeypatch):
+        client, template, seen, prefix = self._client(monkeypatch)
         client.post(f"{prefix}/chat", json={"message": "a", "session_id": "s1"})
         client.post(f"{prefix}/chat", json={"message": "b", "session_id": "s2"})
         # The shared template's history must stay empty; each request used a clone.
         assert template.chat_history == []
 
-    def test_agent_with_handoffs_is_not_cloned(self):
+    def test_agent_with_handoffs_is_not_cloned(self, monkeypatch):
         # ``clone_for_channel`` drops handoffs, so an agent configured with
         # delegation must NOT be cloned — it stays on the shared template to
         # preserve its handoff behaviour.
@@ -110,11 +111,11 @@ class TestAgentOSChatSessionIsolation:
 
         seen = []
 
-        async def _fake_achat(self, message):
+        async def _fake_achat(self, message, *args, **kwargs):
             seen.append(id(self))
             return f"echo:{message}"
 
-        type(template).achat = _fake_achat
+        monkeypatch.setattr(type(template), "achat", _fake_achat, raising=False)
 
         os_app = AgentOS(agents=[template])
         client = TestClient(os_app.get_app())
