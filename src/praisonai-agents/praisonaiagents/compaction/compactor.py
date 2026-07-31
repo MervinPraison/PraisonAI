@@ -459,6 +459,58 @@ class ContextCompactor:
             return self.tool_pruner.prune(messages, self.config.max_tool_result_size)
         return messages, 0
     
+    def _snap_to_pair_boundary(
+        self,
+        messages: List[Dict[str, Any]],
+        cut_index: int,
+    ) -> int:
+        """Move ``cut_index`` so it never splits an assistant ``tool_calls``
+        message from its matching ``tool`` result.
+
+        ``messages[:cut_index]`` is the older segment that gets dropped or
+        summarised; ``messages[cut_index:]`` is the recent segment that is
+        kept verbatim. If the boundary would leave a ``tool`` result at the
+        head of the kept segment whose originating assistant ``tool_calls``
+        message sits in the older segment (or vice versa), strict providers
+        reject the transcript with a 400. This snaps the boundary *outward*
+        (to a lower index) so the whole pair is kept together on the recent
+        side, which is the safe direction for the provider contract.
+
+        Returns a boundary index in ``[0, len(messages)]``.
+        """
+        if cut_index <= 0 or cut_index >= len(messages):
+            return max(0, min(cut_index, len(messages)))
+
+        # Collect the tool_call ids produced by assistant messages that fall
+        # in the older (dropped/summarised) segment. Any tool result in the
+        # kept segment referencing one of these would be orphaned.
+        def _call_ids(msg: Dict[str, Any]) -> set:
+            ids = set()
+            for tc in (msg.get("tool_calls") or []):
+                if isinstance(tc, dict) and tc.get("id"):
+                    ids.add(tc["id"])
+            return ids
+
+        # Walk the boundary outward while the first kept message is an orphaned
+        # tool result, i.e. its tool_call_id was emitted before the cut.
+        older_call_ids = set()
+        for msg in messages[:cut_index]:
+            older_call_ids |= _call_ids(msg)
+
+        while cut_index > 0:
+            head = messages[cut_index]
+            head_response_id = head.get("tool_call_id")
+            if head.get("role") == "tool" and head_response_id in older_call_ids:
+                # Pull the boundary back to include the preceding message; keep
+                # going until the emitting assistant tool_calls message is on
+                # the kept side too.
+                cut_index -= 1
+                older_call_ids -= _call_ids(messages[cut_index])
+            else:
+                break
+
+        return cut_index
+
     def _truncate(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Truncate oldest messages."""
         result = []
@@ -476,25 +528,49 @@ class ContextCompactor:
         # Always keep system messages
         result.extend(system_msgs)
         
-        # Keep recent messages
-        recent = other_msgs[-self.preserve_recent:] if other_msgs else []
+        # Keep recent messages. Snap the boundary outward so a tool result at
+        # the head of the kept window is never orphaned from its assistant
+        # tool_calls message (strict providers 400 on an orphaned tool result).
+        if other_msgs and len(other_msgs) > self.preserve_recent:
+            cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            cut = 0
+        recent = other_msgs[cut:]
         
         # Add recent messages
         result.extend(recent)
         
-        # If still over limit, truncate more
+        # If still over limit, truncate more. Drop the whole leading tool pair
+        # together (an assistant tool_calls message plus its tool results) so we
+        # never leave an orphaned tool result at the head of the kept window.
         while self.count_total_tokens(result) > self.target_tokens and len(result) > 1:
-            # Remove oldest message (respecting preserve_system setting)
-            removed = False
+            # Find the oldest droppable (non-system when preserved) message.
+            start = None
             for i, msg in enumerate(result):
-                # Skip system messages only if preserve_system is True
                 if not (self.preserve_system and msg.get("role") == "system"):
-                    result.pop(i)
-                    removed = True
+                    start = i
                     break
-            if not removed:
+            if start is None:
                 # Only system messages remain but still over budget — stop to avoid infinite loop
                 break
+
+            # If the oldest droppable message emits tool_calls, drop it together
+            # with all of its immediately-following tool results.
+            drop_ids = set()
+            for tc in (result[start].get("tool_calls") or []):
+                if isinstance(tc, dict) and tc.get("id"):
+                    drop_ids.add(tc["id"])
+            end = start + 1
+            while (
+                drop_ids
+                and end < len(result)
+                and result[end].get("role") == "tool"
+                and result[end].get("tool_call_id") in drop_ids
+            ):
+                end += 1
+            del result[start:end]
         
         return result
     
@@ -507,20 +583,25 @@ class ContextCompactor:
             if self.preserve_system and msg.get("role") == "system":
                 result.append(msg)
         
-        # Add messages from end until we hit target
+        # Add messages from end until we hit target. Track the boundary index
+        # into non_system so we can snap it to keep tool pairs together.
         non_system = [m for m in messages if m.get("role") != "system"]
         
+        kept = 0
+        window: List[Dict[str, Any]] = []
         for msg in reversed(non_system):
-            if self.count_total_tokens(result + [msg]) <= self.target_tokens:
-                result.insert(len([m for m in result if m.get("role") == "system"]), msg)
+            if self.count_total_tokens(result + [msg] + window) <= self.target_tokens:
+                window.insert(0, msg)
+                kept += 1
             else:
                 break
         
-        # Ensure messages are in order
-        system_msgs = [m for m in result if m.get("role") == "system"]
-        other_msgs = [m for m in result if m.get("role") != "system"]
+        # Snap the boundary outward so a tool result kept at the window head is
+        # not orphaned from its assistant tool_calls left outside the window.
+        cut = self._snap_to_pair_boundary(non_system, len(non_system) - kept)
+        window = non_system[cut:]
         
-        return system_msgs + other_msgs
+        return result + window
     
     def _summarize(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Summarize old messages (simplified version)."""
@@ -532,11 +613,16 @@ class ContextCompactor:
         
         result.extend(system_msgs)
         
-        # Keep recent messages
-        recent = other_msgs[-self.preserve_recent:]
-        
-        # Summarize older messages
-        older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+        # Choose the recent/older boundary by count, then snap it so a
+        # tool_calls message and its result are never split across it.
+        if len(other_msgs) > self.preserve_recent:
+            cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            cut = 0
+        recent = other_msgs[cut:]
+        older = other_msgs[:cut]
         
         if older:
             # Create a simple summary
@@ -580,9 +666,17 @@ class ContextCompactor:
         
         result.extend(system_msgs)
         
-        # Keep recent messages intact
-        recent = other_msgs[-self.preserve_recent:]
-        older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+        # Keep recent messages intact. Snap the boundary so a tool_calls
+        # message and its result are pruned/kept together (prune only rewrites
+        # tool-result *content*, but a snapped boundary keeps intent consistent).
+        if len(other_msgs) > self.preserve_recent:
+            cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            cut = 0
+        recent = other_msgs[cut:]
+        older = other_msgs[:cut]
         
         # Prune older messages
         for msg in older:
@@ -665,8 +759,15 @@ class ContextCompactor:
         
         result.extend(system_msgs)
         
-        # Keep recent messages
-        recent = other_msgs[-self.preserve_recent:]
+        # Keep recent messages, snapping the boundary so tool_calls/result
+        # pairs are never split across the recent/older divide.
+        if len(other_msgs) > self.preserve_recent:
+            recent_cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            recent_cut = 0
+        recent = other_msgs[recent_cut:]
         
         # Determine what to summarize
         total_original_messages = len(messages)
@@ -678,13 +779,14 @@ class ContextCompactor:
             messages_since_summary = total_original_messages - self._previous_summary_global_idx
             new_older_messages = max(0, messages_since_summary - self.preserve_recent)
             if new_older_messages > 0:
-                to_summarize = other_msgs[-messages_since_summary:-self.preserve_recent]
+                to_summarize = other_msgs[-messages_since_summary:recent_cut]
             else:
                 to_summarize = []
             self._used_previous_summary = True
         else:
-            # Fresh summary: summarize all older messages
-            to_summarize = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+            # Fresh summary: summarize all older messages (kept in sync with the
+            # snapped recent boundary so a tool pair is never split)
+            to_summarize = other_msgs[:recent_cut]
             self._used_previous_summary = False
         
         if to_summarize or self._previous_summary:
@@ -775,8 +877,15 @@ class ContextCompactor:
         
         result.extend(system_msgs)
         
-        # Keep recent messages
-        recent = other_msgs[-self.preserve_recent:]
+        # Keep recent messages, snapping the boundary so tool_calls/result
+        # pairs are never split across the recent/older divide.
+        if len(other_msgs) > self.preserve_recent:
+            recent_cut = self._snap_to_pair_boundary(
+                other_msgs, len(other_msgs) - self.preserve_recent
+            )
+        else:
+            recent_cut = 0
+        recent = other_msgs[recent_cut:]
         
         # Determine what to summarize based on iterative settings
         total_original_messages = len(messages)
@@ -787,13 +896,14 @@ class ContextCompactor:
             messages_since_summary = total_original_messages - self._previous_summary_global_idx
             new_older_messages = max(0, messages_since_summary - self.preserve_recent)
             if new_older_messages > 0:
-                older = other_msgs[-messages_since_summary:-self.preserve_recent]
+                older = other_msgs[-messages_since_summary:recent_cut]
             else:
                 older = []
             self._used_previous_summary = True
         else:
-            # Fresh summary: summarize all older messages
-            older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+            # Fresh summary: summarize all older messages (kept in sync with the
+            # snapped recent boundary so a tool pair is never split)
+            older = other_msgs[:recent_cut]
             self._used_previous_summary = False
         
         if older and self.llm_summarize_fn:

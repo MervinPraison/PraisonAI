@@ -580,5 +580,99 @@ class TestCompactionSummaryDurability:
         assert result.summary == ""
 
 
+class TestToolPairPreservation:
+    """Compaction must never split an assistant tool_calls message from its
+    matching tool result (Issue #3559): strict providers 400 on an orphaned
+    tool message.
+    """
+
+    @staticmethod
+    def _has_orphan_tool(messages):
+        """Return True if any tool result lacks a preceding tool_calls id or
+        any tool_calls id lacks a following tool result."""
+        call_ids = set()
+        response_ids = set()
+        for m in messages:
+            for tc in (m.get("tool_calls") or []):
+                if isinstance(tc, dict) and tc.get("id"):
+                    call_ids.add(tc["id"])
+            if m.get("tool_call_id"):
+                response_ids.add(m["tool_call_id"])
+        return bool(response_ids - call_ids) or bool(call_ids - response_ids)
+
+    @staticmethod
+    def _conversation_with_pairs():
+        """Long conversation where a tool pair sits right on the boundary."""
+        msgs = [{"role": "system", "content": "system prompt"}]
+        for i in range(6):
+            msgs.append({"role": "user", "content": f"user turn {i} with some content"})
+            msgs.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": f"call_{i}", "type": "function",
+                                "function": {"name": "lookup", "arguments": "{}"}}],
+            })
+            msgs.append({"role": "tool", "tool_call_id": f"call_{i}",
+                         "content": f"tool result {i} " + "x" * 80})
+            msgs.append({"role": "assistant", "content": f"assistant reply {i}"})
+        return msgs
+
+    def test_snap_boundary_moves_off_orphan_tool(self):
+        compactor = ContextCompactor(max_tokens=100)
+        msgs = [
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"id": "call_1", "function": {"name": "f", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "res"},
+            {"role": "user", "content": "next"},
+        ]
+        # A boundary of 1 would keep the tool result but drop its tool_calls.
+        assert compactor._snap_to_pair_boundary(msgs, 1) == 0
+        # A boundary that keeps the whole pair is left untouched.
+        assert compactor._snap_to_pair_boundary(msgs, 2) == 2
+
+    def test_sliding_window_preserves_pairs(self):
+        # preserve_recent=2 lands the boundary between a tool result and its
+        # emitting assistant tool_calls in the original (buggy) code.
+        compactor = ContextCompactor(max_tokens=200, target_tokens=150,
+                                     strategy=CompactionStrategy.SLIDING,
+                                     preserve_recent=2)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+    def test_summarize_preserves_pairs(self):
+        compactor = ContextCompactor(max_tokens=200, target_tokens=150,
+                                     strategy=CompactionStrategy.SUMMARIZE,
+                                     preserve_recent=2)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+    def test_prune_preserves_pairs(self):
+        compactor = ContextCompactor(max_tokens=200, target_tokens=150,
+                                     strategy=CompactionStrategy.PRUNE,
+                                     preserve_recent=2)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+    def test_truncate_preserves_pairs(self):
+        # TRUNCATE is the default strategy: it must also keep tool pairs intact,
+        # both at the recent-window boundary and while dropping older messages
+        # one pair at a time to hit the target budget.
+        compactor = ContextCompactor(max_tokens=200, target_tokens=150,
+                                     strategy=CompactionStrategy.TRUNCATE,
+                                     preserve_recent=2)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+    def test_truncate_drops_tool_pair_together(self):
+        # A tight budget forces the truncate loop to shed older messages. The
+        # assistant tool_calls message and its result must be dropped together,
+        # never leaving an orphaned tool result at the head of the window.
+        compactor = ContextCompactor(max_tokens=50, target_tokens=30,
+                                     strategy=CompactionStrategy.TRUNCATE,
+                                     preserve_recent=4)
+        compacted, _ = compactor.compact(self._conversation_with_pairs())
+        assert not self._has_orphan_tool(compacted)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
