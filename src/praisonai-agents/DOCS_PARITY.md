@@ -27,13 +27,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2736 |
 | ✅ Bots | 7 | 31 | 12500 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 119 | 34621 |
+| ✅ CLI | 5 | 120 | 34810 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 4031 |
+| ✅ Code Execution | 2 | 14 | 4224 |
 | ✅ Conditions | 1 | 3 | 1179 |
-| ✅ Configuration | 3 | 7 | 2809 |
-| ✅ Context Management | 16 | 34 | 13258 |
+| ✅ Configuration | 3 | 8 | 2997 |
+| ✅ Context Management | 16 | 34 | 13272 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -68,9 +68,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Reflection | 3 | 3 | 680 |
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 6 | 2766 |
-| ✅ Security | 1 | 3 | 2970 |
-| ✅ Sessions | 4 | 13 | 5302 |
+| ✅ Sandbox | 5 | 6 | 2800 |
+| ✅ Security | 1 | 3 | 2974 |
+| ✅ Sessions | 4 | 13 | 5403 |
 | ✅ Skills | 6 | 14 | 5346 |
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
