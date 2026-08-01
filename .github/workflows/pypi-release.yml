@@ -147,14 +147,28 @@ jobs:
       # PyPI API token auth: username __token__, password = pypi-… token (see pypi.org/help/#invalid-auth)
       UV_PUBLISH_USERNAME: __token__
       UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      # GH_TOKEN is NOT set here: it is a GitHub App installation token minted in
+      # "Generate GitHub App token" and exported via $GITHUB_ENV, so releases are
+      # authored by praisonai-triage-agent[bot] rather than MervinPraison.
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Checkout main
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
+          # Do not bake the token into .git/config: an http.extraheader would
+          # outrank the remote URL set in "Configure git" and pin this first
+          # (1h) token, defeating the refresh before the wrapper release.
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
@@ -165,10 +179,19 @@ jobs:
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
 
       - name: Configure git
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
         run: |
-          git config user.name "MervinPraison"
-          git config user.email "454862+MervinPraison@users.noreply.github.com"
-          gh auth setup-git
+          set -euo pipefail
+          git config user.name "praisonai-triage-agent[bot]"
+          git config user.email "272766704+praisonai-triage-agent[bot]@users.noreply.github.com"
+          # persist-credentials:false left the remote unauthenticated; push auth
+          # comes from the app token embedded here (masked in logs, and the
+          # token dies with the runner).
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${REPO}.git"
+          echo "GH_TOKEN=${APP_TOKEN}" >> "$GITHUB_ENV"
+          GH_TOKEN="${APP_TOKEN}" gh auth setup-git
 
       - name: Release summary
         run: |
@@ -610,19 +633,6 @@ jobs:
             sleep "$INTERVAL"
           done
 
-      - name: Commit agents version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_agents != true &&
-          steps.pypi_exists.outputs.skip_agents != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-agents/pyproject.toml src/praisonai-agents/uv.lock
-          git diff --cached --quiet && { echo "No agents files to commit"; exit 0; }
-          git commit -m "Bump praisonaiagents to ${{ steps.versions.outputs.agents_version }}"
-          git pull --rebase origin main
-          git push origin main
-
       - name: Publish praisonai-code
         if: >-
           inputs.dry_run != true &&
@@ -679,19 +689,6 @@ jobs:
             echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
             sleep "$INTERVAL"
           done
-
-      - name: Commit praisonai-code version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_code != true &&
-          steps.pypi_exists.outputs.skip_code != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-code/pyproject.toml src/praisonai-code/uv.lock src/praisonai-code/praisonai_code/__init__.py
-          git diff --cached --quiet && { echo "No code files to commit"; exit 0; }
-          git commit -m "Bump praisonai-code to ${{ steps.versions.outputs.code_version }}"
-          git pull --rebase origin main
-          git push origin main
 
       - name: Publish praisonai-bot
         if: >-
@@ -750,19 +747,6 @@ jobs:
             sleep "$INTERVAL"
           done
 
-      - name: Commit praisonai-bot version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_bot != true &&
-          steps.pypi_exists.outputs.skip_bot != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-bot/pyproject.toml src/praisonai-bot/uv.lock src/praisonai-bot/praisonai_bot/_version.py
-          git diff --cached --quiet && { echo "No bot files to commit"; exit 0; }
-          git commit -m "Bump praisonai-bot to ${{ steps.versions.outputs.bot_version }}"
-          git pull --rebase origin main
-          git push origin main
-
       - name: Publish praisonai-train
         if: >-
           inputs.dry_run != true &&
@@ -819,19 +803,6 @@ jobs:
             echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
             sleep "$INTERVAL"
           done
-
-      - name: Commit praisonai-train version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_train != true &&
-          steps.pypi_exists.outputs.skip_train != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-train/pyproject.toml src/praisonai-train/uv.lock src/praisonai-train/praisonai_train/_version.py
-          git diff --cached --quiet && { echo "No train files to commit"; exit 0; }
-          git commit -m "Bump praisonai-train to ${{ steps.versions.outputs.train_version }}"
-          git pull --rebase origin main
-          git push origin main
 
       - name: Publish praisonai-browser
         if: >-
@@ -890,19 +861,6 @@ jobs:
             sleep "$INTERVAL"
           done
 
-      - name: Commit praisonai-browser version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_browser != true &&
-          steps.pypi_exists.outputs.skip_browser != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-browser/pyproject.toml src/praisonai-browser/uv.lock src/praisonai-browser/praisonai_browser/_version.py
-          git diff --cached --quiet && { echo "No browser files to commit"; exit 0; }
-          git commit -m "Bump praisonai-browser to ${{ steps.versions.outputs.browser_version }}"
-          git pull --rebase origin main
-          git push origin main
-
       - name: Publish praisonai-mcp
         if: >-
           inputs.dry_run != true &&
@@ -959,19 +917,6 @@ jobs:
             echo "⏳ Waiting for ${PACKAGE}==${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
             sleep "$INTERVAL"
           done
-
-      - name: Commit praisonai-mcp version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_mcp != true &&
-          steps.pypi_exists.outputs.skip_mcp != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-mcp/pyproject.toml src/praisonai-mcp/uv.lock src/praisonai-mcp/praisonai_mcp/_version.py
-          git diff --cached --quiet && { echo "No mcp files to commit"; exit 0; }
-          git commit -m "Bump praisonai-mcp to ${{ steps.versions.outputs.mcp_version }}"
-          git pull --rebase origin main
-          git push origin main
 
       - name: Publish praisonai-sandbox
         if: >-
@@ -1030,19 +975,6 @@ jobs:
             sleep "$INTERVAL"
           done
 
-      - name: Commit praisonai-sandbox version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_sandbox != true &&
-          steps.pypi_exists.outputs.skip_sandbox != 'true'
-        run: |
-          set -euo pipefail
-          git add src/praisonai-sandbox/pyproject.toml src/praisonai-sandbox/uv.lock src/praisonai-sandbox/praisonai_sandbox/_version.py
-          git diff --cached --quiet && { echo "No sandbox files to commit"; exit 0; }
-          git commit -m "Bump praisonai-sandbox to ${{ steps.versions.outputs.sandbox_version }}"
-          git pull --rebase origin main
-          git push origin main
-
       - name: Publish praisonai-deploy
         if: >-
           inputs.dry_run != true &&
@@ -1100,18 +1032,31 @@ jobs:
             sleep "$INTERVAL"
           done
 
-      - name: Commit praisonai-deploy version bump
-        if: >-
-          inputs.dry_run != true &&
-          inputs.skip_deploy != true &&
-          steps.pypi_exists.outputs.skip_deploy != 'true'
+      # All per-package version bumps are still uncommitted at this point: the
+      # wrapper release below stages every one of them (bump_and_release.py's
+      # release_files list) into a SINGLE "Release v…" commit.
+
+      # App tokens expire after 1h and this job can exceed that (9 packages ×
+      # up to a 600s PyPI wait). Re-mint so the final commit/tag/push/release
+      # never runs on an expired token.
+      - name: Refresh GitHub App token
+        id: app-token-final
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Use refreshed GitHub App token
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        env:
+          APP_TOKEN: ${{ steps.app-token-final.outputs.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git add src/praisonai-deploy/pyproject.toml src/praisonai-deploy/uv.lock src/praisonai-deploy/praisonai_deploy/_version.py
-          git diff --cached --quiet && { echo "No deploy files to commit"; exit 0; }
-          git commit -m "Bump praisonai-deploy to ${{ steps.versions.outputs.deploy_version }}"
-          git pull --rebase origin main
-          git push origin main
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${REPO}.git"
+          echo "GH_TOKEN=${APP_TOKEN}" >> "$GITHUB_ENV"
 
       - name: Bump and release wrapper
         if: >-
@@ -1129,7 +1074,7 @@ jobs:
             --mcp-pin "${{ steps.versions.outputs.mcp_version }}" \
             --sandbox-pin "${{ steps.versions.outputs.sandbox_version }}" \
             --deploy-pin "${{ steps.versions.outputs.deploy_version }}" \
-            --wait --max-wait 600 --no-add-all
+            --wait --max-wait 600 --no-add-all --force
 
       - name: Publish praisonai wrapper to PyPI
         if: >-
@@ -1215,3 +1160,20 @@ jobs:
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
             echo "✅ praisonai==${WRAPPER}"
           fi
+
+      # Safety net. On a clean run the wrapper's "Release v…" commit already
+      # carries every bump and this is a no-op. It only fires when the single
+      # commit could not happen: a package publish failed midway (those versions
+      # are already live on PyPI, so the bumps must not be lost), skip_wrapper
+      # was set, or the wrapper itself failed.
+      - name: Persist any uncommitted version bumps
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        run: |
+          set -euo pipefail
+          # -u = tracked modifications only; uv build output under dist/ is
+          # untracked and stays out of the commit.
+          git add -u
+          git diff --cached --quiet && { echo "Nothing left to commit"; exit 0; }
+          git commit -m "chore(release): persist version bumps [skip ci]"
+          git pull --rebase origin main
+          git push origin main
