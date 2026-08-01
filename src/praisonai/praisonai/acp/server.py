@@ -416,9 +416,10 @@ class ACPServer:
             if hasattr(agent, "achat"):
                 response = await agent.achat(message)
             elif hasattr(agent, "chat"):
-                # Run sync chat in executor
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.chat, message)
+                # Run sync chat off the event loop. ``asyncio.to_thread`` is the
+                # documented modern primitive (``get_event_loop()`` is deprecated
+                # inside a running coroutine since Python 3.10).
+                response = await asyncio.to_thread(agent.chat, message)
             else:
                 response = "Agent does not support chat interface"
             

@@ -271,6 +271,56 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
     return agent
 
 
+_APPLYABLE_OVERRIDES = frozenset({
+    "instructions", "goal", "role", "backstory",
+    "llm", "max_iter",
+    "verbose", "markdown",
+})
+
+
+class AgentConfigError(ValueError):
+    """Raised when an agent_config override is unsupported or cannot be applied."""
+
+
+def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> None:
+    """Apply per-request overrides to an isolated agent clone.
+
+    Only whitelisted fields are settable. An unknown or unsettable key raises
+    ``AgentConfigError`` so the caller learns their override wasn't honoured
+    instead of silently drifting. Callers translate this into a 400 response.
+
+    Refuses to mutate a shared, non-isolated agent (e.g. a plain mock that took
+    the shared-instance fallback): writing overrides onto a registry-shared
+    object would leak this request's config into subsequent/concurrent requests.
+    In that case the override is rejected rather than silently applied globally.
+    """
+    if not agent_config:
+        return
+    if not _supports_session_isolation(agent):
+        raise AgentConfigError(
+            "agent_config overrides require a session-isolatable Agent; this "
+            "agent is shared across requests and cannot be safely overridden "
+            "per request."
+        )
+    unknown = set(agent_config) - _APPLYABLE_OVERRIDES
+    if unknown:
+        raise AgentConfigError(
+            f"Unsupported agent_config override(s): {sorted(unknown)}. "
+            f"Allowed: {sorted(_APPLYABLE_OVERRIDES)}"
+        )
+    for key, value in agent_config.items():
+        if not hasattr(agent, key):
+            raise AgentConfigError(
+                f"Agent has no attribute {key!r}; cannot override."
+            )
+        try:
+            setattr(agent, key, value)
+        except (AttributeError, TypeError) as e:
+            raise AgentConfigError(
+                f"Cannot override {key!r} on this agent: {e}"
+            )
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -339,15 +389,17 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 detail=f"Agent '{agent_id}' not found"
             )
         
+        # Apply per-request agent_config overrides to the isolated clone, or
+        # reject unsupported keys with a 400 so the caller isn't silently
+        # running a different config than they asked for.
+        try:
+            _apply_agent_config(agent, request.agent_config)
+        except AgentConfigError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         try:
             # Session ID echoed back to the caller
             session_id = request.session_id or "default"
-            
-            # Apply agent config overrides if provided
-            if request.agent_config:
-                # This would depend on the specific agent implementation
-                # For now, we'll just log it
-                logger.debug(f"Agent config overrides provided: {request.agent_config}")
             
             # Invoke agent (handle both sync and async agents)
             if _supports_async_start(agent):
@@ -489,10 +541,17 @@ async def invoke_agent_standalone(
         # rather than leaking one session's history into another.
         agent = resolve_session_agent(agent_id, session_id)
 
-        # Apply config if provided
-        if agent_config:
-            logger.debug(f"Agent config provided: {agent_config}")
-        
+        # Apply per-request overrides, or surface a clean error dict if a key
+        # isn't supported (mirrors the route's 400 without raising HTTP here).
+        try:
+            _apply_agent_config(agent, agent_config)
+        except AgentConfigError as e:
+            return {
+                "error": str(e),
+                "status": "error",
+                "agent_id": agent_id,
+            }
+
         # Invoke agent
         session_id = session_id or "default"
         
