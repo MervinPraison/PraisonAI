@@ -207,3 +207,104 @@ def deploy_azure(
     if resource_group is not None:
         args.extend(["--resource-group", resource_group])
     _exit_from_handler(args)
+
+
+@app.command("fly")
+def deploy_fly(
+    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
+    region: Optional[str] = typer.Option(None, "--region", "-r", help="Fly region"),
+):
+    """Deploy to Fly.io."""
+    args = ["fly", file]
+    if region is not None:
+        args.extend(["--region", region])
+    _exit_from_handler(args)
+
+
+@app.command("railway")
+def deploy_railway(
+    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
+):
+    """Deploy to Railway."""
+    _exit_from_handler(["railway", file])
+
+
+@app.command("render")
+def deploy_render(
+    file: str = typer.Argument("agents.yaml", help="Agent file to deploy"),
+):
+    """Deploy to Render."""
+    _exit_from_handler(["render", file])
+
+
+compose_app = typer.Typer(help="Docker Compose stack management")
+app.add_typer(compose_app, name="compose")
+
+
+@compose_app.command("up")
+def deploy_compose_up(
+    file: str = typer.Option("agents.yaml", "--file", "-f", help="Path to agents.yaml"),
+    stack_dir: Optional[str] = typer.Option(None, "--stack-dir", help="Path to compose stack template"),
+    foreground: bool = typer.Option(False, "--foreground", help="Run in foreground (no -d)"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Start agents API + Postgres compose stack."""
+    args = ["compose", "up", "--file", file]
+    if stack_dir:
+        args.extend(["--stack-dir", stack_dir])
+    if foreground:
+        args.append("--foreground")
+    if as_json:
+        args.append("--json")
+    _exit_from_handler(args)
+
+
+@compose_app.command("down")
+def deploy_compose_down(
+    file: str = typer.Option("agents.yaml", "--file", "-f", help="Path to agents.yaml"),
+    stack_dir: Optional[str] = typer.Option(None, "--stack-dir", help="Path to compose stack template"),
+    volumes: bool = typer.Option(False, "--volumes", "-v", help="Remove named volumes"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Stop agents compose stack."""
+    args = ["compose", "down", "--file", file]
+    if stack_dir:
+        args.extend(["--stack-dir", stack_dir])
+    if volumes:
+        args.append("--volumes")
+    if as_json:
+        args.append("--json")
+    _exit_from_handler(args)
+
+
+@app.command("create")
+def deploy_create(
+    template: str = typer.Option(..., "--template", "-t", help="Starter template name"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Scaffold a deploy project from a starter template."""
+    args = ["create", "--template", template, "--dir", directory]
+    if as_json:
+        args.append("--json")
+    _exit_from_handler(args)
+
+
+@app.command("helm")
+def deploy_helm(
+    chart: str = typer.Option(..., "--chart", help="Chart name: gateway or agents-api"),
+    release: str = typer.Option("praisonai", "--release", "-r", help="Helm release name"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="Kubernetes namespace"),
+    stack_dir: Optional[str] = typer.Option(None, "--chart-dir", help="Override chart directory"),
+    install: bool = typer.Option(True, "--install/--no-install", help="Run helm upgrade --install"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Thin wrapper around helm upgrade for repo infra charts."""
+    args = ["helm", "--chart", chart, "--release", release, "--namespace", namespace]
+    if stack_dir:
+        args.extend(["--chart-dir", stack_dir])
+    if not install:
+        args.append("--no-install")
+    if as_json:
+        args.append("--json")
+    _exit_from_handler(args)

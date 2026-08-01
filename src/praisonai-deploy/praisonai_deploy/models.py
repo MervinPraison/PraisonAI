@@ -18,6 +18,9 @@ class CloudProvider(str, Enum):
     AWS = "aws"
     AZURE = "azure"
     GCP = "gcp"
+    FLY = "fly"
+    RAILWAY = "railway"
+    RENDER = "render"
 
 
 class APIConfig(BaseModel):

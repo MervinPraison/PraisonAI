@@ -27,11 +27,29 @@ def _gcp_loader():
     return GCPProvider
 
 
+def _fly_loader():
+    from .fly import FlyProvider
+    return FlyProvider
+
+
+def _railway_loader():
+    from .railway import RailwayProvider
+    return RailwayProvider
+
+
+def _render_loader():
+    from .render import RenderProvider
+    return RenderProvider
+
+
 # Built-in cloud providers with lazy loading
 _BUILTIN_CLOUDS = {
     "aws": _aws_loader,
     "azure": _azure_loader,
     "gcp": _gcp_loader,
+    "fly": _fly_loader,
+    "railway": _railway_loader,
+    "render": _render_loader,
 }
 
 

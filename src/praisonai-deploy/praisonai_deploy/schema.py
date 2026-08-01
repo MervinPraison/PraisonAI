@@ -67,7 +67,7 @@ def validate_agents_yaml(file_path: str) -> Optional[DeployConfig]:
         try:
             cloud_data['provider'] = CloudProvider(provider_str)
         except ValueError:
-            raise ValueError(f"Invalid cloud provider: {provider_str}. Must be one of: aws, azure, gcp")
+            raise ValueError(f"Invalid cloud provider: {provider_str}. Must be one of: aws, azure, gcp, fly, railway, render")
         
         config_dict['cloud'] = CloudConfig(**cloud_data)
     

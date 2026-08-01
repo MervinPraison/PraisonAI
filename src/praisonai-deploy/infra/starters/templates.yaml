@@ -1,0 +1,16 @@
+templates:
+  - name: docker-api
+    path: docker-api
+    description: Local API deploy with agents.yaml (compose-ready)
+  - name: docker-compose
+    path: docker-compose
+    description: Agents API + Postgres compose stack starter
+  - name: fly
+    path: fly
+    description: Fly.io starter (fly.toml + agents.yaml)
+  - name: railway
+    path: railway
+    description: Railway starter (railway.json + agents.yaml)
+  - name: render
+    path: render
+    description: Render starter (render.yaml + agents.yaml)

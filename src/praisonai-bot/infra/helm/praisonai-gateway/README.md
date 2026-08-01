@@ -11,7 +11,7 @@ kubectl create secret generic praisonai-gateway-auth \
   --from-literal=GATEWAY_AUTH_TOKEN="$(openssl rand -hex 16)"
 
 # 2. Install from a local checkout
-helm install praisonai ./deploy/helm/praisonai-gateway \
+helm install praisonai ./src/praisonai-bot/infra/helm/praisonai-gateway \
   --set auth.existingSecret=praisonai-gateway-auth \
   --set image.tag=latest
 ```

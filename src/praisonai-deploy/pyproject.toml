@@ -37,6 +37,9 @@ praisonai-deploy = "praisonai_deploy.__main__:main"
 aws = "praisonai_deploy.providers.aws:AWSProvider"
 azure = "praisonai_deploy.providers.azure:AzureProvider"
 gcp = "praisonai_deploy.providers.gcp:GCPProvider"
+fly = "praisonai_deploy.providers.fly:FlyProvider"
+railway = "praisonai_deploy.providers.railway:RailwayProvider"
+render = "praisonai_deploy.providers.render:RenderProvider"
 
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }
