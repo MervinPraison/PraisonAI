@@ -29,6 +29,7 @@ _PROVIDER_MAP = {
     "groq/":       ("GROQ_API_KEY",       "https://api.groq.com/openai/v1"),
     "cohere/":     ("COHERE_API_KEY",     "https://api.cohere.ai/v1"),
     "openrouter/": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    "orcarouter/": ("ORCAROUTER_API_KEY", "https://api.orcarouter.ai/v1"),
     "ollama/":     ("OLLAMA_API_KEY",     "http://localhost:11434/v1"),
 }
 
@@ -54,9 +55,11 @@ _KEY_VAR_TO_FALLBACK_PROVIDERS = {
     "GROQ_API_KEY": ("groq",),
     "COHERE_API_KEY": ("cohere",),
     "OPENROUTER_API_KEY": ("openrouter",),
+    "ORCAROUTER_API_KEY": ("orcarouter",),
 }
 _ALL_FALLBACK_PROVIDERS = (
     "openai", "anthropic", "google", "gemini", "groq", "cohere", "openrouter",
+    "orcarouter",
 )
 
 # Ordered list of (credential env-var, provider-appropriate default model).
@@ -68,6 +71,7 @@ _PROVIDER_DEFAULTS = (
     ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
     ("COHERE_API_KEY", "cohere/command-r"),
     ("OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
+    ("ORCAROUTER_API_KEY", "orcarouter/openai/gpt-5.5"),
     ("OLLAMA_HOST", "ollama/llama3.2"),
 )
 

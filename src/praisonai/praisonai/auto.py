@@ -469,7 +469,7 @@ class BaseAutoGenerator:
         except ImportError:
             _BUILTIN_MODEL_PREFIXES = frozenset(
                 {"openai", "groq", "cohere", "ollama",
-                 "anthropic", "google", "openrouter"}
+                 "anthropic", "google", "openrouter", "orcarouter"}
             )
         if provider_id in _BUILTIN_MODEL_PREFIXES:
             return None

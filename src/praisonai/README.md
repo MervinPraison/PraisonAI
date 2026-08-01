@@ -138,6 +138,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 <img src="https://img.shields.io/badge/Cerebras-F05A28?style=flat" alt="Cerebras" />
 <img src="https://img.shields.io/badge/Cohere-39594D?style=flat" alt="Cohere" />
 <img src="https://img.shields.io/badge/OpenRouter-6467F2?style=flat" alt="OpenRouter" />
+<img src="https://img.shields.io/badge/OrcaRouter-1F6FEB?style=flat" alt="OrcaRouter" />
 <img src="https://img.shields.io/badge/Perplexity-20808D?style=flat" alt="Perplexity" />
 <img src="https://img.shields.io/badge/Fireworks-FF6B35?style=flat" alt="Fireworks" />
 <img src="https://img.shields.io/badge/AWS_Bedrock-FF9900?style=flat&logo=amazonaws&logoColor=white" alt="AWS Bedrock" />
@@ -168,6 +169,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 | Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
 | Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
 | OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
+| OrcaRouter | [Example](examples/python/providers/orcarouter/orcarouter_example.py) |
 | HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
 | Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
 | AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |

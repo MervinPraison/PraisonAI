@@ -177,6 +177,46 @@ FALLBACK_MODELS = [
         supports_tools=True,
         notes="Requires Ollama running locally",
     ),
+
+    # OrcaRouter (gateway). Unlike OpenRouter, litellm ships no catalogue for
+    # this gateway, so without these entries `list_providers()` would never
+    # surface it and the catalogue-driven provider picker in `praisonai setup`
+    # / `praisonai auth login` could not offer it. Model ids stay namespaced
+    # because the gateway rejects bare names; the full catalogue is at
+    # https://www.orcarouter.ai/models and any id can be passed through.
+    ModelInfo(
+        id="orcarouter/auto",
+        provider="orcarouter",
+        description="Adaptive router — picks an upstream model per request",
+        supports_tools=True,
+        supports_vision=True,
+        supports_reasoning=True,
+        notes="Routes per request, so structured-output support varies by upstream",
+    ),
+    ModelInfo(
+        id="openai/gpt-5.5",
+        provider="orcarouter",
+        description="OpenAI flagship via OrcaRouter",
+        supports_tools=True,
+        supports_vision=True,
+        supports_reasoning=True,
+    ),
+    ModelInfo(
+        id="anthropic/claude-sonnet-5",
+        provider="orcarouter",
+        description="Anthropic Sonnet via OrcaRouter",
+        supports_tools=True,
+        supports_vision=True,
+        supports_reasoning=True,
+    ),
+    ModelInfo(
+        id="google/gemini-3.5-flash",
+        provider="orcarouter",
+        description="Google Gemini Flash via OrcaRouter",
+        supports_tools=True,
+        supports_vision=True,
+        supports_reasoning=True,
+    ),
 ]
 
 
@@ -191,6 +231,7 @@ PROVIDER_KEY_URLS = {
     "gemini": "https://aistudio.google.com/app/apikey",
     "groq": "https://console.groq.com/keys",
     "openrouter": "https://openrouter.ai/keys",
+    "orcarouter": "https://www.orcarouter.ai/console",
     "mistral": "https://console.mistral.ai/api-keys",
     "deepseek": "https://platform.deepseek.com/api_keys",
     "xai": "https://console.x.ai",

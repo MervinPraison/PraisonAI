@@ -19,6 +19,7 @@ _LAZY_ATTRS = {
     "_reset_default_registry":  lambda: __import__("praisonai.llm.registry", fromlist=["_reset_default_registry"])._reset_default_registry,
     # Gateway providers
     "OpenRouterProvider":       lambda: __import__("praisonai.llm.gateways", fromlist=["OpenRouterProvider"]).OpenRouterProvider,
+    "OrcaRouterProvider":       lambda: __import__("praisonai.llm.gateways", fromlist=["OrcaRouterProvider"]).OrcaRouterProvider,
     "LiteLLMProxyProvider":     lambda: __import__("praisonai.llm.gateways", fromlist=["LiteLLMProxyProvider"]).LiteLLMProxyProvider,
     "CustomGatewayProvider":    lambda: __import__("praisonai.llm.gateways", fromlist=["CustomGatewayProvider"]).CustomGatewayProvider,
     "register_gateway_providers": lambda: __import__("praisonai.llm.gateways", fromlist=["register_gateway_providers"]).register_gateway_providers,
@@ -46,12 +47,14 @@ __all__ = [
     "embedding",
     # Gateway providers
     "OpenRouterProvider",
+    "OrcaRouterProvider",
     "LiteLLMProxyProvider",
     "CustomGatewayProvider",
     "register_gateway_providers",
 ]
 
-# NOTE: Gateway providers ("openrouter/...", "litellm-proxy/...", etc.) are
+# NOTE: Gateway providers ("openrouter/...", "orcarouter/...",
+# "litellm-proxy/...", etc.) are
 # registered lazily on first registry access (see get_default_llm_registry() in
 # registry.py), not eagerly on import. This keeps `create_llm_provider(...)`
 # behaviour unchanged while avoiding the gateway + registry + importlib.metadata

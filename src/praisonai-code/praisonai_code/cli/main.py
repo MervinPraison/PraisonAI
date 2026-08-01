@@ -124,7 +124,7 @@ def _provider_preflight_message():
     return (
         "No LLM provider is configured.\n\n"
         "PraisonAI supports OpenAI, Anthropic, Google/Gemini, Groq, "
-        "Cohere, Ollama, OpenRouter and 100+ models via LiteLLM.\n\n"
+        "Cohere, Ollama, OpenRouter, OrcaRouter and 100+ models via LiteLLM.\n\n"
         "Easiest setup (interactive, no shell 'export' needed):\n"
         "    praisonai setup\n\n"
         "Or set a provider API key, for example:\n"

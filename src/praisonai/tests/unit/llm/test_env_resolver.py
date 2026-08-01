@@ -276,12 +276,34 @@ class TestProviderMapping:
             "groq/": "https://api.groq.com/openai/v1",
             "cohere/": "https://api.cohere.ai/v1",
             "openrouter/": "https://openrouter.ai/api/v1",
+            "orcarouter/": "https://api.orcarouter.ai/v1",
             "ollama/": "http://localhost:11434/v1",
         }
         
         for prefix, (key_var, base_url) in _PROVIDER_MAP.items():
             assert base_url is not None, f"Provider {prefix} has None base URL"
             assert base_url == expected_urls[prefix], f"Provider {prefix} has unexpected URL {base_url}"
+
+    def test_orcarouter_model_resolves_to_gateway(self):
+        """An orcarouter/ model should pick up the gateway URL and its own key."""
+        env = {
+            "MODEL_NAME": "orcarouter/openai/gpt-5.5",
+            "ORCAROUTER_API_KEY": "sk-orca-test",
+            "OPENAI_API_KEY": "sk-openai-should-not-be-used",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "orcarouter/openai/gpt-5.5"
+            assert ep.base_url == "https://api.orcarouter.ai/v1"
+            assert ep.api_key == "sk-orca-test"
+
+    def test_orcarouter_key_alone_picks_an_orcarouter_default_model(self):
+        """With only ORCAROUTER_API_KEY set, the default model should be OrcaRouter's."""
+        with patch.dict(os.environ, {"ORCAROUTER_API_KEY": "sk-orca-test"}, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model.startswith("orcarouter/")
+            assert ep.base_url == "https://api.orcarouter.ai/v1"
+            assert ep.api_key == "sk-orca-test"
 
     def test_provider_key_precedence_no_cross_contamination(self):
         """Ensure providers don't accidentally use other providers' keys.""" 
