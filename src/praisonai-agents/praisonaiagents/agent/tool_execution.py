@@ -1361,7 +1361,7 @@ class ToolExecutionMixin:
                 try:
                     from ..runtime.tool_output_store import get_tool_output_store
                     from uuid import uuid4
-                    store = get_tool_output_store(getattr(self, '_run_id', None))
+                    store = get_tool_output_store(getattr(self, '_current_run_id', None))
                     # Add unique suffix to prevent collisions with repeated keys
                     unique_suffix = uuid4().hex[:8]
                     field_call_id = f"{tool_call_id}_{key}_{unique_suffix}" if tool_call_id else f"{tool_name}_{key}_{unique_suffix}"

@@ -2331,7 +2331,7 @@ Your Goal: {self.goal}"""
             return output
         
         try:
-            run_id = getattr(self, '_run_id', None)
+            run_id = getattr(self, '_current_run_id', None)
             return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
             logging.warning(f"Tool output truncation error: {e}")

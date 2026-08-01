@@ -11,6 +11,7 @@ Heavy implementations live in the praisonai wrapper.
 from __future__ import annotations
 
 from praisonaiagents._logging import get_logger
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -216,6 +217,12 @@ class FailoverManager:
         self._profiles: List[AuthProfile] = []
         self._current_index: int = 0
         self._on_failover_callbacks: List[Callable[[AuthProfile, AuthProfile], None]] = []
+        # Re-entrant lock: FailoverManager is a shared credential pool by design
+        # (one instance across many concurrent Agent/LLM instances), so every
+        # read/mutation of _profiles and each AuthProfile status transition must
+        # be synchronized. RLock allows methods like mark_failure to call
+        # get_next_profile while already holding the lock.
+        self._lock = threading.RLock()
     
     def add_profile(self, profile: AuthProfile) -> None:
         """Add an auth profile.
@@ -223,8 +230,9 @@ class FailoverManager:
         Args:
             profile: The profile to add
         """
-        self._profiles.append(profile)
-        self._profiles.sort(key=lambda p: p.priority)
+        with self._lock:
+            self._profiles.append(profile)
+            self._profiles.sort(key=lambda p: p.priority)
     
     def remove_profile(self, name: str) -> bool:
         """Remove a profile by name.
@@ -235,11 +243,12 @@ class FailoverManager:
         Returns:
             True if removed, False if not found
         """
-        for i, profile in enumerate(self._profiles):
-            if profile.name == name:
-                self._profiles.pop(i)
-                return True
-        return False
+        with self._lock:
+            for i, profile in enumerate(self._profiles):
+                if profile.name == name:
+                    self._profiles.pop(i)
+                    return True
+            return False
     
     def get_profile(self, name: str) -> Optional[AuthProfile]:
         """Get a profile by name.
@@ -250,10 +259,11 @@ class FailoverManager:
         Returns:
             The profile or None if not found
         """
-        for profile in self._profiles:
-            if profile.name == name:
-                return profile
-        return None
+        with self._lock:
+            for profile in self._profiles:
+                if profile.name == name:
+                    return profile
+            return None
     
     def list_profiles(self) -> List[AuthProfile]:
         """List all profiles.
@@ -261,7 +271,8 @@ class FailoverManager:
         Returns:
             List of all profiles
         """
-        return list(self._profiles)
+        with self._lock:
+            return list(self._profiles)
     
     def get_next_profile(self) -> Optional[AuthProfile]:
         """Get the next available profile.
@@ -272,29 +283,30 @@ class FailoverManager:
         Returns:
             The next available profile, or None if all are unavailable
         """
-        if not self._profiles:
+        with self._lock:
+            if not self._profiles:
+                return None
+            
+            # First, check if any cooldowns have expired
+            current_time = time.time()
+            for profile in self._profiles:
+                if profile.cooldown_until and current_time >= profile.cooldown_until:
+                    profile.reset()
+            
+            # Find first available profile
+            for profile in self._profiles:
+                if profile.is_available:
+                    return profile
+            
+            # If none available, return the one with shortest remaining cooldown
+            available_profiles = [p for p in self._profiles if p.status != ProviderStatus.DISABLED]
+            if available_profiles:
+                return min(
+                    available_profiles,
+                    key=lambda p: p.cooldown_until or 0
+                )
+            
             return None
-        
-        # First, check if any cooldowns have expired
-        current_time = time.time()
-        for profile in self._profiles:
-            if profile.cooldown_until and current_time >= profile.cooldown_until:
-                profile.reset()
-        
-        # Find first available profile
-        for profile in self._profiles:
-            if profile.is_available:
-                return profile
-        
-        # If none available, return the one with shortest remaining cooldown
-        available_profiles = [p for p in self._profiles if p.status != ProviderStatus.DISABLED]
-        if available_profiles:
-            return min(
-                available_profiles,
-                key=lambda p: p.cooldown_until or 0
-            )
-        
-        return None
     
     def mark_failure(
         self,
@@ -309,27 +321,37 @@ class FailoverManager:
             error: Error message
             is_rate_limit: Whether this is a rate limit error
         """
-        if is_rate_limit:
-            profile.mark_rate_limited(self.config.cooldown_on_rate_limit)
-            logger.warning(
-                f"Profile '{profile.name}' rate limited, "
-                f"cooldown for {self.config.cooldown_on_rate_limit}s"
+        with self._lock:
+            if is_rate_limit:
+                profile.mark_rate_limited(self.config.cooldown_on_rate_limit)
+                logger.warning(
+                    f"Profile '{profile.name}' rate limited, "
+                    f"cooldown for {self.config.cooldown_on_rate_limit}s"
+                )
+            else:
+                profile.mark_error(error, self.config.cooldown_on_error)
+                logger.warning(
+                    f"Profile '{profile.name}' error: {error}, "
+                    f"cooldown for {self.config.cooldown_on_error}s"
+                )
+            
+            # Resolve the target profile and snapshot callbacks while holding
+            # the lock, but invoke them AFTER releasing it. User callbacks may
+            # block or acquire external locks; running them under our shared
+            # credential-pool lock would stall every concurrent agent and risks
+            # lock-ordering deadlocks.
+            next_profile = self.get_next_profile()
+            callbacks = (
+                list(self._on_failover_callbacks)
+                if next_profile and next_profile != profile
+                else []
             )
-        else:
-            profile.mark_error(error, self.config.cooldown_on_error)
-            logger.warning(
-                f"Profile '{profile.name}' error: {error}, "
-                f"cooldown for {self.config.cooldown_on_error}s"
-            )
-        
-        # Notify callbacks
-        next_profile = self.get_next_profile()
-        if next_profile and next_profile != profile:
-            for callback in self._on_failover_callbacks:
-                try:
-                    callback(profile, next_profile)
-                except Exception as e:
-                    logger.error(f"Failover callback error: {e}")
+
+        for callback in callbacks:
+            try:
+                callback(profile, next_profile)
+            except Exception as e:
+                logger.error(f"Failover callback error: {e}")
     
     def mark_success(self, profile: AuthProfile) -> None:
         """Mark a profile as successful.
@@ -337,9 +359,10 @@ class FailoverManager:
         Args:
             profile: The profile that succeeded
         """
-        if profile.status != ProviderStatus.AVAILABLE:
-            profile.reset()
-            logger.info(f"Profile '{profile.name}' recovered")
+        with self._lock:
+            if profile.status != ProviderStatus.AVAILABLE:
+                profile.reset()
+                logger.info(f"Profile '{profile.name}' recovered")
     
     def on_failover(
         self,
@@ -350,7 +373,8 @@ class FailoverManager:
         Args:
             callback: Function called with (failed_profile, new_profile)
         """
-        self._on_failover_callbacks.append(callback)
+        with self._lock:
+            self._on_failover_callbacks.append(callback)
     
     def get_retry_delay(self, attempt: int) -> float:
         """Calculate retry delay for an attempt.
@@ -374,18 +398,20 @@ class FailoverManager:
         Returns:
             Status information
         """
-        available = sum(1 for p in self._profiles if p.is_available)
-        return {
-            "total_profiles": len(self._profiles),
-            "available_profiles": available,
-            "profiles": [p.to_dict() for p in self._profiles],
-            "config": self.config.to_dict(),
-        }
+        with self._lock:
+            available = sum(1 for p in self._profiles if p.is_available)
+            return {
+                "total_profiles": len(self._profiles),
+                "available_profiles": available,
+                "profiles": [p.to_dict() for p in self._profiles],
+                "config": self.config.to_dict(),
+            }
     
     def reset_all(self) -> None:
         """Reset all profiles to available status."""
-        for profile in self._profiles:
-            profile.reset()
+        with self._lock:
+            for profile in self._profiles:
+                profile.reset()
 
 
 @runtime_checkable

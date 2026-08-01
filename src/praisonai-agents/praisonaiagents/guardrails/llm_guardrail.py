@@ -141,9 +141,10 @@ Your response:"""
                 reason = response[5:].strip(": ")
                 return False, f"Guardrail validation failed: {reason}"
             else:
-                # Unclear response, log and pass through
+                # Unclear response - fail closed, matching _llm_validate() and the
+                # class's documented "fail-closed by default" contract.
                 self.logger.warning(f"Unclear guardrail response: {response}")
-                return True, task_output
+                return False, f"Guardrail validation unclear: {response}"
                 
         except Exception as e:
             self.logger.error(f"Error in LLM guardrail validation: {str(e)}")
