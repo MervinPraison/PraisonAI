@@ -33,10 +33,36 @@ class ChromaVectorStore:
         """
         if not namespace or namespace == self.namespace:
             return self._collection
-        return self._client.get_or_create_collection(
+        collection = self._client.get_or_create_collection(
             name=namespace,
             metadata=self._COLLECTION_METADATA,
         )
+        self._warn_on_metric_mismatch(collection)
+        return collection
+
+    def _warn_on_metric_mismatch(self, collection) -> None:
+        """Warn once per collection if a legacy collection is not on cosine.
+
+        ``get_or_create_collection`` never changes the distance metric of a
+        collection that already exists, so a namespace created by an older
+        build can persist on L2 while new ones use cosine — making
+        ``score = 1 - distance`` incomparable. We surface this instead of
+        silently returning drifting scores. Migration is left to the caller
+        because it requires a destructive rebuild of stored vectors.
+        """
+        try:
+            stored = (collection.metadata or {}).get("hnsw:space")
+        except Exception:
+            return
+        expected = self._COLLECTION_METADATA["hnsw:space"]
+        if stored and stored != expected and collection.name not in self._metric_warned:
+            self._metric_warned.add(collection.name)
+            logger.warning(
+                "Chroma collection %r uses distance metric %r, expected %r. "
+                "Scores from this namespace are not comparable to cosine "
+                "namespaces; recreate it to migrate.",
+                collection.name, stored, expected,
+            )
     
     def __init__(
         self,
@@ -56,6 +82,7 @@ class ChromaVectorStore:
         self.config = config or {}
         self.namespace = namespace or "default"
         self.persist_directory = persist_directory or self.config.get("path", ".praison/chroma")
+        self._metric_warned: set = set()
         
         # REMOVED: os.environ['ANONYMIZED_TELEMETRY'] = 'False'
         # Per-instance Settings(anonymized_telemetry=False) already covers this safely.
@@ -71,6 +98,7 @@ class ChromaVectorStore:
             name=self.namespace,
             metadata=self._COLLECTION_METADATA
         )
+        self._warn_on_metric_mismatch(self._collection)
     
     def add(
         self,

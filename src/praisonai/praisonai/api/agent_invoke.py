@@ -273,7 +273,7 @@ def resolve_session_agent(agent_id: str, session_id: Optional[str]) -> Any:
 
 _APPLYABLE_OVERRIDES = frozenset({
     "instructions", "goal", "role", "backstory",
-    "llm", "temperature", "max_iter",
+    "llm", "max_iter",
     "verbose", "markdown",
 })
 
@@ -288,9 +288,20 @@ def _apply_agent_config(agent: Any, agent_config: Optional[Dict[str, Any]]) -> N
     Only whitelisted fields are settable. An unknown or unsettable key raises
     ``AgentConfigError`` so the caller learns their override wasn't honoured
     instead of silently drifting. Callers translate this into a 400 response.
+
+    Refuses to mutate a shared, non-isolated agent (e.g. a plain mock that took
+    the shared-instance fallback): writing overrides onto a registry-shared
+    object would leak this request's config into subsequent/concurrent requests.
+    In that case the override is rejected rather than silently applied globally.
     """
     if not agent_config:
         return
+    if not _supports_session_isolation(agent):
+        raise AgentConfigError(
+            "agent_config overrides require a session-isolatable Agent; this "
+            "agent is shared across requests and cannot be safely overridden "
+            "per request."
+        )
     unknown = set(agent_config) - _APPLYABLE_OVERRIDES
     if unknown:
         raise AgentConfigError(
