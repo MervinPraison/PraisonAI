@@ -80,6 +80,11 @@ from .format import (
     markdown_to_slack,
     strip_markdown,
 )
+from .webhook_filter import (
+    WebhookFilter,
+    evaluate_webhook_filter,
+    resolve_field,
+)
 from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_policy
 from .silence import (
     SILENT_REPLY_TOKEN,
@@ -129,6 +134,9 @@ __all__ = [
     "ChannelField",
     "ChannelDescriptor",
     "WebhookVerifierProtocol",
+    "WebhookFilter",
+    "evaluate_webhook_filter",
+    "resolve_field",
     "CallbackPayloadStoreProtocol",
     "InMemoryCallbackPayloadStore",
     "GatewayRuntimeSeams",

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .linear import LinearBot
     from .email import EmailBot
     from .agentmail import AgentMailBot
+    from .webhook import WebhookBot, WebhookRoute
     from .bot import Bot
     from .botos import BotOS
     from ._session import BotSessionManager
@@ -68,6 +69,12 @@ def __getattr__(name: str):
     if name == "AgentMailBot":
         from .agentmail import AgentMailBot
         return AgentMailBot
+    if name == "WebhookBot":
+        from .webhook import WebhookBot
+        return WebhookBot
+    if name == "WebhookRoute":
+        from .webhook import WebhookRoute
+        return WebhookRoute
     if name == "Bot":
         from .bot import Bot
         return Bot
@@ -192,6 +199,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "LinearBot", "EmailBot", "AgentMailBot",
+    "WebhookBot", "WebhookRoute",
     "Bot", "BotOS",
     "BotSessionManager",
     "StoreBackedIdentityResolver",
