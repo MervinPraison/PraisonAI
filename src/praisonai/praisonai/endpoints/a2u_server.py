@@ -9,11 +9,16 @@ import json
 import logging
 import os
 import uuid
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+# Strong-enough references to in-flight publish tasks so CPython's GC cannot
+# collect a fire-and-forget task before it runs. Entries drop out on completion.
+_BACKGROUND_TASKS: "weakref.WeakSet" = weakref.WeakSet()
 
 
 @dataclass
@@ -160,27 +165,51 @@ class A2UEventBus:
     
     def publish_sync(self, event: A2UEvent, stream_name: str = "events") -> int:
         """
-        Synchronously publish an event (creates event loop if needed).
-        
+        Synchronously publish an event.
+
+        - Inside a running loop: schedules a *tracked* task (so it cannot be
+          GC'd before it runs and its exceptions are not silently lost) and
+          returns the number of subscribers targeted. The coroutine's result is
+          available via ``last_publish_task()`` for callers needing the real
+          delivered count.
+        - Outside a loop: blocks until publication completes via the async
+          bridge and returns the actual delivered count.
+
         Args:
             event: Event to publish
             stream_name: Name of the stream
-            
+
         Returns:
-            Number of subscribers that received the event
+            Number of subscribers (targeted under a running loop, delivered
+            otherwise).
         """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Schedule in running loop
-                asyncio.ensure_future(self.publish(event, stream_name))
-                return len(self._streams.get(stream_name, set()))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
-        
-        # Use safe bridge for sync execution
-        from .._async_bridge import run_sync
-        return run_sync(self.publish(event, stream_name))
+            # No running loop — run to completion synchronously via the bridge.
+            from .._async_bridge import run_sync
+            return run_sync(self.publish(event, stream_name))
+
+        # Running-loop path: schedule + track so the task cannot be GC'd before
+        # it runs, and its exceptions cannot be silently lost.
+        task = loop.create_task(self.publish(event, stream_name))
+        _BACKGROUND_TASKS.add(task)
+
+        def _report(t: "asyncio.Task") -> None:
+            _BACKGROUND_TASKS.discard(t)
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.error("A2U publish failed", exc_info=exc)
+
+        task.add_done_callback(_report)
+        self._last_publish_task = task
+        return len(self._streams.get(stream_name, set()))
+
+    def last_publish_task(self) -> Optional["asyncio.Task"]:
+        """Return the task from the most recent running-loop publish_sync call."""
+        return getattr(self, "_last_publish_task", None)
     
     async def get_events(
         self,

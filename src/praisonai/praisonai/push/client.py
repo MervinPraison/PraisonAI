@@ -222,7 +222,7 @@ class PushClient:
         self, channel: str, timeout: float = 30.0,
     ) -> ChannelMessage:
         """Block until the next message on a channel, or raise TimeoutError."""
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
 
         async def _one_shot(msg: ChannelMessage) -> None:
             if not future.done():
