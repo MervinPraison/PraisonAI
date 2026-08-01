@@ -152,7 +152,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 </p>
 
 <details>
-<summary><strong>View all 24 providers with examples</strong></summary>
+<summary><strong>View all 25 providers with examples</strong></summary>
 
 | Provider | Example |
 |----------|:-------:|
