@@ -158,6 +158,10 @@ jobs:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
           private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          # Scope to this repo only. Without it the token is minted for every
+          # repository the owner has; this job never leaves PraisonAI (checkout,
+          # push to origin, and gh release create all target it).
+          repositories: ${{ github.event.repository.name }}
 
       - name: Checkout main
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -1047,6 +1051,7 @@ jobs:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
           private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
 
       - name: Use refreshed GitHub App token
         if: ${{ !cancelled() && inputs.dry_run != true }}
