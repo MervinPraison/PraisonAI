@@ -1345,34 +1345,36 @@ Your Goal: {self.goal}"""
         self._apply_context_compaction(messages, _HookEvent)
 
         # Trigger BEFORE_LLM hook
+        # Only build the input if a BEFORE_LLM hook is actually registered
         from ..hooks import HookEvent, BeforeLLMInput
-        before_llm_input = BeforeLLMInput(
-            session_id=getattr(self, '_session_id', 'default'),
-            cwd=os.getcwd(),
-            event_name=HookEvent.BEFORE_LLM,
-            timestamp=str(time.time()),
-            agent_name=self.name,
-            messages=messages,
-            model=self.llm if isinstance(self.llm, str) else str(self.llm),
-            temperature=temperature
-        )
-        _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        # Honour a blocking BEFORE_LLM hook/plugin (POLICY/GUARDRAIL) by
-        # refusing to dispatch the request, mirroring how BEFORE_TOOL/BEFORE_AGENT
-        # enforce blocks. Without this, a plugin that returns PluginDecision.deny()
-        # (or raises GuardrailBlocked) would fail open and still hit the model.
-        if self._hook_runner.is_blocked(_before_llm_results):
-            _block_reason = next(
-                (getattr(r.output, "reason", None) for r in _before_llm_results
-                 if r.output and getattr(r.output, "is_denied", lambda: False)()),
-                None,
-            ) or "Blocked by hook"
-            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
-            return f"[LLM request blocked by hook: {_block_reason}]"
-        # C7 - honour any BEFORE_LLM hook that mutated the message stream
-        # (e.g. PII redactor). The runner applies modified_input in-place on
-        # before_llm_input.messages; adopt that value for the actual LLM call.
-        messages = before_llm_input.messages
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_LLM):
+            before_llm_input = BeforeLLMInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_LLM,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                messages=messages,
+                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                temperature=temperature
+            )
+            _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
+            # Honour a blocking BEFORE_LLM hook/plugin (POLICY/GUARDRAIL) by
+            # refusing to dispatch the request, mirroring how BEFORE_TOOL/BEFORE_AGENT
+            # enforce blocks. Without this, a plugin that returns PluginDecision.deny()
+            # (or raises GuardrailBlocked) would fail open and still hit the model.
+            if self._hook_runner.is_blocked(_before_llm_results):
+                _block_reason = next(
+                    (getattr(r.output, "reason", None) for r in _before_llm_results
+                     if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                    None,
+                ) or "Blocked by hook"
+                logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+                return f"[LLM request blocked by hook: {_block_reason}]"
+            # C7 - honour any BEFORE_LLM hook that mutated the message stream
+            # (e.g. PII redactor). The runner applies modified_input in-place on
+            # before_llm_input.messages; adopt that value for the actual LLM call.
+            messages = before_llm_input.messages
 
         # Pre-call budget guard (zero overhead when _max_budget is None).
         # Estimate this call's minimum cost from the known input size plus the
@@ -1526,19 +1528,21 @@ Your Goal: {self.goal}"""
                     self._on_budget_exceeded(current_cost, self._max_budget)
             
             # Trigger AFTER_LLM hook
+            # Only build the input if an AFTER_LLM hook is actually registered
             from ..hooks import HookEvent, AfterLLMInput
-            after_llm_input = AfterLLMInput(
-                session_id=getattr(self, '_session_id', 'default'),
-                cwd=os.getcwd(),
-                event_name=HookEvent.AFTER_LLM,
-                timestamp=str(time.time()),
-                agent_name=self.name,
-                messages=messages,
-                response=str(final_response),
-                model=self.llm if isinstance(self.llm, str) else str(self.llm),
-                latency_ms=(time.time() - start_time) * 1000
-            )
-            self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
+            if self._hook_runner.registry.has_hooks(HookEvent.AFTER_LLM):
+                after_llm_input = AfterLLMInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.AFTER_LLM,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    messages=messages,
+                    response=str(final_response),
+                    model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    latency_ms=(time.time() - start_time) * 1000
+                )
+                self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
             
             return final_response
 
