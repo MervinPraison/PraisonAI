@@ -335,14 +335,23 @@ class FailoverManager:
                     f"cooldown for {self.config.cooldown_on_error}s"
                 )
             
-            # Notify callbacks
+            # Resolve the target profile and snapshot callbacks while holding
+            # the lock, but invoke them AFTER releasing it. User callbacks may
+            # block or acquire external locks; running them under our shared
+            # credential-pool lock would stall every concurrent agent and risks
+            # lock-ordering deadlocks.
             next_profile = self.get_next_profile()
-            if next_profile and next_profile != profile:
-                for callback in self._on_failover_callbacks:
-                    try:
-                        callback(profile, next_profile)
-                    except Exception as e:
-                        logger.error(f"Failover callback error: {e}")
+            callbacks = (
+                list(self._on_failover_callbacks)
+                if next_profile and next_profile != profile
+                else []
+            )
+
+        for callback in callbacks:
+            try:
+                callback(profile, next_profile)
+            except Exception as e:
+                logger.error(f"Failover callback error: {e}")
     
     def mark_success(self, profile: AuthProfile) -> None:
         """Mark a profile as successful.
