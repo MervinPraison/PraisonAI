@@ -53,6 +53,18 @@ from .unicode_utils import safe_error_message, safe_log_message, extract_root_ca
 from .supervisor import ChannelState, ChannelSupervisor
 
 
+# Per-platform token env-var fallbacks used by the generic channel-launch path
+# (Issue #3578). Channels whose credentials live in the environment rather than
+# gateway.yaml (email/AgentMail/Linear) resolve their token from the first env
+# var present here, preserving the behaviour of the previous hand-written
+# ``_create_bot`` dispatch. Tried in order.
+_TOKEN_FALLBACK_ENV: Dict[str, tuple] = {
+    "linear": ("LINEAR_OAUTH_TOKEN", "LINEAR_API_KEY"),
+    "email": ("EMAIL_APP_PASSWORD",),
+    "agentmail": ("AGENTMAIL_API_KEY",),
+}
+
+
 # WebSocket close code for a slow-consumer eviction. 1013 ("Try Again Later")
 # is the closest standard code for a server that is shedding a client it cannot
 # keep up with; the structured GatewayCloseCode.SLOW_CONSUMER reason travels in
@@ -6371,60 +6383,82 @@ class WebSocketGateway:
                 ch_cfg.get('platform', channel_type),
             )
 
-        if channel_type == "telegram":
-            from praisonai_bot.bots import TelegramBot
-            return TelegramBot(token=token, agent=agent, config=config)
-        elif channel_type == "discord":
-            from praisonai_bot.bots import DiscordBot
-            return DiscordBot(token=token, agent=agent, config=config)
-        elif channel_type == "slack":
-            from praisonai_bot.bots import SlackBot
-            app_token = ch_cfg.get("app_token", os.environ.get("SLACK_APP_TOKEN", ""))
-            return SlackBot(token=token, agent=agent, config=config, app_token=app_token)
-        elif channel_type == "whatsapp":
-            from praisonai_bot.bots import WhatsAppBot
-            wa_mode = ch_cfg.get("mode", "cloud").lower().strip()
-            return WhatsAppBot(
-                token=token,
-                phone_number_id=ch_cfg.get("phone_number_id", ""),
-                agent=agent,
-                config=config,
-                verify_token=ch_cfg.get("verify_token", ""),
-                webhook_port=int(ch_cfg.get("webhook_port", 8080)),
-                mode=wa_mode,
-                creds_dir=ch_cfg.get("creds_dir"),
+        # Route every channel — built-in, register_platform(), or a
+        # ``praisonai.channels`` entry point — through the same registry seam
+        # that Bot()/probe_channels already use (Issue #3578). Constructing by
+        # hand here re-implemented platform dispatch and silently skipped any
+        # channel that wasn't one of the seven built-ins; the registry resolves
+        # them all, so a plugin channel configured in gateway.yaml now starts
+        # with zero edits to this method.
+        return self._build_channel_adapter(channel_type, token, agent, config, ch_cfg)
+
+    def _build_channel_adapter(
+        self,
+        channel_type: str,
+        token: str,
+        agent: "Agent",
+        config: Any,
+        ch_cfg: Dict[str, Any],
+    ) -> Any:
+        """Construct a platform adapter via the shared registry seam.
+
+        Resolves the adapter class through ``resolve_adapter()`` (built-in,
+        ``register_platform()``, or ``praisonai.channels`` entry point) and wires
+        its constructor kwargs from ``ch_cfg`` plus the per-platform env-var
+        fallbacks, mirroring ``Bot._build_adapter``. An unresolvable or
+        unconstructable platform is recorded as a degraded channel (visible in
+        health/doctor) instead of a silent skip.
+        """
+        from praisonai_bot.bots._registry import resolve_adapter
+        from praisonai_bot.bots.bot import _EXTRA_ENV_MAP
+
+        try:
+            adapter_cls = resolve_adapter(channel_type)
+        except ValueError:
+            logger.warning(
+                "Unknown channel type %r — no built-in, registered, or "
+                "entry-point adapter resolves it; channel not started.",
+                channel_type,
             )
-        elif channel_type == "linear":
-            from praisonai_bot.bots import LinearBot
-            linear_token = token or os.environ.get("LINEAR_OAUTH_TOKEN", "") or os.environ.get("LINEAR_API_KEY", "")
-            return LinearBot(
-                token=linear_token,
-                agent=agent,
-                config=config,
-                signing_secret=ch_cfg.get("signing_secret", "") or os.environ.get("LINEAR_WEBHOOK_SECRET", ""),
-                webhook_port=int(ch_cfg.get("webhook_port", 8080)),
+            self._mark_degraded_owner(
+                "channel", channel_type, reason="unresolved_platform"
             )
-        elif channel_type == "email":
-            from praisonai_bot.bots import EmailBot
-            email_token = token or os.environ.get("EMAIL_APP_PASSWORD", "")
-            return EmailBot(
-                token=email_token,
-                agent=agent,
-                email_address=ch_cfg.get("email_address") or os.environ.get("EMAIL_ADDRESS", ""),
-                imap_server=ch_cfg.get("imap_server") or os.environ.get("EMAIL_IMAP_SERVER", ""),
-                smtp_server=ch_cfg.get("smtp_server") or os.environ.get("EMAIL_SMTP_SERVER", ""),
+            return None
+
+        # Preserve the prior per-platform token env-var fallbacks so email/
+        # AgentMail/Linear channels — whose tokens live in the environment, not
+        # gateway.yaml — keep resolving exactly as before this refactor.
+        if not token:
+            for env_key in _TOKEN_FALLBACK_ENV.get(channel_type, ()):  # noqa: SIM110
+                env_val = os.environ.get(env_key, "")
+                if env_val:
+                    token = env_val
+                    break
+
+        # Build adapter kwargs: token + agent + config, then pass through every
+        # channel-specific config key (minus platform/token) as the adapter's
+        # own constructor kwarg — the same generic pass-through probe_channels
+        # uses — and backfill per-platform env vars (e.g. SLACK_APP_TOKEN).
+        init_kwargs: Dict[str, Any] = {"token": token, "agent": agent, "config": config}
+        extras = _EXTRA_ENV_MAP.get(channel_type, {})
+        for param, env_key in extras.items():
+            env_val = os.environ.get(env_key, "")
+            if env_val:
+                init_kwargs[param] = env_val
+        for key, value in ch_cfg.items():
+            if key in ("platform", "token"):
+                continue
+            init_kwargs[key] = value
+
+        try:
+            return adapter_cls(**init_kwargs)
+        except Exception as exc:
+            logger.warning(
+                "Failed to construct channel %r adapter: %s", channel_type, exc
             )
-        elif channel_type == "agentmail":
-            from praisonai_bot.bots import AgentMailBot
-            am_token = token or os.environ.get("AGENTMAIL_API_KEY", "")
-            return AgentMailBot(
-                token=am_token,
-                agent=agent,
-                inbox_id=ch_cfg.get("inbox_id") or os.environ.get("AGENTMAIL_INBOX_ID", ""),
-                domain=ch_cfg.get("domain") or os.environ.get("AGENTMAIL_DOMAIN", ""),
+            self._mark_degraded_owner(
+                "channel", channel_type, reason="adapter_construction_failed"
             )
-        else:
-            logger.warning(f"Unknown channel type: {channel_type}")
             return None
 
     async def _run_bot_safe(self, name: str, bot: Any) -> None:
