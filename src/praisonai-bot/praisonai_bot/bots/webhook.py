@@ -58,6 +58,7 @@ Usage (YAML gateway channel)::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -338,7 +339,13 @@ class WebhookBot:
         if route.silent:
             return web.Response(status=200, text="OK")
 
-        await self._dispatch(route, event, request)
+        try:
+            await self._dispatch(route, event, raw_body)
+        except Exception:  # noqa: BLE001
+            # Fail loud on dispatch: surface a 5xx so the sender retries the
+            # delivery instead of a false 200 ack that silently drops the event.
+            logger.error("Webhook agent dispatch failed", exc_info=True)
+            return web.Response(status=500, text="Dispatch failed")
         return web.Response(status=200, text="OK")
 
     def _match_route(self, event: Mapping[str, Any]) -> Optional[WebhookRoute]:
@@ -352,35 +359,50 @@ class WebhookBot:
         return None
 
     async def _dispatch(
-        self, route: WebhookRoute, event: Mapping[str, Any], request: Any
+        self, route: WebhookRoute, event: Mapping[str, Any], raw_body: bytes
     ) -> None:
-        """Render the prompt and run the agent through the session manager."""
+        """Render the prompt and run the agent through the session manager.
+
+        Raises on dispatch failure so the HTTP handler can return a 5xx and the
+        sender retries, rather than silently acknowledging a dropped event.
+        """
         if not self._agent:
             logger.warning("Webhook channel has no agent configured")
             return
 
         prompt = render_prompt(route.prompt, event)
-        # Stable dedup id: prefer a delivery id header, else the request path +
-        # a hash of the body-derived prompt, so redeliveries collapse to one run
-        # through the ingress journal.
+        message_id = self._message_id_for(event, raw_body)
+        user_id = f"webhook:{self._path}"
+        await self._session_mgr.chat(
+            self._agent,
+            user_id,
+            prompt,
+            message_id=message_id,
+        )
+
+    def _message_id_for(
+        self, event: Mapping[str, Any], raw_body: bytes
+    ) -> str:
+        """Return a stable dedup/ingress-journal id for this delivery.
+
+        Prefers a provider-supplied delivery id header (GitHub/Stripe/generic),
+        and otherwise falls back to a deterministic hash of the channel path +
+        raw request body. The fallback keeps ingress journaling and
+        deduplication active for generic senders that omit a delivery header —
+        without it an empty ``message_id`` silently disables both.
+        """
         headers = event.get("headers", {})
         lowered = {str(k).lower(): v for k, v in headers.items()}
-        message_id = (
+        delivery_id = (
             lowered.get("x-github-delivery")
             or lowered.get("x-request-id")
             or lowered.get("x-delivery-id")
-            or ""
+            or lowered.get("stripe-signature")
         )
-        user_id = f"webhook:{self._path}"
-        try:
-            await self._session_mgr.chat(
-                self._agent,
-                user_id,
-                prompt,
-                message_id=message_id,
-            )
-        except Exception:  # noqa: BLE001
-            logger.error("Webhook agent dispatch failed", exc_info=True)
+        if delivery_id:
+            return str(delivery_id)
+        digest = hashlib.sha256(self._path.encode("utf-8") + b"\x00" + raw_body)
+        return f"webhook-{digest.hexdigest()}"
 
     # ── Agent integration ───────────────────────────────────────────
 

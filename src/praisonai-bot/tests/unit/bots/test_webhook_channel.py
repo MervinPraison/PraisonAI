@@ -219,3 +219,75 @@ async def test_handler_no_matching_route_acks(monkeypatch):
     resp = await bot._handle_webhook(req)
     assert resp.status == 200
     bot._session_mgr.chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_returns_500_on_dispatch_failure(monkeypatch):
+    """A failed agent dispatch surfaces a 5xx so the sender retries (not a
+    false 200 ack that silently drops the event)."""
+    monkeypatch.setenv("PRAISONAI_INSECURE_WEBHOOKS", "true")
+    bot = _make_bot(monkeypatch)
+    bot._session_mgr.chat.side_effect = RuntimeError("agent boom")
+    req = _FakeRequest(json.dumps(_event()["payload"]).encode(), {})
+    resp = await bot._handle_webhook(req)
+    assert resp.status == 500
+    bot._session_mgr.chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_delivery_header_as_message_id(monkeypatch):
+    monkeypatch.setenv("PRAISONAI_INSECURE_WEBHOOKS", "true")
+    bot = _make_bot(monkeypatch)
+    req = _FakeRequest(
+        json.dumps(_event()["payload"]).encode(),
+        {"X-GitHub-Delivery": "abc-123"},
+    )
+    await bot._handle_webhook(req)
+    _, kwargs = bot._session_mgr.chat.call_args
+    assert kwargs["message_id"] == "abc-123"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_falls_back_to_stable_body_hash_message_id(monkeypatch):
+    """A generic sender with no delivery header still gets a deterministic,
+    non-empty message_id so ingress journaling/dedup stay active."""
+    monkeypatch.setenv("PRAISONAI_INSECURE_WEBHOOKS", "true")
+    body = json.dumps(_event()["payload"]).encode()
+    bot = _make_bot(monkeypatch, path="/hooks/x")
+    await bot._handle_webhook(_FakeRequest(body, {}))
+    _, kwargs = bot._session_mgr.chat.call_args
+    mid = kwargs["message_id"]
+    assert mid.startswith("webhook-") and len(mid) > len("webhook-")
+
+    # Deterministic: the same path + body yields the same id (redeliveries
+    # collapse to one journaled run).
+    bot2 = _make_bot(monkeypatch, path="/hooks/x")
+    await bot2._handle_webhook(_FakeRequest(body, {}))
+    _, kwargs2 = bot2._session_mgr.chat.call_args
+    assert kwargs2["message_id"] == mid
+
+
+def test_gateway_create_bot_wires_webhook(monkeypatch):
+    """The gateway's adapter switch constructs a WebhookBot for a
+    ``type: webhook`` channel (Issue #3580 P1: was silently skipped)."""
+    from praisonai_bot.gateway import server as S
+    from praisonai_bot.bots import _defaults as D
+
+    gw = S.WebSocketGateway.__new__(S.WebSocketGateway)
+
+    class _Agent:
+        tools = ["t"]
+
+        def clone_for_channel(self):
+            return self
+
+    monkeypatch.setattr(D, "apply_bot_smart_defaults", lambda agent, config: agent)
+    ch_cfg = {
+        "path": "/hooks/github",
+        "verify": {"hmac": {"header": "X-Sig", "secret": "s"}},
+        "routes": [{"when": {"field": "payload.action", "equals": "opened"}}],
+    }
+    bot = gw._create_bot("webhook", "", _Agent(), None, ch_cfg)
+    assert type(bot).__name__ == "WebhookBot"
+    assert bot._path == "/hooks/github"
+    assert bot.webhook_verifier is not None
