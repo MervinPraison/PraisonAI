@@ -920,7 +920,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-browser"
-version = "0.0.9"
+version = "0.0.10"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -964,7 +964,7 @@ provides-extras = ["server", "playwright", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.161"
+version = "1.6.162"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
