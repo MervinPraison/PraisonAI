@@ -507,6 +507,29 @@ class BaseAutoGenerator:
             generate_structured(response_model, messages, **kwargs)
         )
 
+    @staticmethod
+    def _normalize_gateway_model(model_name: str) -> tuple:
+        """Map a built-in gateway model to its (LiteLLM, OpenAI-SDK) forms.
+
+        Only OrcaRouter needs rewriting here: LiteLLM has no native
+        ``orcarouter/`` route, so the id must go out over LiteLLM's OpenAI-
+        compatible path (``openai/`` prefix, which LiteLLM strips) while the
+        OpenAI SDK talks to the gateway directly and wants the bare gateway id.
+        The config_list base_url already points at the gateway for both. Any
+        other model is returned unchanged for both legs so existing providers
+        (including LiteLLM's native ``openrouter/``) are untouched.
+
+        Examples (``orcarouter/openai/gpt-5.5``)::
+
+            LiteLLM   -> openai/openai/gpt-5.5   (LiteLLM strips openai/)
+            OpenAI SDK-> openai/gpt-5.5          (gateway's own id)
+        """
+        prefix = "orcarouter/"
+        if not model_name.lower().startswith(prefix):
+            return model_name, model_name
+        gateway_id = model_name[len(prefix):]
+        return f"openai/{gateway_id}", gateway_id
+
     async def _completion_impl(
         self,
         response_model: Type[T],
@@ -535,6 +558,16 @@ class BaseAutoGenerator:
         if registered is not None:
             return registered
 
+        # OrcaRouter is a built-in gateway prefix, so it never delegates to the
+        # registry above, yet LiteLLM has no native "orcarouter/" route and the
+        # config_list base_url already points at the gateway. Normalize the id
+        # per leg so both the LiteLLM and the OpenAI-SDK fallbacks reach the
+        # gateway with the vendor namespace it requires -- mirroring what
+        # OrcaRouterProvider and PraisonAIModel already do on their own paths.
+        litellm_model_name, openai_model_name = self._normalize_gateway_model(
+            model_name
+        )
+
         # Preserve the original LiteLLM failure so that, if the OpenAI fallback
         # also fails, the user sees BOTH tracebacks (via ``raise ... from``)
         # instead of only the second one. Otherwise the real cause (auth/region
@@ -548,7 +581,7 @@ class BaseAutoGenerator:
                 litellm = _get_litellm()
                 call = litellm.acompletion if is_async else litellm.completion
                 call_kwargs = dict(
-                    model=model_name,
+                    model=litellm_model_name,
                     messages=messages,
                     response_format=response_model,
                     **kwargs,
@@ -590,14 +623,14 @@ class BaseAutoGenerator:
                     return await client.aparse_structured_output(
                         messages=messages,
                         response_format=response_model,
-                        model=model_name,
+                        model=openai_model_name,
                         **kwargs,
                     )
                 return await asyncio.to_thread(
                     lambda: client.parse_structured_output(
                         messages=messages,
                         response_format=response_model,
-                        model=model_name,
+                        model=openai_model_name,
                         **kwargs,
                     )
                 )

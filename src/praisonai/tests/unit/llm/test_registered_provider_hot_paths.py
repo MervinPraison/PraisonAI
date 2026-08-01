@@ -269,3 +269,79 @@ def test_auto_generator_preserves_provider_specific_config(monkeypatch):
     assert "api_key" not in cfg
     assert "base_url" not in cfg
     assert "model" not in cfg
+
+
+# ---------------------------------------------------------------------------
+# OrcaRouter structured-completion normalization
+#
+# OrcaRouter is a built-in gateway prefix, so it never delegates to the
+# registry, yet LiteLLM has no native "orcarouter/" route. The ladder must
+# rewrite the id per leg (LiteLLM vs OpenAI SDK) so both reach the gateway with
+# the vendor namespace it requires, mirroring OrcaRouterProvider/PraisonAIModel.
+# ---------------------------------------------------------------------------
+
+def test_normalize_gateway_model_rewrites_orcarouter():
+    """orcarouter/<vendor>/<model> maps to per-leg forms; both reach the gateway."""
+    from praisonai.auto import BaseAutoGenerator
+
+    cases = {
+        "orcarouter/openai/gpt-5.5": ("openai/openai/gpt-5.5", "openai/gpt-5.5"),
+        "orcarouter/anthropic/claude-sonnet-5": (
+            "openai/anthropic/claude-sonnet-5",
+            "anthropic/claude-sonnet-5",
+        ),
+        "orcarouter/orcarouter/auto": (
+            "openai/orcarouter/auto",
+            "orcarouter/auto",
+        ),
+    }
+    for model, expected in cases.items():
+        assert BaseAutoGenerator._normalize_gateway_model(model) == expected
+
+
+def test_normalize_gateway_model_passthrough_for_others():
+    """Non-OrcaRouter models are returned unchanged for both legs."""
+    from praisonai.auto import BaseAutoGenerator
+
+    for model in ("openai/gpt-4o-mini", "openrouter/openai/gpt-4o", "gpt-4o"):
+        assert BaseAutoGenerator._normalize_gateway_model(model) == (model, model)
+
+
+def test_orcarouter_litellm_leg_receives_openai_prefixed_id(monkeypatch):
+    """The LiteLLM leg must send openai/<gateway-id>, not the raw orcarouter id."""
+    import types
+
+    from pydantic import BaseModel
+
+    from praisonai import auto as auto_mod
+    from praisonai.auto import BaseAutoGenerator
+
+    seen = {}
+
+    class Result(BaseModel):
+        answer: str
+
+    def _fake_completion(**kwargs):
+        seen["model"] = kwargs["model"]
+        message = types.SimpleNamespace(content='{"answer": "ok"}')
+        choice = types.SimpleNamespace(message=message)
+        return types.SimpleNamespace(choices=[choice])
+
+    fake_litellm = types.SimpleNamespace(completion=_fake_completion)
+    monkeypatch.setattr(auto_mod, "_get_litellm", lambda: fake_litellm)
+    monkeypatch.setattr(auto_mod, "is_available", lambda name: name == "litellm")
+
+    gen = BaseAutoGenerator(
+        config_list=[{
+            "model": "orcarouter/openai/gpt-5.5",
+            "base_url": "https://api.orcarouter.ai/v1",
+            "api_key": "sk-orca-test",
+        }]
+    )
+    out = asyncio.run(
+        gen._completion_impl(Result, [{"role": "user", "content": "hi"}], is_async=False)
+    )
+    assert out.answer == "ok"
+    # The raw "orcarouter/..." id would make LiteLLM raise (no such route); the
+    # normalized "openai/..." id is what actually reaches the gateway.
+    assert seen["model"] == "openai/openai/gpt-5.5"

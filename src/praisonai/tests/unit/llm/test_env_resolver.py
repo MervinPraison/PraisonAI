@@ -280,7 +280,7 @@ class TestProviderMapping:
             "ollama/": "http://localhost:11434/v1",
         }
         
-        for prefix, (key_var, base_url) in _PROVIDER_MAP.items():
+        for prefix, (_key_var, base_url) in _PROVIDER_MAP.items():
             assert base_url is not None, f"Provider {prefix} has None base URL"
             assert base_url == expected_urls[prefix], f"Provider {prefix} has unexpected URL {base_url}"
 
