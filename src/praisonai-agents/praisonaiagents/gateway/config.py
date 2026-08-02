@@ -120,7 +120,11 @@ class SessionConfig:
     Attributes:
         timeout: Session timeout in seconds (0 = no timeout)
         max_messages: Maximum messages to keep in history (0 = unlimited)
-        persist: Whether to persist session state
+        persist: Whether to persist session state. Defaults to True so a
+            gateway started from the out-of-box path remembers conversations
+            across restarts/redeploys via the SQLite transcript store. Set
+            ``persist: false`` in the config to opt into ephemeral, in-memory
+            sessions.
         persist_path: Path for session persistence
         store: Persistence backend when ``persist`` is set — ``"sqlite"``
             (default: transcripts in a WAL SQLite DB with concurrent readers
@@ -133,7 +137,7 @@ class SessionConfig:
     
     timeout: int = 3600  # 1 hour default
     max_messages: int = 1000
-    persist: bool = False
+    persist: bool = True  # durable by default; set persist=False for ephemeral
     persist_path: Optional[str] = None
     store: str = "sqlite"  # "sqlite" (concurrent, indexed) | "file" (legacy JSON)
     resume_window: int = 86400  # 24 hours default
@@ -774,7 +778,7 @@ class MultiChannelGatewayConfig:
                 session_config = SessionConfig(
                     timeout=sc_data.get("timeout", 3600),
                     max_messages=sc_data.get("max_messages", 1000),
-                    persist=sc_data.get("persist", False),
+                    persist=sc_data.get("persist", True),
                     persist_path=sc_data.get("persist_path"),
                     store=sc_data.get("store", "sqlite"),
                     resume_window=sc_data.get("resume_window", 86400),

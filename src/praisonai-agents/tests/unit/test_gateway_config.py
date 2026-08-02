@@ -16,7 +16,7 @@ class TestSessionConfig:
         config = SessionConfig()
         assert config.timeout == 3600
         assert config.max_messages == 1000
-        assert config.persist is False
+        assert config.persist is True
         assert config.persist_path is None
         assert config.metadata == {}
         assert config.mirror_runtime_state is False  # Issue #1943 - Default off

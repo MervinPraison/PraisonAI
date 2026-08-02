@@ -690,7 +690,7 @@ class WebSocketGateway:
             session_config = SessionConfig(
                 timeout=int(session_data.get("timeout", 3600)),
                 max_messages=int(session_data.get("max_messages", 1000)),
-                persist=bool(session_data.get("persist", False)),
+                persist=bool(session_data.get("persist", True)),
                 persist_path=_substitute(session_data.get("persist_path")),
                 store=str(session_data.get("store", "sqlite") or "sqlite"),
                 resume_window=int(session_data.get("resume_window", 86400)),
