@@ -260,12 +260,15 @@ class _TimeoutBoundTool:
     ``args_schema`` …) is delegated through ``__getattr__`` so the LLM still sees
     the correct schema. Only ``_run``/``run`` route through this generator's own
     timeout wrapper.
-    """
 
-    def __init__(self, inner, wrapped_run=None, wrapped__run=None):
-        object.__setattr__(self, "_inner", inner)
-        object.__setattr__(self, "_wrapped_run", wrapped_run)
-        object.__setattr__(self, "_wrapped__run", wrapped__run)
+    The proxy is instantiated as a *dynamic subclass of the wrapped tool's own
+    class* (see :func:`_make_timeout_proxy`) so ``isinstance(proxy, BaseTool)``
+    still holds. Downstream executors (``praisonaiagents`` tool_execution,
+    CrewAI/LangChain) route on ``isinstance(tool, BaseTool)`` to call ``.run``;
+    a plain proxy would fail that check *and* is not ``callable``, so the tool
+    call would silently execute nothing. Keeping the type identity preserves the
+    old in-place behaviour for every consumer while still isolating executors.
+    """
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_inner"), name)
@@ -284,6 +287,51 @@ class _TimeoutBoundTool:
         if fn is None:
             return object.__getattribute__(self, "_inner")._run(*args, **kwargs)
         return fn(*args, **kwargs)
+
+
+# Cache of dynamically-generated ``(_TimeoutBoundTool, type(inner))`` subclasses
+# keyed by the inner class, so we build one proxy type per tool class instead of
+# per tool instance.
+_TIMEOUT_PROXY_TYPES: "Dict[type, type]" = {}
+_TIMEOUT_PROXY_TYPES_LOCK = threading.Lock()
+
+
+def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
+    """Build a per-generator timeout proxy that keeps ``inner``'s type identity.
+
+    The returned object is an instance of a subclass of both
+    ``_TimeoutBoundTool`` and ``type(inner)`` so ``isinstance(proxy, BaseTool)``
+    (and any other base of the wrapped tool) still passes for downstream
+    executors, while ``_run``/``run`` route through this generator's timeout
+    wrapper and every other attribute is delegated to the shared inner object.
+    The inner object itself is never mutated.
+    """
+    inner_cls = type(inner)
+    proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+    if proxy_cls is None:
+        with _TIMEOUT_PROXY_TYPES_LOCK:
+            proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+            if proxy_cls is None:
+                try:
+                    proxy_cls = type(
+                        f"_TimeoutBound_{getattr(inner_cls, '__name__', 'Tool')}",
+                        (_TimeoutBoundTool, inner_cls),
+                        {},
+                    )
+                except TypeError:
+                    # Some tool classes forbid subclassing (e.g. custom
+                    # metaclass/__slots__ conflicts); fall back to the plain
+                    # proxy. isinstance() will not match, but callability of the
+                    # inner is still exposed via __getattr__ delegation, and the
+                    # generic callable branch is preserved by the caller.
+                    proxy_cls = _TimeoutBoundTool
+                _TIMEOUT_PROXY_TYPES[inner_cls] = proxy_cls
+
+    proxy = proxy_cls.__new__(proxy_cls)
+    object.__setattr__(proxy, "_inner", inner)
+    object.__setattr__(proxy, "_wrapped_run", wrapped_run)
+    object.__setattr__(proxy, "_wrapped__run", wrapped__run)
+    return proxy
 
 
 def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None, owner_key=None):
@@ -400,8 +448,10 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
 
         if wrapped_methods:
             # Build a fresh per-generator proxy; the shared inner object is never
-            # mutated, so cross-generator contamination is impossible.
-            proxy = _TimeoutBoundTool(
+            # mutated, so cross-generator contamination is impossible. The proxy
+            # subclasses ``type(inner)`` so ``isinstance(proxy, BaseTool)`` still
+            # holds for downstream executors.
+            proxy = _make_timeout_proxy(
                 inner,
                 wrapped_run=wrapped_methods.get("run"),
                 wrapped__run=wrapped_methods.get("_run"),
