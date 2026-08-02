@@ -6475,8 +6475,8 @@ class WebSocketGateway:
             if self._is_telegram_bot(bot):
                 self._inject_routing_handler(name, bot)
                 await self._start_telegram_bot_polling(name, bot)
-            elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
-                # WhatsApp/Linear run their own aiohttp webhook servers
+            elif type(bot).__name__ in ("WhatsAppBot", "LinearBot", "WebhookBot"):
+                # WhatsApp/Linear/Webhook run their own aiohttp webhook servers
                 self._inject_routing_handler(name, bot)
                 await bot.start()
             else:
@@ -6526,6 +6526,13 @@ class WebSocketGateway:
         agent based on the gateway's routing rules for each incoming message.
         """
         gateway = self
+
+        # Some ingress channels (e.g. the generic ``webhook`` channel) dispatch
+        # internally through their own declarative routes + session manager and
+        # do not expose the ``on_message`` hook. For those, there is nothing to
+        # inject — skip rather than raise.
+        if not hasattr(bot, "on_message"):
+            return
 
         @bot.on_message
         async def _routed_message_handler(message):
