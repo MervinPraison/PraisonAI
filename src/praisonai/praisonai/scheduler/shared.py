@@ -83,7 +83,7 @@ class ScheduleTicker:
         if now is None:
             now = time.time()
         try:
-            from croniter import croniter  # type: ignore[import-untyped]
+            from praisonaiagents.scheduler.due import next_fire_time
         except ImportError:
             _warn_cron_unavailable()
             return False
@@ -91,7 +91,11 @@ class ScheduleTicker:
         # (mirrors core ``is_due`` using ``last_run_at or created_at``).
         base = self.last_run_at if self.last_run_at is not None else self.created_at
         try:
-            next_run = croniter(self._cron_expr(), base).get_next(float)
+            next_run = next_fire_time(self._cron_expr(), base)
+        except ImportError:
+            # ``croniter`` engine absent — degrade like the missing-import path.
+            _warn_cron_unavailable()
+            return False
         except (ValueError, KeyError, TypeError):
             return False
         return now >= next_run
