@@ -6,8 +6,14 @@ Provides session management:
 - session resume: Resume a session
 - session delete: Delete a session
 - session export: Export a session
+- session share: Publish a redacted, read-only transcript and return a link
+- session unshare: Revoke a previously published transcript
 """
 
+import hashlib
+import os
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -470,6 +476,168 @@ def session_show(
         f"Messages: {session.message_count}",
         title="Session Details"
     )
+
+
+def _shares_dir() -> Path:
+    """Directory holding published transcripts (``~/.praisonai/shares``).
+
+    Lives under the canonical data home so shares sit alongside the session
+    stores rather than a second home root (consistent with #3201).
+    """
+    from praisonaiagents.paths import get_data_dir
+
+    path = get_data_dir() / "shares"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _share_path(session_id: str) -> Path:
+    """Stable per-session transcript path (id hashed to a safe filename)."""
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    return _shares_dir() / f"{digest}.html"
+
+
+def _render_share_html(session_id: str, transcript_md: str) -> str:
+    """Wrap an already-redacted Markdown transcript in a self-contained page.
+
+    Zero external infrastructure: a single static HTML file that opens over
+    ``file://``. The transcript is inserted as pre-escaped text so no session
+    content is interpreted as markup.
+    """
+    from html import escape
+
+    body = escape(transcript_md)
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        f"<title>PraisonAI session {escape(session_id)}</title>\n"
+        "<style>body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;"
+        "max-width:860px;margin:2rem auto;padding:0 1rem;color:#1b1f24}"
+        "pre{white-space:pre-wrap;word-wrap:break-word}"
+        ".note{color:#57606a;font-size:12px;margin-bottom:1rem}</style>\n"
+        "</head>\n<body>\n"
+        '<p class="note">Read-only shared transcript · best-effort secret '
+        "redaction applied — review before sharing widely</p>\n"
+        f"<pre>{body}</pre>\n"
+        "</body>\n</html>\n"
+    )
+
+
+@app.command("share")
+def session_share(
+    session_id: str = typer.Argument(..., help="Session ID to share"),
+    redact_level: str = typer.Option(
+        "standard",
+        "--redact-level",
+        help="Redaction level: 'standard' or 'strict'.",
+    ),
+):
+    """Publish a redacted, read-only transcript and return a shareable link.
+
+    Reuses the existing session resolver + transcript redactor (#3426), then
+    writes a single self-contained HTML file to ``~/.praisonai/shares`` and
+    returns a ``file://`` link — no external service or dependency required.
+    Sharing is opt-in and applies best-effort secret redaction first; review
+    the published transcript before sharing it widely.
+    """
+    output = get_output_controller()
+
+    from ..state.redact import REDACT_LEVELS
+    from ..state.session_resolver import export_session
+
+    if redact_level not in REDACT_LEVELS:
+        output.print_error(
+            f"Invalid --redact-level '{redact_level}'. "
+            f"Choose one of: {', '.join(REDACT_LEVELS)}."
+        )
+        raise typer.Exit(1)
+
+    transcript = export_session(
+        session_id,
+        format="md",
+        redact=True,
+        redact_level=redact_level,
+    )
+
+    if transcript is None:
+        output.print_error(
+            f"Session not found: {session_id}",
+            remediation="Use 'praisonai session list' to see available sessions",
+        )
+        raise typer.Exit(1)
+
+    try:
+        share_path = _share_path(session_id)
+        rendered_html = _render_share_html(session_id, transcript)
+        # Write to a sibling temp file then atomically replace, so a failed or
+        # interrupted write never truncates a previously published transcript.
+        temp_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=share_path.parent,
+                prefix=f".{share_path.stem}-",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temp_path = Path(temporary_file.name)
+                temporary_file.write(rendered_html)
+            os.replace(temp_path, share_path)
+        except OSError:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise
+    except OSError as e:
+        output.print_error(f"Failed to share session: {e}")
+        raise typer.Exit(1) from e
+
+    url = share_path.resolve().as_uri()
+
+    if output.is_json_mode:
+        output.print_json({
+            "session_id": session_id,
+            "shared": True,
+            "url": url,
+            "path": str(share_path),
+        })
+        return
+
+    output.print_success(f"Shared session: {session_id}")
+    output.print_info(f"Link: {url}")
+
+
+@app.command("unshare")
+def session_unshare(
+    session_id: str = typer.Argument(..., help="Session ID to unshare"),
+):
+    """Revoke a previously published transcript."""
+    output = get_output_controller()
+
+    revoked = False
+    try:
+        share_path = _share_path(session_id)
+        # Unlink unconditionally: a missing file is a successful no-op and races
+        # with a concurrent deletion are treated as already-revoked.
+        share_path.unlink()
+        revoked = True
+    except FileNotFoundError:
+        revoked = False
+    except OSError as e:
+        output.print_error(f"Failed to unshare session: {e}")
+        raise typer.Exit(1) from e
+
+    if output.is_json_mode:
+        output.print_json({"session_id": session_id, "revoked": revoked})
+        return
+
+    if revoked:
+        output.print_success(f"Unshared session: {session_id}")
+    else:
+        output.print_info(f"No shared transcript found for: {session_id}")
 
 
 @app.command("import")
