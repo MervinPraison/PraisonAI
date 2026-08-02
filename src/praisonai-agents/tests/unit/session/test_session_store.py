@@ -1205,3 +1205,177 @@ class TestCompactionCheckpoint:
         session = temp_store.get_session("s1")
         assert session.last_compaction is None
         assert temp_store.get_working_history("s1") == []
+
+
+class TestSpillOnWriteFailure:
+    """Issue #3597: durable-write failure spills + signals + recovers."""
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        """Isolate PRAISONAI_HOME so the spill dir is under a temp path."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("PRAISONAI_HOME", str(home))
+        # paths.get_data_dir() caches; clear it so PRAISONAI_HOME is honoured.
+        from praisonaiagents import paths
+        paths._clear_cache()
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        store = DefaultSessionStore(session_dir=str(sessions))
+        yield store, home
+        paths._clear_cache()
+
+    def _spill_dir(self, home):
+        return home / "state" / "session_spill"
+
+    def test_write_failure_spills_message(self, env):
+        """A failed atomic write salvages the turn to a spill file."""
+        store, home = env
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            ok = store.add_user_message("s1", "hello-durable")
+        assert ok is False
+
+        spill_dir = self._spill_dir(home)
+        files = list(spill_dir.glob("s1.*.json"))
+        assert len(files) == 1
+        data = json.loads(files[0].read_text())
+        assert data["session_id"] == "s1"
+        assert data["messages"][0]["content"] == "hello-durable"
+
+    def test_spill_file_permissions_0600(self, env):
+        """Spill files are written with restrictive 0600 permissions."""
+        store, home = env
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "secret")
+        files = list(self._spill_dir(home).glob("s1.*.json"))
+        assert files
+        mode = os.stat(files[0]).st_mode & 0o777
+        assert mode == 0o600
+
+    def test_persist_failed_hook_fires(self, env):
+        """SESSION_PERSIST_FAILED is emitted on a durable-write failure."""
+        store, home = env
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["role"] = event_input.role
+            captured["content"] = event_input.content
+            captured["spilled"] = event_input.spilled
+            return HookResult.allow()
+
+        hook_id = registry.register_function(HookEvent.SESSION_PERSIST_FAILED, _hook)
+        try:
+            with patch.object(store, "_atomic_write_json", return_value=False):
+                store.add_assistant_message("s1", "reply-content")
+        finally:
+            registry.unregister(hook_id)
+
+        assert captured.get("role") == "assistant"
+        assert captured.get("content") == "reply-content"
+        assert captured.get("spilled") is True
+
+    def test_reingest_on_load(self, env):
+        """A spilled turn is folded back into the session on next load."""
+        store, home = env
+        # First a real message persists normally.
+        store.add_user_message("s1", "first")
+        # Then a write failure spills the second turn.
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "spilled-turn")
+
+        # A fresh store instance re-ingests on load.
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "first" in contents
+        assert "spilled-turn" in contents
+
+        # Spill file is consumed after successful re-ingest.
+        assert not list(self._spill_dir(home).glob("s1.*.json"))
+
+    def test_reingest_no_duplicate(self, env):
+        """Re-ingest does not duplicate a turn already present on disk."""
+        store, home = env
+        store.add_user_message("s1", "first")
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "spilled-turn")
+
+        # Load twice; the second load must not re-add the same turn.
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        store2.get_chat_history("s1")
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert contents.count("spilled-turn") == 1
+
+    def test_no_spill_on_success(self, env):
+        """Happy path writes nothing to the spill dir."""
+        store, home = env
+        store.add_user_message("s1", "ok")
+        assert not self._spill_dir(home).exists() or not list(
+            self._spill_dir(home).glob("s1.*.json")
+        )
+
+    def test_rapid_failures_do_not_overwrite_spills(self, env):
+        """Consecutive failures in the same ms keep distinct spill files."""
+        store, home = env
+        fixed_ms = 1_700_000_000.0
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            with patch("praisonaiagents.session.store.time.time", return_value=fixed_ms):
+                store.add_user_message("s1", "turn-a")
+                store.add_user_message("s1", "turn-b")
+
+        files = list(self._spill_dir(home).glob("s1.*.json"))
+        assert len(files) == 2
+        contents = set()
+        for f in files:
+            data = json.loads(f.read_text())
+            contents.add(data["messages"][0]["content"])
+        assert contents == {"turn-a", "turn-b"}
+
+    def test_reingest_enforces_retention_window(self, env):
+        """Recovered turns go through the retention window like normal writes."""
+        store, home = env
+        store = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        store.add_user_message("s1", "m1")
+        store.add_user_message("s1", "m2")
+        # Spill two more turns beyond the window.
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "m3")
+            store.add_user_message("s1", "m4")
+
+        store2 = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        session = store2.get_session("s1")
+        assert len(session.messages) == 2
+
+    def test_reingest_skips_malformed_spill(self, env):
+        """A malformed spill payload never blocks recovery of valid ones."""
+        store, home = env
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        # Valid-JSON but wrong-shape spills (list root, non-list messages).
+        (spill_dir / "s1.1.1.aa.json").write_text(json.dumps([1, 2, 3]))
+        (spill_dir / "s1.2.1.bb.json").write_text(
+            json.dumps({"session_id": "s1", "messages": "not-a-list"})
+        )
+        (spill_dir / "s1.3.1.cc.json").write_text(
+            json.dumps({"session_id": "s1", "messages": [{"role": "user", "content": "good"}]})
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "good" in contents

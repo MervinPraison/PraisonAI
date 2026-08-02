@@ -70,6 +70,7 @@ __all__ = [
     "AfterLLMInput",
     "SessionStartInput",
     "SessionEndInput",
+    "SessionPersistFailedInput",
     "OnErrorInput",
     "OnRetryInput",
     # Message lifecycle event inputs
@@ -140,6 +141,7 @@ _LAZY_GROUPS = {
         'AfterLLMInput': ('praisonaiagents.hooks.events', 'AfterLLMInput'),
         'SessionStartInput': ('praisonaiagents.hooks.events', 'SessionStartInput'),
         'SessionEndInput': ('praisonaiagents.hooks.events', 'SessionEndInput'),
+        'SessionPersistFailedInput': ('praisonaiagents.hooks.events', 'SessionPersistFailedInput'),
         'OnErrorInput': ('praisonaiagents.hooks.events', 'OnErrorInput'),
         'OnRetryInput': ('praisonaiagents.hooks.events', 'OnRetryInput'),
         'MessageReceivedInput': ('praisonaiagents.hooks.events', 'MessageReceivedInput'),

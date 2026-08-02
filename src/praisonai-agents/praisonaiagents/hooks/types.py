@@ -32,6 +32,10 @@ class HookEvent(str, Enum):
     # Session lifecycle
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    # Fired when a durable session write fails (disk-full/corruption/permission).
+    # The already-produced turn is spilled to a fallback file and this hook makes
+    # the otherwise-silent failure observable for metrics/alerting (Issue #3597).
+    SESSION_PERSIST_FAILED = "session_persist_failed"
     
     # LLM lifecycle
     BEFORE_LLM = "before_llm"

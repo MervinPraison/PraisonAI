@@ -641,6 +641,9 @@ class DefaultSessionStore:
                         if session_id in self._cache:
                             return self._cache[session_id]
                     return SessionData(session_id=session_id)
+                # Issue #3597: fold any turns spilled on a prior write failure
+                # back into the session, then delete the consumed spill files.
+                self._reingest_spill(session_id, session)
             with self._lock:
                 self._cache[session_id] = session
             return session
@@ -650,7 +653,13 @@ class DefaultSessionStore:
                 return self._cache[session_id]
             session = SessionData(session_id=session_id)
             self._cache[session_id] = session
-            return session
+        # Even with no on-disk file yet, a prior write failure may have spilled
+        # turns for this session — recover them on first load (Issue #3597).
+        with FileLock(filepath, self.lock_timeout):
+            self._reingest_spill(session_id, session)
+        with self._lock:
+            self._cache[session_id] = session
+        return session
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> SessionData:
         """Load session JSON from disk (caller must hold FileLock).
@@ -703,6 +712,8 @@ class DefaultSessionStore:
                     if session_id in self._cache:
                         return self._cache[session_id]
                 return SessionData(session_id=session_id)
+            # Issue #3597: recover any turns spilled on a prior write failure.
+            self._reingest_spill(session_id, session)
         with self._lock:
             self._cache[session_id] = session
         return session
@@ -733,6 +744,213 @@ class DefaultSessionStore:
             except (IOError, OSError):
                 pass
             return False
+
+    def _spill_dir(self) -> str:
+        """Directory for last-resort salvage files (Issue #3597)."""
+        from ..paths import get_session_spill_dir
+        return str(get_session_spill_dir())
+
+    def _spill(
+        self, session_id: str, messages: List["SessionMessage"]
+    ) -> Optional[str]:
+        """Salvage already-produced turns to an atomic fallback file.
+
+        On a durable-write failure the message survives only in memory; this
+        writes it to ``~/.praisonai/state/session_spill/*.json`` (0600, temp
+        file + ``os.replace`` + best-effort dir fsync) so a shutdown/crash does
+        not silently lose it. Stdlib-only and best-effort: any failure here is
+        swallowed (the caller already returns False and fires the hook).
+
+        Returns the spill file path on success, else ``None``.
+        """
+        if not messages:
+            return None
+        try:
+            spill_dir = self._spill_dir()
+            os.makedirs(spill_dir, exist_ok=True)
+            safe_id = "".join(
+                c if c.isalnum() or c in "-_" else "_" for c in session_id
+            )
+            # A monotonic ms timestamp keeps files sortable/attributable, but a
+            # short random token guarantees uniqueness so consecutive failures
+            # within the same PID+millisecond never overwrite an earlier spill
+            # (each unpersisted turn keeps its own recoverable file).
+            unique = os.urandom(4).hex()
+            filename = (
+                f"{safe_id}.{int(time.time() * 1000)}.{os.getpid()}.{unique}.json"
+            )
+            filepath = os.path.join(spill_dir, filename)
+            payload = {
+                "session_id": session_id,
+                "spilled_at": datetime.now(timezone.utc).isoformat(),
+                "messages": [m.to_dict() for m in messages],
+            }
+            fd, temp_path = tempfile.mkstemp(dir=spill_dir, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                try:
+                    os.chmod(temp_path, 0o600)
+                except OSError:
+                    pass
+                os.replace(temp_path, filepath)
+                temp_path = None
+            finally:
+                if temp_path is not None:
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+            # Best-effort directory fsync so the rename is durable.
+            try:
+                dir_fd = os.open(spill_dir, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
+            return filepath
+        except (IOError, OSError, TypeError, ValueError) as e:
+            logger.error(f"Session spill failed for {session_id}: {e}")
+            return None
+
+    def _fire_persist_failed_hook(
+        self,
+        session_id: str,
+        message: "SessionMessage",
+        error: str,
+        spill_path: Optional[str],
+    ) -> None:
+        """Emit SESSION_PERSIST_FAILED so a silent failure is observable.
+
+        Best-effort and fully guarded: hooks are optional and must never turn a
+        persistence failure into a raised exception on the caller's hot path.
+        Skipped entirely when no such hook is registered (zero overhead).
+        """
+        try:
+            from ..hooks.registry import get_default_registry
+            from ..hooks.types import HookEvent
+
+            registry = get_default_registry()
+            if not registry.has_hooks(HookEvent.SESSION_PERSIST_FAILED):
+                return
+
+            from ..hooks.events import SessionPersistFailedInput
+            from ..hooks.runner import HookRunner
+
+            event_input = SessionPersistFailedInput(
+                session_id=session_id,
+                cwd=os.getcwd(),
+                event_name=HookEvent.SESSION_PERSIST_FAILED.value,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                role=message.role,
+                content=message.content,
+                error=error,
+                spilled=spill_path is not None,
+                spill_path=spill_path,
+            )
+            HookRunner(registry).execute_sync(
+                HookEvent.SESSION_PERSIST_FAILED, event_input
+            )
+        except Exception:  # pragma: no cover - observability must never break persistence
+            logger.debug("SESSION_PERSIST_FAILED hook failed", exc_info=True)
+
+    def _on_write_failure(
+        self, session_id: str, messages: List["SessionMessage"], error: str
+    ) -> None:
+        """Spill salvage + fire the observability hook on a durable-write failure."""
+        if not messages:
+            return
+        spill_path = self._spill(session_id, messages)
+        self._fire_persist_failed_hook(
+            session_id, messages[-1], error, spill_path
+        )
+
+    def _reingest_spill(self, session_id: str, session: SessionData) -> None:
+        """Re-ingest any spilled turns for a session on load (Issue #3597).
+
+        Merges salvaged messages that are not already present (matched on
+        role+content+timestamp) back into the loaded session, then persists and
+        deletes each spill file only after it is successfully folded in. Fully
+        guarded: a failure here must never break loading a session.
+        """
+        try:
+            spill_dir = self._spill_dir()
+            if not os.path.isdir(spill_dir):
+                return
+            safe_id = "".join(
+                c if c.isalnum() or c in "-_" else "_" for c in session_id
+            )
+            prefix = f"{safe_id}."
+            candidates = sorted(
+                f for f in os.listdir(spill_dir)
+                if f.startswith(prefix) and f.endswith(".json")
+            )
+        except (IOError, OSError):
+            return
+
+        seen = {
+            (m.role, m.content, m.timestamp) for m in session.messages
+        }
+        recovered: List[tuple] = []  # (filepath, [SessionMessage])
+        for filename in candidates:
+            filepath = os.path.join(spill_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError, OSError):
+                continue
+            # A syntactically valid spill can still carry an unexpected shape
+            # (non-object root, non-list messages, non-object message). Guard
+            # each level so one malformed spill can't raise AttributeError /
+            # TypeError and block recovery of the rest.
+            if not isinstance(data, dict):
+                continue
+            if data.get("session_id") != session_id:
+                continue
+            raw_messages = data.get("messages")
+            if not isinstance(raw_messages, list):
+                continue
+            msgs = []
+            for raw in raw_messages:
+                if not isinstance(raw, dict):
+                    continue
+                msg = SessionMessage.from_dict(raw)
+                key = (msg.role, msg.content, msg.timestamp)
+                if key in seen:
+                    continue
+                seen.add(key)
+                msgs.append(msg)
+            recovered.append((filepath, msgs))
+
+        if not recovered:
+            return
+
+        new_messages = [m for _, msgs in recovered for m in msgs]
+        if new_messages:
+            session.messages.extend(new_messages)
+            filepath = self._get_session_path(session_id)
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            # Recovered turns extend the active window like any other append, so
+            # they must go through the same retention policy (compact/truncate)
+            # every ordinary write uses — otherwise recovery could persist and
+            # expose an oversized transcript that stays inconsistent until a
+            # later mutation happens to compact it.
+            self._enforce_window(session)
+            if not self._atomic_write_json(filepath, session.to_dict()):
+                # Could not fold the salvage back in durably — leave the spill
+                # files in place so a later load can retry.
+                return
+
+        # Persisted (or nothing new to persist) — delete the consumed spills.
+        for filepath, _ in recovered:
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
 
     def _modify_session_locked(
         self,
@@ -824,10 +1042,14 @@ class DefaultSessionStore:
             # permanently destroy all prior history while reporting success.
             try:
                 session = self._load_session_from_disk(session_id, filepath)
-            except OSError:
+            except OSError as e:
                 logger.error(
                     f"Failed to save session {session_id}: could not read existing session"
                 )
+                # Issue #3597: the read failed, so the durable file is intact
+                # but this turn is unpersisted — salvage it and signal instead
+                # of losing it silently.
+                self._on_write_failure(session_id, [message], str(e))
                 return False
 
             # Add message
@@ -840,6 +1062,11 @@ class DefaultSessionStore:
             # Write atomically
             if not self._atomic_write_json(filepath, session.to_dict()):
                 logger.error(f"Failed to save session {session_id}")
+                # Issue #3597: durable write failed (disk-full / corruption).
+                # Spill just this turn to a fallback file and fire the
+                # SESSION_PERSIST_FAILED hook so the loss is observable and
+                # recoverable on next load.
+                self._on_write_failure(session_id, [message], "atomic write failed")
                 return False
 
             # Update cache

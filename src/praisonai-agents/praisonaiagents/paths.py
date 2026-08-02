@@ -117,6 +117,20 @@ def get_sessions_dir() -> Path:
     return get_data_dir() / "sessions"
 
 
+def get_session_spill_dir() -> Path:
+    """
+    Get the session spill directory (last-resort salvage on write failure).
+
+    When a durable session write fails (disk-full / corruption / permission),
+    the already-produced turn is spilled here atomically and re-ingested on the
+    next load (Issue #3597).
+
+    Returns:
+        Path to ~/.praisonai/state/session_spill/
+    """
+    return get_data_dir() / "state" / "session_spill"
+
+
 def get_skills_dir() -> Path:
     """
     Get user skills directory.

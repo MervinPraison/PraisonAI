@@ -141,6 +141,38 @@ class SessionEndInput(HookInput):
 
 
 @dataclass
+class SessionPersistFailedInput(HookInput):
+    """Input for SESSION_PERSIST_FAILED hooks (a durable session write failed).
+
+    Fired by the session store when an ``add_message``/``set_chat_history``
+    write cannot be persisted (disk-full, SQLite/FTS corruption, permission /
+    ``OSError``). Instead of losing the already-produced turn silently, the
+    store spills it to an atomic fallback file and fires this hook so operators
+    can observe/route the failure (metrics, alerting, forensics) — mirroring the
+    ``MESSAGE_UNDELIVERED`` posture on the outbound side (Issue #3597).
+
+    ``spilled`` reports whether the last-resort fallback write itself
+    succeeded; ``spill_path`` is the file the turn was salvaged to (when any).
+    """
+    role: str = ""
+    content: str = ""
+    error: str = ""
+    spilled: bool = False
+    spill_path: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "role": self.role,
+            "content": self.content[:500] if self.content else "",
+            "error": self.error,
+            "spilled": self.spilled,
+            "spill_path": self.spill_path,
+        })
+        return base
+
+
+@dataclass
 class BeforeLLMInput(HookInput):
     """Input for BeforeLLM hooks."""
     messages: List[Dict[str, Any]] = field(default_factory=list)
