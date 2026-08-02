@@ -205,6 +205,7 @@ class PersistenceOrchestrator:
             session_id,
             build_session=_build_session,
             get_messages=lambda: self._sync(self.conversation.get_messages(session_id)),
+            create_session=lambda s: self._sync(self.conversation.create_session(s)),
         )
 
         if messages is None:

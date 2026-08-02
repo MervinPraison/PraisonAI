@@ -11,6 +11,7 @@ naked callables and ``_wrap_tool_with_timeout`` had zero call sites.
 
 import logging
 import threading
+import uuid
 
 import pytest
 
@@ -28,6 +29,7 @@ def _make_generator():
     gen._tool_timeout_executor_lock = threading.Lock()
     gen._leaked_workers = 0
     gen._max_leaked_workers = 16
+    gen._timeout_owner_key = uuid.uuid4()
     gen.logger = logging.getLogger(__name__)
     return gen
 
