@@ -9,7 +9,8 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
-from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
+import os
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 T = TypeVar('T')
 
@@ -56,6 +57,57 @@ _FILE_TOOL_PREFIXES: Dict[str, str] = {
     "copy_file": "copy",
 }
 
+# Prefix for a shell command that touches a path *outside* the workspace root.
+# Distinct from ``bash:`` so a broad ``bash:*`` / "allow shell" / session grant
+# never silently authorises out-of-workspace access — the escaping path is named
+# so the grant is path-scoped, mirroring the ``edit:<path>`` file-tool targets.
+_SHELL_EXTERNAL_PREFIX = "shell:external-path"
+
+
+def _shell_external_paths(command: str) -> List[str]:
+    """Return the workspace-escaping paths referenced by a shell *command*.
+
+    Reuses the existing command decomposition (``permissions.command_parser``)
+    and the shared containment resolver (``tools.path_safety``) — the very
+    primitives the file tools rely on — so shell path-scoping cannot diverge
+    from the SDK's file-tool workspace guarantee. The workspace root defaults
+    to ``$PRAISONAI_WORKSPACE_ROOT`` or the current working directory.
+
+    Set ``PRAISONAI_SHELL_WORKSPACE_BOUNDARY`` to ``0``/``false``/``no`` to opt
+    out (e.g. trusted sandboxed/CI runs); the check then returns ``[]`` and the
+    command keeps its plain ``bash:<command>`` target. Any parse/resolve failure
+    also returns ``[]`` so target derivation never breaks a tool call — the
+    downstream ``PermissionManager`` boundary gate still applies fail-closed.
+    """
+    if os.environ.get(
+        "PRAISONAI_SHELL_WORKSPACE_BOUNDARY", "1"
+    ).lower() in ("0", "false", "no"):
+        return []
+    try:
+        from ..permissions.command_parser import parse_command
+        from ..tools.path_safety import resolve_within_root
+
+        root = os.environ.get("PRAISONAI_WORKSPACE_ROOT") or os.getcwd()
+        escaping: List[str] = []
+        seen = set()
+        for op in parse_command(command):
+            candidates = list(op.write_targets) + list(op.path_args)
+            # An executable referenced by path runs code outside the workspace;
+            # a bare name (``rm``) is PATH-resolved and must not be flagged.
+            exe = op.executable
+            if exe and (exe.startswith(("/", "~", "./", "../", "$")) or "/" in exe):
+                candidates.append(exe)
+            for path in candidates:
+                if path in seen:
+                    continue
+                seen.add(path)
+                if resolve_within_root(path, root) is None:
+                    escaping.append(path)
+        return escaping
+    except Exception:  # noqa: BLE001 — never break target derivation
+        return []
+
+
 # Argument keys commonly holding the shell command / file path, in priority order.
 _COMMAND_KEYS = ("command", "cmd", "code", "query")
 # ``src`` covers ``move_file``/``copy_file`` (which take ``src``/``dst``) so a
@@ -72,7 +124,10 @@ def build_permission_target(
     Maps a tool name + arguments to a target string the permission store can
     match against (and generalise via ``suggest_scope_pattern``):
 
-    * shell tools -> ``bash:<command>``
+    * shell tools -> ``bash:<command>`` — but a command touching a path
+      *outside* the workspace root instead yields
+      ``shell:external-path:<path>`` so a broad ``bash:*`` / "allow shell" /
+      session grant cannot silently authorise out-of-workspace access.
     * file tools  -> ``<edit|write|delete|…>:<path>``
     * everything else -> ``tool:<tool_name>``
 
@@ -92,7 +147,11 @@ def build_permission_target(
         for key in _COMMAND_KEYS:
             value = args.get(key)
             if isinstance(value, str) and value.strip():
-                return f"bash:{value.strip()}"
+                command = value.strip()
+                external = _shell_external_paths(command)
+                if external:
+                    return f"{_SHELL_EXTERNAL_PREFIX}:{','.join(external)}"
+                return f"bash:{command}"
         return f"tool:{tool_name}"
 
     prefix = _FILE_TOOL_PREFIXES.get(tool_name)

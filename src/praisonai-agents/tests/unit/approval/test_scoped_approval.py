@@ -94,6 +94,54 @@ class TestBuildPermissionTarget:
 
         assert build_permission_target("edit_file", {}) == "tool:edit_file"
 
+    def test_in_workspace_shell_stays_bash(self, tmp_path, monkeypatch):
+        # A command touching only in-workspace paths keeps its ``bash:`` target.
+        from praisonaiagents.approval.utils import build_permission_target
+
+        monkeypatch.chdir(tmp_path)
+        target = build_permission_target(
+            "execute_command", {"command": "cat ./notes.txt"}
+        )
+        assert target == "bash:cat ./notes.txt"
+
+    def test_out_of_workspace_shell_uses_external_target(self, tmp_path, monkeypatch):
+        # A command touching a path OUTSIDE the workspace root must earn a
+        # distinct ``shell:external-path:<path>`` target so a broad ``bash:*``
+        # / session grant cannot silently authorise it.
+        from praisonaiagents.approval.utils import build_permission_target
+
+        monkeypatch.chdir(tmp_path)
+        target = build_permission_target(
+            "execute_command", {"command": "cat /etc/passwd"}
+        )
+        assert target == "shell:external-path:/etc/passwd"
+        # A different escaping path yields a different target (path-scoped).
+        other = build_permission_target(
+            "execute_command", {"command": "cat ~/.ssh/id_rsa"}
+        )
+        assert other.startswith("shell:external-path:")
+        assert other != target
+
+    def test_redirect_out_of_workspace_flagged(self, tmp_path, monkeypatch):
+        from praisonaiagents.approval.utils import build_permission_target
+
+        monkeypatch.chdir(tmp_path)
+        target = build_permission_target(
+            "execute_command", {"command": "echo hi > /tmp/evil.txt"}
+        )
+        assert target == "shell:external-path:/tmp/evil.txt"
+
+    def test_boundary_opt_out_env(self, tmp_path, monkeypatch):
+        # The explicit opt-out (sandboxed/CI) restores the plain ``bash:`` target.
+        from praisonaiagents.approval.utils import build_permission_target
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PRAISONAI_SHELL_WORKSPACE_BOUNDARY", "0")
+        target = build_permission_target(
+            "execute_command", {"command": "cat /etc/passwd"}
+        )
+        assert target == "bash:cat /etc/passwd"
+
 
 # ── ConsoleBackend scoped prompt ────────────────────────────────────────────
 
