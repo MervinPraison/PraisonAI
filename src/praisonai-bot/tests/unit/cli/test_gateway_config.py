@@ -369,6 +369,81 @@ def test_gateway_block_accepts_and_propagates_undelivered_opt_in():
     print("✓ Undelivered opt-in loads via schema and reaches gateway config")
 
 
+def test_start_with_config_applies_session_persist_opt_out():
+    """``gateway.session.persist: false`` opt-out reaches the store (#3593).
+
+    Regression: the multi-bot CLI builds ``WebSocketGateway(config=...)`` with a
+    *default* session config, so ``__init__`` selects a persistent store before
+    ``start_with_config`` loads the YAML. Before the fix, ``start_with_config``
+    never read the ``session:`` block, so a documented ``persist: false`` was
+    silently ignored now that persistence is durable-by-default. This guards
+    that the block is re-read and the store re-selected (None for opt-out).
+    """
+    import asyncio
+
+    import pytest
+
+    from praisonai_bot.gateway.server import WebSocketGateway
+
+    class _StopEarly(Exception):
+        pass
+
+    gw = WebSocketGateway()
+    # Durable-by-default: a store exists before YAML is applied.
+    assert gw._session_store is not None
+    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
+        "channels": {"telegram": {"token": "fake-token"}},
+        "gateway": {"session": {"persist": False}},
+    }
+
+    async def _stop(*_a, **_k):
+        raise _StopEarly
+
+    gw.start_channels = _stop  # type: ignore[assignment]
+    gw.start = _stop  # type: ignore[assignment]
+
+    with pytest.raises(_StopEarly):
+        asyncio.run(gw.start_with_config("ignored.yaml"))
+
+    # The explicit opt-out took effect: no persistent store, in-memory only.
+    assert gw._session_store is None
+    assert gw.config.session_config.persist is False
+    print("✓ session.persist:false opt-out reaches the store via start_with_config")
+
+
+def test_explicit_session_store_survives_start_with_config():
+    """A constructor-supplied store is explicit and wins over YAML (#3593)."""
+    import asyncio
+
+    import pytest
+
+    from praisonai_bot.gateway.server import WebSocketGateway
+
+    class _StopEarly(Exception):
+        pass
+
+    sentinel = object()
+    gw = WebSocketGateway(session_store=sentinel)  # type: ignore[arg-type]
+    assert gw._session_store is sentinel
+    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
+        "channels": {"telegram": {"token": "fake-token"}},
+        "gateway": {"session": {"persist": False}},
+    }
+
+    async def _stop(*_a, **_k):
+        raise _StopEarly
+
+    gw.start_channels = _stop  # type: ignore[assignment]
+    gw.start = _stop  # type: ignore[assignment]
+
+    with pytest.raises(_StopEarly):
+        asyncio.run(gw.start_with_config("ignored.yaml"))
+
+    # YAML session block must not clobber an explicit store.
+    assert gw._session_store is sentinel
+    print("✓ explicit session_store survives start_with_config YAML session block")
+
+
 def test_gateway_health_block_matches_runtime_consumer():
     """``gateway.health`` schema keys must match ``HealthMonitorConfig.from_dict``.
 

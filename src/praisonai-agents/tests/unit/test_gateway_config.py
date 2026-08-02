@@ -295,6 +295,22 @@ class TestMultiChannelGatewayConfig:
         assert "telegram" in config.channels
         assert "discord" in config.channels
 
+    def test_from_dict_session_persist_default_and_opt_out(self):
+        """``session_config`` persistence defaults to True; ``persist: false`` opts out (#3593)."""
+        from praisonaiagents.gateway import MultiChannelGatewayConfig
+
+        # Omitted persist defaults to durable-by-default.
+        default_config = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"session_config": {}}}
+        )
+        assert default_config.gateway.session_config.persist is True
+
+        # Explicit opt-out is preserved.
+        ephemeral_config = MultiChannelGatewayConfig.from_dict(
+            {"gateway": {"session_config": {"persist": False}}}
+        )
+        assert ephemeral_config.gateway.session_config.persist is False
+
     def test_to_dict(self):
         """Test MultiChannelGatewayConfig serialization."""
         from praisonaiagents.gateway import MultiChannelGatewayConfig
