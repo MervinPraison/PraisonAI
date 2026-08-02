@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from praisonaiagents.gateway import (
     GatewayConfig,
+    SessionConfig,
     GatewayEvent,
     GatewayMessage,
     EventType,
@@ -690,7 +691,7 @@ class WebSocketGateway:
             session_config = SessionConfig(
                 timeout=int(session_data.get("timeout", 3600)),
                 max_messages=int(session_data.get("max_messages", 1000)),
-                persist=bool(session_data.get("persist", False)),
+                persist=bool(session_data.get("persist", True)),
                 persist_path=_substitute(session_data.get("persist_path")),
                 store=str(session_data.get("store", "sqlite") or "sqlite"),
                 resume_window=int(session_data.get("resume_window", 86400)),
@@ -748,7 +749,73 @@ class WebSocketGateway:
 
         logger.info(f"Gateway config loaded from {config_path}")
         return cls(config=config)
-    
+
+    @staticmethod
+    def _build_session_store(
+        session_config: SessionConfig,
+    ) -> Optional[SessionStoreProtocol]:
+        """Select the session store implied by ``session_config``.
+
+        Shared by ``__init__`` and ``start_with_config`` so the multi-bot CLI
+        path (which loads its ``session:`` block *after* construction) picks the
+        same store an explicit config would (Issue #3593).
+
+        Returns ``None`` (in-memory sessions) when persistence is disabled, or
+        when a persistent store cannot be initialised — e.g. an absent/read-only
+        home dir — so durable-by-default never crashes gateway startup.
+        """
+        if not session_config.persist:
+            logger.info("Session persistence disabled, using in-memory sessions only")
+            return None
+
+        # Persistence enabled: default to the SQLite transcript store (WAL,
+        # concurrent readers, indexed lookups) so gateway session history shares
+        # the durability/concurrency model already used by the delivery journal,
+        # DLQ and kanban (Issue #3407). ``store: file`` selects the legacy
+        # per-session JSON store.
+        persist_path = session_config.persist_path
+        store_kind = getattr(session_config, "store", "sqlite")
+        if store_kind == "file":
+            try:
+                store = DefaultSessionStore(session_dir=persist_path)
+                logger.info(f"Session persistence enabled (file/JSON store), directory: {persist_path or '~/.praisonai/sessions/'}")
+                return store
+            except Exception as exc:
+                # Now that persistence is durable-by-default (Issue #3593), an
+                # environment with an absent/read-only home dir must not crash
+                # the gateway at construction — degrade to in-memory sessions.
+                logger.warning(
+                    "File/JSON session store unavailable (%s); falling back to "
+                    "in-memory sessions (history will not survive a restart).",
+                    exc,
+                )
+                return None
+        try:
+            from praisonaiagents.session.sqlite_transcript_store import (
+                SqliteTranscriptStore,
+            )
+            store = SqliteTranscriptStore(session_dir=persist_path)
+            logger.info(f"Session persistence enabled (SQLite store), directory: {persist_path or '~/.praisonai/sessions/'}")
+            return store
+        except Exception as exc:
+            logger.warning(
+                "SQLite transcript store unavailable (%s); falling back to "
+                "file/JSON store.", exc
+            )
+            try:
+                store = DefaultSessionStore(session_dir=persist_path)
+                return store
+            except Exception as exc2:
+                # Both durable stores failed to initialise (e.g. the default
+                # ~/.praisonai/sessions dir cannot be created). Degrade to
+                # in-memory rather than aborting startup.
+                logger.warning(
+                    "File/JSON session store also unavailable (%s); falling "
+                    "back to in-memory sessions (history will not survive a "
+                    "restart).", exc2
+                )
+                return None
+
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -874,36 +941,14 @@ class WebSocketGateway:
         # revocation) instead of leaving it trusted for its whole lifetime.
         self._client_auth_generation: Dict[str, str] = {}  # client_id -> auth generation
         
-        # Initialize session store based on configuration
+        # Initialize session store based on configuration. Track whether an
+        # explicit store was supplied so the YAML ``session:`` block loaded
+        # later in ``start_with_config`` never clobbers a caller-provided store.
+        self._session_store_explicit = session_store is not None
         if session_store:
             self._session_store: Optional[SessionStoreProtocol] = session_store
-        elif self.config.session_config.persist:
-            # Persistence enabled: default to the SQLite transcript store
-            # (WAL, concurrent readers, indexed lookups) so gateway session
-            # history shares the durability/concurrency model already used by
-            # the delivery journal, DLQ and kanban (Issue #3407). ``store:
-            # file`` selects the legacy per-session JSON store.
-            persist_path = self.config.session_config.persist_path
-            store_kind = getattr(self.config.session_config, "store", "sqlite")
-            if store_kind == "file":
-                self._session_store = DefaultSessionStore(session_dir=persist_path)
-                logger.info(f"Session persistence enabled (file/JSON store), directory: {persist_path or '~/.praisonai/sessions/'}")
-            else:
-                try:
-                    from praisonaiagents.session.sqlite_transcript_store import (
-                        SqliteTranscriptStore,
-                    )
-                    self._session_store = SqliteTranscriptStore(session_dir=persist_path)
-                    logger.info(f"Session persistence enabled (SQLite store), directory: {persist_path or '~/.praisonai/sessions/'}")
-                except Exception as exc:
-                    logger.warning(
-                        "SQLite transcript store unavailable (%s); "
-                        "falling back to file/JSON store.", exc
-                    )
-                    self._session_store = DefaultSessionStore(session_dir=persist_path)
         else:
-            self._session_store = None
-            logger.info("Session persistence disabled, using in-memory sessions only")
+            self._session_store = self._build_session_store(self.config.session_config)
         
         # Track session TTLs for cleanup
         self._session_ttls: Dict[str, float] = {}  # session_id -> expiry timestamp
@@ -7844,6 +7889,31 @@ class WebSocketGateway:
             self._host = gw_cfg["host"]
         if gw_cfg.get("port"):
             self._port = int(gw_cfg["port"])
+        # Issue #3593: the multi-bot CLI builds this gateway with a *default*
+        # session config, so ``__init__`` already picked a store before this
+        # YAML loaded. Re-read the ``session:`` block here and re-select the
+        # store so a documented ``session.persist: false`` opt-out (or a custom
+        # store/path) actually takes effect. A store passed to the constructor
+        # is explicit and always wins.
+        session_yaml = gw_cfg.get("session")
+        if isinstance(session_yaml, dict) and not self._session_store_explicit:
+            try:
+                new_session_config = SessionConfig(
+                    timeout=int(session_yaml.get("timeout", 3600)),
+                    max_messages=int(session_yaml.get("max_messages", 1000)),
+                    persist=bool(session_yaml.get("persist", True)),
+                    persist_path=session_yaml.get("persist_path"),
+                    store=str(session_yaml.get("store", "sqlite") or "sqlite"),
+                    resume_window=int(session_yaml.get("resume_window", 86400)),
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Invalid gateway.session block (%s); keeping current "
+                    "session configuration.", exc
+                )
+            else:
+                self.config.session_config = new_session_config
+                self._session_store = self._build_session_store(new_session_config)
         # Propagate slow-consumer flow-control limits so YAML/CLI users get the
         # configured ceilings instead of the in-memory defaults when clients
         # register via ``_register_client_conn``.

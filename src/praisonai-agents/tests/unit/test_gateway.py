@@ -64,7 +64,7 @@ class TestSessionConfig:
         config = SessionConfig()
         assert config.timeout == 3600
         assert config.max_messages == 1000
-        assert config.persist is False
+        assert config.persist is True
     
     def test_custom_session_config(self):
         """Test custom session configuration."""
