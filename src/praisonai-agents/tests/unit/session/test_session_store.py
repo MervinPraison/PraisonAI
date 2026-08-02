@@ -1318,3 +1318,64 @@ class TestSpillOnWriteFailure:
         assert not self._spill_dir(home).exists() or not list(
             self._spill_dir(home).glob("s1.*.json")
         )
+
+    def test_rapid_failures_do_not_overwrite_spills(self, env):
+        """Consecutive failures in the same ms keep distinct spill files."""
+        store, home = env
+        fixed_ms = 1_700_000_000.0
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            with patch("praisonaiagents.session.store.time.time", return_value=fixed_ms):
+                store.add_user_message("s1", "turn-a")
+                store.add_user_message("s1", "turn-b")
+
+        files = list(self._spill_dir(home).glob("s1.*.json"))
+        assert len(files) == 2
+        contents = set()
+        for f in files:
+            data = json.loads(f.read_text())
+            contents.add(data["messages"][0]["content"])
+        assert contents == {"turn-a", "turn-b"}
+
+    def test_reingest_enforces_retention_window(self, env):
+        """Recovered turns go through the retention window like normal writes."""
+        store, home = env
+        store = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        store.add_user_message("s1", "m1")
+        store.add_user_message("s1", "m2")
+        # Spill two more turns beyond the window.
+        with patch.object(store, "_atomic_write_json", return_value=False):
+            store.add_user_message("s1", "m3")
+            store.add_user_message("s1", "m4")
+
+        store2 = DefaultSessionStore(
+            session_dir=store.session_dir,
+            max_messages=2,
+            retention=RETENTION_TRUNCATE,
+            active_window=2,
+        )
+        session = store2.get_session("s1")
+        assert len(session.messages) == 2
+
+    def test_reingest_skips_malformed_spill(self, env):
+        """A malformed spill payload never blocks recovery of valid ones."""
+        store, home = env
+        spill_dir = self._spill_dir(home)
+        spill_dir.mkdir(parents=True, exist_ok=True)
+        # Valid-JSON but wrong-shape spills (list root, non-list messages).
+        (spill_dir / "s1.1.1.aa.json").write_text(json.dumps([1, 2, 3]))
+        (spill_dir / "s1.2.1.bb.json").write_text(
+            json.dumps({"session_id": "s1", "messages": "not-a-list"})
+        )
+        (spill_dir / "s1.3.1.cc.json").write_text(
+            json.dumps({"session_id": "s1", "messages": [{"role": "user", "content": "good"}]})
+        )
+
+        store2 = DefaultSessionStore(session_dir=store.session_dir)
+        history = store2.get_chat_history("s1")
+        contents = [m["content"] for m in history]
+        assert "good" in contents

@@ -771,7 +771,14 @@ class DefaultSessionStore:
             safe_id = "".join(
                 c if c.isalnum() or c in "-_" else "_" for c in session_id
             )
-            filename = f"{safe_id}.{int(time.time() * 1000)}.{os.getpid()}.json"
+            # A monotonic ms timestamp keeps files sortable/attributable, but a
+            # short random token guarantees uniqueness so consecutive failures
+            # within the same PID+millisecond never overwrite an earlier spill
+            # (each unpersisted turn keeps its own recoverable file).
+            unique = os.urandom(4).hex()
+            filename = (
+                f"{safe_id}.{int(time.time() * 1000)}.{os.getpid()}.{unique}.json"
+            )
             filepath = os.path.join(spill_dir, filename)
             payload = {
                 "session_id": session_id,
@@ -896,10 +903,21 @@ class DefaultSessionStore:
                     data = json.load(f)
             except (json.JSONDecodeError, IOError, OSError):
                 continue
+            # A syntactically valid spill can still carry an unexpected shape
+            # (non-object root, non-list messages, non-object message). Guard
+            # each level so one malformed spill can't raise AttributeError /
+            # TypeError and block recovery of the rest.
+            if not isinstance(data, dict):
+                continue
             if data.get("session_id") != session_id:
                 continue
+            raw_messages = data.get("messages")
+            if not isinstance(raw_messages, list):
+                continue
             msgs = []
-            for raw in data.get("messages", []):
+            for raw in raw_messages:
+                if not isinstance(raw, dict):
+                    continue
                 msg = SessionMessage.from_dict(raw)
                 key = (msg.role, msg.content, msg.timestamp)
                 if key in seen:
@@ -916,6 +934,12 @@ class DefaultSessionStore:
             session.messages.extend(new_messages)
             filepath = self._get_session_path(session_id)
             session.updated_at = datetime.now(timezone.utc).isoformat()
+            # Recovered turns extend the active window like any other append, so
+            # they must go through the same retention policy (compact/truncate)
+            # every ordinary write uses — otherwise recovery could persist and
+            # expose an oversized transcript that stays inconsistent until a
+            # later mutation happens to compact it.
+            self._enforce_window(session)
             if not self._atomic_write_json(filepath, session.to_dict()):
                 # Could not fold the salvage back in durably — leave the spill
                 # files in place so a later load can retry.
