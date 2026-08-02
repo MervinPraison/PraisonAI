@@ -665,6 +665,43 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
     """
     from praisonaiagents.bots.presentation import BlockType
 
+    # table_to_markdown / chart_to_text were added to the core in a later
+    # release than this package's minimum praisonaiagents pin. Import them
+    # defensively so text-only presentations still render on older cores; if
+    # they are missing, fall back to a compact inline renderer for those blocks.
+    try:
+        from praisonaiagents.bots.presentation import (
+            chart_to_text,
+            table_to_markdown,
+        )
+    except ImportError:
+        def table_to_markdown(columns: List[str], rows: List[List[str]]) -> str:
+            def _cell(value: Any) -> str:
+                return str(value).replace("|", "\\|").replace("\n", " ")
+
+            header = [_cell(c) for c in columns]
+            ncols = len(header)
+            out = ["| " + " | ".join(header) + " |",
+                   "| " + " | ".join(["---"] * ncols) + " |"]
+            for row in rows:
+                cells = [_cell(c) for c in row][:ncols]
+                cells += [""] * (ncols - len(cells))
+                out.append("| " + " | ".join(cells) + " |")
+            return "\n".join(out)
+
+        def chart_to_text(
+            chart_kind: Optional[str],
+            series: List[Dict[str, Any]],
+            caption: Optional[str] = None,
+        ) -> str:
+            kind = chart_kind or "chart"
+            out = [caption or f"{kind.capitalize()} chart"]
+            for entry in series or []:
+                label = str(entry.get("label", "series"))
+                points = entry.get("points", []) or []
+                out.append(f"{label}: " + ", ".join(str(p) for p in points))
+            return "\n".join(out)
+
     lines: List[str] = []
     for block in presentation.blocks:
         btype = block.type.value if hasattr(block.type, "value") else block.type
@@ -680,6 +717,18 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
         elif btype in (BlockType.SELECT, "select"):
             for o in (block.options or []):
                 lines.append(f"• {o.label}")
+        elif btype == "table":
+            columns = getattr(block, "columns", None)
+            if columns:
+                lines.append(table_to_markdown(columns, getattr(block, "rows", None) or []))
+        elif btype == "chart":
+            lines.append(
+                chart_to_text(
+                    getattr(block, "chart_kind", None),
+                    getattr(block, "series", None) or [],
+                    block.text,
+                )
+            )
     return {"text": "\n".join(lines) if lines else "\u200b"}
 
 

@@ -76,6 +76,8 @@ class BlockType(str, Enum):
     SELECT = "select"        # Dropdown/select menu
     DIVIDER = "divider"      # Visual separator
     CONTEXT = "context"      # Contextual info (smaller text)
+    TABLE = "table"          # Tabular data (columns + rows)
+    CHART = "chart"          # Chart/visualisation (kind + series)
 
 
 @dataclass
@@ -245,6 +247,12 @@ class PresentationBlock:
     options: Optional[List[SelectOption]] = None
     placeholder: Optional[str] = None
     action_id: Optional[str] = None
+    # Tabular data (TABLE blocks)
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[str]]] = None
+    # Chart data (CHART blocks)
+    chart_kind: Optional[str] = None
+    series: Optional[List[Dict[str, Any]]] = None
     
     @staticmethod
     def make_text(content: str, markdown: bool = True) -> "PresentationBlock":
@@ -279,6 +287,47 @@ class PresentationBlock:
     def make_context(content: str) -> "PresentationBlock":
         """Create a context block (smaller text)."""
         return PresentationBlock(type=BlockType.CONTEXT, text=content)
+
+    @staticmethod
+    def make_table(
+        columns: List[str],
+        rows: List[List[str]],
+    ) -> "PresentationBlock":
+        """Create a table block from *columns* and *rows*.
+
+        Describe tabular data once; channels with a native table widget render
+        it directly, and everywhere else it degrades to a deterministic
+        markdown table (see :func:`adapt_presentation`).
+        """
+        return PresentationBlock(
+            type=BlockType.TABLE,
+            columns=[str(c) for c in columns],
+            rows=[[str(c) for c in row] for row in rows],
+        )
+
+    @staticmethod
+    def make_chart(
+        chart_kind: str,
+        series: List[Dict[str, Any]],
+        text: Optional[str] = None,
+    ) -> "PresentationBlock":
+        """Create a chart block.
+
+        Args:
+            chart_kind: One of ``"bar"``, ``"line"``, ``"pie"``, ``"area"``.
+            series: A list of ``{"label": str, "points": list[float]}`` dicts.
+            text: Optional caption/title for the chart.
+
+        Channels with native visualisation render the series directly; elsewhere
+        the chart degrades to a compact text summary (see
+        :func:`adapt_presentation`).
+        """
+        return PresentationBlock(
+            type=BlockType.CHART,
+            chart_kind=chart_kind,
+            series=series,
+            text=text,
+        )
 
     @staticmethod
     def quick_replies(
@@ -320,6 +369,14 @@ class PresentationBlock:
             data["placeholder"] = self.placeholder
         if self.action_id is not None:
             data["action_id"] = self.action_id
+        if self.columns is not None:
+            data["columns"] = self.columns
+        if self.rows is not None:
+            data["rows"] = self.rows
+        if self.chart_kind is not None:
+            data["chart_kind"] = self.chart_kind
+        if self.series is not None:
+            data["series"] = self.series
         return data
     
     @classmethod
@@ -338,6 +395,10 @@ class PresentationBlock:
             ),
             placeholder=data.get("placeholder"),
             action_id=data.get("action_id"),
+            columns=data.get("columns"),
+            rows=data.get("rows"),
+            chart_kind=data.get("chart_kind"),
+            series=data.get("series"),
         )
 
 
@@ -484,6 +545,10 @@ class PresentationLimits:
         supports_markdown: Whether channel supports markdown
         supports_select: Whether channel supports select menus
         supports_web_apps: Whether channel supports web apps
+        supports_tables: Whether channel has a native table widget
+        supports_charts: Whether channel has native chart/visualisation
+        max_table_rows: Maximum rows in a table block
+        max_table_cols: Maximum columns in a table block
     """
     
     max_buttons: int = 10
@@ -495,6 +560,10 @@ class PresentationLimits:
     supports_markdown: bool = True
     supports_select: bool = True
     supports_web_apps: bool = False
+    supports_tables: bool = False
+    supports_charts: bool = False
+    max_table_rows: int = 50
+    max_table_cols: int = 10
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -508,6 +577,10 @@ class PresentationLimits:
             "supports_markdown": self.supports_markdown,
             "supports_select": self.supports_select,
             "supports_web_apps": self.supports_web_apps,
+            "supports_tables": self.supports_tables,
+            "supports_charts": self.supports_charts,
+            "max_table_rows": self.max_table_rows,
+            "max_table_cols": self.max_table_cols,
         }
     
     @classmethod
@@ -523,6 +596,10 @@ class PresentationLimits:
             supports_markdown=data.get("supports_markdown", True),
             supports_select=data.get("supports_select", True),
             supports_web_apps=data.get("supports_web_apps", False),
+            supports_tables=data.get("supports_tables", False),
+            supports_charts=data.get("supports_charts", False),
+            max_table_rows=data.get("max_table_rows", 50),
+            max_table_cols=data.get("max_table_cols", 10),
         )
     
     @staticmethod
@@ -758,6 +835,80 @@ def _select_to_buttons(
     return PresentationBlock(type=BlockType.BUTTONS, buttons=buttons)
 
 
+def _clamp_table(
+    block: PresentationBlock,
+    limits: PresentationLimits,
+) -> PresentationBlock:
+    """Return a copy of a TABLE block clamped to the channel's row/column caps."""
+    columns = list(block.columns or [])
+    rows = [list(r) for r in (block.rows or [])]
+    if limits.max_table_cols and len(columns) > limits.max_table_cols:
+        columns = columns[: limits.max_table_cols]
+        rows = [r[: limits.max_table_cols] for r in rows]
+    if limits.max_table_rows and len(rows) > limits.max_table_rows:
+        rows = rows[: limits.max_table_rows]
+    return PresentationBlock(type=BlockType.TABLE, columns=columns, rows=rows)
+
+
+def table_to_markdown(columns: List[str], rows: List[List[str]]) -> str:
+    """Render a table as a deterministic GitHub-flavoured markdown table.
+
+    Cells are coerced to strings and pipes escaped so the table stays valid.
+    Short rows are padded and long rows trimmed to the header width.
+    """
+    def _cell(value: Any) -> str:
+        return str(value).replace("|", "\\|").replace("\n", " ")
+
+    header = [_cell(c) for c in columns]
+    ncols = len(header)
+    lines = ["| " + " | ".join(header) + " |"]
+    lines.append("| " + " | ".join(["---"] * ncols) + " |")
+    for row in rows:
+        cells = [_cell(c) for c in row][:ncols]
+        cells += [""] * (ncols - len(cells))
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def chart_to_text(
+    chart_kind: Optional[str],
+    series: List[Dict[str, Any]],
+    caption: Optional[str] = None,
+) -> str:
+    """Render a chart as a compact, deterministic text summary.
+
+    Produces a caption/kind header followed by one line per series listing its
+    label and points, so the data is never silently dropped on channels without
+    a native visualisation.
+    """
+    lines: List[str] = []
+    kind = chart_kind or "chart"
+    header = caption or f"{kind.capitalize()} chart"
+    lines.append(header)
+    for entry in series or []:
+        label = str(entry.get("label", "series"))
+        points = entry.get("points", []) or []
+        rendered = ", ".join(str(p) for p in points)
+        lines.append(f"{label}: {rendered}")
+    return "\n".join(lines)
+
+
+def _table_to_text_block(block: PresentationBlock) -> PresentationBlock:
+    """Degrade a TABLE block to a markdown-table TEXT block."""
+    return PresentationBlock(
+        type=BlockType.TEXT,
+        text=table_to_markdown(block.columns or [], block.rows or []),
+    )
+
+
+def _chart_to_text_block(block: PresentationBlock) -> PresentationBlock:
+    """Degrade a CHART block to a text-summary TEXT block."""
+    return PresentationBlock(
+        type=BlockType.TEXT,
+        text=chart_to_text(block.chart_kind, block.series or [], block.text),
+    )
+
+
 def adapt_presentation(
     presentation: MessagePresentation,
     limits: PresentationLimits,
@@ -866,6 +1017,43 @@ def adapt_presentation(
             adapted_blocks.append(
                 PresentationBlock(type=block.type, text=text)
             )
+            continue
+
+        if block_type == BlockType.TABLE.value:
+            clamped = _clamp_table(block, limits)
+            if limits.supports_tables:
+                adapted_blocks.append(clamped)
+            else:
+                # Degrade to a deterministic markdown table (then clamp text).
+                text_block = _table_to_text_block(clamped)
+                if (
+                    limits.max_text_length
+                    and text_block.text
+                    and len(text_block.text) > limits.max_text_length
+                ):
+                    text_block = PresentationBlock(
+                        type=BlockType.TEXT,
+                        text=text_block.text[: limits.max_text_length],
+                    )
+                adapted_blocks.append(text_block)
+            continue
+
+        if block_type == BlockType.CHART.value:
+            if limits.supports_charts:
+                adapted_blocks.append(block)
+            else:
+                # Degrade to a compact text summary (then clamp text).
+                text_block = _chart_to_text_block(block)
+                if (
+                    limits.max_text_length
+                    and text_block.text
+                    and len(text_block.text) > limits.max_text_length
+                ):
+                    text_block = PresentationBlock(
+                        type=BlockType.TEXT,
+                        text=text_block.text[: limits.max_text_length],
+                    )
+                adapted_blocks.append(text_block)
             continue
 
         adapted_blocks.append(block)
