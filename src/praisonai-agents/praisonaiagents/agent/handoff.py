@@ -648,13 +648,15 @@ class Handoff:
         """
         start_time = time.time()
         kwargs = context or {}
+        pushed = False
         
         try:
-            # Safety checks
+            # Safety checks (may raise before anything is pushed for this call)
             self._check_safety(source_agent)
             
             # Track handoff chain
             _push_handoff(source_agent.name)
+            pushed = True
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -730,7 +732,8 @@ class Handoff:
             logger.error(f"Handoff error: {e}")
             return result
         finally:
-            _pop_handoff()
+            if pushed:
+                _pop_handoff()
     
     async def execute_async(
         self,
@@ -756,10 +759,12 @@ class Handoff:
         kwargs = context or {}
         
         async def _execute():
+            pushed = False
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -808,7 +813,8 @@ class Handoff:
                 
                 return result
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         try:
             if semaphore is not None:
@@ -876,13 +882,15 @@ class Handoff:
         def handoff_tool(**kwargs):
             """Execute the handoff to the target agent."""
             start_time = time.time()
+            pushed = False
             
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 
                 # Track handoff chain
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute on_handoff callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -968,7 +976,8 @@ class Handoff:
                 self._execute_callback(self.config.on_error, source_agent, kwargs, result)
                 return f"Error during handoff to {self.agent.name}: {str(e)}"
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         # Set function metadata for tool definition generation
         handoff_tool.__name__ = self.tool_name
@@ -1446,13 +1455,15 @@ class TypedHandoff(Handoff, Generic[T]):
         
         start_time = time.time()
         kwargs = context or {}
+        pushed = False
         
         try:
-            # Safety checks
+            # Safety checks (may raise before anything is pushed for this call)
             self._check_safety(source_agent)
             
             # Track handoff chain
             _push_handoff(source_agent.name)
+            pushed = True
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1525,7 +1536,8 @@ class TypedHandoff(Handoff, Generic[T]):
             logger.error(f"Typed handoff error: {e}")
             return result
         finally:
-            _pop_handoff()
+            if pushed:
+                _pop_handoff()
     
     async def execute_async(
         self,
@@ -1559,10 +1571,12 @@ class TypedHandoff(Handoff, Generic[T]):
         kwargs = context or {}
         
         async def _execute():
+            pushed = False
             try:
-                # Safety checks
+                # Safety checks (may raise before anything is pushed for this call)
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
+                pushed = True
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1610,7 +1624,8 @@ class TypedHandoff(Handoff, Generic[T]):
                     handoff_depth=_get_handoff_depth(),
                 )
             finally:
-                _pop_handoff()
+                if pushed:
+                    _pop_handoff()
         
         try:
             if semaphore is not None:
