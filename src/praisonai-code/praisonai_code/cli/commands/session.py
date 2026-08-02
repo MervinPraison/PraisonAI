@@ -11,6 +11,8 @@ Provides session management:
 """
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -514,7 +516,8 @@ def _render_share_html(session_id: str, transcript_md: str) -> str:
         "pre{white-space:pre-wrap;word-wrap:break-word}"
         ".note{color:#57606a;font-size:12px;margin-bottom:1rem}</style>\n"
         "</head>\n<body>\n"
-        '<p class="note">Read-only shared transcript · secrets redacted</p>\n'
+        '<p class="note">Read-only shared transcript · best-effort secret '
+        "redaction applied — review before sharing widely</p>\n"
         f"<pre>{body}</pre>\n"
         "</body>\n</html>\n"
     )
@@ -534,7 +537,8 @@ def session_share(
     Reuses the existing session resolver + transcript redactor (#3426), then
     writes a single self-contained HTML file to ``~/.praisonai/shares`` and
     returns a ``file://`` link — no external service or dependency required.
-    Sharing is opt-in and always redacts secrets first.
+    Sharing is opt-in and applies best-effort secret redaction first; review
+    the published transcript before sharing it widely.
     """
     output = get_output_controller()
 
@@ -562,10 +566,35 @@ def session_share(
         )
         raise typer.Exit(1)
 
-    share_path = _share_path(session_id)
-    share_path.write_text(
-        _render_share_html(session_id, transcript), encoding="utf-8"
-    )
+    try:
+        share_path = _share_path(session_id)
+        rendered_html = _render_share_html(session_id, transcript)
+        # Write to a sibling temp file then atomically replace, so a failed or
+        # interrupted write never truncates a previously published transcript.
+        temp_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=share_path.parent,
+                prefix=f".{share_path.stem}-",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temp_path = Path(temporary_file.name)
+                temporary_file.write(rendered_html)
+            os.replace(temp_path, share_path)
+        except OSError:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise
+    except OSError as e:
+        output.print_error(f"Failed to share session: {e}")
+        raise typer.Exit(1) from e
+
     url = share_path.resolve().as_uri()
 
     if output.is_json_mode:
@@ -588,15 +617,18 @@ def session_unshare(
     """Revoke a previously published transcript."""
     output = get_output_controller()
 
-    share_path = _share_path(session_id)
     revoked = False
-    if share_path.exists():
-        try:
-            share_path.unlink()
-            revoked = True
-        except OSError as e:
-            output.print_error(f"Failed to unshare session: {e}")
-            raise typer.Exit(1)
+    try:
+        share_path = _share_path(session_id)
+        # Unlink unconditionally: a missing file is a successful no-op and races
+        # with a concurrent deletion are treated as already-revoked.
+        share_path.unlink()
+        revoked = True
+    except FileNotFoundError:
+        revoked = False
+    except OSError as e:
+        output.print_error(f"Failed to unshare session: {e}")
+        raise typer.Exit(1) from e
 
     if output.is_json_mode:
         output.print_json({"session_id": session_id, "revoked": revoked})

@@ -73,7 +73,7 @@ def test_share_escapes_transcript_markup():
     assert "&lt;script&gt;" in html
 
 
-def test_share_path_is_stable_per_session():
+def test_share_path_is_stable_per_session(project):
     assert _share_path("abc") == _share_path("abc")
     assert _share_path("abc") != _share_path("def")
 
