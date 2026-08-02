@@ -663,7 +663,11 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
     listed as readable text (with any URLs inlined) so the content is never
     silently dropped.
     """
-    from praisonaiagents.bots.presentation import BlockType
+    from praisonaiagents.bots.presentation import (
+        BlockType,
+        chart_to_text,
+        table_to_markdown,
+    )
 
     lines: List[str] = []
     for block in presentation.blocks:
@@ -680,6 +684,11 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
         elif btype in (BlockType.SELECT, "select"):
             for o in (block.options or []):
                 lines.append(f"• {o.label}")
+        elif btype in (BlockType.TABLE, "table"):
+            if block.columns:
+                lines.append(table_to_markdown(block.columns, block.rows or []))
+        elif btype in (BlockType.CHART, "chart"):
+            lines.append(chart_to_text(block.chart_kind, block.series or [], block.text))
     return {"text": "\n".join(lines) if lines else "\u200b"}
 
 

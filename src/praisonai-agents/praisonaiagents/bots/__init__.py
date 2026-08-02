@@ -52,6 +52,8 @@ from .presentation import (
     ButtonStyle,
     BlockType,
     adapt_presentation,
+    table_to_markdown,
+    chart_to_text,
 )
 from .interactive import (
     InteractiveContext,
@@ -130,6 +132,8 @@ __all__ = [
     "ButtonStyle",
     "BlockType",
     "adapt_presentation",
+    "table_to_markdown",
+    "chart_to_text",
     "PlatformCapabilities",
     "ChannelField",
     "ChannelDescriptor",
