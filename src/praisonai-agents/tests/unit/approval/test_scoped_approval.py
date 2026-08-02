@@ -94,53 +94,103 @@ class TestBuildPermissionTarget:
 
         assert build_permission_target("edit_file", {}) == "tool:edit_file"
 
-    def test_in_workspace_shell_stays_bash(self, tmp_path, monkeypatch):
-        # A command touching only in-workspace paths keeps its ``bash:`` target.
+    def test_shell_target_preserves_command_identity(self, tmp_path, monkeypatch):
+        # The shell target is always ``bash:<command>`` verbatim — including for
+        # out-of-workspace commands — so command-specific rules (e.g.
+        # ``deny: bash:rm *``) can still match. The out-of-workspace boundary is
+        # enforced downstream by ``PermissionManager`` (see the boundary tests
+        # below), NOT by mangling the target into a path-only namespace (which
+        # would silently evade command-scoped deny rules).
         from praisonaiagents.approval.utils import build_permission_target
 
         monkeypatch.chdir(tmp_path)
-        target = build_permission_target(
-            "execute_command", {"command": "cat ./notes.txt"}
+        assert (
+            build_permission_target("execute_command", {"command": "cat ./notes.txt"})
+            == "bash:cat ./notes.txt"
         )
-        assert target == "bash:cat ./notes.txt"
-
-    def test_out_of_workspace_shell_uses_external_target(self, tmp_path, monkeypatch):
-        # A command touching a path OUTSIDE the workspace root must earn a
-        # distinct ``shell:external-path:<path>`` target so a broad ``bash:*``
-        # / session grant cannot silently authorise it.
-        from praisonaiagents.approval.utils import build_permission_target
-
-        monkeypatch.chdir(tmp_path)
-        target = build_permission_target(
-            "execute_command", {"command": "cat /etc/passwd"}
+        assert (
+            build_permission_target("execute_command", {"command": "cat /etc/passwd"})
+            == "bash:cat /etc/passwd"
         )
-        assert target == "shell:external-path:/etc/passwd"
-        # A different escaping path yields a different target (path-scoped).
-        other = build_permission_target(
-            "execute_command", {"command": "cat ~/.ssh/id_rsa"}
+        assert (
+            build_permission_target(
+                "execute_command", {"command": "echo hi > /tmp/evil.txt"}
+            )
+            == "bash:echo hi > /tmp/evil.txt"
         )
-        assert other.startswith("shell:external-path:")
-        assert other != target
 
-    def test_redirect_out_of_workspace_flagged(self, tmp_path, monkeypatch):
-        from praisonaiagents.approval.utils import build_permission_target
 
-        monkeypatch.chdir(tmp_path)
-        target = build_permission_target(
-            "execute_command", {"command": "echo hi > /tmp/evil.txt"}
+# ── Workspace-boundary enforcement (PermissionManager) ──────────────────────
+
+
+class TestShellWorkspaceBoundary:
+    """The out-of-workspace boundary is enforced by ``PermissionManager`` on the
+    plain ``bash:<command>`` target, so a broad ``bash:*`` / "allow shell" /
+    session grant cannot silently authorise external paths *and* a
+    command-specific ``deny`` still fires (no target-namespace evasion)."""
+
+    def _mgr(self, tmp_path, rule_pattern, action):
+        from praisonaiagents.permissions import (
+            PermissionManager,
+            PermissionAction,
         )
-        assert target == "shell:external-path:/tmp/evil.txt"
+        from praisonaiagents.permissions.rules import PermissionRule
 
-    def test_boundary_opt_out_env(self, tmp_path, monkeypatch):
-        # The explicit opt-out (sandboxed/CI) restores the plain ``bash:`` target.
-        from praisonaiagents.approval.utils import build_permission_target
-
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("PRAISONAI_SHELL_WORKSPACE_BOUNDARY", "0")
-        target = build_permission_target(
-            "execute_command", {"command": "cat /etc/passwd"}
+        mgr = PermissionManager(
+            storage_dir=str(tmp_path / "perm"),
+            agent_name="w",
+            workspace_root=str(tmp_path / "ws"),
         )
-        assert target == "bash:cat /etc/passwd"
+        mgr.add_rule(
+            PermissionRule(pattern=rule_pattern, action=PermissionAction(action))
+        )
+        return mgr
+
+    def test_broad_allow_does_not_cover_external_path(self, tmp_path):
+        # PR core goal: ``bash:*`` allow must NOT silently authorise a command
+        # touching a path outside the workspace — it escalates to ASK.
+        from praisonaiagents.permissions import PermissionAction
+
+        mgr = self._mgr(tmp_path, "bash:*", "allow")
+        result = mgr.check("bash:cat /etc/passwd", agent_name="w")
+        assert result.action == PermissionAction.ASK
+
+    def test_broad_allow_still_covers_in_workspace(self, tmp_path):
+        # In-workspace commands under a broad allow are unchanged (no regression).
+        from praisonaiagents.permissions import PermissionAction
+
+        ws = tmp_path / "ws"
+        ws.mkdir(parents=True, exist_ok=True)
+        mgr = self._mgr(tmp_path, "bash:*", "allow")
+        result = mgr.check(f"bash:cat {ws}/notes.txt", agent_name="w")
+        assert result.action == PermissionAction.ALLOW
+
+    def test_command_deny_still_fires_on_external_path(self, tmp_path):
+        # Regression guard for the reviewer-reported bypass: an explicit
+        # ``deny: bash:rm *`` MUST still win even when the path is external —
+        # the target must keep its command identity so the deny matches.
+        from praisonaiagents.permissions import PermissionAction
+
+        mgr = self._mgr(tmp_path, "bash:rm *", "deny")
+        result = mgr.check("bash:rm /tmp/evil.txt", agent_name="w")
+        assert result.action == PermissionAction.DENY
+
+    def test_no_workspace_root_is_backward_compatible(self, tmp_path):
+        # Backward-compat: with no ``workspace_root`` configured, the boundary
+        # stays off and a broad allow covers the external command (unchanged).
+        from praisonaiagents.permissions import (
+            PermissionManager,
+            PermissionAction,
+        )
+        from praisonaiagents.permissions.rules import PermissionRule
+
+        mgr = PermissionManager(storage_dir=str(tmp_path / "perm"), agent_name="w")
+        assert mgr.workspace_root is None
+        mgr.add_rule(
+            PermissionRule(pattern="bash:*", action=PermissionAction("allow"))
+        )
+        result = mgr.check("bash:cat /etc/passwd", agent_name="w")
+        assert result.action == PermissionAction.ALLOW
 
 
 # ── ConsoleBackend scoped prompt ────────────────────────────────────────────
