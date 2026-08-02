@@ -782,7 +782,19 @@ Launch PraisonAI servers with unified discovery support.
             "api_key": {"default": None},
         }
         parsed = self._parse_args(args, spec)
-        
+
+        # Security: the unified server mounts tool-driving routes; refuse to bind
+        # a non-localhost host without an API key, mirroring cmd_agents.
+        host = parsed.get("host", self.DEFAULT_HOST)
+        api_key = parsed.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
+        if host not in _LOCALHOST_HOSTS and not api_key:
+            raise SystemExit(
+                "praisonai serve unified: --api-key (or PRAISONAI_SERVE_API_KEY) is "
+                "required when binding to a non-localhost host; the unified server "
+                "exposes tool-driving routes."
+            )
+        parsed["api_key"] = api_key
+
         try:
             self._print_success(f"Starting unified server on {parsed['host']}:{parsed['port']}")
             print("  Providers: agents-api, recipe, mcp, a2a, a2u")

@@ -121,7 +121,20 @@ def create_unified_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    
+
+    # Enforce authentication when an API key is supplied. Without this the
+    # mounted routes (notably POST /v1/tools/invoke via mount_provider_routes)
+    # are public, so a caller passing api_key= would be silently unprotected.
+    if api_key:
+        from .._api_auth import build_api_key_middleware
+
+        app.add_middleware(
+            build_api_key_middleware(
+                api_key,
+                public_paths={"/health"},
+            )
+        )
+
     # Add discovery routes
     add_discovery_routes(app, discovery)
     

@@ -23,6 +23,7 @@ def resume_or_create_session(
     session_id: str,
     build_session: Callable[[], ConversationSession],
     get_messages: Callable[[], List[ConversationMessage]],
+    create_session: Optional[Callable[[ConversationSession], Any]] = None,
 ) -> Optional[List[ConversationMessage]]:
     """Create the session if missing, else return its messages (sync).
 
@@ -36,13 +37,20 @@ def resume_or_create_session(
             when ``session`` is ``None`` — lets each caller keep its own name/
             metadata conventions.
         get_messages: Callable returning the existing messages when resuming.
+        create_session: Optional callable used to persist the built session.
+            Defaults to ``store.create_session``. Callers wired to an
+            ``AsyncConversationStore`` MUST pass a dispatcher (e.g. one that runs
+            the returned coroutine to completion), otherwise the bare
+            ``store.create_session`` returns an un-awaited coroutine that is
+            silently dropped and the session row is never written.
 
     Returns:
         ``None`` when a new session was created (no history), otherwise the list
         of previously persisted messages.
     """
     if session is None:
-        store.create_session(build_session())
+        target = create_session if create_session is not None else store.create_session
+        target(build_session())
         return None
     return get_messages()
 

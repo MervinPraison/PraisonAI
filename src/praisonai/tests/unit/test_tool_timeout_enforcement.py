@@ -11,6 +11,7 @@ naked callables and ``_wrap_tool_with_timeout`` had zero call sites.
 
 import logging
 import threading
+import uuid
 
 import pytest
 
@@ -28,6 +29,7 @@ def _make_generator():
     gen._tool_timeout_executor_lock = threading.Lock()
     gen._leaked_workers = 0
     gen._max_leaked_workers = 16
+    gen._timeout_owner_key = uuid.uuid4()
     gen.logger = logging.getLogger(__name__)
     return gen
 
@@ -120,6 +122,90 @@ def test_build_tools_dict_no_wrap_when_no_timeout():
 
     tools_dict = gen._build_tools_dict({"roles": {"a": {}}})
     assert tools_dict["plain"] is sentinel
+
+
+def test_timeout_proxy_preserves_isinstance_and_schema():
+    # A shared framework-tool object wrapped for timeout must keep its type
+    # identity: downstream executors (praisonaiagents tool_execution, CrewAI /
+    # LangChain) route on ``isinstance(tool, BaseTool)`` to call ``.run``. A
+    # plain proxy that fails that check (and is not callable) would silently
+    # execute nothing, so the proxy subclasses the wrapped tool's own class.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from praisonai.agents_generator import _wrap_with_timeout, _TimeoutBoundTool
+
+    class FrameworkTool:
+        name = "calc"
+        description = "doubles x"
+        args_schema = {"x": "int"}
+
+        def _run(self, x=1):
+            return x * 2
+
+        def run(self, x=1):
+            return self._run(x)
+
+    inner = FrameworkTool()
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        proxy = _wrap_with_timeout(
+            inner, 5.0, lambda: executor, owner_key=uuid.uuid4()
+        )
+        # Type identity preserved for isinstance-based dispatch.
+        assert isinstance(proxy, FrameworkTool)
+        assert isinstance(proxy, _TimeoutBoundTool)
+        # Schema attributes still delegate to the shared inner object.
+        assert proxy.name == "calc"
+        assert proxy.args_schema == {"x": "int"}
+        # Execution routes through the timeout-wrapped methods and returns.
+        assert proxy.run(x=3) == 6
+        assert proxy._run(x=4) == 8
+        # The shared inner object is never mutated in place.
+        assert "run" not in vars(inner)
+        assert "_run" not in vars(inner)
+    finally:
+        executor.shutdown()
+
+
+def test_timeout_proxy_isolated_across_generators():
+    # One generator's executor must never leak into another's calls. After the
+    # first generator's pool is shut down, a second generator's proxy (built on
+    # the same shared inner object) must still execute successfully.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from praisonai.agents_generator import _wrap_with_timeout, _TIMEOUT_ORIGINAL
+
+    class FrameworkTool:
+        name = "echo"
+        description = "echoes"
+
+        def _run(self, v=0):
+            return v
+
+        def run(self, v=0):
+            return self._run(v)
+
+    inner = FrameworkTool()
+
+    exec_a = ThreadPoolExecutor(max_workers=2)
+    key_a = uuid.uuid4()
+    proxy_a = _wrap_with_timeout(inner, 5.0, lambda: exec_a, owner_key=key_a)
+
+    # Same owner re-wrapping is idempotent (no proxy rebuild / wrapper stacking).
+    assert _wrap_with_timeout(proxy_a, 5.0, lambda: exec_a, owner_key=key_a) is proxy_a
+
+    exec_b = ThreadPoolExecutor(max_workers=2)
+    key_b = uuid.uuid4()
+    proxy_b = _wrap_with_timeout(proxy_a, 5.0, lambda: exec_b, owner_key=key_b)
+    try:
+        assert proxy_b is not proxy_a
+        # The second proxy unwraps back to the shared inner, never the peer proxy.
+        assert getattr(proxy_b, _TIMEOUT_ORIGINAL) is inner
+        # Shutting down generator A's pool must not break generator B's calls.
+        exec_a.shutdown()
+        assert proxy_b.run(v=11) == 11
+    finally:
+        exec_b.shutdown()
 
 
 def test_ag2_not_in_default_priority():

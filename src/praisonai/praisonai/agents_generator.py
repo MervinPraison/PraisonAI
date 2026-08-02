@@ -5,6 +5,7 @@ import os
 import inspect
 import logging
 import threading
+import uuid
 import re
 import difflib
 import importlib
@@ -245,7 +246,95 @@ _TIMEOUT_MARKER = "__praisonai_timeout_wrapped__"
 _TIMEOUT_ORIGINAL = "__praisonai_timeout_original__"
 
 
-def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None):
+class _TimeoutBoundTool:
+    """Per-generator proxy that adds timeout enforcement to a framework tool.
+
+    Framework tool objects (CrewAI/LangChain ``BaseTool``, praisonai ``@tool``)
+    are frequently cached and shared across generators (``ToolResolver``, plugin
+    registries). Mutating their ``_run``/``run`` in place would let generator B's
+    executor leak into generator A's calls; when B's pool is shut down, A's tool
+    call raises ``RuntimeError: cannot schedule new futures after shutdown``.
+
+    Each generator instead installs its own proxy: the underlying object is never
+    mutated, and every framework-visible attribute (``name``/``description``/
+    ``args_schema`` …) is delegated through ``__getattr__`` so the LLM still sees
+    the correct schema. Only ``_run``/``run`` route through this generator's own
+    timeout wrapper.
+
+    The proxy is instantiated as a *dynamic subclass of the wrapped tool's own
+    class* (see :func:`_make_timeout_proxy`) so ``isinstance(proxy, BaseTool)``
+    still holds. Downstream executors (``praisonaiagents`` tool_execution,
+    CrewAI/LangChain) route on ``isinstance(tool, BaseTool)`` to call ``.run``;
+    a plain proxy would fail that check *and* is not ``callable``, so the tool
+    call would silently execute nothing. Keeping the type identity preserves the
+    old in-place behaviour for every consumer while still isolating executors.
+    """
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_inner"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_inner"), name, value)
+
+    def run(self, *args, **kwargs):
+        fn = object.__getattribute__(self, "_wrapped_run")
+        if fn is None:
+            return object.__getattribute__(self, "_inner").run(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    def _run(self, *args, **kwargs):
+        fn = object.__getattribute__(self, "_wrapped__run")
+        if fn is None:
+            return object.__getattribute__(self, "_inner")._run(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+
+# Cache of dynamically-generated ``(_TimeoutBoundTool, type(inner))`` subclasses
+# keyed by the inner class, so we build one proxy type per tool class instead of
+# per tool instance.
+_TIMEOUT_PROXY_TYPES: "Dict[type, type]" = {}
+_TIMEOUT_PROXY_TYPES_LOCK = threading.Lock()
+
+
+def _make_timeout_proxy(inner, wrapped_run=None, wrapped__run=None):
+    """Build a per-generator timeout proxy that keeps ``inner``'s type identity.
+
+    The returned object is an instance of a subclass of both
+    ``_TimeoutBoundTool`` and ``type(inner)`` so ``isinstance(proxy, BaseTool)``
+    (and any other base of the wrapped tool) still passes for downstream
+    executors, while ``_run``/``run`` route through this generator's timeout
+    wrapper and every other attribute is delegated to the shared inner object.
+    The inner object itself is never mutated.
+    """
+    inner_cls = type(inner)
+    proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+    if proxy_cls is None:
+        with _TIMEOUT_PROXY_TYPES_LOCK:
+            proxy_cls = _TIMEOUT_PROXY_TYPES.get(inner_cls)
+            if proxy_cls is None:
+                try:
+                    proxy_cls = type(
+                        f"_TimeoutBound_{getattr(inner_cls, '__name__', 'Tool')}",
+                        (_TimeoutBoundTool, inner_cls),
+                        {},
+                    )
+                except TypeError:
+                    # Some tool classes forbid subclassing (e.g. custom
+                    # metaclass/__slots__ conflicts); fall back to the plain
+                    # proxy. isinstance() will not match, but callability of the
+                    # inner is still exposed via __getattr__ delegation, and the
+                    # generic callable branch is preserved by the caller.
+                    proxy_cls = _TimeoutBoundTool
+                _TIMEOUT_PROXY_TYPES[inner_cls] = proxy_cls
+
+    proxy = proxy_cls.__new__(proxy_cls)
+    object.__setattr__(proxy, "_inner", inner)
+    object.__setattr__(proxy, "_wrapped_run", wrapped_run)
+    object.__setattr__(proxy, "_wrapped__run", wrapped__run)
+    return proxy
+
+
+def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked=None, owner_key=None):
     """Enforce a per-call timeout on a tool, sync or async.
 
     For async tools the underlying task is cancelled on timeout. For sync tools
@@ -268,14 +357,16 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     import functools
     import inspect
 
-    # Identity of the wrapper's owner so a shared framework-tool object patched
-    # in place by one generator is transparently re-wrapped (not skipped) when a
+    # Identity of the wrapper's owner so a shared framework-tool object wrapped
+    # by one generator is transparently re-wrapped (not skipped) when a
     # *different* generator processes it — otherwise it would keep the first
     # generator's executor/timeout even after that generator's pool is closed.
-    # The executor_factory is a bound method unique per generator instance, so
-    # its identity is a stable per-owner key. (May be None for callers that pass
-    # no factory; those paths never capture a foreign executor.)
-    _owner_key = id(executor_factory) if executor_factory is not None else None
+    # Prefer a caller-supplied stable key (the generator pins a uuid at
+    # construction). Never derive it from ``id(executor_factory)``: each access
+    # to a bound method yields a fresh object, so its id() churns and the guard
+    # would compare against a value that never repeats. Fall back to a per-call
+    # sentinel so an owner-less caller is always treated as its own owner.
+    _owner_key = owner_key if owner_key is not None else object()
 
     def _wrap_callable(fn):
         """Return a timeout-enforcing wrapper around a bare callable."""
@@ -333,36 +424,42 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     # tool_calls. Instead, wrap only the execution method IN PLACE so the object
     # — and its schema — survive.
     if not callable(tool) or _looks_like_framework_tool(tool):
+        # Idempotency guard for shared framework tool objects (cached by
+        # ToolResolver / passed via plugin registries). If this generator already
+        # wrapped the object, its proxy is stamped with our owner key — return it
+        # unchanged so re-wrapping on every generate_crew_and_kickoff() does not
+        # rebuild proxies. A proxy owned by a *different* generator is unwrapped
+        # back to the shared inner object and re-wrapped here, so this generator's
+        # calls always bind to its own executor/timeout (never a foreign pool
+        # that may already be shut down). Compare by value, not identity: a stale
+        # ``is`` check against uuids/ints could silently never match.
+        existing_owner = getattr(tool, _TIMEOUT_MARKER, None)
+        if isinstance(tool, _TimeoutBoundTool) and existing_owner == _owner_key:
+            return tool
+        inner = getattr(tool, _TIMEOUT_ORIGINAL, tool)
+
+        wrapped_methods = {}
         for method_name in ("_run", "run"):
-            method = getattr(tool, method_name, None)
+            method = getattr(inner, method_name, None)
             if callable(method):
-                # Idempotency guard for shared framework tool objects (cached by
-                # ToolResolver / passed via plugin registries). Re-wrapping on
-                # every generate_crew_and_kickoff() would stack wrappers (N×
-                # timeout, monotonic memory growth). But the marker is keyed by
-                # the *owning* executor_factory: if a *different* generator later
-                # patches the same shared object, we must re-wrap in place so the
-                # method binds to that generator's own executor/timeout instead
-                # of retaining the first generator's (whose pool may already be
-                # shut down). Same owner → skip; different owner → re-wrap.
-                if getattr(method, _TIMEOUT_MARKER, None) is _owner_key:
-                    return tool
-                # Re-wrap the *original* method, never a foreign generator's
-                # wrapper, so wrappers never stack across generators.
-                base = getattr(method, _TIMEOUT_ORIGINAL, method)
-                wrapped = _wrap_callable(base)
-                if wrapped is base:
-                    continue
-                try:
-                    setattr(wrapped, _TIMEOUT_MARKER, _owner_key)
-                    setattr(wrapped, _TIMEOUT_ORIGINAL, base)
-                except (AttributeError, TypeError):
-                    pass
-                try:
-                    object.__setattr__(tool, method_name, wrapped)  # bypass pydantic frozen
-                    return tool
-                except (AttributeError, TypeError):
-                    break  # fall through to callable wrapping below
+                wrapped = _wrap_callable(method)
+                if wrapped is not method:
+                    wrapped_methods[method_name] = wrapped
+
+        if wrapped_methods:
+            # Build a fresh per-generator proxy; the shared inner object is never
+            # mutated, so cross-generator contamination is impossible. The proxy
+            # subclasses ``type(inner)`` so ``isinstance(proxy, BaseTool)`` still
+            # holds for downstream executors.
+            proxy = _make_timeout_proxy(
+                inner,
+                wrapped_run=wrapped_methods.get("run"),
+                wrapped__run=wrapped_methods.get("_run"),
+            )
+            object.__setattr__(proxy, _TIMEOUT_MARKER, _owner_key)
+            object.__setattr__(proxy, _TIMEOUT_ORIGINAL, inner)
+            return proxy
+
         # No patchable execution method or non-callable object; return as-is so
         # we never silently drop a tool object we couldn't safely wrap.
         if not callable(tool):
@@ -475,6 +572,11 @@ class AgentsGenerator:
         # is leaked we recycle it so new tool calls aren't starved forever.
         self._leaked_workers = 0
         self._max_leaked_workers = max(1, _resolve_tool_timeout_workers() // 2)
+        # Stable per-generator identity for timeout-wrapper ownership. A bound
+        # method (self._get_tool_timeout_executor) yields a fresh object with a
+        # different id() on every access, so it cannot be used as a reliable
+        # owner key; a uuid pinned at construction can.
+        self._timeout_owner_key = uuid.uuid4()
         
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
@@ -529,6 +631,7 @@ class AgentsGenerator:
             timeout_seconds,
             self._get_tool_timeout_executor,
             on_leaked=self._note_leaked_worker,
+            owner_key=self._timeout_owner_key,
         )
 
     def close(self):
