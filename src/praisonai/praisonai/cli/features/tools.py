@@ -29,15 +29,16 @@ class ToolsHandler(CommandHandler):
         self._resolver_loaded = False
 
     def _get_resolver(self):
-        """Lazily construct the canonical ToolResolver (None if unavailable)."""
+        """Lazily construct the canonical ToolResolver (None if unavailable).
+
+        Delegates construction to the shared
+        :mod:`praisonai.templates._tool_sources` helper and caches the result.
+        """
         if self._resolver_loaded:
             return self._resolver
         self._resolver_loaded = True
-        try:
-            from praisonai.tool_resolver import ToolResolver
-            self._resolver = ToolResolver()
-        except Exception:
-            self._resolver = None
+        from praisonai.templates._tool_sources import get_resolver
+        self._resolver = get_resolver()
         return self._resolver
     
     @property
@@ -95,14 +96,11 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         human-readable description table below is kept as a presentation
         overlay.
         """
-        tools: Dict[str, Any] = {}
-        resolver = self._get_resolver()
-        if resolver is not None:
-            try:
-                tools.update({name: {"source": src}
-                              for name, src in resolver.list_available_sources().items()})
-            except Exception:
-                pass
+        from praisonai.templates._tool_sources import resolver_source_map
+        tools: Dict[str, Any] = {
+            name: {"source": src}
+            for name, src in resolver_source_map(self._get_resolver()).items()
+        }
         if not tools:
             try:
                 from praisonaiagents.tools import TOOL_MAPPINGS
@@ -436,19 +434,11 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         # praisonai_tools + TOOL_MAPPINGS scan only when the resolver (i.e.
         # praisonai-code) is unavailable, mirroring the pattern used by
         # `_get_builtin_tools` and `templates/tools_doctor.py`.
-        resolver = self._get_resolver()
-        resolved = False
-        if resolver is not None:
-            try:
-                by_source: Dict[str, List[str]] = {}
-                for name, src in resolver.list_available_sources().items():
-                    by_source.setdefault(src, []).append(name)
-                if by_source:
-                    discovered.update(by_source)
-                    resolved = True
-            except Exception:
-                pass
-        if not resolved:
+        from praisonai.templates._tool_sources import resolver_source_buckets
+        by_source = resolver_source_buckets(self._get_resolver())
+        if by_source:
+            discovered.update(by_source)
+        else:
             discovered.update(self._legacy_manual_scan())
         
         # Additional packages from --include
