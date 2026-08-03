@@ -356,6 +356,17 @@ class PraisonAI:
             for attr in ('auto_save', 'resume_session', 'cli_project_sessions'):
                 if hasattr(preserved_args, attr):
                     setattr(args, attr, getattr(preserved_args, attr))
+
+        # Preserve permission-gating flags threaded by ``praison run <file>.yaml``.
+        # parse_args() above returns a fresh args object, so approval settings set
+        # on ``praison.args`` before main() would otherwise be dropped and YAML
+        # runs would silently bypass the approval gate. These are independent of
+        # session flags (e.g. ``--allow`` with ``--no-save`` sets approval but not
+        # cli_project_sessions), so preserve them unconditionally when present.
+        if preserved_args:
+            for attr in ('approval', 'approve_all_tools', 'approval_timeout'):
+                if hasattr(preserved_args, attr):
+                    setattr(args, attr, getattr(preserved_args, attr))
         
         # Store args for use in handle_direct_prompt
         self.args = args
