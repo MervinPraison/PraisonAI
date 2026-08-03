@@ -108,6 +108,27 @@ def is_protected(path: str, extra_protected: Optional[Sequence[str]] = None) -> 
     return False
 
 
+def resolve_real_path(path: str) -> str:
+    """Return the fully symlink-resolved absolute path.
+
+    Editing tools must classify *and act on the same target*. Returning the
+    resolved path lets callers both validate against — and write to — the real
+    file, so a same-directory symlink (``harmless.txt -> .env``) cannot let a
+    protected file slip through a later ``open()`` that follows the link.
+
+    Args:
+        path: The file path to resolve (absolute or relative).
+
+    Returns:
+        The ``os.path.realpath`` of ``path``, falling back to the input on
+        ``OSError`` (e.g. a broken/looping symlink).
+    """
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
 def get_protection_reason(path: str) -> Optional[str]:
     """
     Get the human-readable reason why a path is protected.
