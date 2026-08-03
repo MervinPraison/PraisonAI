@@ -271,6 +271,24 @@ class SttConfigSchema(BaseModel):
     model: Optional[str] = None  # Optional STT model override (default whisper-1)
 
 
+class TtsConfigSchema(BaseModel):
+    """Schema for outbound voice-reply (text-to-speech) configuration (Issue #3623).
+
+    The symmetric outbound counterpart to :class:`SttConfigSchema`. Off by
+    default (opt-in): set ``voice.enabled: true`` to have the gateway synthesise
+    the agent's reply and deliver it as a native voice note on adapters that
+    support one. ``mode`` chooses when to speak — ``always`` for every reply, or
+    ``match_inbound`` to reply in voice only when the user sent a voice memo.
+    """
+    enabled: bool = False
+    mode: str = "off"  # off | always | match_inbound
+    model: Optional[str] = None  # Optional TTS model override (default tts-1)
+    voice: Optional[str] = None  # Optional voice name (e.g. "alloy")
+    speed: Optional[float] = None  # Optional speaking-rate multiplier
+    format: str = "ogg"  # Voice-note native formats: ogg/opus
+    max_chars: int = Field(default=4000, ge=0)  # Skip TTS above this length (0 = no cap)
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -320,6 +338,11 @@ class ChannelConfigSchema(BaseModel):
     # adapters transcribe it and feed the transcript to the agent. On by
     # default; set ``stt.enabled: false`` to opt out.
     stt: Optional[SttConfigSchema] = None
+    # Outbound voice reply (Issue #3623): when enabled, the gateway synthesises
+    # the agent's reply and delivers it as a native voice note (the symmetric
+    # counterpart to ``stt``). Off by default; ``voice.mode`` selects always vs.
+    # match_inbound. ``tts`` is accepted as an alias via ``extra="allow"``.
+    voice: Optional[TtsConfigSchema] = None
 
     # Shell execution opt-in for inbound channel bots (Slack/Telegram/etc.)
     allow_shell: bool = False
