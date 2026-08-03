@@ -110,3 +110,78 @@ def test_session_run_without_permission_flags_has_no_approval():
     assert args is not None
     assert not hasattr(args, "approval")
     assert not hasattr(args, "approve_all_tools")
+
+
+class _PreservedArgs:
+    """Args pre-set on ``praison.args`` by the YAML ``run`` path."""
+
+    def __init__(self, **kw):
+        self.approval = None
+        self.approve_all_tools = None
+        self.approval_timeout = None
+        self.cli_project_sessions = False
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _run_main_preserving(monkeypatch, preserved):
+    """Drive the *real* legacy ``PraisonAI.main()`` args-preservation boundary.
+
+    parse_args() returns a fresh namespace (as it does after real CLI parsing);
+    an invalid framework forces an early ``sys.exit`` right after the preservation
+    loop and ``self.args = args`` assignment, so we can assert exactly which
+    fields survived the reparse without executing any workflow/LLM.
+    """
+    from praisonai_code.cli.legacy import praison_ai as legacy
+
+    class _Fresh:
+        def __init__(self):
+            self.framework = "definitely-not-a-real-framework"
+            self.prompt_flag = None
+
+    praison = legacy.PraisonAI.__new__(legacy.PraisonAI)
+    praison.agent_file = "workflow.yaml"
+    praison.framework = ""
+    praison.config_list = [{"model": "gpt-4o"}]
+    praison.args = preserved
+
+    monkeypatch.setattr(praison, "parse_args", lambda: (_Fresh(), []))
+    monkeypatch.setattr(legacy, "_load_env_once", lambda: None, raising=False)
+    monkeypatch.setattr(legacy, "_ensure_availability_flags", lambda: None, raising=False)
+
+    class _Boom(Exception):
+        pass
+
+    def _raise_available(_fw):
+        raise ImportError("stop after preservation")
+
+    monkeypatch.setattr(
+        legacy, "_fw_validators_module",
+        lambda: type("M", (), {"assert_framework_available": staticmethod(_raise_available)}),
+        raising=False,
+    )
+    monkeypatch.setattr(legacy.sys, "exit", lambda *a: (_ for _ in ()).throw(_Boom()))
+
+    with pytest.raises(_Boom):
+        praison.main()
+    return praison.args
+
+
+def test_main_preserves_approval_across_parse_args_boundary(monkeypatch):
+    # Regression: parse_args() replaces args, so approval settings threaded onto
+    # praison.args must be re-applied or YAML runs silently bypass the gate.
+    preserved = _PreservedArgs(
+        approval="console", approve_all_tools=True, approval_timeout="30",
+    )
+    args = _run_main_preserving(monkeypatch, preserved)
+    assert args.approval == "console"
+    assert args.approve_all_tools is True
+    assert args.approval_timeout == "30"
+
+
+def test_main_preserves_approval_without_session_flag(monkeypatch):
+    # --allow/--deny with --no-save sets approval but NOT cli_project_sessions;
+    # the approval gate must still survive the reparse independently of sessions.
+    preserved = _PreservedArgs(approval="console", cli_project_sessions=False)
+    args = _run_main_preserving(monkeypatch, preserved)
+    assert args.approval == "console"
