@@ -91,6 +91,7 @@ from .config import BotConfig, BotOSConfig, DisplayPolicy, resolve_display_polic
 from .silence import (
     SILENT_REPLY_TOKEN,
     is_intentional_silence_response,
+    classify_final,
     BotLoopPolicy,
     BotLoopGuard,
 )
@@ -171,6 +172,7 @@ __all__ = [
     "strip_markdown",
     "SILENT_REPLY_TOKEN",
     "is_intentional_silence_response",
+    "classify_final",
     "BotLoopPolicy",
     "BotLoopGuard",
     "RunPhase",
