@@ -516,12 +516,19 @@ class MessageHookMixin:
         whitespace, or a raw ``[tool_calls: …]`` placeholder) the gateway must
         still deliver a visible outcome rather than drop the turn. The fallback
         is a short, plain sentence; an operator can override it with an optional
-        ``empty_final_message`` config key (the only config surface — no new
-        knob is required for the guarantee to hold). Emitting it is logged so the
-        recorded non-outcome is operator-visible.
+        ``empty_final_message`` key under the existing ``BotConfig.metadata``
+        block (no new typed knob is added — ``metadata`` is the declared seam
+        for platform-specific extras). A direct ``config.empty_final_message``
+        attribute is still honoured for programmatic callers. Emitting it is
+        logged so the recorded non-outcome is operator-visible.
         """
-        fallback = getattr(getattr(self, "config", None), "empty_final_message", None)
-        text = str(fallback).strip() if fallback else self._DEFAULT_EMPTY_FINAL
+        config = getattr(self, "config", None)
+        fallback = getattr(config, "empty_final_message", None)
+        if not fallback:
+            metadata = getattr(config, "metadata", None)
+            if isinstance(metadata, dict):
+                fallback = metadata.get("empty_final_message")
+        text = str(fallback).strip() if fallback and str(fallback).strip() else self._DEFAULT_EMPTY_FINAL
         logger.info(
             "Empty-final resolution: substituted fallback for a blank/placeholder "
             "reply on %s (visible-outcome guarantee)",
