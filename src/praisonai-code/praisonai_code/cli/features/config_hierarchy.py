@@ -49,6 +49,11 @@ CONFIG_SCHEMA = {
         "model": {"type": "string"},
         "temperature": {"type": "number", "minimum": 0, "maximum": 2},
         "max_tokens": {"type": "integer", "minimum": 1},
+        # Extra instruction/context sources loaded alongside AGENTS.md/CLAUDE.md.
+        # Each entry is a file path, glob (e.g. "docs/standards/*.md"), a "~"
+        # path, or a remote http(s):// URL. Entries concatenate (layered) across
+        # the config hierarchy so a project extends, not replaces, an org set.
+        "instructions": {"type": "array", "items": {"type": "string"}},
         "providers": {
             "type": "object",
             "additionalProperties": {

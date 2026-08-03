@@ -2,10 +2,29 @@
 
 from __future__ import annotations
 
+import glob as _glob
+import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CANDIDATES = ["AGENTS.md", "agents.md", ".agents/AGENTS.md", "CLAUDE.md"]
+
+# Upper bound on the bytes read from a single remote instruction source. Keeps a
+# stray large URL from ballooning the system context; oversized bodies are
+# truncated with a marker rather than failing the run.
+_REMOTE_MAX_BYTES = 256 * 1024
+
+# Timeout (seconds) for a single remote instruction fetch. Best-effort: a slow
+# or unreachable URL is skipped with a warning, never blocking the run.
+_REMOTE_TIMEOUT = 5.0
+
+# Opt-in to allow fetching instruction URLs that resolve to private, loopback,
+# or link-local addresses. Off by default so an auto-loaded project config from
+# an untrusted checkout cannot make the host contact internal services (SSRF).
+_ALLOW_LOCAL_URL_ENV = "PRAISONAI_INSTRUCTIONS_ALLOW_LOCAL_URLS"
 
 # Tool-argument keys that carry a file path across the various file tools
 # (praisonaiagents ``read_file`` uses ``filepath``; praisonai-code tools use
@@ -132,6 +151,208 @@ def load_context_files(
     for search_dir in _discover_search_dirs(base, walk_up):
         for name in DEFAULT_CANDIDATES:
             _add(search_dir / name)
+
+    return "\n\n".join(chunks)
+
+
+def _is_remote_source(entry: str) -> bool:
+    """Whether an instruction entry is an ``http(s)://`` URL."""
+    return entry.startswith(("http://", "https://"))
+
+
+def _allow_local_urls() -> bool:
+    """Whether fetching URLs that resolve to internal addresses is opted in."""
+    return os.environ.get(_ALLOW_LOCAL_URL_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _is_blocked_host(host: str) -> bool:
+    """Whether ``host`` resolves to a private/loopback/link-local/reserved IP.
+
+    SSRF guard: an instruction URL can arrive from an auto-loaded project config
+    in an untrusted checkout, so a URL that resolves to an internal service must
+    not be fetched. Any resolved address in a non-global range blocks the fetch
+    (fail-closed on resolution errors). Bypassable via ``_ALLOW_LOCAL_URL_ENV``
+    for trusted internal setups.
+    """
+    import ipaddress
+    import socket
+
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        # Unresolvable — let urlopen surface the failure/warning downstream.
+        return False
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr.split("%", 1)[0])
+        except ValueError:
+            return True
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def _url_is_fetchable(url: str) -> bool:
+    """Validate scheme and destination of a remote instruction URL (SSRF guard)."""
+    from urllib.parse import urlparse
+
+    if _allow_local_urls():
+        return True
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if _is_blocked_host(parsed.hostname or ""):
+        logger.warning(
+            "Skipping remote instruction source %s: resolves to a "
+            "private/loopback/link-local address (set %s=1 to allow)",
+            url,
+            _ALLOW_LOCAL_URL_ENV,
+        )
+        return False
+    return True
+
+
+def _fetch_remote_source(url: str) -> Optional[str]:
+    """Fetch a remote instruction source, best-effort and size-bounded.
+
+    Uses the stdlib ``urllib`` (lazily imported) so no heavy dependency is
+    added. Destinations are validated against an SSRF guard (see
+    :func:`_url_is_fetchable`) that rejects private/loopback/link-local hosts,
+    and redirects are re-validated so a public URL cannot bounce to an internal
+    one. A slow, unreachable, or oversized response is handled gracefully:
+    failures return ``None`` (with a warning) so the run continues, and bodies
+    larger than ``_REMOTE_MAX_BYTES`` are truncated with a marker.
+    """
+    if not _url_is_fetchable(url):
+        return None
+    try:
+        import urllib.request
+
+        class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                if not _url_is_fetchable(newurl):
+                    return None
+                return super().redirect_request(
+                    req, fp, code, msg, headers, newurl
+                )
+
+        opener = urllib.request.build_opener(_GuardedRedirectHandler())
+        with opener.open(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
+            raw = resp.read(_REMOTE_MAX_BYTES + 1)
+    except Exception as exc:  # noqa: BLE001 - best-effort; never block the run
+        logger.warning("Skipping remote instruction source %s: %s", url, exc)
+        return None
+
+    truncated = len(raw) > _REMOTE_MAX_BYTES
+    if truncated:
+        raw = raw[:_REMOTE_MAX_BYTES]
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - decode is defensive
+        return None
+    if truncated:
+        text += "\n... [remote instruction source truncated]"
+    return text
+
+
+def resolve_instruction_sources(
+    entries: Optional[List[str]] = None,
+    *,
+    cwd: Optional[Path] = None,
+) -> str:
+    """Resolve config-declared instruction sources into combined text.
+
+    Each entry may be:
+
+    * a plain file path (``docs/rules.md``),
+    * a glob (``docs/standards/*.md``),
+    * a ``~``-prefixed path (``~/company/ai-rules.md``), or
+    * a remote ``http(s)://`` URL.
+
+    Entries are resolved in order and their contents concatenated (blank-line
+    separated), so callers can layer org-wide sources before project-specific
+    ones. Local globs expand to their matches sorted for determinism; a
+    ``~``/env-var path is expanded; remote URLs are fetched lazily, best-effort
+    and size-bounded (see :func:`_fetch_remote_source`). Missing local paths and
+    failed fetches are skipped with a warning rather than aborting the run.
+
+    Args:
+        entries: Ordered list of source specifiers. ``None``/empty returns "".
+        cwd: Base directory for resolving relative paths (defaults to CWD).
+
+    Returns:
+        Combined instruction text, blank-line separated (possibly empty).
+    """
+    if not entries:
+        return ""
+
+    base = Path(cwd) if cwd else Path.cwd()
+
+    seen: Set = set()
+    chunks: List[str] = []
+
+    def _add_file(path: Path) -> None:
+        if not path.is_file():
+            return
+        try:
+            stat = path.stat()
+            key = (stat.st_dev, stat.st_ino)
+        except OSError:
+            key = path.resolve()
+        if key in seen:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Skipping instruction source %s: %s", path, exc)
+            return
+        seen.add(key)
+        chunks.append(text)
+
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        entry = entry.strip()
+
+        if _is_remote_source(entry):
+            if entry in seen:
+                continue
+            text = _fetch_remote_source(entry)
+            if text is not None:
+                seen.add(entry)
+                chunks.append(text)
+            continue
+
+        expanded = os.path.expanduser(os.path.expandvars(entry))
+        candidate = Path(expanded)
+        if not candidate.is_absolute():
+            candidate = base / candidate
+
+        # Expand globs (including brace-free ``*``/``?``/``[]`` patterns). When
+        # the entry contains no glob metacharacter this yields the single path.
+        pattern = str(candidate)
+        if any(ch in pattern for ch in "*?["):
+            for match in sorted(_glob.glob(pattern, recursive=True)):
+                _add_file(Path(match))
+        else:
+            if candidate.is_file():
+                _add_file(candidate)
+            else:
+                logger.warning("Instruction source not found: %s", entry)
 
     return "\n\n".join(chunks)
 

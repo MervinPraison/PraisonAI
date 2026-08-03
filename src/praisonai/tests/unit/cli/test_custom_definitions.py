@@ -683,3 +683,42 @@ class TestRunCustomAgentPermissionMerge:
             invocation_permissions=None,
         )
         assert captured["non_interactive"] is True
+
+
+class TestRunCustomAgentInstructions:
+    """The --agent path must accept and inject config/CLI instruction sources."""
+
+    def _run(self, tmp_path, instructions):
+        from praisonai.cli.commands import run as run_module
+
+        captured = {}
+
+        class FakeAgent:
+            def __init__(self, *args, **kwargs):
+                captured["agent_kwargs"] = kwargs
+
+            def start(self, *args, **kwargs):
+                return "ok"
+
+        with patch("praisonaiagents.Agent", FakeAgent):
+            run_module._run_custom_agent(
+                {"instructions": "hi"},
+                "do something",
+                model=None,
+                verbose=False,
+                instructions=instructions,
+            )
+        return captured
+
+    def test_instructions_injected_into_backstory(self, tmp_path):
+        """A resolved instruction file lands in the agent backstory up front."""
+        rules = tmp_path / "rules.md"
+        rules.write_text("CANONICAL TEAM RULES")
+        captured = self._run(tmp_path, [str(rules)])
+        backstory = captured["agent_kwargs"].get("backstory") or ""
+        assert "CANONICAL TEAM RULES" in backstory
+
+    def test_no_instructions_is_noop(self, tmp_path):
+        """Absent instructions leave the agent config unchanged (backward-compat)."""
+        captured = self._run(tmp_path, None)
+        assert not (captured["agent_kwargs"].get("backstory") or "")

@@ -547,6 +547,40 @@ def _apply_config_defaults(
     return mcp, mcp_env, permissions_config, mcp_servers
 
 
+def _resolve_config_instructions() -> List[str]:
+    """Return config-declared ``instructions`` sources (layered, concat-merged).
+
+    The resolver already concatenates list-valued keys across the config
+    hierarchy (global → user → project), so an org-wide instruction set under
+    a project-specific one is preserved rather than overridden. The key lives
+    under ``extra`` because it is a wrapper-only top-level key. Non-list or
+    absent values yield an empty list (fully backward-compatible).
+    """
+    try:
+        config = resolve_config()
+    except (ValueError, OSError):
+        return []
+    value = (getattr(config, "extra", None) or {}).get("instructions")
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(v) for v in value if isinstance(v, (str,)) and v.strip()]
+    return []
+
+
+def _merge_instructions(cli_instructions: Optional[List[str]]) -> List[str]:
+    """Merge config-declared instruction sources with repeatable CLI ones.
+
+    Config sources come first (org/project layering) and CLI ``--instructions``
+    entries are appended on top, matching the documented precedence (flag
+    merges on top of config). Returns an empty list when neither is present.
+    """
+    merged = _resolve_config_instructions()
+    if cli_instructions:
+        merged = merged + [s for s in cli_instructions if isinstance(s, str) and s.strip()]
+    return merged
+
+
 def _checkpoints_auto_enabled() -> bool:
     """Whether automatic run-checkpointing is enabled via project config.
 
@@ -870,6 +904,7 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    instructions: Optional[List[str]] = typer.Option(None, "--instructions", help="Extra instruction/context source (file path, glob, or http(s):// URL) to load alongside AGENTS.md/CLAUDE.md. Repeatable; merges on top of config-declared 'instructions'."),
     # Permission flags for CI-safe declarative policies
     allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
     deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
@@ -920,6 +955,11 @@ def run_main(
     if restore:
         _restore_checkpoint(restore)
         return
+
+    # Merge config-declared instruction sources (layered global→project) with
+    # repeatable ``--instructions`` flags so both the prompt and profiled run
+    # paths load the same extra guidance alongside AGENTS.md/CLAUDE.md.
+    merged_instructions = _merge_instructions(instructions)
 
     # Ingest piped stdin so `run` composes in Unix pipelines and CI, e.g.
     #   cat error.log | praisonai run "Diagnose the root cause"
@@ -1097,6 +1137,7 @@ def run_main(
             thinking_budget=thinking_budget,
             subagents=subagents,
             no_rules=no_rules,
+            instructions=merged_instructions,
         )
         return
     
@@ -1144,6 +1185,7 @@ def run_main(
             no_save=no_save,
             thinking_budget=thinking_budget,
             allow_local_tools=allow_local_tools,
+            instructions=merged_instructions,
         )
         return
     
@@ -1242,6 +1284,7 @@ def run_main(
                 fork=fork,
                 no_save=no_save,
                 no_rules=no_rules,
+                instructions=merged_instructions,
             )
         return
     
@@ -1319,6 +1362,7 @@ def run_main(
                 thinking_budget=thinking_budget,
                 allow_local_tools=allow_local_tools,
                 isolated=worktree,
+                instructions=merged_instructions,
             )
 
 
@@ -1484,6 +1528,7 @@ def _run_prompt(
     thinking_budget: Optional[int] = None,
     allow_local_tools: bool = False,
     isolated: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1575,7 +1620,7 @@ def _run_prompt(
             and not isolated
             and not any([
                 mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
-                memory, permissions_config, fork,
+                memory, permissions_config, fork, instructions,
             ])
         )
         # Keep the two identities separate:
@@ -1650,7 +1695,9 @@ def _run_prompt(
             if selected_tools:
                 agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
 
-            _wire_subtree_context_hook(agent_config, no_rules=no_rules)
+            _wire_subtree_context_hook(
+                agent_config, no_rules=no_rules, instructions=instructions
+            )
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
             # constructor kwarg) so defaults are unchanged when omitted.
@@ -1955,6 +2002,7 @@ def _wire_subtree_context_hook(
     agent_config: Dict[str, Any],
     *,
     no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
 ) -> None:
     """Attach the just-in-time subtree instruction hook to ``agent_config``.
 
@@ -1967,6 +2015,13 @@ def _wire_subtree_context_hook(
     did. This registers the *existing* ``AFTER_TOOL`` subtree hook on a fresh,
     session-scoped registry so the non-interactive/CI/SDK-via-CLI surface
     matches interactive behaviour.
+
+    ``instructions`` are config/flag-declared instruction sources (files,
+    globs, ``~`` paths, or ``http(s)://`` URLs) that extend the convention-only
+    ``AGENTS.md``/``CLAUDE.md`` auto-load. They are resolved and concatenated
+    up front into the agent's ``backstory`` (so the guidance is present in the
+    system context before any tool call) and passed to the subtree hook as
+    ``already_loaded`` so nested files are not duplicated.
 
     No-op (leaving the default run unchanged) when the up-front rules are
     disabled via ``--no-rules`` / ``PRAISON_NO_RULES`` or when the optional
@@ -2007,13 +2062,28 @@ def _wire_subtree_context_hook(
     except (ImportError, AttributeError):
         return
 
+    # Resolve config/flag-declared instruction sources and inject them up front
+    # so they sit in the system context alongside the AGENTS.md/CLAUDE.md load.
+    already_loaded = ""
+    if instructions:
+        try:
+            already_loaded = context_files.resolve_instruction_sources(instructions)
+        except Exception:
+            already_loaded = ""
+        if already_loaded:
+            existing = agent_config.get("backstory") or ""
+            block = f"# Project Instructions\n{already_loaded}"
+            agent_config["backstory"] = (
+                f"{existing}\n\n{block}" if existing else block
+            )
+
     try:
         budget = int(os.environ.get("PRAISON_CONTEXT_BUDGET", "0") or "0")
     except ValueError:
         budget = 0
 
     try:
-        hook = build_subtree_context_hook(max_chars=budget)
+        hook = build_subtree_context_hook(already_loaded, max_chars=budget)
         registry = HookRegistry()
         registry.register_function(
             event=HookEvent.AFTER_TOOL,
@@ -2049,6 +2119,7 @@ def _run_custom_agent(
     thinking_budget: Optional[int] = None,
     subagents: Optional[str] = None,
     no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
@@ -2174,7 +2245,9 @@ def _run_custom_agent(
             agent_config["auto_save"] = auto_save_name
         
         # Create and run agent
-        _wire_subtree_context_hook(agent_config, no_rules=no_rules)
+        _wire_subtree_context_hook(
+            agent_config, no_rules=no_rules, instructions=instructions
+        )
         agent = Agent(**agent_config)
         # Reasoning effort applied via the property setter (not a constructor
         # kwarg) so defaults are unchanged when --thinking is omitted.
@@ -2225,6 +2298,7 @@ def _run_prompt_profiled(
     fork: bool = False,
     no_save: bool = False,
     no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2296,7 +2370,9 @@ def _run_prompt_profiled(
         if memory_cfg is not None:
             agent_config["memory"] = memory_cfg
     
-    _wire_subtree_context_hook(agent_config, no_rules=no_rules)
+    _wire_subtree_context_hook(
+        agent_config, no_rules=no_rules, instructions=instructions
+    )
     agent = Agent(**agent_config)
     if session_id or auto_save_name:
         apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)

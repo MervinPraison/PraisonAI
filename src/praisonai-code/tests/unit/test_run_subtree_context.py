@@ -97,3 +97,74 @@ def test_custom_agent_and_profiled_forward_no_rules():
 
     for fn in (_run_prompt, _run_custom_agent, _run_prompt_profiled):
         assert _param_default(fn, "no_rules") is False
+
+
+# --- Config-declared instruction sources (--instructions / config) ---------
+
+
+def test_wiring_injects_instruction_sources_up_front(tmp_path, monkeypatch):
+    """Config/flag instruction sources land in the agent backstory up front."""
+    monkeypatch.setattr(
+        "praisonai_bot.integration.context_files._get_git_root",
+        lambda start: tmp_path,
+    )
+    rules = tmp_path / "standards.md"
+    rules.write_text("ORG STANDARD")
+
+    agent_config = {"name": "RunAgent"}
+    _wire_subtree_context_hook(agent_config, instructions=[str(rules)])
+
+    backstory = agent_config.get("backstory") or ""
+    assert "ORG STANDARD" in backstory
+    assert "# Project Instructions" in backstory
+
+
+def test_wiring_no_instructions_leaves_backstory_untouched(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "praisonai_bot.integration.context_files._get_git_root",
+        lambda start: tmp_path,
+    )
+    agent_config = {"name": "RunAgent", "backstory": "BASE"}
+    _wire_subtree_context_hook(agent_config, instructions=None)
+    assert agent_config["backstory"] == "BASE"
+
+
+def test_wiring_no_rules_skips_instruction_injection(tmp_path):
+    rules = tmp_path / "standards.md"
+    rules.write_text("ORG STANDARD")
+    agent_config = {"name": "RunAgent"}
+    _wire_subtree_context_hook(
+        agent_config, no_rules=True, instructions=[str(rules)]
+    )
+    assert "backstory" not in agent_config
+
+
+def test_merge_instructions_layers_config_then_cli(tmp_path, monkeypatch):
+    """Config-declared sources come first; --instructions merge on top."""
+    from praisonai_code.cli.commands import run as run_mod
+
+    monkeypatch.setattr(
+        run_mod, "_resolve_config_instructions", lambda: ["org.md", "proj.md"]
+    )
+    merged = run_mod._merge_instructions(["cli-extra.md"])
+    assert merged == ["org.md", "proj.md", "cli-extra.md"]
+
+
+def test_resolve_config_instructions_reads_layered_config(tmp_path, monkeypatch):
+    """A project praisonai.yaml `instructions:` list is surfaced (concat-merge).
+
+    The runtime resolver concatenates list-valued keys across the hierarchy, so
+    a project config extends rather than replaces any global list.
+    """
+    from praisonai_code.cli.commands import run as run_mod
+    from praisonai_code.cli.configuration import resolver as resolver_mod
+
+    (tmp_path / "praisonai.yaml").write_text(
+        "instructions:\n  - docs/rules.md\n  - https://example.com/r.md\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    # Fresh resolver bound to this cwd (avoid cached singleton from other tests).
+    resolver_mod._default_resolver = None
+
+    out = run_mod._resolve_config_instructions()
+    assert out == ["docs/rules.md", "https://example.com/r.md"]
