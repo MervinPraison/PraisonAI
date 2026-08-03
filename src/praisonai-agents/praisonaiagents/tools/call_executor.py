@@ -14,6 +14,7 @@ Design principles:
 import asyncio
 import concurrent.futures
 import contextvars
+import functools
 import inspect
 import logging
 import uuid
@@ -22,6 +23,22 @@ from dataclasses import dataclass, field
 from ..trace.context_events import copy_context_to_callable
 
 logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=None)
+def _accepts_on_progress(execute_tool_fn: Callable) -> bool:
+    """Return whether ``execute_tool_fn`` advertises an ``on_progress`` kwarg.
+
+    Memoised because ``execute_tool_fn`` is invariant per agent (its bound
+    method compares/hashes equal across calls), so ``inspect.signature`` only
+    needs to run once per callable rather than once per tool call in the loop.
+    The ``(TypeError, ValueError)`` fallback is preserved for built-in/C
+    callables whose signature can't be introspected.
+    """
+    try:
+        return "on_progress" in inspect.signature(execute_tool_fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 class ToolTimeoutError(Exception):
@@ -277,11 +294,8 @@ def _run_tool_body(
     try:
         # Only pass on_progress if execute_tool_fn advertises support for it,
         # keeping full backward compatibility with existing 3-arg callables.
-        supports_progress = False
-        try:
-            supports_progress = "on_progress" in inspect.signature(execute_tool_fn).parameters
-        except (TypeError, ValueError):
-            supports_progress = False
+        # Memoised so the signature probe runs once per callable, not per call.
+        supports_progress = _accepts_on_progress(execute_tool_fn)
 
         if supports_progress:
             raw = execute_tool_fn(
