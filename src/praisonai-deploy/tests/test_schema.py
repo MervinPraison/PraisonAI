@@ -2,11 +2,9 @@
 Unit tests for deploy YAML schema validation.
 """
 import pytest
-import tempfile
-import os
 
 
-def test_validate_agents_yaml_with_deploy_api():
+def test_validate_agents_yaml_with_deploy_api(tmp_path):
     """Test YAML validation with API deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -28,20 +26,15 @@ deploy:
     workers: 2
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.type.value == "api"
-            assert config.api.port == 8080
-            assert config.api.workers == 2
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "api"
+    assert config.api.port == 8080
+    assert config.api.workers == 2
 
 
-def test_validate_agents_yaml_with_deploy_docker():
+def test_validate_agents_yaml_with_deploy_docker(tmp_path):
     """Test YAML validation with Docker deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -64,21 +57,16 @@ deploy:
     push: true
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.type.value == "docker"
-            assert config.docker.image_name == "my-agent"
-            assert config.docker.tag == "v1.0.0"
-            assert config.docker.push is True
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "docker"
+    assert config.docker.image_name == "my-agent"
+    assert config.docker.tag == "v1.0.0"
+    assert config.docker.push is True
 
 
-def test_validate_agents_yaml_with_deploy_cloud_aws():
+def test_validate_agents_yaml_with_deploy_cloud_aws(tmp_path):
     """Test YAML validation with AWS cloud deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -102,21 +90,16 @@ deploy:
     memory: "512"
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.type.value == "cloud"
-            assert config.cloud.provider.value == "aws"
-            assert config.cloud.region == "us-east-1"
-            assert config.cloud.service_name == "my-agent-service"
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "cloud"
+    assert config.cloud.provider.value == "aws"
+    assert config.cloud.region == "us-east-1"
+    assert config.cloud.service_name == "my-agent-service"
 
 
-def test_validate_agents_yaml_with_deploy_cloud_azure():
+def test_validate_agents_yaml_with_deploy_cloud_azure(tmp_path):
     """Test YAML validation with Azure cloud deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -140,20 +123,15 @@ deploy:
     subscription_id: sub-123
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.type.value == "cloud"
-            assert config.cloud.provider.value == "azure"
-            assert config.cloud.resource_group == "my-rg"
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "cloud"
+    assert config.cloud.provider.value == "azure"
+    assert config.cloud.resource_group == "my-rg"
 
 
-def test_validate_agents_yaml_with_deploy_cloud_gcp():
+def test_validate_agents_yaml_with_deploy_cloud_gcp(tmp_path):
     """Test YAML validation with GCP cloud deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -176,20 +154,15 @@ deploy:
     project_id: my-project-123
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.type.value == "cloud"
-            assert config.cloud.provider.value == "gcp"
-            assert config.cloud.project_id == "my-project-123"
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "cloud"
+    assert config.cloud.provider.value == "gcp"
+    assert config.cloud.project_id == "my-project-123"
 
 
-def test_validate_agents_yaml_no_deploy_section():
+def test_validate_agents_yaml_no_deploy_section(tmp_path):
     """Test YAML validation when no deploy section present."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -204,18 +177,13 @@ agents:
     goal: Help users
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config is None
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config is None
 
 
-def test_validate_agents_yaml_invalid_type():
+def test_validate_agents_yaml_invalid_type(tmp_path):
     """Test YAML validation with invalid deploy type."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -233,18 +201,13 @@ deploy:
   type: invalid_type
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            with pytest.raises(ValueError):
-                validate_agents_yaml(f.name)
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    with pytest.raises(ValueError):
+        validate_agents_yaml(str(yaml_file))
 
 
-def test_validate_agents_yaml_missing_required_config():
+def test_validate_agents_yaml_missing_required_config(tmp_path):
     """Test YAML validation with missing required config for type."""
     from praisonai_deploy.schema import validate_agents_yaml
     
@@ -262,15 +225,10 @@ deploy:
   type: api
 """
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(yaml_content)
-        f.flush()
-        
-        try:
-            config = validate_agents_yaml(f.name)
-            assert config.api is not None
-        finally:
-            os.unlink(f.name)
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.api is not None
 
 
 def test_validate_agents_yaml_file_not_found():
