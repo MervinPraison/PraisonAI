@@ -66,6 +66,41 @@ deploy:
     assert config.docker.push is True
 
 
+def test_validate_agents_yaml_docker_with_api_auth_disabled(tmp_path):
+    """Docker deploy should parse optional sibling `api` block (auth/port)."""
+    from praisonai_deploy.schema import validate_agents_yaml
+
+    yaml_content = """
+name: Test Agent
+framework: praisonai
+
+agents:
+  assistant:
+    name: Assistant
+    role: Helper
+    goal: Help users
+
+deploy:
+  type: docker
+  docker:
+    image_name: my-agent
+    expose:
+      - 8016
+  api:
+    host: 0.0.0.0
+    port: 8016
+    auth_enabled: false
+"""
+
+    yaml_file = tmp_path / "agents.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    config = validate_agents_yaml(str(yaml_file))
+    assert config.type.value == "docker"
+    assert config.api is not None
+    assert config.api.auth_enabled is False
+    assert config.api.port == 8016
+
+
 def test_validate_agents_yaml_with_deploy_cloud_aws(tmp_path):
     """Test YAML validation with AWS cloud deploy config."""
     from praisonai_deploy.schema import validate_agents_yaml

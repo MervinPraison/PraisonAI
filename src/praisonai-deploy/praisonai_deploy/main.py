@@ -128,7 +128,10 @@ class Deploy:
             if not push_result.success:
                 return push_result
 
-        env_vars = collect_runtime_env_vars()
+        auth_env = None
+        if self.config.api and not self.config.api.auth_enabled:
+            auth_env = {"PRAISONAI_API_AUTH": "disabled"}
+        env_vars = collect_runtime_env_vars(extra=auth_env)
 
         return run_docker_container(docker_cfg, env_vars=env_vars, replace_existing=True)
     
