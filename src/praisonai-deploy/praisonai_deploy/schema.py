@@ -74,10 +74,6 @@ def validate_agents_yaml(file_path: str) -> Optional[DeployConfig]:
             raise ValueError(f"Invalid cloud provider: {provider_str}. Must be one of: aws, azure, gcp, fly, railway, render")
         
         config_dict['cloud'] = CloudConfig(**cloud_data)
-        # Optional sibling `api` block configures the generated server (port, auth, cors).
-        api_data = deploy_data.get('api')
-        if api_data:
-            config_dict['api'] = APIConfig(**api_data)
     
     # Parse agents if present
     if 'agents' in deploy_data:

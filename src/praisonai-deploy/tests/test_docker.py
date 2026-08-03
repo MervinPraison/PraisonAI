@@ -194,3 +194,63 @@ def test_check_docker_installed_failure(mock_run):
     
     result = check_docker_installed()
     assert result is False
+
+
+@patch('praisonai_deploy.main.run_docker_container')
+@patch('praisonai_deploy.main.build_docker_image')
+@patch('praisonai_deploy.main.prepare_docker_build_context')
+@patch('praisonai_deploy.main.generate_api_server_code')
+@patch('praisonai_deploy.main.save_dockerfile')
+def test_deploy_docker_propagates_auth_disabled_env(
+    mock_save, mock_gen, mock_ctx, mock_build, mock_run
+):
+    """`_deploy_docker` must forward PRAISONAI_API_AUTH=disabled to the container."""
+    from praisonai_deploy.main import Deploy
+    from praisonai_deploy.models import (
+        DeployConfig, DeployType, DockerConfig, APIConfig, DeployResult,
+    )
+
+    mock_gen.return_value = "# api_server.py"
+    mock_ctx.return_value = "."
+    mock_build.return_value = DeployResult(success=True, message="built")
+    mock_run.return_value = DeployResult(success=True, message="running")
+
+    config = DeployConfig(
+        type=DeployType.DOCKER,
+        docker=DockerConfig(image_name="test-app", expose=[8016]),
+        api=APIConfig(host="0.0.0.0", port=8016, auth_enabled=False),
+    )
+    result = Deploy(config, agents_file="agents.yaml").deploy()
+
+    assert result.success is True
+    env_vars = mock_run.call_args.kwargs["env_vars"]
+    assert env_vars.get("PRAISONAI_API_AUTH") == "disabled"
+
+
+@patch('praisonai_deploy.main.run_docker_container')
+@patch('praisonai_deploy.main.build_docker_image')
+@patch('praisonai_deploy.main.prepare_docker_build_context')
+@patch('praisonai_deploy.main.generate_api_server_code')
+@patch('praisonai_deploy.main.save_dockerfile')
+def test_deploy_docker_auth_enabled_no_override(
+    mock_save, mock_gen, mock_ctx, mock_build, mock_run
+):
+    """Auth enabled (default) must NOT inject the disabled override."""
+    from praisonai_deploy.main import Deploy
+    from praisonai_deploy.models import (
+        DeployConfig, DeployType, DockerConfig, DeployResult,
+    )
+
+    mock_gen.return_value = "# api_server.py"
+    mock_ctx.return_value = "."
+    mock_build.return_value = DeployResult(success=True, message="built")
+    mock_run.return_value = DeployResult(success=True, message="running")
+
+    config = DeployConfig(
+        type=DeployType.DOCKER,
+        docker=DockerConfig(image_name="test-app", expose=[8005]),
+    )
+    Deploy(config, agents_file="agents.yaml").deploy()
+
+    env_vars = mock_run.call_args.kwargs["env_vars"]
+    assert "PRAISONAI_API_AUTH" not in env_vars
