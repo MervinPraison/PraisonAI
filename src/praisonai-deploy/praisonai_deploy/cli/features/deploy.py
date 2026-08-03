@@ -12,6 +12,22 @@ from rich import print as rprint
 console = Console()
 
 
+def _configure_stdio() -> None:
+    """Force UTF-8 on stdout/stderr so emoji banners never crash on cp1252 consoles.
+
+    The ``praisonai deploy`` bridge dispatches straight into
+    ``handle_deploy_command`` without going through the ``praisonai-deploy``
+    console entry point, so the same safeguard is applied here.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def _build_deploy_config_from_args(args):
     """Build DeployConfig from CLI flags, merging YAML deploy section when present."""
     from praisonai_deploy.models import DeployConfig, DeployType, CloudProvider, APIConfig, DockerConfig, CloudConfig
@@ -629,6 +645,8 @@ def handle_deploy_command(args):
         Exit code (0 on success, non-zero on failure).
     """
     import argparse as ap
+
+    _configure_stdio()
 
     handler = DeployHandler()
 
