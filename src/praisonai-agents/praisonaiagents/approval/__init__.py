@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import inspect
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -96,11 +97,11 @@ def get_approval_callback() -> Optional[Callable]:
     """Get the current approval callback function (legacy API)."""
     return approval_callback
 
-def mark_approved(tool_name: str) -> None:
-    get_approval_registry().mark_approved(tool_name)
+def mark_approved(tool_name: str, arguments: Optional[Dict] = None) -> None:
+    get_approval_registry().mark_approved(tool_name, arguments)
 
-def is_already_approved(tool_name: str) -> bool:
-    return get_approval_registry().is_already_approved(tool_name)
+def is_already_approved(tool_name: str, arguments: Optional[Dict] = None) -> bool:
+    return get_approval_registry().is_already_approved(tool_name, arguments)
 
 def is_yaml_approved(tool_name: str) -> bool:
     return get_approval_registry().is_yaml_approved(tool_name)
@@ -166,6 +167,29 @@ async def request_approval(function_name: str, arguments: Dict) -> ApprovalDecis
 
 RiskLevel = Literal["critical", "high", "medium", "low"]
 
+
+def _bind_call_args(func: Callable, args: tuple, kwargs: Dict) -> Dict:
+    """Normalise a call's positional + keyword args into a single dict.
+
+    The approval cache is keyed by the tool's arguments, so a directly-invoked
+    ``@require_approval`` tool must reduce positional args to the same named
+    form the cache uses — otherwise ``read_file("/a")`` and ``read_file("/b")``
+    would share the empty-argument key and one approval would unlock the other.
+
+    Falls back to a shallow merge of ``kwargs`` plus an ``__args__`` tuple when
+    the signature cannot be bound (e.g. C-implemented callables), so distinct
+    positional calls still produce distinct keys instead of collapsing.
+    """
+    try:
+        bound = inspect.signature(func).bind_partial(*args, **kwargs)
+        return dict(bound.arguments)
+    except (TypeError, ValueError):
+        merged = dict(kwargs)
+        if args:
+            merged["__args__"] = args
+        return merged
+
+
 def require_approval(risk_level: RiskLevel = "high"):
     """Decorator to mark a tool as requiring human approval."""
     def decorator(func):
@@ -177,13 +201,18 @@ def require_approval(risk_level: RiskLevel = "high"):
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if is_already_approved(tool_name):
+            # Bind positional args into a normalized dict so the approval key
+            # reflects the *actual* call. Without this, positional-only calls
+            # (e.g. read_file("/etc/passwd")) would all collapse to the same
+            # empty-argument key, letting one approval unlock any later value.
+            approval_args = _bind_call_args(func, args, kwargs)
+            if is_already_approved(tool_name, approval_args):
                 return func(*args, **kwargs)
             if is_yaml_approved(tool_name):
-                mark_approved(tool_name)
+                mark_approved(tool_name, approval_args)
                 return func(*args, **kwargs)
             if is_env_auto_approve():
-                mark_approved(tool_name)
+                mark_approved(tool_name, approval_args)
                 return func(*args, **kwargs)
             try:
                 from ..utils.async_bridge import is_async_context, run_coroutine_from_any_context
@@ -196,32 +225,35 @@ def require_approval(risk_level: RiskLevel = "high"):
                     )
                 else:
                     # Safe to run async approval using registry
-                    decision = run_coroutine_from_any_context(request_approval(tool_name, kwargs))
+                    decision = run_coroutine_from_any_context(request_approval(tool_name, approval_args))
             except Exception as e:
                 logging.warning(f"Approval request failed: {e}", exc_info=True)
                 # Fail closed - do not fall back to console
                 raise PermissionError(f"Approval request failed for {tool_name}: {e}") from e
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
-            mark_approved(tool_name)
             kwargs.update(decision.modified_args)
+            approval_args.update(decision.modified_args)
+            mark_approved(tool_name, approval_args)
             return func(*args, **kwargs)
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            if is_already_approved(tool_name):
+            approval_args = _bind_call_args(func, args, kwargs)
+            if is_already_approved(tool_name, approval_args):
                 return await func(*args, **kwargs)
             if is_yaml_approved(tool_name):
-                mark_approved(tool_name)
+                mark_approved(tool_name, approval_args)
                 return await func(*args, **kwargs)
             if is_env_auto_approve():
-                mark_approved(tool_name)
+                mark_approved(tool_name, approval_args)
                 return await func(*args, **kwargs)
-            decision = await request_approval(tool_name, kwargs)
+            decision = await request_approval(tool_name, approval_args)
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
-            mark_approved(tool_name)
             kwargs.update(decision.modified_args)
+            approval_args.update(decision.modified_args)
+            mark_approved(tool_name, approval_args)
             return await func(*args, **kwargs)
 
         if asyncio.iscoroutinefunction(func):

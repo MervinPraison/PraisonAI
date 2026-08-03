@@ -4985,8 +4985,20 @@ Summary:"""
             self._memory_instance = None
             return
         
-        # Determine user_id
-        mem_user_id = user_id or getattr(self, 'user_id', None) or "default"
+        # Determine user_id. A shared constant default (e.g. "praison") would
+        # silently merge different sessions'/users' private memory onto the same
+        # on-disk path. When memory is enabled and no explicit user_id was given,
+        # fall back to a per-instance, non-shared id so agents are isolated by
+        # default. Pass user_id=... explicitly to persist/share memory across runs.
+        mem_user_id = user_id
+        if not mem_user_id:
+            import uuid
+            mem_user_id = f"agent-{uuid.uuid4().hex[:12]}"
+            logging.warning(
+                "Agent memory enabled without an explicit user_id; using an "
+                "auto-generated, non-shared id (%s). Pass user_id=... explicitly "
+                "to persist/share memory across runs.", mem_user_id,
+            )
         
         if memory is True or memory == "file":
             # Use FileMemory (zero dependencies)
