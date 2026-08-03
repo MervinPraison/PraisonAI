@@ -453,7 +453,26 @@ class MessageHookMixin:
                     return {"content": "", "cancel": True, "silent": True}
                 if content and content.strip() == "NO_REPLY":
                     return {"content": "", "cancel": True, "silent": True}
-        
+
+        # Empty-final resolution (Issue #3621): the visible-outcome guarantee.
+        # A blank/whitespace final, or the machine ``[tool_calls: …]`` placeholder,
+        # is NOT deliberate silence — dropping it (Slack), parking an empty send
+        # in the DLQ (Telegram) or shipping the raw placeholder to the user are
+        # all the worst bug class in this subsystem: an inbound action that ends
+        # with no visible outcome. Substitute one recorded, typed fallback here,
+        # at the single delivery decision point, so every adapter that funnels
+        # through ``fire_message_sending`` delivers a real answer instead. An
+        # exact silence token is already handled above, so only genuine "empty,
+        # not silence" reaches here.
+        try:
+            from praisonaiagents.bots.silence import classify_final
+            if classify_final(content) == "empty":
+                content = self._resolve_empty_final()
+        except ImportError:
+            # Core unavailable: still never ship a blank/placeholder body.
+            if not content or not content.strip() or content.strip().startswith("[tool_calls:"):
+                content = self._resolve_empty_final()
+
         result: Dict[str, Any] = {"content": content, "cancel": False}
         runner = self._get_hook_runner()
         if runner is None:
@@ -487,6 +506,35 @@ class MessageHookMixin:
         except Exception as e:
             logger.debug(f"MESSAGE_SENDING hook error (non-fatal): {e}")
         return result
+
+    _DEFAULT_EMPTY_FINAL = "Task completed — no message to show."
+
+    def _resolve_empty_final(self) -> str:
+        """Return the recorded fallback text for an empty, non-silence final.
+
+        Issue #3621: when the agent produces no user-visible text (blank,
+        whitespace, or a raw ``[tool_calls: …]`` placeholder) the gateway must
+        still deliver a visible outcome rather than drop the turn. The fallback
+        is a short, plain sentence; an operator can override it with an optional
+        ``empty_final_message`` key under the existing ``BotConfig.metadata``
+        block (no new typed knob is added — ``metadata`` is the declared seam
+        for platform-specific extras). A direct ``config.empty_final_message``
+        attribute is still honoured for programmatic callers. Emitting it is
+        logged so the recorded non-outcome is operator-visible.
+        """
+        config = getattr(self, "config", None)
+        fallback = getattr(config, "empty_final_message", None)
+        if not fallback:
+            metadata = getattr(config, "metadata", None)
+            if isinstance(metadata, dict):
+                fallback = metadata.get("empty_final_message")
+        text = str(fallback).strip() if fallback and str(fallback).strip() else self._DEFAULT_EMPTY_FINAL
+        logger.info(
+            "Empty-final resolution: substituted fallback for a blank/placeholder "
+            "reply on %s (visible-outcome guarantee)",
+            getattr(self, "platform", "unknown"),
+        )
+        return text
 
     def fire_message_sent(
         self, channel_id: str, content: str, message_id: str = ""

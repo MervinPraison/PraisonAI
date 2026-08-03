@@ -6077,6 +6077,11 @@ class WebSocketGateway:
                 # Issue #3352: share the gateway's metrics registry so per-turn
                 # prompt-prefix drift increments ``prompt_cache_invalidations_total``.
                 self._stamp_metrics(bot)
+                # Issue #3621: re-drive any inbound journaled message left mid-turn
+                # by a previous crash/restart. The durable path is on by default
+                # but its crash-recovery (``InboundJournal.replay()``) had no caller,
+                # so polling/socket transports silently lost in-flight messages.
+                self._replay_inbound_journal(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -6165,6 +6170,50 @@ class WebSocketGateway:
             sess._admission_gate = gate
         elif hasattr(bot, "_admission_gate"):
             bot._admission_gate = gate
+
+    @staticmethod
+    def _replay_inbound_journal(bot: Any) -> None:
+        """Recover a channel's durable inbound journal on start (Issue #3621).
+
+        The durable inbound path is on by default and journals every message
+        (``pending`` → ``claimed`` → ``complete``), but its crash-recovery
+        method — ``InboundJournal.replay()`` — had no caller. A gateway killed
+        mid-turn (deploy/OOM/crash) therefore left the row stuck ``claimed``
+        forever. Because the journal keys dedup on ``message_id``, that stale
+        ``claimed`` row also *poisons* the dedup ledger: if the transport ever
+        redelivers the same message, it is dropped as a duplicate — so the
+        inbound could never be reprocessed.
+
+        Calling ``replay()`` here resets stale claims back to ``pending`` (so a
+        redelivery, or the gateway's session-level resume — Issue #3379 —
+        ``_resume_interrupted_turns()``, can reprocess them exactly once) and
+        quarantines genuine poison entries to the inbound DLQ. This is the
+        ledger's own crash-recovery contract; it deliberately does *not*
+        synthesise per-adapter native message objects to self-dispatch, which
+        would duplicate the session-resume path and reach into every transport.
+
+        Best-effort and bounded: any failure degrades to today's behaviour
+        rather than aborting channel start. Reset counts are logged so the
+        recovery is operator-visible.
+        """
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        journal = getattr(sess, "_ingress_journal", None) if sess is not None else None
+        if journal is None:
+            return
+        try:
+            recovered = journal.replay()
+        except Exception as exc:  # pragma: no cover — defensive, recovery is best-effort
+            logger.debug("Inbound crash-replay skipped: %s", exc)
+            return
+        if recovered:
+            logger.info(
+                "Inbound crash-recovery: reset %d stranded journaled message(s) "
+                "to pending on start (unblocked for redelivery/resume)",
+                recovered,
+            )
 
     @staticmethod
     def _build_identity_resolver(identity_cfg: Any) -> Optional[Any]:
@@ -6404,6 +6453,57 @@ class WebSocketGateway:
             )
             return agent
 
+    @staticmethod
+    def _inject_channel_prompt_hint(agent: "Agent", channel_type: str) -> None:
+        """Append a channel's ``system_prompt_hint`` to the agent prompt.
+
+        Issue #3621: the ``ChannelDescriptor`` contract promises a channel's
+        ``system_prompt_hint`` reaches the agent prompt, and
+        ``get_channel_system_prompt_hint()`` already resolves it, but nothing
+        called it — so a plugin channel's declared constraints never reached the
+        model. This is the missing consumer.
+
+        The model prompt is built from ``backstory``/``system_prompt`` (see
+        ``Agent`` — ``instructions`` is only read once at construction and is
+        *not* re-consumed at inference), so the hint must be appended to the
+        effective prompt fields to actually reach the model. We update
+        ``backstory`` and rebuild ``system_prompt`` (the runtime prefers the
+        latter) so the hint lands on the durable path used by the standard
+        prompt builder.
+
+        No-op when the channel declares no hint (all built-ins) or the hint is
+        already present (idempotent across hot-reload / re-clone). Deterministic
+        ordering (single trailing append) keeps the prompt prefix cache-stable.
+        """
+        try:
+            from praisonai_bot.bots._registry import get_channel_system_prompt_hint
+
+            hint = (get_channel_system_prompt_hint(channel_type) or "").strip()
+        except Exception as exc:  # pragma: no cover — defensive, optional seam
+            logger.debug("Channel prompt-hint lookup skipped for %r: %s", channel_type, exc)
+            return
+        if not hint:
+            return
+        backstory = getattr(agent, "backstory", "") or ""
+        if hint in backstory:
+            return
+        agent.backstory = f"{backstory}\n\n{hint}".strip()
+        # Rebuild the cached system prompt so the hint reaches the model on the
+        # standard prompt path (runtime prefers ``system_prompt`` when set).
+        try:
+            agent.system_prompt = (
+                f"{agent.backstory}\n\nYour Role: {getattr(agent, 'role', '')}\n\n"
+                f"Your Goal: {getattr(agent, 'goal', '')}"
+            ).strip()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug("Channel prompt-hint system_prompt rebuild skipped: %s", exc)
+        # Keep ``instructions`` consistent for any introspection/telemetry that
+        # reads it, without relying on it for the model prompt.
+        instructions = getattr(agent, "instructions", None)
+        if isinstance(instructions, str) and hint not in instructions:
+            agent.instructions = f"{instructions}\n\n{hint}".strip()
+        logger.debug("Injected channel system_prompt_hint for %r", channel_type)
+
     def _create_bot(
         self,
         channel_type: str,
@@ -6420,6 +6520,17 @@ class WebSocketGateway:
         # Apply smart defaults to agent (same logic as Bot() wrapper)
         from praisonai_bot.bots._defaults import apply_bot_smart_defaults, enable_shell_tools
         agent = apply_bot_smart_defaults(agent, config)
+
+        # Issue #3621: inject the channel's declared ``system_prompt_hint`` into
+        # the per-channel agent so a channel plugin can teach the agent its
+        # constraints/affordances (e.g. "plain text only, one short line").
+        # The core contract (ChannelDescriptor) names the agent prompt as a
+        # consumer, and the helper already exists — this is the missing caller.
+        # Appended once at construction on the cloned agent, so it is bounded and
+        # prompt-cache-stable. Built-in channels declare no hint and return ""
+        # (no-op), so only third-party channels that opt in are affected.
+        self._inject_channel_prompt_hint(agent, channel_type)
+
         if ch_cfg.get("allow_shell"):
             agent = enable_shell_tools(
                 agent,
@@ -7314,6 +7425,10 @@ class WebSocketGateway:
             # Issue #3352: re-share the metrics registry on the hot-reloaded
             # channel so prompt-cache invalidation metering keeps working.
             self._stamp_metrics(bot)
+            # Issue #3621: re-drive any journaled inbound stranded by a crash on
+            # the hot-reloaded channel too, so recovery isn't limited to full
+            # gateway boot.
+            self._replay_inbound_journal(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:

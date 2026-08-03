@@ -66,6 +66,39 @@ def is_intentional_silence_response(text: str | None) -> bool:
     return False
 
 
+def classify_final(text: str | None) -> str:
+    """Classify an agent's final reply for the visible-outcome guarantee.
+
+    Every inbound turn must end in a visible outcome or a recorded, intentional
+    non-outcome. This is the single decision point the bot/gateway layer uses to
+    tell those apart, so no adapter re-decides "blank" differently:
+
+      - ``"silence"``: a deliberate no-reply (an exact ``NO_REPLY``/``[SILENT]``
+        marker). The gateway suppresses the send on purpose.
+      - ``"empty"``: blank, whitespace-only, or the machine ``[tool_calls: …]``
+        placeholder — NOT deliberate silence. The gateway must substitute a
+        recorded, user-facing fallback rather than drop it or leak the token.
+      - ``"text"``: real user-facing content to deliver as-is.
+
+    Examples:
+        >>> classify_final("NO_REPLY")
+        'silence'
+        >>> classify_final("")
+        'empty'
+        >>> classify_final("   ")
+        'empty'
+        >>> classify_final("[tool_calls: search_web]")
+        'empty'
+        >>> classify_final("Here is your answer.")
+        'text'
+    """
+    if is_intentional_silence_response(text):
+        return "silence"
+    if not text or not text.strip() or text.strip().startswith("[tool_calls:"):
+        return "empty"
+    return "text"
+
+
 @dataclass
 class BotLoopPolicy:
     """Sliding-window pair budget for bot-to-bot loop protection.
