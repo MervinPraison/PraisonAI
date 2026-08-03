@@ -26,3 +26,9 @@ deploy:
       - 8005
     registry: ghcr.io/myorg
     push: false
+  # Optional: configure the generated server inside the container.
+  # host/port/auth_enabled/cors_enabled are honored just like `type: api`.
+  api:
+    host: 0.0.0.0
+    port: 8005
+    auth_enabled: true
