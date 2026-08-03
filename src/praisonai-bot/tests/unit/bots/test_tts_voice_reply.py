@@ -127,9 +127,15 @@ class TestSynthesizeVoiceReply:
     def test_delegates_to_tts_tool(self, monkeypatch):
         calls = {}
 
-        def fake_tts_tool(text, voice=None, model=None, output_format="ogg"):
+        def fake_tts_tool(
+            text, voice=None, model=None, output_format="ogg", speed=None
+        ):
             calls.update(
-                text=text, voice=voice, model=model, output_format=output_format
+                text=text,
+                voice=voice,
+                model=model,
+                output_format=output_format,
+                speed=speed,
             )
             return {"success": True, "audio_path": "/tmp/reply.ogg"}
 
@@ -144,6 +150,25 @@ class TestSynthesizeVoiceReply:
         assert calls["voice"] == "alloy"
         assert calls["model"] == "openai/tts-1"
         assert calls["output_format"] == "ogg"
+
+    def test_forwards_speed_to_tts_tool(self, monkeypatch):
+        # Regression: a configured ``voice.speed`` must reach the TTS tool
+        # instead of being silently dropped (default speaking rate).
+        calls = {}
+
+        def fake_tts_tool(
+            text, voice=None, model=None, output_format="ogg", speed=None
+        ):
+            calls["speed"] = speed
+            return {"success": True, "audio_path": "/tmp/reply.ogg"}
+
+        import praisonai_bot.tools.audio as audio_mod
+
+        monkeypatch.setattr(audio_mod, "tts_tool", fake_tts_tool)
+
+        cfg = TtsConfig(enabled=True, speed=1.5)
+        assert synthesize_voice_reply("Hello", cfg) == "/tmp/reply.ogg"
+        assert calls["speed"] == 1.5
 
     def test_failure_returns_none(self, monkeypatch):
         import praisonai_bot.tools.audio as audio_mod

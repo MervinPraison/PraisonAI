@@ -6776,10 +6776,18 @@ class WebSocketGateway:
                         agent, user_id, message_text, tool_policy=tool_policy
                     )
                 if hasattr(bot, '_send_response_with_media'):
+                    # Issue #3623: this handler serves VOICE|AUDIO as well as
+                    # TEXT (handle_voice delegates here), so thread whether the
+                    # inbound message was a voice/audio memo. Without this the
+                    # ``voice.mode: match_inbound`` policy could never fire for
+                    # gateway-owned Telegram channels.
                     await bot._send_response_with_media(
                         update.message.chat_id,
                         response,
                         reply_to=update.message.message_id,
+                        inbound_was_voice=bool(
+                            update.message.voice or update.message.audio
+                        ),
                     )
                 else:
                     await update.message.reply_text(str(response))

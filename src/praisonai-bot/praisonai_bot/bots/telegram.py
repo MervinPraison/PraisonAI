@@ -751,6 +751,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             
                             # Finalize with text content (after hook processing and media extraction)
                             await streamer.finalize(text_content if text_content else send_result["content"])
+
+                            # Issue #3623: the streamed reply is delivered as text
+                            # by the streamer, so the outbound voice-reply policy
+                            # must be applied here too (the non-streaming path does
+                            # this inside _send_response_with_media). Otherwise
+                            # ``voice.mode: always``/``match_inbound`` would be a
+                            # no-op whenever streaming is enabled. Best-effort.
+                            await self._maybe_send_voice_reply(
+                                update.message.chat_id,
+                                text_content if text_content else send_result["content"],
+                                inbound_was_voice=bool(
+                                    update.message.voice or update.message.audio
+                                ),
+                            )
                             
                             # Send media files separately (same as non-streaming path)
                             if media_urls:

@@ -222,6 +222,7 @@ def synthesize_voice_reply(text: str, cfg: TtsConfig) -> Optional[str]:
             voice=cfg.voice,
             model=cfg.model,
             output_format=cfg.format or "ogg",
+            speed=cfg.speed,
         )
     except Exception as e:
         logger.error("Voice reply synthesis error: %s", e)
