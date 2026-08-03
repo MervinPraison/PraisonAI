@@ -13,7 +13,7 @@ from ..utils.file_utils import (
     file_exists,
     is_path_within_directory,
 )
-from ...security.protected import is_protected, get_protection_reason
+from ...security.protected import is_protected, get_protection_reason, resolve_real_path
 
 
 def search_replace(
@@ -62,7 +62,11 @@ def search_replace(
         abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
-    
+
+    # Resolve symlinks so the protection/workspace checks and the read+write all
+    # act on the same real target, defeating a symlink-swap TOCTOU.
+    abs_path = resolve_real_path(abs_path)
+
     # Protected path check — never allow modification of system files
     if is_protected(abs_path):
         reason = get_protection_reason(abs_path) or "Protected system file"

@@ -18,7 +18,7 @@ from ..utils.text_utils import (
     unescape_html_entities,
     strip_markdown_code_fences,
 )
-from ...security.protected import is_protected, get_protection_reason
+from ...security.protected import is_protected, get_protection_reason, resolve_real_path
 
 
 def write_file(
@@ -64,7 +64,13 @@ def write_file(
         abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
-    
+
+    # Resolve symlinks so every subsequent check *and* the write itself act on
+    # the real target — a same-directory symlink can't redirect the write into
+    # a protected/out-of-workspace file after the check (TOCTOU). For a new file
+    # the link doesn't exist yet, so realpath returns the path unchanged.
+    abs_path = resolve_real_path(abs_path)
+
     # Protected path check — never allow overwriting system files
     if is_protected(abs_path):
         reason = get_protection_reason(abs_path) or "Protected system file"
@@ -183,7 +189,10 @@ def append_to_file(
         abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
-    
+
+    # Resolve symlinks so the check and the append act on the same real target.
+    abs_path = resolve_real_path(abs_path)
+
     # Protected path check — never allow modification of system files
     if is_protected(abs_path):
         reason = get_protection_reason(abs_path) or "Protected system file"

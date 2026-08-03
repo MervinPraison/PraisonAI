@@ -1,6 +1,8 @@
 import os
 import json
 import base64
+import hmac
+import secrets
 import asyncio
 import websockets
 from fastapi import FastAPI, WebSocket, Request
@@ -14,6 +16,7 @@ import argparse
 import logging
 import importlib.util
 import time
+from typing import Optional
 from collections import defaultdict
 
 
@@ -61,6 +64,51 @@ RATE_LIMIT_WINDOW = 3600
 
 active_connections = 0
 client_ips = defaultdict(list)
+
+# Guard the shared, async-mutated counters so concurrent WebSocket handlers
+# can't over-commit MAX_CONCURRENT_CONNECTIONS / MAX_REQUESTS_PER_WINDOW via a
+# check-then-mutate TOCTOU across ``await`` points.
+_conn_lock = asyncio.Lock()
+_ips_lock = asyncio.Lock()
+
+# One-shot, short-lived session tokens handed to the Twilio media-stream client
+# so the shared server secret is never embedded in a URL (which leaks into
+# access logs / referrers / history). Maps token -> expiry timestamp.
+_STREAM_SESSION_TTL = 60  # seconds
+_pending_stream_sessions: "dict[str, float]" = {}
+
+
+def _mint_stream_session_token() -> str:
+    """Create a single-use, TTL-bound token for the media-stream handshake."""
+    now = time.time()
+    # Opportunistically drop expired tokens so the map can't grow unbounded.
+    for tok in [t for t, exp in _pending_stream_sessions.items() if exp < now]:
+        _pending_stream_sessions.pop(tok, None)
+    token = secrets.token_urlsafe(32)
+    _pending_stream_sessions[token] = now + _STREAM_SESSION_TTL
+    return token
+
+
+def _consume_stream_session_token(token: str) -> bool:
+    """Validate and consume a one-shot stream-session token (constant-time)."""
+    if not token:
+        return False
+    now = time.time()
+    for candidate, expiry in list(_pending_stream_sessions.items()):
+        if expiry < now:
+            _pending_stream_sessions.pop(candidate, None)
+            continue
+        if hmac.compare_digest(candidate, token):
+            _pending_stream_sessions.pop(candidate, None)
+            return True
+    return False
+
+
+def _tokens_match(provided: Optional[str], expected: Optional[str]) -> bool:
+    """Constant-time token comparison to avoid a timing side channel."""
+    if not provided or not expected:
+        return False
+    return hmac.compare_digest(provided, expected)
 
 
 def _refresh_env_globals() -> None:
@@ -196,7 +244,7 @@ async def handle_incoming_call(request: Request):
                     token = decoded
             except Exception:
                 pass
-    if token != CALL_SERVER_TOKEN:
+    if not _tokens_match(token, CALL_SERVER_TOKEN):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
     response = VoiceResponse()
@@ -205,11 +253,15 @@ async def handle_incoming_call(request: Request):
     # response.say("")
     host = request.url.hostname
     connect = Connect()
-    
+
+    # Never embed the shared server secret in the stream URL — a query-string
+    # token leaks into intermediary access logs, referrers and history. Mint a
+    # one-shot, TTL-bound session token the media-stream handshake validates and
+    # consumes exactly once.
     stream_url = f'wss://{host}/media-stream'
-    if CALL_SERVER_TOKEN:
-        stream_url += f'?token={CALL_SERVER_TOKEN}'
-    
+    session_token = _mint_stream_session_token()
+    stream_url += f'?session={session_token}'
+
     connect.stream(url=stream_url)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
@@ -219,30 +271,44 @@ async def handle_media_stream(websocket: WebSocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
     global active_connections
     
-    # 1. Authentication
+    # 1. Authentication — accept a one-shot, per-connection session token
+    #    (from the ``session`` query param minted by the incoming-call handler,
+    #    or an ``x-call-token`` header). The shared CALL_SERVER_TOKEN is never
+    #    carried in the URL. Header-supplied secrets are compared in constant
+    #    time. Absent a session token, a valid header token is accepted for
+    #    direct/back-compat callers.
     if not CALL_SERVER_TOKEN:
         await websocket.close(code=4003, reason="CALL_SERVER_TOKEN not configured")
         return
-    token = websocket.query_params.get("token")
-    if token != CALL_SERVER_TOKEN:
+    session_token = websocket.query_params.get("session")
+    header_token = websocket.headers.get("x-call-token")
+    authorized = _consume_stream_session_token(session_token or "") or _tokens_match(
+        header_token, CALL_SERVER_TOKEN
+    )
+    if not authorized:
         await websocket.close(code=4003, reason="Unauthorized")
         return
-            
-    # 2. Rate Limiting Request Rate
+
+    # 2. Rate Limiting Request Rate — guarded so concurrent handlers can't
+    #    over-commit the window via a check-then-mutate race across ``await``.
     client_ip = websocket.client.host if websocket.client else "unknown"
     now = time.time()
-    client_ips[client_ip] = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
-    if len(client_ips[client_ip]) >= MAX_REQUESTS_PER_WINDOW:
-        await websocket.close(code=4029, reason="Rate limit exceeded")
-        return
-    client_ips[client_ip].append(now)
-    
-    # 3. Connection Limiting
-    if active_connections >= MAX_CONCURRENT_CONNECTIONS:
-        await websocket.close(code=1013, reason="Server busy")
-        return
-        
-    active_connections += 1
+    async with _ips_lock:
+        window = [t for t in client_ips[client_ip] if now - t < RATE_LIMIT_WINDOW]
+        if len(window) >= MAX_REQUESTS_PER_WINDOW:
+            client_ips[client_ip] = window
+            await websocket.close(code=4029, reason="Rate limit exceeded")
+            return
+        window.append(now)
+        client_ips[client_ip] = window
+
+    # 3. Connection Limiting — atomically check-and-increment under the lock so
+    #    MAX_CONCURRENT_CONNECTIONS is never over-committed.
+    async with _conn_lock:
+        if active_connections >= MAX_CONCURRENT_CONNECTIONS:
+            await websocket.close(code=1013, reason="Server busy")
+            return
+        active_connections += 1
     try:
         print("Client connected")
         await websocket.accept()
@@ -311,7 +377,8 @@ async def handle_media_stream(websocket: WebSocket):
 
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
     finally:
-        active_connections -= 1
+        async with _conn_lock:
+            active_connections -= 1
 
 async def handle_response_done(response, openai_ws):
     """Handle the response.done event and process any function calls."""
