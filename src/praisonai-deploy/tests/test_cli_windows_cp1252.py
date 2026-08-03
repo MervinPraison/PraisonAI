@@ -25,6 +25,7 @@ def test_configure_stdio_reconfigures_to_utf8():
         _configure_stdio()
 
     assert stream.encoding == "utf-8"
+    assert stream.errors == "replace"
     stream.write("🏥 health check ❌")
     stream.flush()
 
@@ -51,6 +52,41 @@ def test_handle_deploy_command_configures_stdio_before_dispatch():
 
     assert code == 0
     mock_cfg.assert_called_once()
+
+
+def test_main_entry_configures_stdio_with_replace_before_dispatch():
+    """``praisonai-deploy`` console entry must set utf-8 + replace before app runs."""
+    from praisonai_deploy import __main__ as main_mod
+
+    stream = _make_cp1252_stream()
+    seen = {}
+
+    def _capture_app(*_args, **_kwargs):
+        seen["encoding"] = stream.encoding
+        seen["errors"] = stream.errors
+
+    fake_app_module = Mock()
+    fake_app_module.app = _capture_app
+
+    with patch.object(sys, "stdout", stream), patch.object(sys, "stderr", stream):
+        with patch.dict(sys.modules, {"praisonai_deploy.cli.app": fake_app_module}):
+            main_mod.main(["--help"])
+
+    assert seen["encoding"] == "utf-8"
+    assert seen["errors"] == "replace"
+    stream.write("🚀 deploy ❌")
+    stream.flush()
+
+
+def test_main_configure_stdio_survives_streams_without_reconfigure():
+    """__main__._configure_stdio must be a no-op on streams lacking reconfigure."""
+    from praisonai_deploy.__main__ import _configure_stdio
+
+    plain = io.StringIO()
+    assert not hasattr(plain, "reconfigure")
+
+    with patch.object(sys, "stdout", plain), patch.object(sys, "stderr", plain):
+        _configure_stdio()  # should be a no-op, no exception
 
 
 def test_doctor_banner_does_not_crash_on_cp1252_stdout():
