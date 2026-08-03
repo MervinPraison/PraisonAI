@@ -4,6 +4,43 @@ Unit tests for API server deploy functionality.
 from unittest.mock import Mock, patch, MagicMock
 import tempfile
 import os
+import sys
+
+
+@patch('subprocess.Popen')
+def test_start_api_server_background_uses_sys_executable(mock_popen):
+    """Background deploy must spawn the server with the same interpreter."""
+    from praisonai_deploy.api import start_api_server
+    from praisonai_deploy.models import APIConfig
+
+    config = APIConfig(host="127.0.0.1", port=8005)
+    mock_process = Mock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+    mock_popen.return_value = mock_process
+
+    start_api_server("agents.yaml", config, background=True)
+
+    argv = mock_popen.call_args.args[0]
+    assert argv[0] == sys.executable
+
+
+@patch('subprocess.Popen')
+def test_start_api_server_foreground_uses_sys_executable(mock_popen):
+    """Foreground deploy must spawn the server with the same interpreter."""
+    from praisonai_deploy.api import start_api_server
+    from praisonai_deploy.models import APIConfig
+
+    config = APIConfig(host="127.0.0.1", port=8005)
+    mock_process = Mock()
+    mock_process.pid = 12345
+    mock_process.wait.return_value = 0
+    mock_popen.return_value = mock_process
+
+    start_api_server("agents.yaml", config, background=False)
+
+    argv = mock_popen.call_args.args[0]
+    assert argv[0] == sys.executable
 
 
 @patch('subprocess.Popen')

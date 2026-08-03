@@ -4,6 +4,7 @@ API server deployment functionality.
 import subprocess
 import os
 import signal
+import sys
 import time
 from typing import Optional
 from .models import APIConfig, DeployResult
@@ -149,23 +150,29 @@ def start_api_server(
         with open(server_file, 'w') as f:
             f.write(server_code)
         
-        # Install flask and flask-cors if needed
+        # Install flask and flask-cors if needed. Use the same interpreter that
+        # will run the server so packages land where the child process expects.
         try:
             subprocess.run(
-                ['pip', 'install', '-q', 'flask', 'flask-cors'],
+                [sys.executable, '-m', 'pip', 'install', '-q', 'flask', 'flask-cors'],
                 check=False,
                 capture_output=True
             )
         except Exception:
             pass
         
+        # Preserve the parent environment (e.g. OPENAI_API_KEY) so the generated
+        # server can reach the agent runtime for /chat.
+        server_env = os.environ.copy()
+        
         # Start server
         if background:
             process = subprocess.Popen(
-                ['python', server_file],
+                [sys.executable, server_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True
+                start_new_session=True,
+                env=server_env
             )
             
             # Wait a bit to check if it started successfully
@@ -195,7 +202,7 @@ def start_api_server(
             print(f"💬 Chat endpoint: {url}/chat")
             print("\nPress Ctrl+C to stop the server\n")
             
-            process = subprocess.Popen(['python', server_file])
+            process = subprocess.Popen([sys.executable, server_file], env=server_env)
             try:
                 exit_code = process.wait()
             except KeyboardInterrupt:
