@@ -17,6 +17,19 @@ from praisonaiagents._logging import get_logger
 logger = get_logger(__name__)
 
 
+def next_fire_time(cron_expr: str, base: float) -> float:
+    """Return the next cron fire time (epoch) strictly after ``base``.
+
+    Pure helper owning the "compute next fire from a base" step so wrapper
+    tickers can share core's cron timing rather than re-implementing it.
+    Requires the optional ``croniter`` engine; callers guard its import and
+    the ``(ValueError, KeyError, TypeError)`` raised by malformed expressions.
+    """
+    from croniter import croniter  # type: ignore[import-untyped]
+
+    return croniter(cron_expr, base).get_next(float)
+
+
 def is_due(job: Any, now: float) -> bool:
     """Return ``True`` if ``job`` is due to run at epoch ``now``.
 
@@ -63,8 +76,7 @@ def is_due(job: Any, now: float) -> bool:
             return False
         base_time = job.last_run_at or job.created_at
         try:
-            cron = croniter(sched.cron_expr, base_time)
-            next_run = cron.get_next(float)
+            next_run = next_fire_time(sched.cron_expr, base_time)
         except (ValueError, KeyError, TypeError) as e:
             # A malformed cron expression must not abort the whole tick loop
             # (which iterates all jobs) — treat this job as not-due instead.
