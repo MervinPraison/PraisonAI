@@ -119,6 +119,10 @@ KNOWN_TOP_LEVEL_KEYS = {
     "managed",
     # Managed model allow-list (enforceable policy key).
     "model_allowlist",
+    # Config-declared instruction/context sources (files, globs, ~ paths, or
+    # http(s):// URLs) loaded alongside AGENTS.md/CLAUDE.md. List-valued, so the
+    # resolver's list-concat merge layers them global -> user -> project.
+    "instructions",
 }
 
 # Reserved keys in the plugins section; any other key is a per-plugin option map.

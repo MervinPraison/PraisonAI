@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import glob as _glob
+import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CANDIDATES = ["AGENTS.md", "agents.md", ".agents/AGENTS.md", "CLAUDE.md"]
+
+# Upper bound on the bytes read from a single remote instruction source. Keeps a
+# stray large URL from ballooning the system context; oversized bodies are
+# truncated with a marker rather than failing the run.
+_REMOTE_MAX_BYTES = 256 * 1024
+
+# Timeout (seconds) for a single remote instruction fetch. Best-effort: a slow
+# or unreachable URL is skipped with a warning, never blocking the run.
+_REMOTE_TIMEOUT = 5.0
 
 # Tool-argument keys that carry a file path across the various file tools
 # (praisonaiagents ``read_file`` uses ``filepath``; praisonai-code tools use
@@ -132,6 +146,128 @@ def load_context_files(
     for search_dir in _discover_search_dirs(base, walk_up):
         for name in DEFAULT_CANDIDATES:
             _add(search_dir / name)
+
+    return "\n\n".join(chunks)
+
+
+def _is_remote_source(entry: str) -> bool:
+    """Whether an instruction entry is an ``http(s)://`` URL."""
+    return entry.startswith(("http://", "https://"))
+
+
+def _fetch_remote_source(url: str) -> Optional[str]:
+    """Fetch a remote instruction source, best-effort and size-bounded.
+
+    Uses the stdlib ``urllib`` (lazily imported) so no heavy dependency is
+    added. A slow, unreachable, or oversized response is handled gracefully:
+    failures return ``None`` (with a warning) so the run continues, and bodies
+    larger than ``_REMOTE_MAX_BYTES`` are truncated with a marker.
+    """
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
+            raw = resp.read(_REMOTE_MAX_BYTES + 1)
+    except Exception as exc:  # noqa: BLE001 - best-effort; never block the run
+        logger.warning("Skipping remote instruction source %s: %s", url, exc)
+        return None
+
+    truncated = len(raw) > _REMOTE_MAX_BYTES
+    if truncated:
+        raw = raw[:_REMOTE_MAX_BYTES]
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - decode is defensive
+        return None
+    if truncated:
+        text += "\n... [remote instruction source truncated]"
+    return text
+
+
+def resolve_instruction_sources(
+    entries: Optional[List[str]] = None,
+    *,
+    cwd: Optional[Path] = None,
+) -> str:
+    """Resolve config-declared instruction sources into combined text.
+
+    Each entry may be:
+
+    * a plain file path (``docs/rules.md``),
+    * a glob (``docs/standards/*.md``),
+    * a ``~``-prefixed path (``~/company/ai-rules.md``), or
+    * a remote ``http(s)://`` URL.
+
+    Entries are resolved in order and their contents concatenated (blank-line
+    separated), so callers can layer org-wide sources before project-specific
+    ones. Local globs expand to their matches sorted for determinism; a
+    ``~``/env-var path is expanded; remote URLs are fetched lazily, best-effort
+    and size-bounded (see :func:`_fetch_remote_source`). Missing local paths and
+    failed fetches are skipped with a warning rather than aborting the run.
+
+    Args:
+        entries: Ordered list of source specifiers. ``None``/empty returns "".
+        cwd: Base directory for resolving relative paths (defaults to CWD).
+
+    Returns:
+        Combined instruction text, blank-line separated (possibly empty).
+    """
+    if not entries:
+        return ""
+
+    base = Path(cwd) if cwd else Path.cwd()
+
+    seen: Set = set()
+    chunks: List[str] = []
+
+    def _add_file(path: Path) -> None:
+        if not path.is_file():
+            return
+        try:
+            stat = path.stat()
+            key = (stat.st_dev, stat.st_ino)
+        except OSError:
+            key = path.resolve()
+        if key in seen:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Skipping instruction source %s: %s", path, exc)
+            return
+        seen.add(key)
+        chunks.append(text)
+
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        entry = entry.strip()
+
+        if _is_remote_source(entry):
+            if entry in seen:
+                continue
+            text = _fetch_remote_source(entry)
+            if text is not None:
+                seen.add(entry)
+                chunks.append(text)
+            continue
+
+        expanded = os.path.expanduser(os.path.expandvars(entry))
+        candidate = Path(expanded)
+        if not candidate.is_absolute():
+            candidate = base / candidate
+
+        # Expand globs (including brace-free ``*``/``?``/``[]`` patterns). When
+        # the entry contains no glob metacharacter this yields the single path.
+        pattern = str(candidate)
+        if any(ch in pattern for ch in "*?["):
+            for match in sorted(_glob.glob(pattern, recursive=True)):
+                _add_file(Path(match))
+        else:
+            if candidate.is_file():
+                _add_file(candidate)
+            else:
+                logger.warning("Instruction source not found: %s", entry)
 
     return "\n\n".join(chunks)
 
