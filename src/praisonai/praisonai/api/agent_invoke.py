@@ -94,7 +94,9 @@ async def verify_token(
     if not token:
         token = request.query_params.get("token")
     
-    if token != CALL_SERVER_TOKEN:
+    # Constant-time comparison to avoid a token-recovery timing side channel.
+    import hmac
+    if not token or not hmac.compare_digest(token, CALL_SERVER_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Request/Response Models

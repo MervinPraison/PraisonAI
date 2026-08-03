@@ -77,7 +77,14 @@ def is_protected(path: str, extra_protected: Optional[Sequence[str]] = None) -> 
         >>> is_protected("src/myapp/main.py")
         False
     """
-    normalized = path.replace("\\", "/")
+    # Resolve symlinks so a same-directory symlink to a protected file (e.g.
+    # ``harmless.txt -> .env``) is checked by its real target, not its
+    # innocuous-looking name. ``realpath`` also normalises ``..``/``.``.
+    try:
+        resolved = os.path.realpath(path)
+    except OSError:
+        resolved = path
+    normalized = resolved.replace("\\", "/")
     basename = os.path.basename(normalized)
 
     # Exact basename match (fast path)
@@ -115,7 +122,13 @@ def get_protection_reason(path: str) -> Optional[str]:
         >>> get_protection_reason(".env")
         'Environment file containing secrets'
     """
-    normalized = path.replace("\\", "/")
+    # Mirror ``is_protected``: resolve symlinks so the reason reflects the real
+    # target rather than an innocuous-looking symlink name.
+    try:
+        resolved = os.path.realpath(path)
+    except OSError:
+        resolved = path
+    normalized = resolved.replace("\\", "/")
     basename = os.path.basename(normalized)
 
     if basename.lower() in {p.lower() for p in PROTECTED_PATHS}:
