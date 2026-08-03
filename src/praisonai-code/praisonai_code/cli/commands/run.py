@@ -1259,6 +1259,11 @@ def run_main(
     # its cwd redirected into the isolated worktree for the duration of the run.
     with _worktree_isolation(worktree, target, keep=keep):
         if is_file:
+            # Resolve permission rules (CLI flags + project config) so YAML
+            # workflows are permission-gated on the same declarative rules as
+            # single-agent `run`, instead of bypassing the approval gate.
+            file_permissions = _parse_permissions(allow, deny, permissions, permission_default)
+            _, _, file_permissions, _ = _apply_config_defaults(None, None, file_permissions)
             # Run from file
             _run_from_file(
                 run_target,
@@ -1276,6 +1281,10 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                permissions_config=file_permissions,
             )
         else:
             # Run as prompt
@@ -1329,6 +1338,10 @@ def _run_from_file(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
+    permissions_config: Optional[dict] = None,
 ):
     """Run agents from a YAML file."""
     output = get_output_controller()
@@ -1387,9 +1400,21 @@ def _run_from_file(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-        
-        # Create args-like object for session configuration
-        if session_id or auto_save_name:
+
+        # Derive an approval backend so YAML runs are permission-gated like the
+        # single-agent `run` path. An explicit --approval wins; otherwise a
+        # console backend is selected when --allow/--deny/--permissions rules are
+        # present so deny/ask patterns are enforced instead of silently bypassed.
+        effective_approval = approval
+        if effective_approval is None and permissions_config:
+            effective_approval = "console"
+
+        # Create args-like object for session + permission configuration. The
+        # legacy YAML path (PraisonAI.run -> _extract_cli_config) already reads
+        # approval / approve_all_tools / approval_timeout and session ids from
+        # ``args``, so threading them here gives YAML the same permission gating
+        # and continuity as `run "<prompt>"` — no new engine wiring needed.
+        if session_id or auto_save_name or effective_approval or approve_all_tools:
             class Args:
                 pass
             
@@ -1397,7 +1422,13 @@ def _run_from_file(
             args.auto_save = auto_save_name
             args.resume_session = session_id
             args.cli_project_sessions = bool(session_id or auto_save_name)
-            
+            if effective_approval:
+                args.approval = effective_approval
+            if approve_all_tools:
+                args.approve_all_tools = approve_all_tools
+            if approval_timeout is not None:
+                args.approval_timeout = approval_timeout
+
             praison.args = args
         
         # Run
