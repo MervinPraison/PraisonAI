@@ -16,6 +16,7 @@ Storage Structure:
     └── summaries.json        # LLM-generated summaries
 """
 
+import os
 import json
 import time
 import sys
@@ -235,19 +236,40 @@ class FileMemory:
 
     
     def _write_json(self, filepath: Path, data: Any) -> bool:
-        """Write JSON file with file locking (Unix only)."""
+        """Write JSON file atomically, with file locking (Unix only).
+
+        Writes to a uniquely-named temp file in the same directory and atomically
+        renames it into place via os.replace so a crash mid-write cannot leave the
+        memory store truncated (open(path, 'w') truncates before any lock can be
+        acquired). tempfile.mkstemp guarantees a distinct temp name per write, so
+        concurrent writers in the same process (multiple threads or FileMemory
+        instances) cannot clobber each other's temp file (matches the atomic-write
+        pattern used across the SDK, e.g. storage/base.py and session/store.py).
+        """
+        import tempfile
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(filepath.parent), prefix=f".{filepath.name}.", suffix=".tmp"
+        )
+        tmp_path = Path(tmp_name)
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
                 if _HAS_FCNTL:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     json.dump(data, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
                 finally:
                     if _HAS_FCNTL:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            os.replace(tmp_path, filepath)
             return True
-        except IOError as e:
+        except (IOError, OSError) as e:
             self._log(f"Error writing {filepath}: {e}", logging.ERROR)
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
             return False
 
     

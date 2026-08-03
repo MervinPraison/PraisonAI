@@ -1348,6 +1348,20 @@ class AgentTeam(SpawnAnnounceProtocol):
             task.status = "failed"  # Set failed status to match sync behavior
             logger.info(f"Task {task_id} failed after {task_max} retries.")
 
+    @staticmethod
+    async def _gather_with_isolation(coros):
+        """Gather async tasks with exception isolation.
+
+        Uses return_exceptions=True so a single failure does not orphan its
+        siblings (leaving them running in the background to mutate shared state).
+        The first exception is re-raised after all siblings have settled.
+        """
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
+
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
         process = Process(
@@ -1366,7 +1380,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 else:
                     # If we encounter a sync task, we must wait for the previous async tasks to finish.
                     if tasks_to_run:
-                        await asyncio.gather(*tasks_to_run)
+                        await self._gather_with_isolation(tasks_to_run)
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
@@ -1376,7 +1390,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     await loop.run_in_executor(None, copy_context_to_callable(lambda tid=task_id: self.run_task(tid)))
 
             if tasks_to_run:
-                await asyncio.gather(*tasks_to_run)
+                await self._gather_with_isolation(tasks_to_run)
                 
         elif self.process == "sequential":
             async_tasks_to_run = []
@@ -1385,7 +1399,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 """Execute all pending async tasks"""
                 nonlocal async_tasks_to_run
                 if async_tasks_to_run:
-                    await asyncio.gather(*async_tasks_to_run)
+                    await self._gather_with_isolation(async_tasks_to_run)
                     async_tasks_to_run = []
             
             async for task_id in process.asequential():
