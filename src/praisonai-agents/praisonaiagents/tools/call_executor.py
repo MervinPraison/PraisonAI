@@ -14,10 +14,10 @@ Design principles:
 import asyncio
 import concurrent.futures
 import contextvars
-import functools
 import inspect
 import logging
 import uuid
+import weakref
 from typing import Any, Callable, Dict, List, Optional, Protocol
 from dataclasses import dataclass, field
 from ..trace.context_events import copy_context_to_callable
@@ -25,13 +25,9 @@ from ..trace.context_events import copy_context_to_callable
 logger = logging.getLogger(__name__)
 
 
-@functools.lru_cache(maxsize=None)
-def _accepts_on_progress(execute_tool_fn: Callable) -> bool:
-    """Return whether ``execute_tool_fn`` advertises an ``on_progress`` kwarg.
+def _probe_on_progress(execute_tool_fn: Callable) -> bool:
+    """Introspect whether ``execute_tool_fn`` advertises an ``on_progress`` kwarg.
 
-    Memoised because ``execute_tool_fn`` is invariant per agent (its bound
-    method compares/hashes equal across calls), so ``inspect.signature`` only
-    needs to run once per callable rather than once per tool call in the loop.
     The ``(TypeError, ValueError)`` fallback is preserved for built-in/C
     callables whose signature can't be introspected.
     """
@@ -39,6 +35,36 @@ def _accepts_on_progress(execute_tool_fn: Callable) -> bool:
         return "on_progress" in inspect.signature(execute_tool_fn).parameters
     except (TypeError, ValueError):
         return False
+
+
+_ON_PROGRESS_CACHE: "weakref.WeakKeyDictionary[Callable, bool]" = weakref.WeakKeyDictionary()
+
+
+def _accepts_on_progress(execute_tool_fn: Callable) -> bool:
+    """Return whether ``execute_tool_fn`` advertises an ``on_progress`` kwarg.
+
+    Memoised because ``execute_tool_fn`` is invariant per agent, so
+    ``inspect.signature`` only needs to run once per callable rather than once
+    per tool call in the loop.
+
+    The cache holds weak references keyed by the callable, so it never keeps a
+    bound method's owning agent alive: once the agent is discarded the entry is
+    dropped. Callables that can't be weak-referenced or hashed (e.g. some
+    built-in/C callables or objects with ``__hash__ = None``) skip the cache and
+    are probed directly, preserving correct dispatch for valid 3-arg tools.
+    """
+    try:
+        cached = _ON_PROGRESS_CACHE.get(execute_tool_fn)
+    except TypeError:
+        return _probe_on_progress(execute_tool_fn)
+    if cached is not None:
+        return cached
+    result = _probe_on_progress(execute_tool_fn)
+    try:
+        _ON_PROGRESS_CACHE[execute_tool_fn] = result
+    except TypeError:
+        pass
+    return result
 
 
 class ToolTimeoutError(Exception):
