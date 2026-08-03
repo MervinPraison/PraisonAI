@@ -76,6 +76,14 @@ def build_permission_target(
     * file tools  -> ``<edit|write|delete|…>:<path>``
     * everything else -> ``tool:<tool_name>``
 
+    The command identity is preserved verbatim so command-specific rules
+    (e.g. ``deny: bash:rm *``) still match. The out-of-workspace boundary is
+    enforced downstream by :class:`~praisonaiagents.permissions.PermissionManager`
+    (its ``external_dir:`` gate), which decomposes the ``bash:<command>`` target
+    and gates any escaping path — so a broad ``bash:*`` / "allow shell" /
+    session grant cannot silently authorise out-of-workspace access while a
+    command-specific ``deny`` still fires.
+
     Falls back to ``tool:<tool_name>`` whenever the expected argument is missing
     so a target is always produced.
 
