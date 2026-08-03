@@ -96,11 +96,11 @@ def get_approval_callback() -> Optional[Callable]:
     """Get the current approval callback function (legacy API)."""
     return approval_callback
 
-def mark_approved(tool_name: str) -> None:
-    get_approval_registry().mark_approved(tool_name)
+def mark_approved(tool_name: str, arguments: Optional[Dict] = None) -> None:
+    get_approval_registry().mark_approved(tool_name, arguments)
 
-def is_already_approved(tool_name: str) -> bool:
-    return get_approval_registry().is_already_approved(tool_name)
+def is_already_approved(tool_name: str, arguments: Optional[Dict] = None) -> bool:
+    return get_approval_registry().is_already_approved(tool_name, arguments)
 
 def is_yaml_approved(tool_name: str) -> bool:
     return get_approval_registry().is_yaml_approved(tool_name)
@@ -177,13 +177,13 @@ def require_approval(risk_level: RiskLevel = "high"):
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if is_already_approved(tool_name):
+            if is_already_approved(tool_name, kwargs):
                 return func(*args, **kwargs)
             if is_yaml_approved(tool_name):
-                mark_approved(tool_name)
+                mark_approved(tool_name, kwargs)
                 return func(*args, **kwargs)
             if is_env_auto_approve():
-                mark_approved(tool_name)
+                mark_approved(tool_name, kwargs)
                 return func(*args, **kwargs)
             try:
                 from ..utils.async_bridge import is_async_context, run_coroutine_from_any_context
@@ -203,25 +203,25 @@ def require_approval(risk_level: RiskLevel = "high"):
                 raise PermissionError(f"Approval request failed for {tool_name}: {e}") from e
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
-            mark_approved(tool_name)
             kwargs.update(decision.modified_args)
+            mark_approved(tool_name, kwargs)
             return func(*args, **kwargs)
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            if is_already_approved(tool_name):
+            if is_already_approved(tool_name, kwargs):
                 return await func(*args, **kwargs)
             if is_yaml_approved(tool_name):
-                mark_approved(tool_name)
+                mark_approved(tool_name, kwargs)
                 return await func(*args, **kwargs)
             if is_env_auto_approve():
-                mark_approved(tool_name)
+                mark_approved(tool_name, kwargs)
                 return await func(*args, **kwargs)
             decision = await request_approval(tool_name, kwargs)
             if not decision.approved:
                 raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
-            mark_approved(tool_name)
             kwargs.update(decision.modified_args)
+            mark_approved(tool_name, kwargs)
             return await func(*args, **kwargs)
 
         if asyncio.iscoroutinefunction(func):

@@ -1768,12 +1768,12 @@ class ToolExecutionMixin:
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
         
-        from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name)
-        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
+
+        from ..approval import get_approval_registry
+        get_approval_registry().mark_approved(function_name, arguments)
         return None, arguments
 
     async def _check_tool_approval_async(self, function_name, arguments):
@@ -1799,12 +1799,12 @@ class ToolExecutionMixin:
             logging.warning(error_msg)
             return {"error": error_msg, "approval_denied": True}
         
-        from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name)
-        
         if decision.modified_args:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
+
+        from ..approval import get_approval_registry
+        get_approval_registry().mark_approved(function_name, arguments)
         return None, arguments
 
     def _execute_tool_with_circuit_breaker(self, function_name, arguments):
