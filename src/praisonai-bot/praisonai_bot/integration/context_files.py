@@ -21,6 +21,11 @@ _REMOTE_MAX_BYTES = 256 * 1024
 # or unreachable URL is skipped with a warning, never blocking the run.
 _REMOTE_TIMEOUT = 5.0
 
+# Opt-in to allow fetching instruction URLs that resolve to private, loopback,
+# or link-local addresses. Off by default so an auto-loaded project config from
+# an untrusted checkout cannot make the host contact internal services (SSRF).
+_ALLOW_LOCAL_URL_ENV = "PRAISONAI_INSTRUCTIONS_ALLOW_LOCAL_URLS"
+
 # Tool-argument keys that carry a file path across the various file tools
 # (praisonaiagents ``read_file`` uses ``filepath``; praisonai-code tools use
 # ``path``/``file_path``; ACP edit tools use ``file_path``). The first present,
@@ -155,18 +160,98 @@ def _is_remote_source(entry: str) -> bool:
     return entry.startswith(("http://", "https://"))
 
 
+def _allow_local_urls() -> bool:
+    """Whether fetching URLs that resolve to internal addresses is opted in."""
+    return os.environ.get(_ALLOW_LOCAL_URL_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _is_blocked_host(host: str) -> bool:
+    """Whether ``host`` resolves to a private/loopback/link-local/reserved IP.
+
+    SSRF guard: an instruction URL can arrive from an auto-loaded project config
+    in an untrusted checkout, so a URL that resolves to an internal service must
+    not be fetched. Any resolved address in a non-global range blocks the fetch
+    (fail-closed on resolution errors). Bypassable via ``_ALLOW_LOCAL_URL_ENV``
+    for trusted internal setups.
+    """
+    import ipaddress
+    import socket
+
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        # Unresolvable — let urlopen surface the failure/warning downstream.
+        return False
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr.split("%", 1)[0])
+        except ValueError:
+            return True
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def _url_is_fetchable(url: str) -> bool:
+    """Validate scheme and destination of a remote instruction URL (SSRF guard)."""
+    from urllib.parse import urlparse
+
+    if _allow_local_urls():
+        return True
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if _is_blocked_host(parsed.hostname or ""):
+        logger.warning(
+            "Skipping remote instruction source %s: resolves to a "
+            "private/loopback/link-local address (set %s=1 to allow)",
+            url,
+            _ALLOW_LOCAL_URL_ENV,
+        )
+        return False
+    return True
+
+
 def _fetch_remote_source(url: str) -> Optional[str]:
     """Fetch a remote instruction source, best-effort and size-bounded.
 
     Uses the stdlib ``urllib`` (lazily imported) so no heavy dependency is
-    added. A slow, unreachable, or oversized response is handled gracefully:
+    added. Destinations are validated against an SSRF guard (see
+    :func:`_url_is_fetchable`) that rejects private/loopback/link-local hosts,
+    and redirects are re-validated so a public URL cannot bounce to an internal
+    one. A slow, unreachable, or oversized response is handled gracefully:
     failures return ``None`` (with a warning) so the run continues, and bodies
     larger than ``_REMOTE_MAX_BYTES`` are truncated with a marker.
     """
+    if not _url_is_fetchable(url):
+        return None
     try:
         import urllib.request
 
-        with urllib.request.urlopen(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
+        class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                if not _url_is_fetchable(newurl):
+                    return None
+                return super().redirect_request(
+                    req, fp, code, msg, headers, newurl
+                )
+
+        opener = urllib.request.build_opener(_GuardedRedirectHandler())
+        with opener.open(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
             raw = resp.read(_REMOTE_MAX_BYTES + 1)
     except Exception as exc:  # noqa: BLE001 - best-effort; never block the run
         logger.warning("Skipping remote instruction source %s: %s", url, exc)

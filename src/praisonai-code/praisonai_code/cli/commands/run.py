@@ -1137,6 +1137,7 @@ def run_main(
             thinking_budget=thinking_budget,
             subagents=subagents,
             no_rules=no_rules,
+            instructions=merged_instructions,
         )
         return
     
@@ -1184,6 +1185,7 @@ def run_main(
             no_save=no_save,
             thinking_budget=thinking_budget,
             allow_local_tools=allow_local_tools,
+            instructions=merged_instructions,
         )
         return
     
@@ -1587,7 +1589,7 @@ def _run_prompt(
             and not isolated
             and not any([
                 mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
-                memory, permissions_config, fork,
+                memory, permissions_config, fork, instructions,
             ])
         )
         # Keep the two identities separate:
@@ -2086,6 +2088,7 @@ def _run_custom_agent(
     thinking_budget: Optional[int] = None,
     subagents: Optional[str] = None,
     no_rules: bool = False,
+    instructions: Optional[List[str]] = None,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
