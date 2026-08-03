@@ -751,6 +751,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             
                             # Finalize with text content (after hook processing and media extraction)
                             await streamer.finalize(text_content if text_content else send_result["content"])
+
+                            # Issue #3623: the streamed reply is delivered as text
+                            # by the streamer, so the outbound voice-reply policy
+                            # must be applied here too (the non-streaming path does
+                            # this inside _send_response_with_media). Otherwise
+                            # ``voice.mode: always``/``match_inbound`` would be a
+                            # no-op whenever streaming is enabled. Best-effort.
+                            await self._maybe_send_voice_reply(
+                                update.message.chat_id,
+                                text_content if text_content else send_result["content"],
+                                inbound_was_voice=bool(
+                                    update.message.voice or update.message.audio
+                                ),
+                            )
                             
                             # Send media files separately (same as non-streaming path)
                             if media_urls:
@@ -844,6 +858,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             update.message.chat_id,
                             send_result["content"],
                             reply_to=update.message.message_id,
+                            inbound_was_voice=bool(
+                                update.message.voice or update.message.audio
+                            ),
                         )
                         # If the agent attached a portable presentation
                         # (buttons/menus), render it natively as an inline
@@ -1650,6 +1667,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         chat_id: int,
         response: str,
         reply_to: Optional[int] = None,
+        inbound_was_voice: bool = False,
     ) -> None:
         """Send response, extracting and sending any MEDIA: files."""
         # Parse response for media
@@ -1661,6 +1679,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Send text first if present
         if text:
             await self._send_long_message(chat_id, text, reply_to=reply_to)
+
+        # Issue #3623: outbound voice reply. When the operator has enabled a
+        # ``voice`` policy, synthesise the agent's plain text and deliver it as
+        # a native Telegram voice note — the symmetric counterpart to inbound
+        # STT. The agent authors plain text; voice is a transport concern here.
+        # Skipped silently (text already sent) when disabled or synthesis fails.
+        await self._maybe_send_voice_reply(
+            chat_id, text, inbound_was_voice=inbound_was_voice
+        )
         
         # Send audio files
         for media_path in media_urls:
@@ -1699,6 +1726,60 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             )
                 except Exception as e:
                     logger.error(f"Failed to send audio: {e}")
+
+    async def _maybe_send_voice_reply(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        inbound_was_voice: bool = False,
+    ) -> None:
+        """Synthesise and send ``text`` as a voice note per the ``voice`` policy.
+
+        The outbound mirror of :meth:`_transcribe_audio`: resolves the operator's
+        ``voice`` config, decides whether to speak (``always`` /
+        ``match_inbound``), synthesises via the shared TTS helper, and delivers a
+        native Telegram voice note. Best-effort — any failure is logged and the
+        already-sent text stands, so voice never breaks a reply.
+        """
+        if not text or not text.strip():
+            return
+        from ._tts import (
+            resolve_tts_config,
+            should_voice_reply,
+            synthesize_voice_reply,
+        )
+
+        cfg = resolve_tts_config(self.config)
+        if not should_voice_reply(cfg, inbound_was_voice=inbound_was_voice):
+            return
+
+        audio_path: Optional[str] = None
+        try:
+            audio_path = await asyncio.to_thread(synthesize_voice_reply, text, cfg)
+            if not audio_path or not os.path.exists(audio_path):
+                return
+            with open(audio_path, "rb") as f:
+                async def send_voice_reply():
+                    f.seek(0)
+                    return await self._application.bot.send_voice(
+                        chat_id=chat_id, voice=f
+                    )
+
+                await deliver_with_retry(
+                    send_voice_reply,
+                    policy=self._outbound_backoff,
+                    platform="telegram",
+                    parked_store=None,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send voice reply: {e}")
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass
 
     
     async def edit_message(

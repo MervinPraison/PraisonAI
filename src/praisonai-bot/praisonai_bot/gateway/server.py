@@ -6033,6 +6033,16 @@ class WebSocketGateway:
                 except Exception:  # pragma: no cover — defensive
                     pass
 
+            # Carry the outbound voice-reply policy (Issue #3623) through the
+            # same metadata passthrough — the symmetric counterpart to ``stt``.
+            # Off by default; ``voice.mode`` selects always vs. match_inbound.
+            _raw_voice = ch_cfg.get("voice", ch_cfg.get("tts"))
+            if _raw_voice is not None:
+                try:
+                    config.metadata["voice"] = _raw_voice
+                except Exception:  # pragma: no cover — defensive
+                    pass
+
             # Warn if no allowlist is configured. Issue #2855: the message must
             # reflect the effective ``unknown_user_policy`` — an empty allowlist
             # with the default ``deny`` policy SILENTLY DROPS unknown DMs, so the
@@ -6766,10 +6776,18 @@ class WebSocketGateway:
                         agent, user_id, message_text, tool_policy=tool_policy
                     )
                 if hasattr(bot, '_send_response_with_media'):
+                    # Issue #3623: this handler serves VOICE|AUDIO as well as
+                    # TEXT (handle_voice delegates here), so thread whether the
+                    # inbound message was a voice/audio memo. Without this the
+                    # ``voice.mode: match_inbound`` policy could never fire for
+                    # gateway-owned Telegram channels.
                     await bot._send_response_with_media(
                         update.message.chat_id,
                         response,
                         reply_to=update.message.message_id,
+                        inbound_was_voice=bool(
+                            update.message.voice or update.message.audio
+                        ),
                     )
                 else:
                     await update.message.reply_text(str(response))
@@ -7257,6 +7275,15 @@ class WebSocketGateway:
         if _raw_stt is not None:
             try:
                 config.metadata["stt"] = _raw_stt
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        # Issue #3623: carry the outbound voice-reply policy through metadata
+        # too, so a hot-reloaded channel still speaks its replies.
+        _raw_voice = ch_cfg.get("voice", ch_cfg.get("tts"))
+        if _raw_voice is not None:
+            try:
+                config.metadata["voice"] = _raw_voice
             except Exception:  # pragma: no cover — defensive
                 pass
 

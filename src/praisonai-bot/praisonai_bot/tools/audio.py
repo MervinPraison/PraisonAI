@@ -43,6 +43,7 @@ def tts_tool(
     model: Optional[str] = None,
     output_dir: Optional[str] = None,
     output_format: str = "mp3",
+    speed: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Convert text to speech and return the audio file path.
@@ -57,6 +58,7 @@ def tts_tool(
         model: TTS model (default: "openai/tts-1")
         output_dir: Directory to save audio (default: temp directory)
         output_format: Audio format (mp3, opus, aac, flac, wav)
+        speed: Speaking-rate multiplier (0.25 to 4.0); provider default when None
         
     Returns:
         Dict with:
@@ -90,6 +92,8 @@ def tts_tool(
             kwargs["voice"] = voice
         if model:
             kwargs["model"] = model
+        if speed is not None:
+            kwargs["speed"] = speed
         
         # Generate speech
         agent.speech(text, output=output_path, **kwargs)
