@@ -314,3 +314,60 @@ class TestRegistryScopeBridge:
         assert not registry._is_session_scoped(
             "worker", "execute_command", {"command": "rm -rf /"}
         )
+
+
+# ── @require_approval positional-argument scoping ───────────────────────────
+
+
+class TestRequireApprovalPositionalScoping:
+    """A single approval must not unlock a decorated tool for *other* argument
+    values — including when the tool is invoked with positional args.
+    """
+
+    def test_positional_call_is_argument_scoped(self, monkeypatch):
+        # One env auto-approved positional call must NOT unlock a different
+        # positional value on the same tool.
+        from praisonaiagents.approval import (
+            require_approval,
+            is_already_approved,
+            _bind_call_args,
+            clear_approval_context,
+        )
+
+        clear_approval_context()
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
+        @require_approval(risk_level="high")
+        def read_secret(path):
+            return f"read {path}"
+
+        read_secret("/tmp/notes.txt")
+
+        assert is_already_approved(
+            "read_secret", _bind_call_args(read_secret, ("/tmp/notes.txt",), {})
+        )
+        # A different positional value must still require approval.
+        assert not is_already_approved(
+            "read_secret", _bind_call_args(read_secret, ("/etc/cron.d/evil",), {})
+        )
+
+    def test_bind_call_args_matches_positional_and_keyword(self):
+        # Calling positionally vs by keyword for the same value yields the same
+        # approval key, so an approval granted one way is honoured the other.
+        from praisonaiagents.approval import _bind_call_args
+
+        def tool(path, mode="r"):
+            return path
+
+        assert _bind_call_args(tool, ("/a",), {}) == _bind_call_args(
+            tool, (), {"path": "/a"}
+        )
+
+    def test_bind_call_args_falls_back_for_builtin(self):
+        # C-implemented callables have no bindable signature; distinct positional
+        # calls must still yield distinct keys (via ``__args__``), never collapse.
+        from praisonaiagents.approval import _bind_call_args
+
+        a = _bind_call_args(len, ("abc",), {})
+        b = _bind_call_args(len, ("abcd",), {})
+        assert a != b
