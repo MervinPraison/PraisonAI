@@ -70,13 +70,28 @@ def test_kill_pid_unix():
 
 
 def test_kill_pid_windows():
-    """Windows kill uses taskkill /F."""
+    """Windows kill uses taskkill /F and reports success on exit code 0."""
     from praisonai_deploy.main import Deploy
 
+    mock_result = Mock()
+    mock_result.returncode = 0
+
     with patch('sys.platform', 'win32'), \
-            patch('subprocess.run') as mock_run:
+            patch('subprocess.run', return_value=mock_result) as mock_run:
         assert Deploy._kill_pid(12345) is True
         assert mock_run.call_args[0][0][0] == 'taskkill'
+
+
+def test_kill_pid_windows_nonzero_returns_false():
+    """Windows kill reports failure when taskkill exits nonzero."""
+    from praisonai_deploy.main import Deploy
+
+    mock_result = Mock()
+    mock_result.returncode = 128
+
+    with patch('sys.platform', 'win32'), \
+            patch('subprocess.run', return_value=mock_result):
+        assert Deploy._kill_pid(12345) is False
 
 
 def test_destroy_api_windows_stops_server():
@@ -90,6 +105,19 @@ def test_destroy_api_windows_stops_server():
     assert result.success is True
     assert result.resources_deleted == ["process:4321"]
     mock_kill.assert_called_once_with(4321)
+
+
+def test_destroy_api_reports_failure_when_kill_fails():
+    """Destroy reports failure and lists failed PIDs when a kill fails."""
+    deploy = _make_deploy(8015)
+
+    with patch.object(deploy, '_find_pids_on_port', return_value=[4321, 5555]), \
+            patch.object(deploy, '_kill_pid', side_effect=lambda pid: pid == 4321):
+        result = deploy._destroy_api()
+
+    assert result.success is False
+    assert result.resources_deleted == ["process:4321"]
+    assert "5555" in (result.error or "")
 
 
 def test_destroy_api_no_server_running():

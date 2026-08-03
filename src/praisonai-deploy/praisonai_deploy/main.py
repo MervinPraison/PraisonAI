@@ -339,16 +339,16 @@ class Deploy:
 
         try:
             if sys.platform == "win32":
-                subprocess.run(
+                result = subprocess.run(
                     ['taskkill', '/PID', str(pid), '/F'],
                     capture_output=True,
                     text=True,
                     timeout=10
                 )
-                return True
+                return result.returncode == 0
             os.kill(pid, signal.SIGTERM)
             return True
-        except (ProcessLookupError, FileNotFoundError, subprocess.SubprocessError):
+        except (ProcessLookupError, FileNotFoundError, OSError, subprocess.SubprocessError):
             return False
 
     def _destroy_api(self) -> DestroyResult:
@@ -366,9 +366,20 @@ class Deploy:
                 )
 
             deleted_resources = []
+            failed_pids = []
             for pid in pids:
                 if self._kill_pid(pid):
                     deleted_resources.append(f"process:{pid}")
+                else:
+                    failed_pids.append(pid)
+
+            if failed_pids:
+                return DestroyResult(
+                    success=False,
+                    message=f"Failed to stop API server on port {port}",
+                    resources_deleted=deleted_resources,
+                    error=f"Could not stop processes: {', '.join(map(str, failed_pids))}"
+                )
 
             return DestroyResult(
                 success=True,
