@@ -281,45 +281,111 @@ class Deploy:
                 error="Invalid deployment type"
             )
     
-    def _destroy_api(self) -> DestroyResult:
-        """Stop local API server."""
+    @staticmethod
+    def _find_pids_on_port(port: int) -> list:
+        """Find PIDs listening on a port (cross-platform).
+
+        Uses ``netstat -ano`` on Windows and ``lsof`` on Unix-like systems.
+        """
+        import subprocess
+        import sys
+
+        pids = []
+        try:
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ['netstat', '-ano'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    needle = f":{port}"
+                    for line in result.stdout.splitlines():
+                        parts = line.split()
+                        if len(parts) < 5 or "LISTENING" not in line:
+                            continue
+                        local_addr = parts[1]
+                        if local_addr.endswith(needle):
+                            try:
+                                pids.append(int(parts[-1]))
+                            except ValueError:
+                                pass
+            else:
+                result = subprocess.run(
+                    ['lsof', '-ti', f':{port}'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    for pid in result.stdout.strip().split('\n'):
+                        try:
+                            pids.append(int(pid))
+                        except ValueError:
+                            pass
+        except (FileNotFoundError, subprocess.SubprocessError):
+            pass
+
+        return list(dict.fromkeys(pids))
+
+    @staticmethod
+    def _kill_pid(pid: int) -> bool:
+        """Terminate a process by PID (cross-platform)."""
         import subprocess
         import signal
+        import sys
         import os
-        
-        port = self.config.api.port if self.config.api else 8005
-        
+
         try:
-            # Find process using the port
-            result = subprocess.run(
-                ['lsof', '-ti', f':{port}'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split('\n')
-                deleted_resources = []
-                
-                for pid in pids:
-                    try:
-                        os.kill(int(pid), signal.SIGTERM)
-                        deleted_resources.append(f"process:{pid}")
-                    except (ProcessLookupError, ValueError):
-                        pass
-                
-                return DestroyResult(
-                    success=True,
-                    message=f"Stopped API server on port {port}",
-                    resources_deleted=deleted_resources
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ['taskkill', '/PID', str(pid), '/F'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
                 )
-            else:
+                return result.returncode == 0
+            os.kill(pid, signal.SIGTERM)
+            return True
+        except (ProcessLookupError, FileNotFoundError, OSError, subprocess.SubprocessError):
+            return False
+
+    def _destroy_api(self) -> DestroyResult:
+        """Stop local API server (cross-platform)."""
+        port = self.config.api.port if self.config.api else 8005
+
+        try:
+            pids = self._find_pids_on_port(port)
+
+            if not pids:
                 return DestroyResult(
                     success=True,
                     message=f"No API server running on port {port}",
                     resources_deleted=[]
                 )
+
+            deleted_resources = []
+            failed_pids = []
+            for pid in pids:
+                if self._kill_pid(pid):
+                    deleted_resources.append(f"process:{pid}")
+                else:
+                    failed_pids.append(pid)
+
+            if failed_pids:
+                return DestroyResult(
+                    success=False,
+                    message=f"Failed to stop API server on port {port}",
+                    resources_deleted=deleted_resources,
+                    error=f"Could not stop processes: {', '.join(map(str, failed_pids))}"
+                )
+
+            return DestroyResult(
+                success=True,
+                message=f"Stopped API server on port {port}",
+                resources_deleted=deleted_resources
+            )
         except Exception as e:
             return DestroyResult(
                 success=False,
