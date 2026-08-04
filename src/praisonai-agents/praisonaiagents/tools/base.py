@@ -47,6 +47,11 @@ class ToolResult:
 
     Plain text/JSON tool returns behave exactly as before; multimodal is purely
     additive and opt-in by the tool author.
+
+    For context economy, a tool may also set ``model_output`` to a compact,
+    model-facing summary/diff. When present the executor feeds ``model_output``
+    to the LLM instead of the full ``output`` (fewer tokens), while the full
+    ``output``/``content`` remain available to display, hooks, and tracing.
     """
 
     def __init__(
@@ -55,13 +60,18 @@ class ToolResult:
         success: bool = True,
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        content: Optional[List[Dict[str, Any]]] = None
+        content: Optional[List[Dict[str, Any]]] = None,
+        model_output: Any = None
     ):
         self.output = output
         self.success = success
         self.error = error
         self.metadata = metadata or {}
         self.content = content
+        # Optional compact, model-facing view. When set, the executor feeds this
+        # to the LLM instead of the full ``output`` for context economy, while
+        # ``output``/``content`` stay available to display, hooks and tracing.
+        self.model_output = model_output
 
     @property
     def is_multimodal(self) -> bool:
@@ -94,7 +104,27 @@ class ToolResult:
         }
         if self.content:
             data["content"] = self.content
+        if self.model_output is not None:
+            data["model_output"] = self.model_output
         return data
+
+
+def resolve_model_output(result: Any) -> Optional[Any]:
+    """Return a tool result's compact, model-facing view, or ``None``.
+
+    Resolution order (first hit wins):
+
+    1. ``result.model_output`` (e.g. ``ToolResult(model_output=...)``), if set.
+    2. A ``to_model_output()`` hook the producing object carries (BaseTool
+       subclasses may attach one) invoked as ``to_model_output(result)``.
+
+    ``None`` means "no compact view declared"; callers then fall back to today's
+    full stringification, so behaviour is unchanged for tools that opt out.
+    """
+    model_output = getattr(result, "model_output", None)
+    if model_output is not None:
+        return model_output
+    return None
 
 
 def multimodal_content(*parts: Dict[str, Any], output: Any = None,
@@ -237,11 +267,29 @@ class BaseTool(ABC):
         """Allow tool to be called directly like a function."""
         return self.run(**kwargs)
     
+    def to_model_output(self, result: Any) -> Optional[Any]:
+        """Optional hook returning a compact, model-facing view of ``result``.
+
+        Override to feed the LLM a terse summary/diff instead of the full tool
+        output for context economy; the full ``result`` still reaches display,
+        hooks, and tracing. Return ``None`` (the default) to keep today's
+        behaviour where the model sees the full output.
+        """
+        return None
+
     def safe_run(self, **kwargs) -> ToolResult:
         """Execute tool with error handling, returning ToolResult."""
         try:
             output = self.run(**kwargs)
-            return ToolResult(output=output, success=True)
+            if isinstance(output, ToolResult):
+                if output.model_output is None:
+                    output.model_output = self.to_model_output(output.output)
+                return output
+            return ToolResult(
+                output=output,
+                success=True,
+                model_output=self.to_model_output(output),
+            )
         except Exception as e:
             logging.error(f"Tool {self.name} failed: {e}")
             return ToolResult(

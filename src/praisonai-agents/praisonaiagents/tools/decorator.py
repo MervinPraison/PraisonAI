@@ -113,9 +113,12 @@ class FunctionTool(BaseTool):
         dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
         retry_policy: Optional[Any] = None,
         approval: Optional[Union[bool, str]] = None,
-        requires_approval: Union[bool, str] = _UNSET
+        requires_approval: Union[bool, str] = _UNSET,
+        to_model_output: Optional[Callable[[Any], Any]] = None
     ):
         self._func = func
+        # Optional compact model-facing view builder: result -> compact view.
+        self._to_model_output = to_model_output
         self.name = name or func.__name__
         self.description = description or func.__doc__ or f"Tool: {self.name}"
         self.version = version
@@ -188,6 +191,20 @@ class FunctionTool(BaseTool):
         kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(**kwargs)
     
+    def to_model_output(self, result: Any) -> Optional[Any]:
+        """Build the compact model-facing view via the ``to_model_output`` fn.
+
+        Returns ``None`` when no builder was supplied so the executor falls back
+        to the full output (unchanged behaviour).
+        """
+        if self._to_model_output is None:
+            return None
+        try:
+            return self._to_model_output(result)
+        except Exception as e:
+            logging.warning(f"to_model_output failed for tool '{self.name}': {e}")
+            return None
+
     def __call__(self, *args, **kwargs) -> Any:
         """Allow calling with positional args like the original function.
         
@@ -248,7 +265,8 @@ def tool(
     dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     retry_policy: Optional[Any] = None,
     approval: Optional[Union[bool, str]] = None,
-    requires_approval: Union[bool, str] = _UNSET
+    requires_approval: Union[bool, str] = _UNSET,
+    to_model_output: Optional[Callable[[Any], Any]] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -296,6 +314,11 @@ def tool(
         requires_approval: Deprecated alias for ``approval`` (kept for the form
             shipped in an earlier release). Emits a ``DeprecationWarning``;
             ``approval`` wins when both are set.
+        to_model_output: Optional callable ``result -> compact_view`` producing
+            the terse, model-facing view of the tool's return value. When set,
+            the executor feeds this compact view to the LLM (context economy)
+            while the full result stays available to display, hooks, and
+            downstream consumers. Defaults to ``None`` (model sees full output).
     
     Returns:
         FunctionTool instance that wraps the function
@@ -312,7 +335,8 @@ def tool(
             availability=availability,
             dynamic_schema_overrides=dynamic_schema_overrides,
             retry_policy=retry_policy,
-            approval=resolved_approval
+            approval=resolved_approval,
+            to_model_output=to_model_output
         )
 
         # Register approval requirement with the global registry so local,

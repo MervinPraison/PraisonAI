@@ -872,6 +872,18 @@ class ToolExecutionMixin:
             # model-visible image parts via format_tool_result_messages().
             _is_multimodal_result = _normalize_multimodal_result(result) is not None
 
+            # Context economy: if the tool declared a compact, model-facing view
+            # (ToolResult.model_output, or a to_model_output(result) hook on the
+            # @tool/BaseTool), resolve it now while the FULL result is still
+            # intact for tracing/hooks/display below. The compact view is only
+            # swapped in at the very end, right before the string returned to
+            # the model is built, so downstream consumers keep the full payload.
+            _model_facing_override = None
+            if not _is_multimodal_result:
+                _model_facing_override = self._resolve_model_facing_result(
+                    function_name, result
+                )
+
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             if not _is_multimodal_result:
@@ -1017,7 +1029,16 @@ class ToolExecutionMixin:
                     tool_error = self._last_normalized_result.error_message
                 # Clean up temporary attribute
                 delattr(self, '_last_normalized_result')
-            
+
+            # Context economy: tracing (above) and the AFTER_TOOL hook (below)
+            # both receive the FULL result via ``_full_tool_output``; after this
+            # point ``result`` becomes the compact, tool-declared model-facing
+            # view (if any) so the LLM sees fewer tokens while downstream
+            # channels kept the full payload. No override => unchanged.
+            _full_tool_output = result
+            if _model_facing_override is not None:
+                result = _model_facing_override
+
             # Only build the input if an AFTER_TOOL hook is actually registered
             if self._hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
                 after_tool_input = AfterToolInput(
@@ -1028,7 +1049,7 @@ class ToolExecutionMixin:
                     agent_name=self.name,
                     tool_name=function_name,
                     tool_input=arguments,
-                    tool_output=result,
+                    tool_output=_full_tool_output,
                     tool_error=tool_error,
                     execution_time_ms=(_time.time() - _tool_start_time) * 1000
                 )
@@ -1092,7 +1113,7 @@ class ToolExecutionMixin:
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
-            
+
             return result
         except Exception as e:
             # Emit tool call end with error for exceptions that escape the retry loop
@@ -2300,6 +2321,43 @@ class ToolExecutionMixin:
             return name
         if callable(tool) or inspect.isclass(tool):
             return getattr(tool, '__name__', None)
+        return None
+
+    def _resolve_model_facing_result(self, function_name, result):
+        """Return a tool's compact, model-facing view for ``result``, or ``None``.
+
+        Resolution order (first hit wins):
+
+        1. ``result.model_output`` — a ToolResult carrying its own compact view.
+        2. The producing tool's ``to_model_output(result)`` hook — set via
+           ``@tool(to_model_output=fn)`` or a ``BaseTool`` override.
+
+        ``None`` means the tool opted out, so the caller keeps today's full
+        stringification (fully backward-compatible).
+        """
+        try:
+            from ..tools.base import resolve_model_output
+            compact = resolve_model_output(result)
+            if compact is not None:
+                return compact
+        except Exception:
+            pass
+
+        try:
+            for name, tool in self._iter_active_named_tools():
+                if name != function_name:
+                    continue
+                hook = getattr(tool, 'to_model_output', None)
+                if callable(hook):
+                    try:
+                        return hook(result)
+                    except Exception as e:
+                        logging.debug(
+                            f"to_model_output hook failed for '{function_name}': {e}"
+                        )
+                return None
+        except Exception:
+            pass
         return None
 
     def _iter_active_named_tools(self):
