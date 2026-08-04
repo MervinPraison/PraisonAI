@@ -367,20 +367,38 @@ def _gateway_bind_host(config: Optional[Any]) -> Optional[str]:
         return None
     for attr in ("bind_host", "host"):
         host = getattr(config, attr, None)
+        # ``GatewayServer.host`` is a method/property accessor — call it before
+        # stringifying, otherwise ``is_loopback`` sees a repr and misclassifies
+        # a genuinely loopback deployment as exposed.
+        if callable(host):
+            try:
+                host = host()
+            except Exception:  # pragma: no cover - defensive
+                host = None
         if host:
             return str(host)
     return None
 
 
-def _shell_auto_approve_is_safe(config: Optional[Any], ch_cfg: Dict[str, Any]) -> bool:
+def _shell_auto_approve_is_safe(
+    config: Optional[Any],
+    ch_cfg: Dict[str, Any],
+    bind_host: Optional[str] = None,
+) -> bool:
     """Blanket shell auto-approve is only safe on a loopback bind + non-group surface.
 
     Mirrors the auth token's exposure-aware posture (``assert_external_bind_safe``):
     an externally-bound gateway or a multi-user/group channel must not silently
     grant RCE to every sender. Returns ``True`` only when the gateway binds to a
     loopback interface AND the channel is not a multi-user/group surface.
+
+    ``bind_host`` is the gateway's resolved bind interface, passed explicitly by
+    the gateway (which holds it on its own server config, not on the per-channel
+    ``BotConfig``). When it is unknown we fall back to any host attribute on
+    ``config``; a truly absent host means "no gateway" (the local ``Bot()``
+    wrapper on a loopback process), which is safe.
     """
-    bind_host = _gateway_bind_host(config)
+    bind_host = bind_host or _gateway_bind_host(config)
     if bind_host is not None:
         try:
             from praisonaiagents.gateway.protocols import is_loopback
@@ -392,9 +410,10 @@ def _shell_auto_approve_is_safe(config: Optional[Any], ch_cfg: Dict[str, Any]) -
             return False
 
     group_policy = str(ch_cfg.get("group_policy") or "").strip().lower()
-    if group_policy and group_policy != "command_only":
-        # respond_all / mention_only / observe all imply a multi-user surface
-        # where any group member's message can reach the shell.
+    if group_policy:
+        # Every configured group policy — including ``command_only`` — is a
+        # multi-user surface where any group member's message can reach the
+        # shell, so blanket auto-approval must be downgraded to approval.
         return False
 
     return True
@@ -582,8 +601,15 @@ def enable_shell_tools(
     ch_cfg: Optional[Dict[str, Any]] = None,
     *,
     channel_type: str = "",
+    gateway_bind_host: Optional[str] = None,
 ) -> Any:
-    """Opt-in shell execution for inbound channel bots (Slack, Telegram, etc.)."""
+    """Opt-in shell execution for inbound channel bots (Slack, Telegram, etc.).
+
+    ``gateway_bind_host`` is the interface the gateway actually bound to. The
+    per-channel ``config`` (a ``BotConfig``) does not carry it, so the gateway
+    passes its resolved bind host explicitly; without it an externally-bound
+    gateway would be invisible to the exposure-aware auto-approve downgrade.
+    """
     if agent is None:
         return agent
 
@@ -631,7 +657,7 @@ def enable_shell_tools(
     # it is safe (loopback bind + non-group), unless the operator explicitly
     # acknowledges the exposure — the same "calibrated by exposure" posture the
     # gateway auth token already enforces via assert_external_bind_safe.
-    if auto_approve and not _shell_auto_approve_is_safe(config, ch_cfg):
+    if auto_approve and not _shell_auto_approve_is_safe(config, ch_cfg, gateway_bind_host):
         acknowledged = _coerce_shell_bool(
             ch_cfg.get("auto_approve_shell_acknowledge_exposed", False)
         )

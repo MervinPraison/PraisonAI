@@ -569,3 +569,102 @@ def test_auto_approve_kept_when_exposure_acknowledged(mock_execute_command):
         )
 
     assert isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_on_command_only_group(mock_execute_command, monkeypatch):
+    """``command_only`` is still a multi-user group surface: a group member's
+    command reaches execute_command, so blanket auto-approve must downgrade."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=_exposure_config("127.0.0.1"),
+                ch_cfg={
+                    "allow_shell": True,
+                    "auto_approve_shell": True,
+                    "group_policy": "command_only",
+                },
+                channel_type="telegram",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_downgraded_when_gateway_bind_host_external(mock_execute_command, monkeypatch):
+    """The gateway passes its real bind host explicitly (the per-channel
+    BotConfig does not carry it); an external bind must still downgrade even
+    when ``config`` has no host attribute."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    monkeypatch.delenv("SLACK_APPROVAL_CHANNEL", raising=False)
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+    agent._approval_backend = None
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        with patch(
+            "praisonai_bot.gateway.gateway_approval.GatewayApprovalBackend",
+            side_effect=ImportError,
+        ):
+            enable_shell_tools(
+                agent,
+                config=BotConfig(),
+                ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+                channel_type="slack",
+                gateway_bind_host="0.0.0.0",
+            )
+
+    assert not isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+@patch("praisonaiagents.tools.execute_command", create=True)
+def test_auto_approve_kept_when_gateway_bind_host_loopback(mock_execute_command):
+    """An explicit loopback gateway bind host keeps blanket auto-approve."""
+    from praisonaiagents.approval.backends import AutoApproveBackend
+
+    mock_execute_command.name = "execute_command"
+    agent = MagicMock()
+    agent.name = "assistant"
+    agent.tools = []
+    agent._perm_deny = frozenset({"execute_command"})
+
+    with patch("praisonaiagents.tools.execute_command", mock_execute_command):
+        enable_shell_tools(
+            agent,
+            config=BotConfig(),
+            ch_cfg={"allow_shell": True, "auto_approve_shell": True},
+            channel_type="slack",
+            gateway_bind_host="127.0.0.1",
+        )
+
+    assert isinstance(agent._approval_backend, AutoApproveBackend)
+
+
+def test_gateway_bind_host_resolves_callable_accessor():
+    """``_gateway_bind_host`` must call a method/property host accessor (e.g.
+    ``GatewayServer.host``) before stringifying, so is_loopback classifies it
+    correctly instead of seeing a bound-method repr."""
+    from types import SimpleNamespace
+
+    from praisonai_bot.bots._defaults import _gateway_bind_host
+
+    config = SimpleNamespace(host=lambda: "127.0.0.1")
+    assert _gateway_bind_host(config) == "127.0.0.1"
