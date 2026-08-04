@@ -417,6 +417,73 @@ class LivenessConfig:
 
 
 @dataclass
+class TurnLockConfig:
+    """Configuration for cluster-wide per-turn serialisation (Issue #3643).
+
+    Selects the backend for the gateway's per-turn lock — the guarantee that
+    only one turn runs against a given resolved session at a time. The default
+    ``"local"`` backend reproduces today's in-process ``asyncio.Lock`` /
+    ``LockMap`` behaviour exactly (zero cost, no new dependency), so
+    single-replica deployments are byte-for-byte unchanged. Selecting
+    ``"redis"`` extends serialisation across every replica so a
+    horizontally-scaled gateway (``replicas > 1``) no longer runs concurrent
+    turns on one session — the concrete distributed lock lives in the
+    wrapper/bot package and reuses the existing ``RedisConfig`` connection and
+    the scheduler's proven owner+TTL lease pattern.
+
+    This maps onto the pure core
+    :class:`~praisonaiagents.gateway.protocols.TurnLockProtocol`.
+
+    Attributes:
+        backend: ``"local"`` (default, in-process ``asyncio.Lock``) or
+            ``"redis"`` (distributed lease, cluster-wide serialisation).
+        ttl: Lease time-to-live in seconds for a distributed backend. Bounds
+            how long a crashed holder's lease survives before it is reclaimable,
+            so a dead replica cannot wedge a healthy session (fail-open /
+            self-healing, as the scheduler already does). Inert for ``"local"``.
+        url: Optional Redis URL for the ``"redis"`` backend. When omitted the
+            distributed lock reuses the gateway's configured ``RedisConfig``.
+    """
+
+    backend: str = "local"
+    ttl: float = 60.0
+    url: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.backend not in ("local", "redis"):
+            raise ValueError(
+                f"Invalid turn_lock backend {self.backend!r}; "
+                "expected 'local' or 'redis'"
+            )
+        if not self.ttl > 0:
+            raise ValueError("turn_lock ttl must be > 0")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a distributed (cross-replica) turn lock is selected."""
+        return self.backend != "local"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (hides sensitive URL)."""
+        return {
+            "backend": self.backend,
+            "ttl": self.ttl,
+            "url": "***" if self.url else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "TurnLockConfig":
+        """Create from a parsed ``gateway.turn_lock`` mapping (tolerant of None)."""
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            backend=str(data.get("backend") or "local"),
+            ttl=float(data.get("ttl") or 60.0),
+            url=data.get("url"),
+        )
+
+
+@dataclass
 class ApiConfig:
     """Configuration for additive protocol surfaces on the gateway app.
 
@@ -526,6 +593,11 @@ class GatewayConfig:
     # Issue #2798: application-level connection liveness (ping/pong heartbeat +
     # half-open reaper). Opt-in; disabled by default so behaviour is unchanged.
     liveness: LivenessConfig = field(default_factory=LivenessConfig)
+    # Issue #3643: cluster-wide per-turn serialisation. Default "local" backend
+    # keeps today's in-process asyncio.Lock behaviour (single-replica); "redis"
+    # serialises turns across replicas so a horizontally-scaled gateway does not
+    # run concurrent turns on one session.
+    turn_lock: "TurnLockConfig" = field(default_factory=lambda: TurnLockConfig())
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -647,6 +719,7 @@ class GatewayConfig:
             "scope_policy_enabled": self.has_scope_policy,
             "api": self.api.to_dict(),
             "liveness": self.liveness.to_dict(),
+            "turn_lock": self.turn_lock.to_dict(),
         }
     
     @property
@@ -837,6 +910,7 @@ class MultiChannelGatewayConfig:
             auth_scopes=auth_scopes,
             api=ApiConfig.from_dict(gw_data.get("api")),
             liveness=LivenessConfig.from_dict(gw_data.get("liveness")),
+            turn_lock=TurnLockConfig.from_dict(gw_data.get("turn_lock")),
         )
         
         # Parse agents section (pass through as dicts)

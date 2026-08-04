@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import time
 import uuid
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    contextmanager,
+)
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -39,6 +43,7 @@ GATEWAY_PROTOCOL_VERSION = 1
 MIN_CLIENT_PROTOCOL_VERSION = 1
 
 if TYPE_CHECKING:
+    import asyncio
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
@@ -4681,6 +4686,179 @@ class LivenessPolicy:
         if now > self.reap_deadline(last_activity):
             return LivenessDecision.REAP
         return LivenessDecision.KEEP
+
+
+# ---------------------------------------------------------------------------
+# Cluster-wide per-turn serialisation contract (Issue #3643)
+# ---------------------------------------------------------------------------
+#
+# Turn serialisation — "only one turn runs against a given resolved session at
+# a time" — is enforced in-process by an ``asyncio.Lock`` (``LockMap``). That
+# guarantee evaporates the moment a gateway is scaled to ``replicas > 1`` (the
+# sanctioned HA topology behind ``redis_pubsub.py`` + the Helm chart): two
+# messages for one session land on two replicas and run concurrent turns with
+# no serialisation between them, corrupting the shared transcript, tripping
+# provider strict-alternation, duplicating replies and double-billing.
+#
+# This is the pure, dependency-free contract for a *distributed* turn lock,
+# mirroring how every other gateway robustness knob (drain, admission,
+# rate-limit, liveness, dead-letter) is a swappable pure protocol in core. The
+# heavy Redis/network implementation is an optional-dep runtime concern that
+# lives in the wrapper/bot package; core keeps only the protocol, the lease
+# token, and a zero-cost in-process default so single-replica behaviour is
+# unchanged and no new dependency is introduced.
+
+
+@dataclass(frozen=True)
+class TurnLeaseToken:
+    """An opaque handle to a held turn lease (Issue #3643).
+
+    Returned by :meth:`TurnLockProtocol.acquire` and passed back to
+    :meth:`TurnLockProtocol.release`. The ``owner`` token identifies the
+    replica/process that holds the lease so a distributed backend can make
+    ``release`` **identity-checked and idempotent** — a replica can only
+    release the lease it actually owns, and a stale/expired lease that has
+    since been reclaimed by another owner is never clobbered.
+
+    Attributes:
+        key: The resolved session id the lease serialises on.
+        owner: The holder's opaque owner token (e.g. a per-replica id).
+        expires_at: Absolute wall-clock expiry (same clock the backend uses).
+            A dead holder's lease is reclaimable once ``now`` passes this, so a
+            crashed replica cannot wedge a healthy session forever.
+    """
+
+    key: str
+    owner: str
+    expires_at: float
+
+
+@runtime_checkable
+class TurnLockProtocol(Protocol):
+    """Contract for serialising a session's turns — cluster-wide or in-process.
+
+    The gateway holds this lock for the *whole* agent turn keyed on the
+    resolved session id, so only one turn ever runs against one session's
+    transcript at a time. With the default in-process backend
+    (:class:`LocalTurnLock`) this reproduces today's ``asyncio.Lock`` behaviour
+    exactly and adds no dependency. With a distributed backend (a
+    ``RedisTurnLock`` in the wrapper/bot package, reusing the scheduler's proven
+    ``owner``+TTL lease pattern) the same ``async with`` seam serialises turns
+    across every replica.
+
+    Contract:
+        * :meth:`acquire` blocks until the lease for ``key`` is held, then
+          returns a :class:`TurnLeaseToken`. ``ttl`` bounds how long the lease
+          survives without renewal so a crashed holder self-heals.
+        * :meth:`release` is identity-checked against the token's ``owner`` and
+          idempotent: releasing an already-expired/reclaimed lease is a no-op,
+          never an error and never another owner's lease.
+        * :meth:`hold` is the ergonomic async context manager wrapping
+          acquire/release, used at the ``async with self._turn_lock.hold(...)``
+          call site.
+
+    A backend outage must fail *open* (degrade to a loud warning rather than
+    wedging a healthy session), mirroring the fail-safe defaults elsewhere.
+    """
+
+    async def acquire(self, key: str, *, owner: str, ttl: float) -> TurnLeaseToken:
+        """Block until the lease for ``key`` is held; return its token."""
+        ...
+
+    async def release(self, token: TurnLeaseToken) -> None:
+        """Release ``token``'s lease (identity-checked, idempotent)."""
+        ...
+
+    def hold(
+        self, key: str, *, owner: str, ttl: float
+    ) -> "AbstractAsyncContextManager[TurnLeaseToken]":
+        """Return an async context manager holding the lease for the block."""
+        ...
+
+
+class LocalTurnLock:
+    """Default in-process turn lock — today's ``asyncio.Lock`` behaviour.
+
+    Zero-cost, dependency-free implementation of :class:`TurnLockProtocol` for
+    single-replica / no-backend deployments. It serialises turns within one
+    process (per event loop) exactly as the existing ``LockMap`` does, so
+    upgrading is byte-for-byte backward compatible. It provides **no** cross-
+    process guarantee — selecting a distributed backend (e.g. ``redis``) is what
+    extends serialisation across replicas.
+
+    The ``owner``/``ttl`` arguments are accepted for protocol symmetry but are
+    inert here: an in-process ``asyncio.Lock`` is released deterministically
+    when the holding task exits, so there is no crashed-holder lease to expire.
+    """
+
+    def __init__(self) -> None:
+        self._locks: Dict[str, "asyncio.Lock"] = {}
+        # Current lease holder per key, so release() is identity-checked: only
+        # the exact token handed out by the latest acquire() may release, so a
+        # stale token can never clobber a waiter that took the lock after it.
+        self._holders: Dict[str, TurnLeaseToken] = {}
+
+    def _lock_for(self, key: str) -> "asyncio.Lock":
+        lock = self._locks.get(key)
+        if lock is None:
+            import asyncio
+
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
+
+    async def acquire(self, key: str, *, owner: str, ttl: float) -> TurnLeaseToken:
+        lock = self._lock_for(key)
+        await lock.acquire()
+        token = TurnLeaseToken(key=key, owner=owner, expires_at=0.0)
+        self._holders[key] = token
+        return token
+
+    async def release(self, token: TurnLeaseToken) -> None:
+        # Identity-checked & idempotent: a stale/duplicate token whose lease has
+        # since been reclaimed by a waiter is a harmless no-op, never another
+        # holder's lease. ``is`` (not ``==``) so equal-valued tokens from two
+        # acquires are not conflated (``TurnLeaseToken`` is frozen/value-equal).
+        if self._holders.get(token.key) is not token:
+            return
+        del self._holders[token.key]
+        lock = self._locks.get(token.key)
+        if lock is not None and lock.locked():
+            lock.release()
+
+    def hold(
+        self, key: str, *, owner: str, ttl: float
+    ) -> "AbstractAsyncContextManager[TurnLeaseToken]":
+        return _TurnLeaseHold(self, key, owner=owner, ttl=ttl)
+
+
+class _TurnLeaseHold:
+    """Async context manager wrapping acquire/release for any turn lock.
+
+    Reusable by any :class:`TurnLockProtocol` implementation so the concrete
+    lock only needs ``acquire``/``release``; ``hold`` composes them safely
+    (releasing on every exit path, including exceptions).
+    """
+
+    def __init__(
+        self, lock: "TurnLockProtocol", key: str, *, owner: str, ttl: float
+    ) -> None:
+        self._lock = lock
+        self._key = key
+        self._owner = owner
+        self._ttl = ttl
+        self._token: Optional[TurnLeaseToken] = None
+
+    async def __aenter__(self) -> TurnLeaseToken:
+        self._token = await self._lock.acquire(
+            self._key, owner=self._owner, ttl=self._ttl
+        )
+        return self._token
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self._token is not None:
+            await self._lock.release(self._token)
+            self._token = None
 
 
 # ---------------------------------------------------------------------------
