@@ -85,6 +85,23 @@ backend: docker
         assert cfg.image == ComputeConfig().image
         assert cfg.setup == []
 
+    @pytest.mark.parametrize(
+        "body, needle",
+        [
+            ("packages:\n  - just-a-list\n", "packages"),
+            ("env: not-a-mapping\n", "env"),
+            ("setup:\n  nested: 1\n", "setup"),
+            ("image:\n  a: b\n", "image"),
+            ("resources: 42\n", "resources"),
+        ],
+    )
+    def test_malformed_nested_shapes_raise_valueerror(self, tmp_path, body, needle):
+        path = _write_env(str(tmp_path), body)
+        with pytest.raises(ValueError) as exc:
+            load_environment_definition(path)
+        assert needle in str(exc.value)
+        assert path in str(exc.value)
+
 
 class TestDiscovery:
     def test_no_file_returns_none(self, tmp_path):

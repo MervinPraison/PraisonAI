@@ -150,25 +150,41 @@ def load_environment_definition(
             f"allowed keys are {sorted(_ENV_KNOWN_KEYS)}"
         )
 
+    def _require(key: str, value: Any, expected: type, kind: str) -> None:
+        if value is not None and not isinstance(value, expected):
+            raise ValueError(
+                f"{path}: '{key}' must be {kind}, got {type(value).__name__}"
+            )
+
     cfg = ComputeConfig()
 
     if "image" in data:
+        _require("image", data["image"], str, "a string")
         cfg.image = data["image"]
     if "packages" in data:
-        cfg.packages = data["packages"] or {}
+        pkgs = data["packages"] or {}
+        _require("packages", pkgs, dict, "a mapping")
+        cfg.packages = pkgs
     if "setup" in data:
         setup = data["setup"] or []
         if isinstance(setup, str):
             setup = [setup]
+        _require("setup", setup, list, "a string or list of strings")
         cfg.setup = list(setup)
     if "env" in data:
-        cfg.env = {str(k): str(v) for k, v in (data["env"] or {}).items()}
+        env = data["env"] or {}
+        _require("env", env, dict, "a mapping")
+        cfg.env = {str(k): str(v) for k, v in env.items()}
     if "working_dir" in data:
+        _require("working_dir", data["working_dir"], str, "a string")
         cfg.working_dir = data["working_dir"]
     if "mount_paths" in data:
-        cfg.mount_paths = list(data["mount_paths"] or [])
+        mounts = data["mount_paths"] or []
+        _require("mount_paths", mounts, list, "a list")
+        cfg.mount_paths = list(mounts)
 
     resources = data.get("resources") or {}
+    _require("resources", resources, dict, "a mapping")
     if "cpu" in resources:
         cfg.cpu = int(resources["cpu"])
     if "memory_mb" in resources:

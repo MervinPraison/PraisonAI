@@ -1084,15 +1084,35 @@ class LocalManagedAgent:
         if self._compute is None:
             raise RuntimeError("No compute provider attached.")
 
-        from praisonaiagents.managed.protocols import ComputeConfig
+        from praisonaiagents.managed.protocols import (
+            ComputeConfig,
+            load_environment_definition,
+        )
+
+        # Opt-in: a repo-committed ``.praisonai/environment.yaml`` supplies the
+        # baseline (image / packages / setup / env / resources). Explicit
+        # kwargs and instance config still win over the file, so callers who
+        # pass nothing and have no file keep today's defaults unchanged.
+        env_cfg = load_environment_definition()
+
+        def _default(key: str, fallback: Any) -> Any:
+            if env_cfg is not None:
+                return getattr(env_cfg, key, fallback)
+            return fallback
 
         config = ComputeConfig(
-            image=kwargs.get("image", "python:3.12-slim"),
-            cpu=kwargs.get("cpu", 1),
-            memory_mb=kwargs.get("memory_mb", 512),
-            env=kwargs.get("env", self._cfg.get("env", {})),
-            packages=kwargs.get("packages", self._cfg.get("packages")),
-            working_dir=kwargs.get("working_dir", self._cfg.get("working_dir", "/workspace")),
+            image=kwargs.get("image", _default("image", "python:3.12-slim")),
+            cpu=kwargs.get("cpu", _default("cpu", 1)),
+            memory_mb=kwargs.get("memory_mb", _default("memory_mb", 512)),
+            env=kwargs.get("env", self._cfg.get("env") or _default("env", {})),
+            packages=kwargs.get(
+                "packages", self._cfg.get("packages") or _default("packages", None)
+            ),
+            setup=kwargs.get("setup", _default("setup", [])),
+            working_dir=kwargs.get(
+                "working_dir",
+                self._cfg.get("working_dir") or _default("working_dir", "/workspace"),
+            ),
             auto_shutdown=kwargs.get("auto_shutdown", True),
             idle_timeout_s=kwargs.get("idle_timeout_s", 300),
         )

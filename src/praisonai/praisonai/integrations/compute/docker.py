@@ -113,14 +113,28 @@ class DockerCompute:
             "created_at": time.time(),
         }
 
-        # Install packages
-        if config.packages:
-            self._install_packages_sync(container, config.packages)
+        # Install packages / run setup. If either fails, tear down the
+        # just-started container so we don't leak an unreachable
+        # ``sleep infinity`` container + registry entry (the caller never
+        # receives an instance_id on failure).
+        try:
+            if config.packages:
+                self._install_packages_sync(container, config.packages)
 
-        # Run setup commands once, after provision, before agent work
-        setup = getattr(config, "setup", None)
-        if setup:
-            self._run_setup_sync(container, setup)
+            # Run setup commands once, after provision, before agent work
+            setup = getattr(config, "setup", None)
+            if setup:
+                self._run_setup_sync(container, setup)
+        except Exception:
+            self._containers.pop(instance_id, None)
+            try:
+                container.remove(force=True)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "[docker_compute] cleanup after failed provision: %s",
+                    cleanup_err,
+                )
+            raise
 
         logger.info("[docker_compute] provisioned: %s image=%s", instance_id, config.image)
 
