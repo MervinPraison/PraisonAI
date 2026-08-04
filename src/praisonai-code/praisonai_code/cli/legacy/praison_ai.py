@@ -2312,13 +2312,13 @@ class PraisonAI:
                 agents=agents_list, 
                 tasks=tasks_list,
                 process=process_type,
-                verbose=1 if verbose else 0
+                output="minimal" if verbose else "silent"
             )
         else:
             praison = AgentTeam(
                 agents=agents_list,
                 process=process_type,
-                verbose=1 if verbose else 0
+                output="minimal" if verbose else "silent"
             )
         praison.launch(port=port, host=host)
         

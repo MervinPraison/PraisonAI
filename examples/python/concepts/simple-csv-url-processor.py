@@ -64,7 +64,7 @@ def main():
         agents=[url_agent],
         tasks=[url_task],
         process="workflow",
-        max_iter=10  # Adjust based on how many URLs you have
+        execution="balanced"  # max_iter=10 preset; adjust for more URLs
     )
     
     print(f"🚀 Processing URLs from {csv_file}")

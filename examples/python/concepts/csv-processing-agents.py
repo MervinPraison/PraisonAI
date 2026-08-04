@@ -86,7 +86,7 @@ def method_1_simple_loop():
         agents=[loop_agent],
         tasks=[loop_task],
         process="workflow",
-        max_iter=10                 # Maximum iterations to prevent infinite loops
+        execution="balanced"        # max_iter=10 preset to prevent infinite loops
     )
     
     print(f"🚀 Starting loop processing of {csv_file}")

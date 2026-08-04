@@ -219,7 +219,7 @@ class MultiAgentHandler:
                     instructions=config.get('instructions', ''),
                     tools=tools if tools else None,
                     llm=config.get('llm') or llm or os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o-mini'),
-                    verbose=self.verbose
+                    output="verbose" if self.verbose else "silent"
                 )
                 agents.append(agent)
                 
@@ -243,7 +243,7 @@ class MultiAgentHandler:
                 agents=agents,
                 tasks=tasks,
                 process=process,
-                verbose=self.verbose
+                output="verbose" if self.verbose else "silent"
             )
             
             result = praison_agents.start()

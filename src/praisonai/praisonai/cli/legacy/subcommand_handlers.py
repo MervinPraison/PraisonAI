@@ -1210,7 +1210,7 @@ def handle_research_command(self, query: str, model: str = None, verbose: bool =
             )
             
             print("[cyan]Gathering information with tools...[/cyan]")
-            agents = AgentTeam(agents=[research_assistant], tasks=[gather_task], verbose=0)
+            agents = AgentTeam(agents=[research_assistant], tasks=[gather_task], output="silent")
             tool_results = agents.start()
             
             # Enhance query with tool results
