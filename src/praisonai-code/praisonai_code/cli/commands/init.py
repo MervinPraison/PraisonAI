@@ -344,3 +344,33 @@ def init(
         output.print_info(
             "Nothing to do — .praisonai/ already initialised. Use --force to overwrite."
         )
+
+
+@app.command("team")
+def init_team(
+    name: str = typer.Argument(..., help="Project name (slugified into a Python package)"),
+    process: str = typer.Option(
+        "sequential",
+        "--process",
+        help="Default process type: sequential or hierarchical",
+    ),
+    agents: int = typer.Option(
+        2, "--agents", help="Number of starter agents to scaffold", min=1
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite existing files"
+    ),
+    no_pyproject: bool = typer.Option(
+        False, "--no-pyproject", help="Skip pyproject.toml generation"
+    ),
+) -> None:
+    """Scaffold a runnable multi-agent AgentTeam project (agents.yaml + tasks.yaml)."""
+    from .init_team import scaffold_team_project
+
+    scaffold_team_project(
+        name,
+        process=process,
+        agent_count=agents,
+        force=force,
+        pyproject=not no_pyproject,
+    )
