@@ -42,6 +42,19 @@ def test_collect_runtime_env_vars():
     assert env.get("OPENAI_API_KEY") == "sk-test"
 
 
+def test_generate_dockerfile_includes_gunicorn_timeout():
+    """Gunicorn CMD must set an explicit --timeout so LLM calls aren't SIGKILL'd."""
+    from praisonai_deploy.docker import generate_dockerfile, DEFAULT_GUNICORN_TIMEOUT
+    from praisonai_deploy.models import DockerConfig
+
+    dockerfile = generate_dockerfile("agents.yaml", DockerConfig())
+
+    assert DEFAULT_GUNICORN_TIMEOUT >= 120
+    assert f'"--timeout", "{DEFAULT_GUNICORN_TIMEOUT}"' in dockerfile
+    assert '"--graceful-timeout", "30"' in dockerfile
+    assert '"gunicorn"' in dockerfile
+
+
 def test_generate_dockerfile_custom_base():
     """Test generating Dockerfile with custom base image."""
     from praisonai_deploy.docker import generate_dockerfile

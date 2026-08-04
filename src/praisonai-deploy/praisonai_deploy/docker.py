@@ -9,6 +9,11 @@ from typing import Optional, Dict, Tuple
 from pathlib import Path
 from .models import DockerConfig, DeployResult, DeployStatus, DestroyResult, ServiceState
 
+# Gunicorn worker timeout (seconds). Agent LLM workloads (cold import + first
+# model round-trip) routinely exceed Gunicorn's 30s default, causing the worker
+# to be SIGKILL'd mid-request on the first /chat call.
+DEFAULT_GUNICORN_TIMEOUT = 120
+
 # Environment variables commonly required inside deployed containers.
 RUNTIME_ENV_KEYS = (
     "OPENAI_API_KEY",
@@ -82,8 +87,9 @@ RUN pip install --no-cache-dir praisonai flask flask-cors gunicorn
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \\
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:{config.expose[0]}/health')" || exit 1
 
-# Run the application
-CMD ["gunicorn", "-b", "0.0.0.0:{config.expose[0]}", "-w", "1", "api_server:app"]
+# Run the application (--timeout avoids SIGKILL of the worker mid-LLM call on
+# cold start; Gunicorn's 30s default is too short for agent workloads)
+CMD ["gunicorn", "-b", "0.0.0.0:{config.expose[0]}", "-w", "1", "--timeout", "{DEFAULT_GUNICORN_TIMEOUT}", "--graceful-timeout", "30", "api_server:app"]
 """
     
     return dockerfile
