@@ -26,10 +26,24 @@ _AGENTS_SRC = (
 )
 
 # Directories whose ``AgentTeam(...)`` calls must use valid kwargs only.
+#
+# Scope note: we intentionally guard copy-paste / shipped surfaces (public
+# ``examples/`` and internal CLI code) plus the specific test files migrated by
+# this change, rather than the whole ``src/praisonai-agents/tests`` tree. That
+# tree contains dozens of legacy ad-hoc example scripts using the removed
+# ``verbose=``/``max_iter=`` kwargs; sweeping them all in here would conflate an
+# unrelated cleanup with this regression guard. Individual migrated test files
+# are listed in ``_SCAN_FILES`` so the calls this PR fixed stay protected.
 _SCAN_DIRS = [
     _REPO_ROOT / "examples",
     _REPO_ROOT / "src" / "praisonai" / "praisonai",
     _REPO_ROOT / "src" / "praisonai-code" / "praisonai_code",
+]
+
+# Individual files (outside the scanned dirs) whose ``AgentTeam(...)`` calls were
+# migrated by this change and must not regress.
+_SCAN_FILES = [
+    _REPO_ROOT / "src" / "praisonai-agents" / "tests" / "crewai-tools-example.py",
 ]
 
 
@@ -63,6 +77,9 @@ def _iter_python_files():
         if not base.exists():
             continue
         for path in base.rglob("*.py"):
+            yield path
+    for path in _SCAN_FILES:
+        if path.exists():
             yield path
 
 
