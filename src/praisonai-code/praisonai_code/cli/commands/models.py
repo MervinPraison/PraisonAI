@@ -63,42 +63,43 @@ def list_models(
                 by_provider[provider_name] = []
             by_provider[provider_name].append(model)
         
-        # Display models in a table format via the encoding-aware console
-        from rich.table import Table
-        
-        console = output.console
+        # Display models in a table format via the encoding-aware console.
+        # Prefer Rich when available; otherwise render the real catalogue as a
+        # plain-text table (still ASCII-safe on non-UTF-8 stdout).
         use_emoji = stdout_supports_unicode()
-        
+        try:
+            from rich.table import Table
+            console = output.console
+        except ImportError:
+            Table = None
+            console = None
+
         for provider_name, provider_models in sorted(by_provider.items()):
-            table = Table(title=f"\n{provider_name.upper()} Models", show_header=True, header_style="bold cyan")
-            table.add_column("Model ID", style="green")
-            table.add_column("Context", justify="right")
-            table.add_column("Output", justify="right")
-            table.add_column("Capabilities", style="yellow")
-            table.add_column("Cost (1K)", justify="right", style="dim")
-            
-            for model in sorted(provider_models, key=lambda x: x.get("id", "")):
-                # Format capabilities (ASCII-safe on non-UTF-8 stdout)
-                cap_str = _capabilities_label(model, use_emoji)
-                
-                # Format costs
-                cost_str = "-"
-                if model.get("input_cost") is not None and model.get("output_cost") is not None:
-                    cost_str = f"${model['input_cost']:.4f}/${model['output_cost']:.4f}"
-                
-                # Format context/output limits
-                context = str(model.get("max_context", "-"))
-                output_limit = str(model.get("max_output", "-"))
-                
-                table.add_row(
-                    model.get("id", "-"),
-                    context,
-                    output_limit,
-                    cap_str,
-                    cost_str
-                )
-            
-            if console is not None:
+            sorted_models = sorted(provider_models, key=lambda x: x.get("id", ""))
+
+            if Table is not None and console is not None:
+                table = Table(title=f"\n{provider_name.upper()} Models", show_header=True, header_style="bold cyan")
+                table.add_column("Model ID", style="green")
+                table.add_column("Context", justify="right")
+                table.add_column("Output", justify="right")
+                table.add_column("Capabilities", style="yellow")
+                table.add_column("Cost (1K)", justify="right", style="dim")
+
+                for model in sorted_models:
+                    cap_str = _capabilities_label(model, use_emoji)
+
+                    cost_str = "-"
+                    if model.get("input_cost") is not None and model.get("output_cost") is not None:
+                        cost_str = f"${model['input_cost']:.4f}/${model['output_cost']:.4f}"
+
+                    table.add_row(
+                        model.get("id", "-"),
+                        str(model.get("max_context", "-")),
+                        str(model.get("max_output", "-")),
+                        cap_str,
+                        cost_str,
+                    )
+
                 console.print(table)
             else:
                 output.print_table(
@@ -116,7 +117,7 @@ def list_models(
                                 else "-"
                             ),
                         ]
-                        for m in sorted(provider_models, key=lambda x: x.get("id", ""))
+                        for m in sorted_models
                     ],
                     title=f"{provider_name.upper()} Models",
                 )
