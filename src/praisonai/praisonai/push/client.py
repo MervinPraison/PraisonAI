@@ -137,8 +137,14 @@ class PushClient:
         has no publish/create/presence-query routes, so ``publish``,
         ``create_channel`` and ``get_presence`` would raise. Callers can gate
         their producer code on this instead of discovering the drop at call time.
+
+        Requires an active connection: before connect, after ``disconnect()``,
+        or after a failed connect that never entered polling mode there is no
+        transport to publish through, so this reports ``False`` rather than a
+        false positive that would let gated producer calls proceed and fail
+        with ``ConnectionError``.
         """
-        return not self._using_polling
+        return self.is_connected and not self._using_polling
 
     # ------------------------------------------------------------------
     # Channel operations

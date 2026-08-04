@@ -370,7 +370,8 @@ class BaseAutoGenerator:
         self._core_client = None  # lazy, per-instance core OpenAIClient
         self._client_lock = threading.Lock()
 
-    def _resolve_framework(self, requested: Optional[str], registry):
+    def _resolve_framework(self, requested: Optional[str], registry,
+                           require_workflow: bool = False):
         """Resolve and validate a framework via the shared adapter registry.
 
         Single source of truth for default selection: when ``requested`` is
@@ -378,6 +379,12 @@ class BaseAutoGenerator:
         — the same selector ``praisonai.run(...)`` uses — instead of hardcoding
         a per-class default. Validates the adapter exists and is installed so
         both auto-generators fail loudly and consistently.
+
+        When ``require_workflow`` is set, the resolved adapter must also
+        advertise ``SUPPORTS_WORKFLOW``. This keeps ``WorkflowAutoGenerator``
+        from silently picking an installed-but-non-workflow default (e.g. when
+        the native ``praisonai`` adapter is absent) and then emitting a
+        workflow YAML that ``AgentsGenerator`` would reject at run time.
         """
         if not requested:
             requested = registry.pick_default()
@@ -392,6 +399,20 @@ class BaseAutoGenerator:
             install_hint = getattr(adapter, "install_hint", f"pip install {requested}")
             raise ImportError(
                 f"{adapter.name} is not installed. Please install with:\n    {install_hint}"
+            )
+        if require_workflow and getattr(adapter, "SUPPORTS_WORKFLOW", False) is not True:
+            from .framework_adapters.registry import adapter_capability
+            supported = [
+                name for name in registry.list_registered()
+                if adapter_capability(name, "SUPPORTS_WORKFLOW", registry=registry) is True
+            ]
+            hint = (
+                f" Frameworks supporting workflow execution: "
+                f"{', '.join(sorted(set(supported)))}." if supported else ""
+            )
+            raise ImportError(
+                f"Framework '{adapter.name}' does not support workflow "
+                f"generation (SUPPORTS_WORKFLOW is not set).{hint}"
             )
         return adapter
 
@@ -1421,7 +1442,9 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         # different per-class default and skipping validation.
         from .framework_adapters.registry import get_default_registry
         self._adapter_registry = adapter_registry or get_default_registry()
-        adapter = self._resolve_framework(framework, self._adapter_registry)
+        adapter = self._resolve_framework(
+            framework, self._adapter_registry, require_workflow=True
+        )
         self._adapter = adapter
         self.topic = topic
         self.workflow_file = workflow_file
