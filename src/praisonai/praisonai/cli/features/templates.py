@@ -637,11 +637,15 @@ class TemplatesHandler:
                     tasks.append(task)
                 
                 # Run
+                _verbose_level = workflow_config.get("verbose", 1)
+                _output_mode = "silent" if not _verbose_level else (
+                    "minimal" if _verbose_level == 1 else "verbose"
+                )
                 praison_agents = AgentTeam(
                     agents=agents,
                     tasks=tasks,
                     process=workflow_config.get("process", "sequential"),
-                    verbose=workflow_config.get("verbose", 1)
+                    output=_output_mode
                 )
                 praison_agents.start()
             elif "steps" in workflow_config:
