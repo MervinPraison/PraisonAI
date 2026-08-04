@@ -141,3 +141,63 @@ def test_mirror_failure_does_not_break_local_write():
             ]
         finally:
             store.close_mirror()
+
+
+def test_set_chat_history_reaches_mirror():
+    """Whole-transcript replacement (Session save_state path) is mirrored too."""
+    mirror = _RecordingMirror()
+    with tempfile.TemporaryDirectory() as d:
+        store = DefaultSessionStore(session_dir=d, mirror=mirror)
+        try:
+            assert store.set_chat_history(
+                "s1",
+                [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                ],
+            ) is True
+            assert store.flush_mirror(timeout=5.0) is True
+        finally:
+            store.close_mirror()
+
+    records = mirror.load("s1")
+    assert [r["content"] for r in records] == ["hi", "hello"]
+    assert all(r["session_id"] == "s1" and r["id"] for r in records)
+
+
+def test_enqueue_after_close_is_dropped_not_stranded():
+    """Records enqueued after close_mirror() are dropped-to-log, not stranded."""
+    mirror = _RecordingMirror()
+    with tempfile.TemporaryDirectory() as d:
+        store = DefaultSessionStore(session_dir=d, mirror=mirror)
+        store.add_message("s1", "user", "before close")
+        assert store.flush_mirror(timeout=5.0) is True
+        store.close_mirror()
+
+        # Reused after close: local write must still succeed and flush is a
+        # no-op that returns True; the mirror never receives the post-close
+        # record (dropped-to-log, not silently queued with no consumer).
+        assert store.add_message("s1", "user", "after close") is True
+        assert store.flush_mirror(timeout=1.0) is True
+
+    assert [r["content"] for r in mirror.load("s1")] == ["before close"]
+
+
+def test_failed_construction_leaks_no_thread():
+    """A construction that fails after makedirs must not leak a mirror thread."""
+    import os
+
+    mirror = _RecordingMirror()
+    with tempfile.TemporaryDirectory() as d:
+        # A path whose parent is a file cannot be created as a directory, so
+        # os.makedirs raises before the mirror writer would be started.
+        bad_parent = os.path.join(d, "afile")
+        with open(bad_parent, "w") as f:
+            f.write("x")
+        bad_dir = os.path.join(bad_parent, "sessions")
+
+        before = threading.active_count()
+        with pytest.raises(OSError):
+            DefaultSessionStore(session_dir=bad_dir, mirror=mirror)
+        # No idle daemon thread left behind by the failed construction.
+        assert threading.active_count() == before

@@ -441,6 +441,18 @@ class _SessionMirrorWriter:
         """Queue records for the mirror without ever blocking the caller."""
         if not records:
             return
+        # After close() the draining thread has exited; queuing here would leave
+        # records stranded with no consumer while the local write reports
+        # success. Drop-to-log instead so the gap is observable (and `session
+        # sync` can reconcile) rather than silently lost (Issue #3646).
+        if self._stop.is_set():
+            logger.warning(
+                "session mirror is closed; dropping %d record(s) for %s "
+                "(local write unaffected; run `session sync` to reconcile)",
+                len(records),
+                session_id,
+            )
+            return
         try:
             self._queue.put_nowait((session_id, records))
         except queue.Full:
@@ -594,16 +606,19 @@ class DefaultSessionStore:
         self._lock = threading.RLock()
         self._cache: Dict[str, SessionData] = {}
 
+        self._mirror = mirror
+
+        # Ensure session directory exists. Do this *before* spinning up the
+        # mirror writer so a construction failure on an unusable session dir
+        # never leaks an idle daemon thread for a store that won't exist.
+        os.makedirs(self.session_dir, exist_ok=True)
+
         # Optional local-first mirror (Issue #3646). Only spun up when a mirror
         # is provided, so the default store keeps its zero-dependency, no-thread
         # behaviour untouched.
-        self._mirror = mirror
         self._mirror_writer: Optional[_SessionMirrorWriter] = (
             _SessionMirrorWriter(mirror) if mirror is not None else None
         )
-
-        # Ensure session directory exists
-        os.makedirs(self.session_dir, exist_ok=True)
     
     @staticmethod
     def _summarise_overflow(
@@ -1321,29 +1336,42 @@ class DefaultSessionStore:
     ) -> bool:
         """Replace session messages atomically (file-locked read-modify-write)."""
 
+        # Capture the built messages so a configured mirror sees whole-transcript
+        # replacements too (Issue #3646). The Session API's ``save_state`` and the
+        # bot session manager persist history through this path, not
+        # ``add_message`` — mirroring only there would omit that history remotely.
+        built: List["SessionMessage"] = []
+
         def _apply(session: SessionData) -> None:
             session.messages.clear()
+            built.clear()
             # Issue #2741: replacing the whole transcript invalidates any prior
             # compaction anchor (its message_index no longer maps to these
             # messages). Clear it so get_working_history returns the full new
             # history instead of clamping to an empty tail and dropping messages.
             session.last_compaction = None
             for msg in messages:
-                session.messages.append(
-                    SessionMessage(
-                        role=msg.get("role", "user"),
-                        content=msg.get("content", "") or "",
-                        timestamp=msg.get("timestamp", time.time()),
-                        metadata=msg.get("metadata", {}),
-                        # Preserve tool turns on whole-transcript saves (#3089).
-                        tool_calls=msg.get("tool_calls"),
-                        tool_call_id=msg.get("tool_call_id"),
-                    )
+                sm = SessionMessage(
+                    role=msg.get("role", "user"),
+                    content=msg.get("content", "") or "",
+                    timestamp=msg.get("timestamp", time.time()),
+                    metadata=msg.get("metadata", {}),
+                    # Preserve tool turns on whole-transcript saves (#3089).
+                    tool_calls=msg.get("tool_calls"),
+                    tool_call_id=msg.get("tool_call_id"),
                 )
+                session.messages.append(sm)
+                built.append(sm)
 
-        return self._modify_session_locked(
+        ok = self._modify_session_locked(
             session_id, _apply, error_label="set chat history"
         )
+        if ok:
+            # Mirror the replaced transcript (non-blocking, off the lock). Records
+            # carry a stable ``id`` so a re-append is idempotent last-writer per
+            # id — the append-only, conflict-free shape the mirror expects.
+            self._mirror_append(session_id, built)
+        return ok
 
     def append_compaction_checkpoint(
         self,
