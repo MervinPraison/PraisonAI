@@ -115,6 +115,13 @@ class DegradedCapabilityProtocol(Protocol):
     Owners write facts where they happen (``mark``/``clear``); readers
     (``health()``, ``gateway status``/``doctor``) read them where needed
     (``list_degraded``).
+
+    Note (Issue #3640): the fail-closed point read ``find`` is deliberately
+    *not* on this base contract. Adding it here would break structural
+    ``isinstance`` conformance for any existing external registry that only
+    implemented ``mark``/``clear``/``list_degraded``. The point read lives on
+    the extended :class:`DegradedCapabilityLookupProtocol`, and the module
+    guard degrades gracefully to ``list_degraded()`` when ``find`` is absent.
     """
 
     def mark(self, owner: DegradedOwner) -> None: ...
@@ -122,6 +129,15 @@ class DegradedCapabilityProtocol(Protocol):
     def clear(self, owner_kind: str, owner_id: str) -> None: ...
 
     def list_degraded(self) -> List[DegradedOwner]: ...
+
+
+@runtime_checkable
+class DegradedCapabilityLookupProtocol(DegradedCapabilityProtocol, Protocol):
+    """Extended contract for registries that support the point read (Issue #3640).
+
+    Kept separate from :class:`DegradedCapabilityProtocol` so upgrading does not
+    silently break structural conformance for pre-existing external registries.
+    """
 
     def find(self, owner_kind: str, owner_id: str) -> Optional[DegradedOwner]: ...
 
@@ -200,6 +216,22 @@ def assert_owner_available(
     if callable(guard):
         guard(owner_kind, owner_id)
         return
-    owner = registry.find(owner_kind, owner_id)
+    # Backward compatibility (Issue #3640): a pre-existing registry may implement
+    # only ``mark``/``clear``/``list_degraded`` and have neither the new guard nor
+    # ``find``. Prefer the point read when present, otherwise derive the owner
+    # from ``list_degraded()`` so a legacy registry still fails-closed rather than
+    # raising ``AttributeError``.
+    find = getattr(registry, "find", None)
+    if callable(find):
+        owner = find(owner_kind, owner_id)
+    else:
+        owner = next(
+            (
+                o
+                for o in registry.list_degraded()
+                if o.owner_kind == owner_kind and o.owner_id == owner_id
+            ),
+            None,
+        )
     if owner is not None:
         raise OwnerUnavailable(owner)

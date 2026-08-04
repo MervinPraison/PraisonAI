@@ -11,6 +11,7 @@ import pytest
 from praisonaiagents.gateway import (
     DEGRADED_STATES,
     OWNER_KINDS,
+    DegradedCapabilityLookupProtocol,
     DegradedCapabilityProtocol,
     DegradedCapabilityRegistry,
     DegradedOwner,
@@ -174,7 +175,7 @@ def test_assert_owner_available_clears_after_recovery():
 
 def test_module_level_guard_is_noop_for_none_registry():
     # A gateway may run without a registry; the guard must not raise.
-    assert_owner_available(None, "provider", "openai") is None
+    assert assert_owner_available(None, "provider", "openai") is None
 
 
 def test_module_level_guard_delegates_and_raises():
@@ -190,4 +191,56 @@ def test_module_level_guard_noop_when_owner_healthy():
     reg = DegradedCapabilityRegistry()
     reg.mark(DegradedOwner("provider", "openai", "cold", "x", ""))
     # A different, healthy owner must pass.
-    assert_owner_available(reg, "capability", "mcp:notion") is None
+    assert assert_owner_available(reg, "capability", "mcp:notion") is None
+
+
+# --- Backward compatibility: legacy registries without find/guard (Issue #3640) ---
+
+
+class _LegacyRegistry:
+    """A registry implementing only the original mark/clear/list_degraded contract.
+
+    Represents a pre-existing external registry written before the fail-closed
+    read (find / assert_owner_available) was introduced.
+    """
+
+    def __init__(self) -> None:
+        self._owners = {}
+
+    def mark(self, owner: DegradedOwner) -> None:
+        self._owners[(owner.owner_kind, owner.owner_id)] = owner
+
+    def clear(self, owner_kind: str, owner_id: str) -> None:
+        self._owners.pop((owner_kind, owner_id), None)
+
+    def list_degraded(self):
+        return list(self._owners.values())
+
+
+def test_legacy_registry_still_satisfies_base_protocol():
+    # The original contract must remain structurally satisfied after the upgrade.
+    assert isinstance(_LegacyRegistry(), DegradedCapabilityProtocol)
+
+
+def test_default_registry_satisfies_lookup_protocol():
+    assert isinstance(DegradedCapabilityRegistry(), DegradedCapabilityLookupProtocol)
+
+
+def test_legacy_registry_not_lookup_protocol():
+    # A legacy registry does NOT need to conform to the extended lookup contract.
+    assert not isinstance(_LegacyRegistry(), DegradedCapabilityLookupProtocol)
+
+
+def test_module_level_guard_fails_closed_on_legacy_registry():
+    # A legacy registry (no find, no guard) must still fail-closed via list_degraded().
+    reg = _LegacyRegistry()
+    reg.mark(DegradedOwner("capability", "mcp:notion", "stale", "secret unresolved", "fix"))
+    with pytest.raises(OwnerUnavailable) as excinfo:
+        assert_owner_available(reg, "capability", "mcp:notion")
+    assert excinfo.value.owner_id == "mcp:notion"
+
+
+def test_module_level_guard_noop_on_legacy_registry_when_healthy():
+    reg = _LegacyRegistry()
+    reg.mark(DegradedOwner("provider", "openai", "cold", "x", ""))
+    assert assert_owner_available(reg, "capability", "mcp:notion") is None

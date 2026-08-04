@@ -159,6 +159,7 @@ from .degraded_state import (
     OWNER_KINDS,
     DEGRADED_STATES,
     # Fail-closed read of the degraded-owner contract (Issue #3640)
+    DegradedCapabilityLookupProtocol,
     OwnerUnavailable,
     assert_owner_available,
 )
@@ -385,6 +386,7 @@ __all__ = [
     "OWNER_KINDS",
     "DEGRADED_STATES",
     # Fail-closed read of the degraded-owner contract (Issue #3640)
+    "DegradedCapabilityLookupProtocol",
     "OwnerUnavailable",
     "assert_owner_available",
     # Inbound trigger / webhook contract (Issue #2281)
