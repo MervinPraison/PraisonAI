@@ -455,7 +455,7 @@ class TurnLockConfig:
                 f"Invalid turn_lock backend {self.backend!r}; "
                 "expected 'local' or 'redis'"
             )
-        if self.ttl <= 0:
+        if not self.ttl > 0:
             raise ValueError("turn_lock ttl must be > 0")
 
     @property
@@ -477,8 +477,8 @@ class TurnLockConfig:
         if not isinstance(data, dict):
             return cls()
         return cls(
-            backend=str(data.get("backend", "local")),
-            ttl=float(data.get("ttl", 60.0)),
+            backend=str(data.get("backend") or "local"),
+            ttl=float(data.get("ttl") or 60.0),
             url=data.get("url"),
         )
 

@@ -43,6 +43,7 @@ GATEWAY_PROTOCOL_VERSION = 1
 MIN_CLIENT_PROTOCOL_VERSION = 1
 
 if TYPE_CHECKING:
+    import asyncio
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
@@ -4792,6 +4793,10 @@ class LocalTurnLock:
 
     def __init__(self) -> None:
         self._locks: Dict[str, "asyncio.Lock"] = {}
+        # Current lease holder per key, so release() is identity-checked: only
+        # the exact token handed out by the latest acquire() may release, so a
+        # stale token can never clobber a waiter that took the lock after it.
+        self._holders: Dict[str, TurnLeaseToken] = {}
 
     def _lock_for(self, key: str) -> "asyncio.Lock":
         lock = self._locks.get(key)
@@ -4805,9 +4810,18 @@ class LocalTurnLock:
     async def acquire(self, key: str, *, owner: str, ttl: float) -> TurnLeaseToken:
         lock = self._lock_for(key)
         await lock.acquire()
-        return TurnLeaseToken(key=key, owner=owner, expires_at=0.0)
+        token = TurnLeaseToken(key=key, owner=owner, expires_at=0.0)
+        self._holders[key] = token
+        return token
 
     async def release(self, token: TurnLeaseToken) -> None:
+        # Identity-checked & idempotent: a stale/duplicate token whose lease has
+        # since been reclaimed by a waiter is a harmless no-op, never another
+        # holder's lease. ``is`` (not ``==``) so equal-valued tokens from two
+        # acquires are not conflated (``TurnLeaseToken`` is frozen/value-equal).
+        if self._holders.get(token.key) is not token:
+            return
+        del self._holders[token.key]
         lock = self._locks.get(token.key)
         if lock is not None and lock.locked():
             lock.release()
