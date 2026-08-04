@@ -110,16 +110,16 @@ class ToolResult:
 
 
 def resolve_model_output(result: Any) -> Optional[Any]:
-    """Return a tool result's compact, model-facing view, or ``None``.
+    """Return a tool result's own compact, model-facing view, or ``None``.
 
-    Resolution order (first hit wins):
+    This reads ``result.model_output`` (e.g. a ``ToolResult`` that carries its
+    own compact view). It does **not** invoke any ``to_model_output()`` hook on
+    the producing tool; the executor resolves that hook separately after this
+    result-carried view misses.
 
-    1. ``result.model_output`` (e.g. ``ToolResult(model_output=...)``), if set.
-    2. A ``to_model_output()`` hook the producing object carries (BaseTool
-       subclasses may attach one) invoked as ``to_model_output(result)``.
-
-    ``None`` means "no compact view declared"; callers then fall back to today's
-    full stringification, so behaviour is unchanged for tools that opt out.
+    ``None`` means "no compact view carried on the result"; callers then fall
+    back to today's full stringification, so behaviour is unchanged for tools
+    that opt out.
     """
     model_output = getattr(result, "model_output", None)
     if model_output is not None:
@@ -270,12 +270,28 @@ class BaseTool(ABC):
     def to_model_output(self, result: Any) -> Optional[Any]:
         """Optional hook returning a compact, model-facing view of ``result``.
 
-        Override to feed the LLM a terse summary/diff instead of the full tool
-        output for context economy; the full ``result`` still reaches display,
-        hooks, and tracing. Return ``None`` (the default) to keep today's
-        behaviour where the model sees the full output.
+        ``result`` is the tool's raw return **value** (the ``output`` channel),
+        not the enclosing :class:`ToolResult`. This is the single hook contract
+        used everywhere: ``safe_run`` and the agent executor both invoke it with
+        the output value. Override to feed the LLM a terse summary/diff instead
+        of the full tool output for context economy; the full ``result`` still
+        reaches display, hooks, and tracing. Return ``None`` (the default) to
+        keep today's behaviour where the model sees the full output.
         """
         return None
+
+    def _safe_to_model_output(self, output: Any) -> Optional[Any]:
+        """Invoke ``to_model_output`` guarded so a failure never breaks a run.
+
+        A raising or misbehaving compact-view builder must degrade to the full
+        output (return ``None``) rather than corrupt an otherwise-successful
+        tool result.
+        """
+        try:
+            return self.to_model_output(output)
+        except Exception as e:
+            logging.warning(f"to_model_output failed for tool '{self.name}': {e}")
+            return None
 
     def safe_run(self, **kwargs) -> ToolResult:
         """Execute tool with error handling, returning ToolResult."""
@@ -283,12 +299,12 @@ class BaseTool(ABC):
             output = self.run(**kwargs)
             if isinstance(output, ToolResult):
                 if output.model_output is None:
-                    output.model_output = self.to_model_output(output.output)
+                    output.model_output = self._safe_to_model_output(output.output)
                 return output
             return ToolResult(
                 output=output,
                 success=True,
-                model_output=self.to_model_output(output),
+                model_output=self._safe_to_model_output(output),
             )
         except Exception as e:
             logging.error(f"Tool {self.name} failed: {e}")

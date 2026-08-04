@@ -890,6 +890,16 @@ class ToolExecutionMixin:
                 try:
                     from ..tools.trust import wrap_if_external
                     result = wrap_if_external(function_name, result)
+                    # The compact, model-facing view is untrusted external
+                    # content too when the producing tool is external, so it
+                    # MUST pass through the same prompt-injection fence before
+                    # it can reach the model. Resolving it above (pre-fence)
+                    # kept the full payload intact for hooks/tracing; fence the
+                    # override here so it never bypasses the security markers.
+                    if _model_facing_override is not None:
+                        _model_facing_override = wrap_if_external(
+                            function_name, _model_facing_override
+                        )
                 except Exception:
                     # Trust module unavailable (partial/broken install) must not
                     # abort tool execution; fall through with the raw result.
@@ -1030,14 +1040,16 @@ class ToolExecutionMixin:
                 # Clean up temporary attribute
                 delattr(self, '_last_normalized_result')
 
-            # Context economy: tracing (above) and the AFTER_TOOL hook (below)
-            # both receive the FULL result via ``_full_tool_output``; after this
-            # point ``result`` becomes the compact, tool-declared model-facing
-            # view (if any) so the LLM sees fewer tokens while downstream
-            # channels kept the full payload. No override => unchanged.
-            _full_tool_output = result
-            if _model_facing_override is not None:
-                result = _model_facing_override
+            # Context economy: ``result`` stays the FULL output through the
+            # AFTER_TOOL hook, result-aware loop detection, and the loop guard
+            # (below), so those channels keep seeing real, changing outcomes.
+            # A tool-declared compact model-facing view (if any) is only swapped
+            # in at the very end, right before ``return``, purely to shrink what
+            # the LLM sees. No override => behaviour is unchanged. Model-facing
+            # annotations added below (AFTER_TOOL additional_context, loop-guard
+            # notices) are collected here so they can be re-applied to the
+            # compact view and therefore always reach the model.
+            _model_facing_annotations = []
 
             # Only build the input if an AFTER_TOOL hook is actually registered
             if self._hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
@@ -1049,7 +1061,7 @@ class ToolExecutionMixin:
                     agent_name=self.name,
                     tool_name=function_name,
                     tool_input=arguments,
-                    tool_output=_full_tool_output,
+                    tool_output=result,
                     tool_error=tool_error,
                     execution_time_ms=(_time.time() - _tool_start_time) * 1000
                 )
@@ -1067,6 +1079,9 @@ class ToolExecutionMixin:
                         result.setdefault("_additional_context", extra_context)
                     else:
                         result = {"value": result, "_additional_context": extra_context}
+                    # Mirror any model-facing annotation onto the compact view so
+                    # it survives the context-economy swap at the end.
+                    _model_facing_annotations.append(extra_context)
             
             # Back-fill the result hash so the result-aware detector can tell a
             # genuine stall (identical output) from legitimate polling (changing
@@ -1110,9 +1125,27 @@ class ToolExecutionMixin:
                     else:
                         # Wrap non-string/dict/list results to preserve original data plus warning
                         result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+                    # Ensure the loop-guard notice also reaches the model when a
+                    # compact model-facing view replaces ``result`` below.
+                    _model_facing_annotations.append(f"[loop-guard] {decision.message}")
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
+
+            # Context economy: now that tracing, hooks, loop detection and the
+            # loop guard have all observed the FULL result, swap in the compact,
+            # tool-declared model-facing view for the LLM. Re-apply any
+            # model-facing annotations so they are never lost. No override =>
+            # the full result is returned exactly as before.
+            if _model_facing_override is not None:
+                result = _model_facing_override
+                for _annotation in _model_facing_annotations:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{_annotation}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", _annotation)
+                    else:
+                        result = {"value": result, "_additional_context": _annotation}
 
             return result
         except Exception as e:
@@ -2329,11 +2362,14 @@ class ToolExecutionMixin:
         Resolution order (first hit wins):
 
         1. ``result.model_output`` — a ToolResult carrying its own compact view.
-        2. The producing tool's ``to_model_output(result)`` hook — set via
+        2. The producing tool's ``to_model_output(output)`` hook — set via
            ``@tool(to_model_output=fn)`` or a ``BaseTool`` override.
 
-        ``None`` means the tool opted out, so the caller keeps today's full
-        stringification (fully backward-compatible).
+        The hook is invoked with the tool's raw output **value**, matching the
+        single ``BaseTool.to_model_output`` contract: if ``result`` is a
+        ``ToolResult`` the enclosed ``output`` is passed, otherwise ``result``
+        itself. ``None`` means the tool opted out, so the caller keeps today's
+        full stringification (fully backward-compatible).
         """
         try:
             from ..tools.base import resolve_model_output
@@ -2343,6 +2379,9 @@ class ToolExecutionMixin:
         except Exception:
             pass
 
+        # Unwrap to the raw output value so the hook receives the same payload
+        # BaseTool.safe_run passes (the ``output`` channel), keeping one contract.
+        hook_input = getattr(result, 'output', result)
         try:
             for name, tool in self._iter_active_named_tools():
                 if name != function_name:
@@ -2350,7 +2389,7 @@ class ToolExecutionMixin:
                 hook = getattr(tool, 'to_model_output', None)
                 if callable(hook):
                     try:
-                        return hook(result)
+                        return hook(hook_input)
                     except Exception as e:
                         logging.debug(
                             f"to_model_output hook failed for '{function_name}': {e}"
