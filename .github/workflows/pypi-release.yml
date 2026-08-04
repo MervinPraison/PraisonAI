@@ -1179,6 +1179,17 @@ jobs:
           # untracked and stays out of the commit.
           git add -u
           git diff --cached --quiet && { echo "Nothing left to commit"; exit 0; }
-          git commit -m "chore(release): persist version bumps [skip ci]"
+          # Name the packages actually staged, so a single-package release
+          # (every other skip_* set) reads "bump praisonai-mcp" rather than a
+          # generic message. Falls back when nothing under src/ is staged.
+          PKGS="$(git diff --cached --name-only \
+            | sed -n 's#^src/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+          if [ -n "$PKGS" ]; then
+            MSG="chore(release): bump ${PKGS} [skip ci]"
+          else
+            MSG="chore(release): persist version bumps [skip ci]"
+          fi
+          echo "Commit message: ${MSG}"
+          git commit -m "$MSG"
           git pull --rebase origin main
           git push origin main
