@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .store import DefaultSessionStore, SessionMessage, SessionData, CompactionCheckpoint
     from .sqlite_store import SqliteSessionStore
     from .sqlite_transcript_store import SqliteTranscriptStore
-    from .protocols import SessionStoreProtocol
+    from .protocols import SessionStoreProtocol, SessionMirrorProtocol
     from .hierarchy import HierarchicalSessionStore, SessionSnapshot, ExtendedSessionData
 
 # Lazy loading for zero import overhead
@@ -92,6 +92,11 @@ def __getattr__(name: str):
         from .protocols import SearchableSessionStoreProtocol
         _module_cache[name] = SearchableSessionStoreProtocol
         return SearchableSessionStoreProtocol
+
+    if name == "SessionMirrorProtocol":
+        from .protocols import SessionMirrorProtocol
+        _module_cache[name] = SessionMirrorProtocol
+        return SessionMirrorProtocol
 
     if name == "SessionHit":
         from .protocols import SessionHit
@@ -179,6 +184,7 @@ __all__ = [
     "get_default_session_store",
     "SessionStoreProtocol",
     "SearchableSessionStoreProtocol",
+    "SessionMirrorProtocol",
     "SessionHit",
     "SessionSummary",
     "HierarchicalSessionStore",

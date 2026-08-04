@@ -326,6 +326,75 @@ class RuntimeStateMirroringProtocol(Protocol):
 
 
 @runtime_checkable
+class SessionMirrorProtocol(Protocol):
+    """Protocol for mirroring session transcripts to a remote backend (Issue #3646).
+
+    A mirror is a *pluggable, local-first* sink: the session store keeps
+    writing to local disk exactly as today, and — when a mirror is configured
+    — new append-only records are also handed to the mirror so a session can
+    be continued on another machine. The contract is deliberately tiny:
+
+    - :meth:`append` receives the records produced by a turn (each an already
+      timestamped, id-tagged dict, so mirroring is conflict-free by
+      construction — last-writer per record id, no merge logic);
+    - :meth:`load` returns all mirrored records for a session so a
+      non-local id can be hydrated on resume;
+    - :meth:`list_sessions` (optional) enumerates mirrored sessions for a
+      ``session list --remote`` surface.
+
+    The mirror must be safe to call off the local write path: an implementation
+    is expected to be tolerant of transient outages, since the caller queues
+    records and never lets a mirror failure block or corrupt the local session.
+
+    Wrapper backends (postgres/supabase/turso/sqlite, …) adapt the existing
+    ``praisonai.persistence.conversation`` stores onto this protocol; core
+    ships only the contract (zero new dependencies).
+
+    Example::
+
+        store: SessionMirrorProtocol = MyRemoteMirror()
+        store.append("s_abc", [{"id": "m1", "role": "user", "content": "hi",
+                                 "timestamp": 1.0}])
+        records = store.load("s_abc")  # full transcript, incl. tool calls
+    """
+
+    def append(self, session_id: str, records: List[Dict[str, Any]]) -> None:
+        """Append append-only transcript records for a session.
+
+        Args:
+            session_id: The session these records belong to.
+            records: New records to mirror. Each is a JSON-serialisable dict
+                carrying at least an ``id`` and ``timestamp`` so re-appends are
+                idempotent (last-writer per record id).
+        """
+        ...
+
+    def load(self, session_id: str) -> List[Dict[str, Any]]:
+        """Load all mirrored records for a session.
+
+        Args:
+            session_id: The session to hydrate.
+
+        Returns:
+            The full ordered list of mirrored records (empty if unknown).
+        """
+        ...
+
+    def list_sessions(
+        self, *, user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Enumerate mirrored sessions (optional).
+
+        Args:
+            user_id: Optional filter to a single user's sessions.
+
+        Returns:
+            List of session metadata dicts (at minimum ``session_id``).
+        """
+        ...
+
+
+@runtime_checkable
 class CheckpointQueryProtocol(Protocol):
     """Read path for session checkpoints / rollback snapshots."""
 

@@ -9,6 +9,7 @@ import copy
 import json
 from praisonaiagents._logging import get_logger
 import os
+import queue
 import sys
 import tempfile
 import threading
@@ -402,6 +403,110 @@ class FileLock:
                 # Note: We don't remove the lock file to avoid race conditions
                 # where another process has opened but not yet locked the file
 
+# Bounded queue for the optional background mirror writer (Issue #3646).
+# A mirror outage must never block the local turn, so appends are enqueued and
+# flushed on a daemon thread; the bound keeps a slow/broken mirror from growing
+# memory without limit (overflow is dropped-to-log, local disk is untouched).
+DEFAULT_MIRROR_QUEUE_SIZE = 1000
+DEFAULT_MIRROR_MAX_RETRIES = 3
+
+
+class _SessionMirrorWriter:
+    """Background, non-blocking writer that flushes records to a mirror.
+
+    Local-first guarantee (Issue #3646): the session store always writes local
+    disk first; this writer runs on a daemon thread and drains a bounded queue,
+    so a mirror's latency or outage never delays or fails a turn. On a full
+    queue we drop-to-log rather than block; on a permanent per-record failure
+    we log and move on. The local session file remains the source of truth.
+    """
+
+    def __init__(
+        self,
+        mirror: Any,
+        *,
+        max_queue: int = DEFAULT_MIRROR_QUEUE_SIZE,
+        max_retries: int = DEFAULT_MIRROR_MAX_RETRIES,
+    ):
+        self._mirror = mirror
+        self._max_retries = max_retries
+        self._queue: "queue.Queue" = queue.Queue(maxsize=max_queue)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="praisonai-session-mirror", daemon=True
+        )
+        self._thread.start()
+
+    def enqueue(self, session_id: str, records: List[Dict[str, Any]]) -> None:
+        """Queue records for the mirror without ever blocking the caller."""
+        if not records:
+            return
+        try:
+            self._queue.put_nowait((session_id, records))
+        except queue.Full:
+            # Never block the turn on a slow mirror; the local write already
+            # succeeded and `session sync` can reconcile the gap later.
+            logger.warning(
+                "session mirror queue full; dropping %d record(s) for %s "
+                "(local write unaffected; run `session sync` to reconcile)",
+                len(records),
+                session_id,
+            )
+
+    def _run(self) -> None:
+        while not self._stop.is_set() or not self._queue.empty():
+            try:
+                session_id, records = self._queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            try:
+                self._flush_one(session_id, records)
+            finally:
+                self._queue.task_done()
+
+    def _flush_one(self, session_id: str, records: List[Dict[str, Any]]) -> None:
+        delay = 0.05
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                self._mirror.append(session_id, records)
+                return
+            except Exception as e:  # pragma: no cover - defensive; mirror is external
+                if attempt >= self._max_retries:
+                    logger.error(
+                        "session mirror append failed for %s after %d attempts: %s "
+                        "(local write unaffected)",
+                        session_id,
+                        attempt,
+                        e,
+                    )
+                    return
+                time.sleep(delay)
+                delay = min(delay * 2, 1.0)
+
+    def flush(self, timeout: Optional[float] = None) -> bool:
+        """Block until queued records are flushed (test/`sync` convenience).
+
+        Waits for every enqueued item to be *processed* (``task_done``), not
+        merely dequeued, so a slow in-flight ``append`` is counted as pending.
+        """
+        deadline = None if timeout is None else time.time() + timeout
+        # queue.Queue exposes unfinished_tasks under its internal mutex; poll it
+        # so we honour the timeout without a blocking join() that can't be
+        # interrupted.
+        while True:
+            with self._queue.all_tasks_done:
+                if self._queue.unfinished_tasks == 0:
+                    return True
+            if deadline is not None and time.time() > deadline:
+                return False
+            time.sleep(0.01)
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Stop the writer, draining any queued records first."""
+        self._stop.set()
+        self._thread.join(timeout=timeout)
+
+
 class DefaultSessionStore:
     """
     JSON-based session persistence with file locking.
@@ -436,6 +541,7 @@ class DefaultSessionStore:
         lock_timeout: float = DEFAULT_LOCK_TIMEOUT,
         retention: Optional[str] = None,
         active_window: Optional[int] = None,
+        mirror: Optional[Any] = None,
     ):
         """
         Initialize session store.
@@ -457,6 +563,11 @@ class DefaultSessionStore:
             active_window: Number of recent turns kept live in ``messages``
                 (defaults to ``max_messages``). Older turns are compacted or
                 truncated per ``retention``.
+            mirror: Optional :class:`~praisonaiagents.session.protocols.SessionMirrorProtocol`
+                sink (Issue #3646). When set, every persisted message is *also*
+                appended to the mirror on a background thread (local-first: the
+                local write always happens first and a mirror outage never
+                blocks or fails the turn). Left ``None`` there is zero overhead.
         """
         self.session_dir = session_dir or DEFAULT_SESSION_DIR
         self.max_messages = max_messages
@@ -482,7 +593,15 @@ class DefaultSessionStore:
 
         self._lock = threading.RLock()
         self._cache: Dict[str, SessionData] = {}
-        
+
+        # Optional local-first mirror (Issue #3646). Only spun up when a mirror
+        # is provided, so the default store keeps its zero-dependency, no-thread
+        # behaviour untouched.
+        self._mirror = mirror
+        self._mirror_writer: Optional[_SessionMirrorWriter] = (
+            _SessionMirrorWriter(mirror) if mirror is not None else None
+        )
+
         # Ensure session directory exists
         os.makedirs(self.session_dir, exist_ok=True)
     
@@ -1073,8 +1192,52 @@ class DefaultSessionStore:
             with self._lock:
                 self._cache[session_id] = session
 
+        # Local write succeeded → mirror the new record (non-blocking, off the
+        # lock). A mirror outage never reaches here as a failure (Issue #3646).
+        self._mirror_append(session_id, [message])
+        return True
+
+    def _mirror_append(
+        self, session_id: str, messages: List["SessionMessage"]
+    ) -> None:
+        """Hand newly persisted messages to the background mirror writer.
+
+        No-op (zero overhead) when no mirror is configured. Records are the
+        message dicts tagged with a stable per-record id so re-appends are
+        idempotent (last-writer per id) — the append-only, conflict-free shape
+        the mirror protocol expects (Issue #3646).
+        """
+        writer = self._mirror_writer
+        if writer is None or not messages:
+            return
+        records = []
+        for m in messages:
+            record = m.to_dict()
+            record.setdefault(
+                "id", f"{session_id}:{record.get('timestamp', time.time())}"
+            )
+            record["session_id"] = session_id
+            records.append(record)
+        writer.enqueue(session_id, records)
+
+    def flush_mirror(self, timeout: Optional[float] = None) -> bool:
+        """Block until queued mirror records are flushed.
+
+        Returns ``True`` immediately when no mirror is configured; otherwise
+        drains the background queue (bounded by ``timeout`` when given). Handy
+        for a future ``session sync`` and for deterministic tests.
+        """
+        writer = self._mirror_writer
+        if writer is None:
             return True
-    
+        return writer.flush(timeout)
+
+    def close_mirror(self) -> None:
+        """Stop the background mirror writer, draining queued records first."""
+        writer = self._mirror_writer
+        if writer is not None:
+            writer.close()
+
     def add_user_message(
         self,
         session_id: str,
