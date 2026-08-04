@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://docs.praison.ai/schemas/agents.schema.json
+# Minimal sequential team: researcher -> writer
+# Run: praisonai examples/yaml/teams/research-writer/agents.yaml
+
+framework: "praisonai"
+topic: "renewable energy"
+
+roles:
+  researcher:
+    role: "Senior Researcher"
+    goal: "Find accurate information about {topic}"
+    backstory: "Expert at concise, factual research."
+    tasks:
+      research_task:
+        description: "Research {topic} and list 5 key facts."
+        expected_output: "A bullet list of 5 facts."
+
+  writer:
+    role: "Report Writer"
+    goal: "Turn research into readable summaries about {topic}"
+    backstory: "Clear technical writer."
+    tasks:
+      summary_task:
+        description: "Write a 3-sentence executive summary from the research."
+        expected_output: "3 sentences, plain text."
+
+# Ordering is by task declaration order above (researcher's task runs first,
+# then the writer's), which is how the roles-file loader sequences tasks.
+# The optional `dependencies:` block below mirrors the canonical fixture
+# (src/praisonai/tests/agents.yaml) and documents intent; the roles-file
+# loader does not consume it, so keep tasks in the order you want them run.
+dependencies:
+  - task: summary_task
+    depends_on: research_task
