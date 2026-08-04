@@ -1109,12 +1109,12 @@ class AgentsGenerator:
         else:
             if self.agent_file in ('/app/api:app', 'api:app'):
                 self.agent_file = 'agents.yaml'
-            try:
-                with open(self.agent_file, 'r') as f:
-                    config = _yaml_safe_load(f)
-            except FileNotFoundError:
-                _rich_print(f"File not found: {self.agent_file}")
-                return None
+            # Let FileNotFoundError surface so the Python API, HTTP handlers,
+            # and tests can distinguish "no such file" from "no result".
+            # Downgrading it to a print (returning None) made every public
+            # entry point return a silent None for a missing file.
+            with open(self.agent_file, 'r') as f:
+                config = _yaml_safe_load(f)
 
         config = _normalize_yaml_config(config or {})
 
@@ -1153,8 +1153,6 @@ class AgentsGenerator:
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
         config = self._load_config()
-        if config is None:
-            return
         from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):
             # Bracket the workflow run in the same observability session the
@@ -1201,8 +1199,6 @@ class AgentsGenerator:
         Generates a crew of agents and initiates tasks based on the provided configuration.
         """
         config = await self._aload_config()
-        if config is None:
-            return
         import asyncio
         from .observability.hooks import observability_session
         if self._is_workflow_yaml(config):

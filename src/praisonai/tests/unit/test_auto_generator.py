@@ -822,17 +822,31 @@ class TestWorkflowMergeSupport:
 class TestWorkflowFrameworkSupport:
     """Test suite for framework support in WorkflowAutoGenerator."""
     
+    @staticmethod
+    def _fake_registry(name="crewai"):
+        """Registry double whose adapter reports available, so framework
+        validation passes without the framework actually being installed."""
+        from unittest.mock import MagicMock
+        adapter = MagicMock()
+        adapter.name = name
+        adapter.is_available.return_value = True
+        registry = MagicMock()
+        registry.create.return_value = adapter
+        registry.pick_default.return_value = "praisonai"
+        return registry
+
     def test_workflow_generator_accepts_framework_parameter(self):
         """Test that WorkflowAutoGenerator accepts framework parameter."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=self._fake_registry("crewai"),
             )
             assert generator.framework == "crewai"
     
     def test_workflow_generator_default_framework_is_praisonai(self):
-        """Test that default framework is praisonai."""
+        """Test that default framework resolves via the shared registry default."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(topic="Test task")
             assert generator.framework == "praisonai"
@@ -842,7 +856,8 @@ class TestWorkflowFrameworkSupport:
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=self._fake_registry("crewai"),
             )
             # The framework should be stored and used in output
             assert generator.framework == "crewai"
