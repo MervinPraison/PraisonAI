@@ -28,8 +28,29 @@ logger = logging.getLogger(__name__)
 # Module-level sentinel to track if we've warned about degraded locking
 _WARNED_NO_FCNTL = False
 
-# Default session directory
-DEFAULT_SESSION_DIR = Path.home() / ".praison" / "sessions"
+# Legacy default session directory (pre-canonical-root layout). Retained only
+# as a fallback when the canonical paths helper is unavailable.
+_LEGACY_SESSION_DIR = Path.home() / ".praison" / "sessions"
+
+
+def _default_session_dir() -> Path:
+    """Resolve the canonical sessions directory (e.g. ``~/.praisonai/sessions/``).
+
+    The REPL/TUI store shares the same root every other CLI surface reads and
+    writes (``praisonai run``/``session *``/dashboard), so ``code`` sessions
+    land where the rest of the CLI already looks. Falls back to the legacy
+    ``~/.praison/sessions/`` path only if the paths helper cannot be imported.
+    """
+    try:
+        from praisonai_code.cli.configuration.paths import get_sessions_dir
+
+        return get_sessions_dir()
+    except Exception:
+        return _LEGACY_SESSION_DIR
+
+
+# Backwards-compatible module attribute; kept for any external import.
+DEFAULT_SESSION_DIR = _LEGACY_SESSION_DIR
 
 
 @dataclass
@@ -151,7 +172,8 @@ class UnifiedSessionStore:
     """
     Persistent session store with file locking.
     
-    Stores sessions as JSON files in ~/.praison/sessions/
+    Stores sessions as JSON files under the canonical sessions root
+    (``~/.praisonai/sessions/``) shared with the rest of the CLI.
     """
     
     def __init__(self, session_dir: Optional[Path] = None):
@@ -159,9 +181,11 @@ class UnifiedSessionStore:
         Initialize session store.
         
         Args:
-            session_dir: Directory to store sessions. Defaults to ~/.praison/sessions/
+            session_dir: Directory to store sessions. Defaults to the canonical
+                sessions root (``~/.praisonai/sessions/``) shared with the rest
+                of the CLI.
         """
-        self.session_dir = Path(session_dir) if session_dir else DEFAULT_SESSION_DIR
+        self.session_dir = Path(session_dir) if session_dir else _default_session_dir()
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, UnifiedSession] = {}
         self._cache_mtime: Dict[str, float] = {}
