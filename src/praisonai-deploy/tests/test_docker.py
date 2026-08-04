@@ -49,10 +49,10 @@ def test_generate_dockerfile_includes_gunicorn_timeout():
 
     dockerfile = generate_dockerfile("agents.yaml", DockerConfig())
 
-    assert "--timeout" in dockerfile
-    assert str(DEFAULT_GUNICORN_TIMEOUT) in dockerfile
     assert DEFAULT_GUNICORN_TIMEOUT >= 120
-    assert "--graceful-timeout" in dockerfile
+    assert f'"--timeout", "{DEFAULT_GUNICORN_TIMEOUT}"' in dockerfile
+    assert '"--graceful-timeout", "30"' in dockerfile
+    assert '"gunicorn"' in dockerfile
 
 
 def test_generate_dockerfile_custom_base():
