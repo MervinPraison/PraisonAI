@@ -1959,7 +1959,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             "process": self.process,
         }
 
-    def save_session_state(self, session_id: str, include_memory: bool = True) -> None:
+    def save_session_state(self, session_id: str, include_memory: bool = True) -> bool:
         """Persist team session state for deterministic resume (Issue #3635).
 
         Writes the shared team ``_state`` (plus run bookkeeping) to the durable,
@@ -1970,15 +1970,25 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         ``shared_memory`` is kept as an *optional enrichment* (not a gate) so
         legacy semantic-recall lookups still find the state when memory is on.
+
+        Returns ``True`` when the durable write succeeded, ``False`` otherwise,
+        so callers can tell whether a resumable state actually reached disk.
         """
         state_data = self._team_state_payload(session_id)
 
         # Primary, durable path: SessionStore (locked, atomic, memory-independent).
+        durable_saved = False
         try:
             from ..session.store import get_default_session_store
-            get_default_session_store().update_session_metadata(
-                session_id, team_session_state=state_data
+            durable_saved = bool(
+                get_default_session_store().update_session_metadata(
+                    session_id, team_session_state=state_data
+                )
             )
+            if not durable_saved:
+                logger.warning(
+                    f"Durable team session save reported no write for {session_id}"
+                )
         except Exception as e:  # never fail a completed run on save
             logger.warning(f"Durable team session save failed for {session_id}: {e}")
 
@@ -1996,6 +2006,8 @@ class AgentTeam(SpawnAnnounceProtocol):
                 )
             except Exception as e:
                 logger.debug(f"Shared-memory session enrichment failed: {e}")
+
+        return durable_saved
 
     def restore_session_state(self, session_id: str) -> bool:
         """Restore team session state for deterministic resume. Returns True if restored.
