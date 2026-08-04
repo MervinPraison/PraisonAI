@@ -19,10 +19,12 @@ from praisonaiagents.config.feature_configs import (
     resolve_reflection,
     resolve_guardrails,
     resolve_web,
-    resolve_output,
-    resolve_execution,
     resolve_caching,
     resolve_autonomy,
+)
+from praisonaiagents.config.param_resolver import (
+    resolve_output,
+    resolve_execution,
 )
 
 
