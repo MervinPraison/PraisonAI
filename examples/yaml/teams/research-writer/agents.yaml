@@ -24,6 +24,11 @@ roles:
         description: "Write a 3-sentence executive summary from the research."
         expected_output: "3 sentences, plain text."
 
+# Ordering is by task declaration order above (researcher's task runs first,
+# then the writer's), which is how the roles-file loader sequences tasks.
+# The optional `dependencies:` block below mirrors the canonical fixture
+# (src/praisonai/tests/agents.yaml) and documents intent; the roles-file
+# loader does not consume it, so keep tasks in the order you want them run.
 dependencies:
   - task: summary_task
     depends_on: research_task

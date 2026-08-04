@@ -13,13 +13,17 @@ research_task  ->  summary_task
 
 | File | Purpose |
 |------|---------|
-| `agents.yaml` | Roles (who) + their tasks (what) + `dependencies` (order) |
+| `agents.yaml` | Roles (who) + their tasks (what); tasks run in declaration order |
 
 > **Which loader applies?** This example uses the canonical single-file format
-> consumed by `praisonai run` via `AgentsGenerator.generate_crew_and_kickoff()`
+> consumed by `AgentsGenerator.generate_crew_and_kickoff()`
 > (`src/praisonai/praisonai/agents_generator.py`). Agents live under `roles:`,
-> each with nested `tasks:`; ordering is declared with `dependencies:`. No new
-> loader module is required — this is the existing YAML path.
+> each with nested `tasks:`. **Tasks run in the order they are declared** — the
+> researcher's task first, then the writer's. (An optional top-level
+> `dependencies:` block is included to document intent and mirror the canonical
+> fixture, but the roles-file loader sequences by declaration order, so keep
+> tasks in the order you want them to run.) No new loader module is required —
+> this is the existing YAML path.
 
 ## Run it
 
@@ -27,6 +31,11 @@ research_task  ->  summary_task
 export OPENAI_API_KEY=sk-...
 praisonai examples/yaml/teams/research-writer/agents.yaml
 ```
+
+This positional-file form is the canonical roles-file entry point. From Python
+the equivalent is `praisonai.run("agents.yaml")` (see
+`src/praisonai/praisonai/_entrypoint.py`), which dispatches to the same
+`AgentsGenerator`.
 
 Change the subject by editing the `topic:` line in `agents.yaml` (interpolated
 into every `{topic}` placeholder).
