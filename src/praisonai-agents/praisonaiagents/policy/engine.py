@@ -334,15 +334,60 @@ def create_read_only_policy(name: str = "read_only") -> Policy:
             ),
             PolicyRule(
                 action=PolicyAction.DENY,
-                resource="tool:*_write*",
+                resource="tool:write_*",
                 reason="Write tools not allowed in read-only mode",
                 name="deny_write_tools"
             ),
             PolicyRule(
                 action=PolicyAction.DENY,
-                resource="tool:*_delete*",
+                resource="tool:*_write*",
+                reason="Write tools not allowed in read-only mode",
+                name="deny_write_tools_suffix"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:delete_*",
                 reason="Delete tools not allowed in read-only mode",
                 name="deny_delete_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:*_delete*",
+                reason="Delete tools not allowed in read-only mode",
+                name="deny_delete_tools_suffix"
+            ),
+            # Other built-in mutating tools shipped by the SDK
+            # (edit_file, apply_patch, copy_file, move_file, append_file, ...)
+            # whose names don't contain "write"/"delete".
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:edit_*",
+                reason="Edit tools not allowed in read-only mode",
+                name="deny_edit_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:apply_patch*",
+                reason="Patch tools not allowed in read-only mode",
+                name="deny_patch_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:copy_*",
+                reason="Copy tools not allowed in read-only mode",
+                name="deny_copy_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:move_*",
+                reason="Move tools not allowed in read-only mode",
+                name="deny_move_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:append_*",
+                reason="Append tools not allowed in read-only mode",
+                name="deny_append_tools"
             ),
         ],
         priority=100

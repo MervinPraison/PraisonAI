@@ -64,3 +64,28 @@ def test_call_still_fails_clean_fail():
     guardrail = LLMGuardrail(description="d", llm=_AmbiguousLLM("FAIL: bad"))
     is_valid, _ = guardrail("output")
     assert is_valid is False
+
+
+class _GetResponseLLM:
+    """Stub mirroring the SDK's own LLM.get_response interface (issue #3631)."""
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    def get_response(self, prompt, verbose=True, markdown=True, stream=True, **kwargs):
+        return self.reply
+
+
+def test_llm_validate_reaches_get_response_interface():
+    """Regression: an LLM exposing only get_response must be validated,
+    not silently rejected as an "Invalid LLM instance"."""
+    guardrail = LLMGuardrail(description="d", llm=_GetResponseLLM("PASS"))
+    is_valid, result = guardrail._llm_validate("content", "d")
+    assert is_valid is True
+    assert result == "content"
+
+
+def test_get_response_llm_clean_fail():
+    guardrail = LLMGuardrail(description="d", llm=_GetResponseLLM("FAIL: bad"))
+    is_valid, _ = guardrail._llm_validate("content", "d")
+    assert is_valid is False

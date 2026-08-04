@@ -227,7 +227,15 @@ Please respond with either:
 Your response:"""
 
             # Get LLM response
-            if hasattr(self.llm, 'complete'):
+            if hasattr(self.llm, 'get_response'):
+                # praisonaiagents.llm.llm.LLM interface
+                response = self.llm.get_response(
+                    prompt=prompt,
+                    verbose=False,
+                    markdown=False,
+                    stream=False,
+                )
+            elif hasattr(self.llm, 'complete'):
                 response = self.llm.complete(prompt)
             elif hasattr(self.llm, 'invoke'):
                 response = self.llm.invoke(prompt)

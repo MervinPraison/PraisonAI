@@ -3848,8 +3848,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Force streaming, no display by default (app-friendly)
         kwargs['stream'] = True
-        
-        # Use the internal streaming generator
+
+        # Use the internal streaming generator (guardrail-bypass warning is
+        # emitted inside _start_stream so it covers start(stream=True) too).
         for chunk in self._start_stream(prompt, **kwargs):
             yield chunk
         
@@ -3858,6 +3859,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Stream generator for real-time response chunks."""
+        # Warn if an output guardrail is configured: token-level streaming
+        # yields chunks before a full response exists to validate, so the
+        # guardrail cannot be applied without breaking the streaming contract.
+        # This lives here (the single common streaming path) so both
+        # iter_stream() and start(stream=True) surface the bypass loudly.
+        if getattr(self, 'guardrail', None) is not None:
+            logging.warning(
+                f"Agent {getattr(self, 'name', '')}: output guardrail is not "
+                "applied to streamed responses (iter_stream / stream=True). "
+                "Use chat() for guardrail-validated output."
+            )
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
