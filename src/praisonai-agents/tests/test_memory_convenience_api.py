@@ -13,7 +13,7 @@ import pytest
 def memory_config(tmp_path):
     """Minimal local SQLite config (no external providers)."""
     return {
-        "provider": "none",
+        "provider": "sqlite",
         "short_db": str(tmp_path / "short_term.db"),
         "long_db": str(tmp_path / "long_term.db"),
     }
@@ -71,3 +71,18 @@ def test_forget_requires_exactly_one_argument(memory_config):
         mem.forget()
     with pytest.raises(ValueError):
         mem.forget(memory_id="x", query="y")
+
+
+def test_forget_rejects_empty_query(memory_config):
+    """forget(query="") must not trigger a broad LIKE '%%' deletion."""
+    from praisonaiagents.memory import Memory
+
+    mem = Memory(config=memory_config, verbose=0)
+    mem.remember("A fact that must survive an empty-query forget")
+
+    with pytest.raises(ValueError):
+        mem.forget(query="")
+    with pytest.raises(ValueError):
+        mem.forget(query="   ")
+
+    assert len(mem.recall("fact", limit=5)) >= 1

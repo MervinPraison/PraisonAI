@@ -1444,6 +1444,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
             raise ValueError("forget() requires exactly one of 'memory_id' or 'query'")
         if memory_id is not None:
             return 1 if self.delete_memory(memory_id, **kwargs) else 0
+        if not query.strip():
+            raise ValueError("forget() query must be a non-empty string")
+        # Scope query-based deletion to long-term memory to mirror
+        # remember()/recall(), which operate on long-term storage only.
+        kwargs.setdefault("memory_type", "long_term")
         return self.delete_memories_matching(query, **kwargs)
 
     # -------------------------------------------------------------------------
