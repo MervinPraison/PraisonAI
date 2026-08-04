@@ -293,3 +293,46 @@ class TestCallbackWithMetadata:
         assert 'task_id' in received_metadata[0]
         assert 'task_name' in received_metadata[0]
         assert received_metadata[0]['task_name'] == "test_task"
+
+    @pytest.mark.asyncio
+    async def test_two_param_callback_arg_order_is_output_then_metadata(self):
+        """Regression guard (issue #3665): a 2-param Task.on_task_complete callback
+        receives (task_output, metadata_dict) — NOT (task, task_output).
+
+        This documents the difference from AgentTeam.on_task_complete, whose hook
+        passes (task, task_output). Copy-pasting a team-style (task, task_output)
+        callback onto a Task silently binds the wrong objects.
+        """
+        from praisonaiagents import Task
+        from praisonaiagents.main import TaskOutput
+
+        received = []
+
+        def team_style_callback(first, second):
+            # A developer copying the team-hook signature expects (task, output).
+            received.append((first, second))
+
+        task = Task(
+            name="test_task",
+            description="Test task",
+            on_task_complete=team_style_callback,
+        )
+
+        task_output = TaskOutput(
+            description="Test",
+            raw="Test output",
+            agent="TestAgent",
+        )
+
+        await task.execute_callback(task_output)
+
+        assert len(received) == 1
+        first, second = received[0]
+        # First arg is the TaskOutput (not the Task).
+        assert isinstance(first, TaskOutput)
+        assert first.raw == "Test output"
+        # Second arg is the metadata dict (not the TaskOutput).
+        assert isinstance(second, dict)
+        assert second["task_name"] == "test_task"
+        # The Task object is NOT passed to a per-task callback.
+        assert not isinstance(first, Task)
