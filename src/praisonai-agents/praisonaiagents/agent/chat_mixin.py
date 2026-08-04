@@ -3849,6 +3849,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Force streaming, no display by default (app-friendly)
         kwargs['stream'] = True
         
+        # Warn if an output guardrail is configured: token-level streaming
+        # yields chunks before a full response exists to validate, so the
+        # guardrail cannot be applied without breaking the streaming contract.
+        if getattr(self, 'guardrail', None) is not None:
+            logging.warning(
+                f"Agent {getattr(self, 'name', '')}: output guardrail is not "
+                "applied to streamed responses (iter_stream / stream=True). "
+                "Use chat() for guardrail-validated output."
+            )
+
         # Use the internal streaming generator
         for chunk in self._start_stream(prompt, **kwargs):
             yield chunk

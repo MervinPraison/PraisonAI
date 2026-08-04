@@ -334,15 +334,27 @@ def create_read_only_policy(name: str = "read_only") -> Policy:
             ),
             PolicyRule(
                 action=PolicyAction.DENY,
-                resource="tool:*_write*",
+                resource="tool:write_*",
                 reason="Write tools not allowed in read-only mode",
                 name="deny_write_tools"
             ),
             PolicyRule(
                 action=PolicyAction.DENY,
-                resource="tool:*_delete*",
+                resource="tool:*_write*",
+                reason="Write tools not allowed in read-only mode",
+                name="deny_write_tools_suffix"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:delete_*",
                 reason="Delete tools not allowed in read-only mode",
                 name="deny_delete_tools"
+            ),
+            PolicyRule(
+                action=PolicyAction.DENY,
+                resource="tool:*_delete*",
+                reason="Delete tools not allowed in read-only mode",
+                name="deny_delete_tools_suffix"
             ),
         ],
         priority=100
