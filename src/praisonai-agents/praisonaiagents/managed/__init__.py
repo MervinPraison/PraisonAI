@@ -26,6 +26,8 @@ from .protocols import (
     InstanceInfo,
     InstanceStatus,
     ManagedRuntimeProtocol,
+    load_environment_definition,
+    find_environment_definition,
 )
 
 __all__ = [
@@ -44,6 +46,8 @@ __all__ = [
     "InstanceStatus",
     "ManagedRuntimeProtocol",
     "ManagedBackendProtocol",
+    "load_environment_definition",
+    "find_environment_definition",
 ]
 
 

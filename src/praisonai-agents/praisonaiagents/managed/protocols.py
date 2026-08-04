@@ -56,6 +56,7 @@ class ComputeConfig:
             cpu=2,
             memory_mb=2048,
             packages={"pip": ["pandas", "numpy"]},
+            setup=["pip install -e ."],
             env={"OPENAI_API_KEY": "sk-..."},
             auto_shutdown=True,
             idle_timeout_s=300,
@@ -66,6 +67,7 @@ class ComputeConfig:
     memory_mb: int = 1024
     gpu: Optional[str] = None
     packages: Dict[str, List[str]] = field(default_factory=dict)
+    setup: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     working_dir: str = "/workspace"
     mount_paths: List[str] = field(default_factory=list)
@@ -73,6 +75,115 @@ class ComputeConfig:
     auto_shutdown: bool = True
     idle_timeout_s: int = 300
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+_ENV_FILENAME = "environment.yaml"
+_ENV_DIRNAME = ".praisonai"
+
+_ENV_KNOWN_KEYS = {
+    "image", "packages", "setup", "env", "resources",
+    "network", "backend", "working_dir", "mount_paths",
+}
+
+
+def find_environment_definition(start: Optional[str] = None) -> Optional[str]:
+    """Discover ``.praisonai/environment.yaml`` by walking up from ``start``.
+
+    Args:
+        start: Directory to start searching from (defaults to CWD).
+
+    Returns:
+        Absolute path to the definition file, or ``None`` if not found.
+    """
+    import os
+
+    current = os.path.abspath(start or os.getcwd())
+    while True:
+        candidate = os.path.join(current, _ENV_DIRNAME, _ENV_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def load_environment_definition(
+    path: Optional[str] = None,
+) -> Optional[ComputeConfig]:
+    """Load a repo-committed ``.praisonai/environment.yaml`` into a ComputeConfig.
+
+    This is the single resolution path shared by every ``compute=`` consumer:
+    the file declares image / packages / setup / env / resources / network /
+    backend, and is mapped onto the existing :class:`ComputeConfig` schema.
+
+    Args:
+        path: Explicit path to a definition file. If ``None``, discovery walks
+            up from the current directory looking for ``.praisonai/environment.yaml``.
+
+    Returns:
+        A :class:`ComputeConfig`, or ``None`` when no file is found (callers then
+        fall back to today's defaults — the file is strictly opt-in).
+
+    Raises:
+        ValueError: If the file contains unknown top-level keys or is malformed.
+    """
+    if path is None:
+        path = find_environment_definition()
+        if path is None:
+            return None
+
+    import yaml  # lazy — stdlib-adjacent, already a dependency
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{path}: environment definition must be a mapping, got {type(data).__name__}"
+        )
+
+    unknown = set(data) - _ENV_KNOWN_KEYS
+    if unknown:
+        raise ValueError(
+            f"{path}: unknown key(s) {sorted(unknown)}; "
+            f"allowed keys are {sorted(_ENV_KNOWN_KEYS)}"
+        )
+
+    cfg = ComputeConfig()
+
+    if "image" in data:
+        cfg.image = data["image"]
+    if "packages" in data:
+        cfg.packages = data["packages"] or {}
+    if "setup" in data:
+        setup = data["setup"] or []
+        if isinstance(setup, str):
+            setup = [setup]
+        cfg.setup = list(setup)
+    if "env" in data:
+        cfg.env = {str(k): str(v) for k, v in (data["env"] or {}).items()}
+    if "working_dir" in data:
+        cfg.working_dir = data["working_dir"]
+    if "mount_paths" in data:
+        cfg.mount_paths = list(data["mount_paths"] or [])
+
+    resources = data.get("resources") or {}
+    if "cpu" in resources:
+        cfg.cpu = int(resources["cpu"])
+    if "memory_mb" in resources:
+        cfg.memory_mb = int(resources["memory_mb"])
+    if "gpu" in resources:
+        cfg.gpu = resources["gpu"]
+
+    # Carry network / backend preferences in existing typed fields so no new
+    # dataclass surface is added without a consumer.
+    if "network" in data:
+        cfg.networking = {"type": data["network"]}
+    if "backend" in data:
+        cfg.metadata["backend"] = data["backend"]
+
+    return cfg
 
 
 @dataclass
