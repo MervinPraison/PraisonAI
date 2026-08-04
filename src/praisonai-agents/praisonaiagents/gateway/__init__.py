@@ -158,6 +158,9 @@ from .degraded_state import (
     DegradedCapabilityRegistry,
     OWNER_KINDS,
     DEGRADED_STATES,
+    # Fail-closed read of the degraded-owner contract (Issue #3640)
+    OwnerUnavailable,
+    assert_owner_available,
 )
 from .hooks import (
     HookAction,
@@ -381,6 +384,9 @@ __all__ = [
     "DegradedCapabilityRegistry",
     "OWNER_KINDS",
     "DEGRADED_STATES",
+    # Fail-closed read of the degraded-owner contract (Issue #3640)
+    "OwnerUnavailable",
+    "assert_owner_available",
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
