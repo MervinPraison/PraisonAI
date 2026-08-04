@@ -9,6 +9,7 @@ from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error
 from ..run_outcome import AgentRunOutcome, RunStatus, validate_decision_string
+from .manager_schema import ManagerInstructions
 import csv
 import os
 
@@ -971,11 +972,6 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             reflection=False
         )
 
-        class ManagerInstructions(BaseModel):
-            task_id: int
-            agent_name: str
-            action: str
-
         manager_task = Task(
             name="manager_task",
             description="Decide the order of tasks and which agent executes them",
@@ -1557,11 +1553,6 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             output={"verbose": self.verbose, "markdown": True},
             reflection=False
         )
-
-        class ManagerInstructions(BaseModel):
-            task_id: int
-            agent_name: str
-            action: str
 
         manager_task = Task(
             name="manager_task",
