@@ -98,7 +98,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
     vector-based memory for enhanced relationship-aware retrieval.
     """
 
-    def __init__(self, config: Dict[str, Any], verbose: int = 0):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, verbose: int = 0):
         self.cfg = config or {}
         self.verbose = verbose
         
@@ -1394,6 +1394,62 @@ class Memory(SearchMixin, MemoryCoreMixin):
             self._log_verbose(f"Deleted {deleted} memories matching '{query}'")
         
         return deleted
+
+    # -------------------------------------------------------------------------
+    #             Convenience API (remember / recall / forget)
+    # -------------------------------------------------------------------------
+    # Thin, intuitive aliases over the existing long-term store/search/delete
+    # methods. They do not replace any backend or add new storage — they simply
+    # provide a friendlier entry point for standalone scripts and agents.
+    def remember(
+        self,
+        content: str,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> str:
+        """Store a fact in long-term memory; returns the memory id.
+
+        Convenience alias over :meth:`store_long_term`.
+        """
+        return self.store_long_term(content, metadata=metadata, **kwargs)
+
+    def recall(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve matching facts from long-term memory.
+
+        Convenience alias over :meth:`search_long_term`.
+        """
+        return self.search_long_term(query, limit=limit, **kwargs)
+
+    def forget(
+        self,
+        *,
+        memory_id: Optional[str] = None,
+        query: Optional[str] = None,
+        **kwargs,
+    ) -> int:
+        """Delete memories by id or matching query; returns count deleted.
+
+        Convenience wrapper over :meth:`delete_memory` /
+        :meth:`delete_memories_matching`. Provide exactly one of
+        ``memory_id`` or ``query``.
+        """
+        if (memory_id is None) == (query is None):
+            raise ValueError("forget() requires exactly one of 'memory_id' or 'query'")
+        if memory_id is not None:
+            return 1 if self.delete_memory(memory_id, **kwargs) else 0
+        if not query.strip():
+            raise ValueError("forget() query must be a non-empty string")
+        # Scope query-based deletion to long-term memory to mirror
+        # remember()/recall(), which operate on long-term storage only.
+        kwargs.setdefault("memory_type", "long_term")
+        return self.delete_memories_matching(query, **kwargs)
 
     # -------------------------------------------------------------------------
     #                       Entity Memory Methods
