@@ -42,11 +42,17 @@ class TestSlugify:
         with pytest.raises(ValueError):
             it.slugify("---")
 
+    def test_reserved_keyword_suffixed(self):
+        # A name that slugifies to a Python keyword must not produce an
+        # invalid `from class.team import ...` import.
+        assert it.slugify("class") == "class_team"
+        assert it.slugify("import") == "import_team"
+
 
 class TestScaffold:
     def test_creates_expected_files(self, tmp_path):
         root = _run(tmp_path, "demo-crew")
-        pkg = root / "src" / "demo_crew"
+        pkg = root / "demo_crew"
         assert (root / ".env.example").exists()
         assert (root / ".gitignore").exists()
         assert (root / "README.md").exists()
@@ -59,13 +65,36 @@ class TestScaffold:
 
     def test_generated_python_parses(self, tmp_path):
         root = _run(tmp_path, "demo-crew")
-        pkg = root / "src" / "demo_crew"
+        pkg = root / "demo_crew"
         ast.parse((pkg / "main.py").read_text())
         ast.parse((pkg / "team.py").read_text())
 
+    def test_documented_run_path_importable(self, tmp_path):
+        # Flat layout: `python -m <slug>.main` must resolve from the project
+        # root, so `<slug>/main.py` (not `src/<slug>/main.py`) must exist and
+        # import the package by its top-level name.
+        root = _run(tmp_path, "demo-crew")
+        main = (root / "demo_crew" / "main.py").read_text()
+        assert "from demo_crew.team import build_team" in main
+        assert not (root / "src").exists()
+
+    def test_topic_uses_double_brace_and_variables(self, tmp_path):
+        # The SDK substitutes {{key}} from AgentTeam(variables=...); single
+        # braces and start(inputs=...) would silently drop the topic.
+        root = _run(tmp_path, "demo-crew")
+        pkg = root / "demo_crew"
+        tasks = (pkg / "config" / "tasks.yaml").read_text()
+        assert "{{topic}}" in tasks
+        assert "{topic}" not in tasks.replace("{{topic}}", "")
+        team = (pkg / "team.py").read_text()
+        assert "variables=variables" in team
+        main = (pkg / "main.py").read_text()
+        assert 'build_team(variables={"topic"' in main
+        assert "inputs=" not in main
+
     def test_yaml_loads(self, tmp_path):
         root = _run(tmp_path, "demo-crew")
-        cfg = root / "src" / "demo_crew" / "config"
+        cfg = root / "demo_crew" / "config"
         agents = yaml.safe_load((cfg / "agents.yaml").read_text())
         tasks = yaml.safe_load((cfg / "tasks.yaml").read_text())
         assert agents["process"] == "sequential"
@@ -79,7 +108,7 @@ class TestScaffold:
     def test_process_hierarchical(self, tmp_path):
         root = _run(tmp_path, "demo-crew", process="hierarchical")
         agents = yaml.safe_load(
-            (root / "src" / "demo_crew" / "config" / "agents.yaml").read_text()
+            (root / "demo_crew" / "config" / "agents.yaml").read_text()
         )
         assert agents["process"] == "hierarchical"
 
@@ -90,7 +119,7 @@ class TestScaffold:
     def test_agents_count(self, tmp_path):
         root = _run(tmp_path, "demo-crew", agent_count=3)
         agents = yaml.safe_load(
-            (root / "src" / "demo_crew" / "config" / "agents.yaml").read_text()
+            (root / "demo_crew" / "config" / "agents.yaml").read_text()
         )
         assert len(agents["agents"]) == 3
 
