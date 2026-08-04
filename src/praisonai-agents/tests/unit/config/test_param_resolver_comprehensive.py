@@ -483,7 +483,7 @@ class TestNamingAlias:
     
     v4.0.0 Updates:
     - Agents is now a SILENT alias for AgentManager (no deprecation warning)
-    - PraisonAIAgents has been REMOVED entirely (raises ImportError)
+    - PraisonAIAgents is restored as a SILENT alias for AgentTeam (see issue #3674)
     """
     
     def test_agents_is_silent_alias(self):
@@ -492,11 +492,10 @@ class TestNamingAlias:
         # Agents is now a silent alias
         assert Agents is AgentManager
     
-    def test_praisonaiagents_removed_v4(self):
-        """PraisonAIAgents was removed in v4 - should raise ImportError."""
-        import pytest
-        with pytest.raises(ImportError):
-            from praisonaiagents import PraisonAIAgents
+    def test_praisonaiagents_restored_alias(self):
+        """PraisonAIAgents is restored as a root alias for AgentTeam (issue #3674)."""
+        from praisonaiagents import AgentTeam, PraisonAIAgents
+        assert PraisonAIAgents is AgentTeam
     
     def test_agent_manager_is_alias_for_agent_team(self):
         """AgentManager is now a silent alias for AgentTeam (v1.0+)."""
