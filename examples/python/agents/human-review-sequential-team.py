@@ -64,7 +64,7 @@ writer = Agent(name="Writer", role="Writer", goal="Write", backstory="Writer")
 
 t1 = Task(
     name="research",
-    description="List 5 facts about {topic}",
+    description="List 5 facts about {{topic}}",  # {{...}} is the substitution syntax
     expected_output="5 bullets",
     agent=researcher,
 )
@@ -80,6 +80,7 @@ team = AgentTeam(
     agents=[researcher, writer],
     tasks=[t1, t2],
     process="sequential",
+    variables={"topic": "REST APIs"},  # substituted into {{topic}} in task descriptions
     hooks=MultiAgentHooksConfig(on_task_complete=review_gate),
 )
 
@@ -95,13 +96,16 @@ def review_output(task_output):
 
 t1_strict = Task(
     name="research",
-    description="List 5 facts about {topic}",
+    description="List 5 facts about {{topic}}",
     expected_output="5 bullets",
     agent=researcher,
+    variables={"topic": "REST APIs"},
     on_task_complete=review_output,     # signature: (task_output)
     fail_on_callback_error=True,        # required so reject halts the workflow
 )
 
 
 if __name__ == "__main__":
-    team.start(inputs={"topic": "REST APIs"})
+    # NOTE: template values come from AgentTeam(variables=...), NOT start(inputs=...).
+    # start() forwards **kwargs but does not consume an ``inputs`` argument.
+    team.start()
