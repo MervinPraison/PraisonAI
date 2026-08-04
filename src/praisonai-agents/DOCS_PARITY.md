@@ -23,16 +23,16 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent-to-User (A2U) | 1 | 3 | 608 |
 | ✅ Approval | 1 | 5 | 2479 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 10 | 2993 |
+| ✅ Auto Generation | 5 | 10 | 3005 |
 | ✅ Autonomy | 3 | 7 | 2736 |
-| ✅ Bots | 7 | 31 | 12596 |
+| ✅ Bots | 7 | 31 | 12671 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 120 | 34994 |
+| ✅ CLI | 5 | 120 | 35016 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4259 |
 | ✅ Conditions | 1 | 3 | 1179 |
-| ✅ Configuration | 3 | 8 | 3026 |
+| ✅ Configuration | 3 | 8 | 3045 |
 | ✅ Context Management | 16 | 34 | 13278 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
@@ -44,12 +44,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
 | ✅ Gateway | 7 | 63 | 23253 |
-| ✅ Guardrails | 4 | 4 | 1793 |
+| ✅ Guardrails | 4 | 4 | 1833 |
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4214 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
-| ✅ LLM | 3 | 14 | 4871 |
+| ✅ LLM | 3 | 14 | 4919 |
 | ✅ Loops | 4 | 5 | 1422 |
 | ✅ MCP | 1 | 60 | 13724 |
 | ✅ Memory | 6 | 17 | 6656 |
