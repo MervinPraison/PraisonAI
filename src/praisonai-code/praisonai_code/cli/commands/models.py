@@ -8,9 +8,21 @@ from typing import Optional, List, Dict, Any
 import typer
 import json
 
-from ..output.console import get_output_controller
+from ..output.console import get_output_controller, stdout_supports_unicode
 
 app = typer.Typer(help="List and describe available models")
+
+
+def _capabilities_label(model: Dict[str, Any], use_emoji: bool) -> str:
+    """Return a capabilities string, ASCII-safe on non-UTF-8 stdout."""
+    capabilities = []
+    if model.get("supports_tools"):
+        capabilities.append("🔧 tools" if use_emoji else "tools")
+    if model.get("supports_vision"):
+        capabilities.append("👁️ vision" if use_emoji else "vision")
+    if model.get("supports_reasoning"):
+        capabilities.append("🧠 reasoning" if use_emoji else "reasoning")
+    return " ".join(capabilities) if capabilities else "-"
 
 
 @app.command(name="list")
@@ -51,11 +63,11 @@ def list_models(
                 by_provider[provider_name] = []
             by_provider[provider_name].append(model)
         
-        # Display models in a table format
+        # Display models in a table format via the encoding-aware console
         from rich.table import Table
-        from rich.console import Console
         
-        console = Console()
+        console = output.console
+        use_emoji = stdout_supports_unicode()
         
         for provider_name, provider_models in sorted(by_provider.items()):
             table = Table(title=f"\n{provider_name.upper()} Models", show_header=True, header_style="bold cyan")
@@ -66,15 +78,8 @@ def list_models(
             table.add_column("Cost (1K)", justify="right", style="dim")
             
             for model in sorted(provider_models, key=lambda x: x.get("id", "")):
-                # Format capabilities
-                capabilities = []
-                if model.get("supports_tools"):
-                    capabilities.append("🔧 tools")
-                if model.get("supports_vision"):
-                    capabilities.append("👁️ vision")
-                if model.get("supports_reasoning"):
-                    capabilities.append("🧠 reasoning")
-                cap_str = " ".join(capabilities) if capabilities else "-"
+                # Format capabilities (ASCII-safe on non-UTF-8 stdout)
+                cap_str = _capabilities_label(model, use_emoji)
                 
                 # Format costs
                 cost_str = "-"
@@ -93,7 +98,28 @@ def list_models(
                     cost_str
                 )
             
-            console.print(table)
+            if console is not None:
+                console.print(table)
+            else:
+                output.print_table(
+                    ["Model ID", "Context", "Output", "Capabilities", "Cost (1K)"],
+                    [
+                        [
+                            m.get("id", "-"),
+                            str(m.get("max_context", "-")),
+                            str(m.get("max_output", "-")),
+                            _capabilities_label(m, use_emoji),
+                            (
+                                f"${m['input_cost']:.4f}/${m['output_cost']:.4f}"
+                                if m.get("input_cost") is not None
+                                and m.get("output_cost") is not None
+                                else "-"
+                            ),
+                        ]
+                        for m in sorted(provider_models, key=lambda x: x.get("id", ""))
+                    ],
+                    title=f"{provider_name.upper()} Models",
+                )
         
     except ImportError:
         # Show basic fallback models
@@ -170,12 +196,16 @@ def describe_model(
         if info.get("description"):
             output.print(f"Description: {info['description']}")
         
-        # Capabilities
+        # Capabilities (ASCII-safe markers on non-UTF-8 stdout)
+        if stdout_supports_unicode():
+            yes, no = "✅", "❌"
+        else:
+            yes, no = "yes", "no"
         output.print("\nCapabilities:")
-        output.print(f"  • Tool calling: {'✅' if info.get('supports_tools') else '❌'}")
-        output.print(f"  • Vision: {'✅' if info.get('supports_vision') else '❌'}")
-        output.print(f"  • Reasoning: {'✅' if info.get('supports_reasoning') else '❌'}")
-        output.print(f"  • Streaming: {'✅' if info.get('supports_streaming', True) else '❌'}")
+        output.print(f"  - Tool calling: {yes if info.get('supports_tools') else no}")
+        output.print(f"  - Vision: {yes if info.get('supports_vision') else no}")
+        output.print(f"  - Reasoning: {yes if info.get('supports_reasoning') else no}")
+        output.print(f"  - Streaming: {yes if info.get('supports_streaming', True) else no}")
         
         # Limits
         output.print("\nLimits:")
@@ -223,8 +253,9 @@ def validate_model(
         from praisonai_code.llm.catalogue import ModelCatalogue
         catalogue = ModelCatalogue()
         
+        valid_mark = "✅ " if stdout_supports_unicode() else ""
         if catalogue.is_valid_model(model):
-            output.print_success(f"✅ '{model}' is a valid model")
+            output.print_success(f"{valid_mark}'{model}' is a valid model")
             
             # Show basic info if available
             info = catalogue.describe_model(model)
@@ -239,7 +270,8 @@ def validate_model(
                 if caps:
                     output.print(f"Capabilities: {', '.join(caps)}")
         else:
-            output.print_error(f"❌ '{model}' is not a valid model")
+            invalid_mark = "❌ " if stdout_supports_unicode() else ""
+            output.print_error(f"{invalid_mark}'{model}' is not a valid model")
             
             # Suggest alternatives
             suggestions = catalogue.get_suggestions(model)
