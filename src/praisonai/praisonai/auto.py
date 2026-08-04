@@ -370,6 +370,52 @@ class BaseAutoGenerator:
         self._core_client = None  # lazy, per-instance core OpenAIClient
         self._client_lock = threading.Lock()
 
+    def _resolve_framework(self, requested: Optional[str], registry,
+                           require_workflow: bool = False):
+        """Resolve and validate a framework via the shared adapter registry.
+
+        Single source of truth for default selection: when ``requested`` is
+        falsy (``None`` or empty string), defer to ``registry.pick_default()``
+        — the same selector ``praisonai.run(...)`` uses — instead of hardcoding
+        a per-class default. Validates the adapter exists and is installed so
+        both auto-generators fail loudly and consistently.
+
+        When ``require_workflow`` is set, the resolved adapter must also
+        advertise ``SUPPORTS_WORKFLOW``. This keeps ``WorkflowAutoGenerator``
+        from silently picking an installed-but-non-workflow default (e.g. when
+        the native ``praisonai`` adapter is absent) and then emitting a
+        workflow YAML that ``AgentsGenerator`` would reject at run time.
+        """
+        if not requested:
+            requested = registry.pick_default()
+        try:
+            adapter = registry.create(requested)
+        except ValueError as e:
+            raise ImportError(
+                f"Unknown framework '{requested}'. Available frameworks: "
+                f"{', '.join(registry.list_registered())}"
+            ) from e
+        if not adapter.is_available():
+            install_hint = getattr(adapter, "install_hint", f"pip install {requested}")
+            raise ImportError(
+                f"{adapter.name} is not installed. Please install with:\n    {install_hint}"
+            )
+        if require_workflow and getattr(adapter, "SUPPORTS_WORKFLOW", False) is not True:
+            from .framework_adapters.registry import adapter_capability
+            supported = [
+                name for name in registry.list_registered()
+                if adapter_capability(name, "SUPPORTS_WORKFLOW", registry=registry) is True
+            ]
+            hint = (
+                f" Frameworks supporting workflow execution: "
+                f"{', '.join(sorted(set(supported)))}." if supported else ""
+            )
+            raise ImportError(
+                f"Framework '{adapter.name}' does not support workflow "
+                f"generation (SUPPORTS_WORKFLOW is not set).{hint}"
+            )
+        return adapter
+
     def _get_core_client(self):
         """Get or create the core-owned ``OpenAIClient`` for this instance.
 
@@ -891,7 +937,7 @@ class AutoGenerator(BaseAutoGenerator):
     """
     
     def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", 
-                 framework="crewai", config_list: Optional[List[Dict]] = None,
+                 framework: Optional[str] = None, config_list: Optional[List[Dict]] = None,
                  pattern: str = "sequential", single_agent: bool = False, 
                  adapter_registry=None):
         """
@@ -900,7 +946,10 @@ class AutoGenerator(BaseAutoGenerator):
         Args:
             topic: The task/topic for agent generation
             agent_file: Output YAML file name
-            framework: Framework to use (crewai, autogen, praisonai)
+            framework: Framework to use (praisonai, crewai, autogen). When
+                omitted, resolves via the shared registry default selector —
+                the same one ``praisonai.run(...)`` uses — so the
+                generate → run round-trip agrees on defaults.
             config_list: Optional LLM configuration
             pattern: Workflow pattern (sequential, parallel, routing, orchestrator-workers, evaluator-optimizer)
             single_agent: If True, generate a single agent instead of a team
@@ -910,28 +959,16 @@ class AutoGenerator(BaseAutoGenerator):
         # Initialize base class first (handles config_list and client)
         super().__init__(config_list=config_list)
         
-        # Validate framework availability using adapter registry
+        # Resolve + validate framework using the shared adapter registry.
         from .framework_adapters.registry import get_default_registry
         
         self._adapter_registry = adapter_registry or get_default_registry()
-        try:
-            adapter = self._adapter_registry.create(framework)
-        except ValueError as e:
-            raise ImportError(
-                f"Unknown framework '{framework}'. Available frameworks: "
-                f"{', '.join(self._adapter_registry.list_registered())}"
-            ) from e
+        adapter = self._resolve_framework(framework, self._adapter_registry)
 
-        # Use safe fallbacks for new adapter attributes
-        install_hint = getattr(adapter, "install_hint", f"pip install {framework}")
-        requires_tools_extra = bool(getattr(adapter, "requires_tools_extra", False))
-        
-        if not adapter.is_available():
-            raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {install_hint}")
-        
         # Check tools availability if required by this framework
-        if requires_tools_extra and not is_available("praisonai_tools"):
-            logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
+        install_hint = getattr(adapter, "install_hint", f"pip install {adapter.name}")
+        if bool(getattr(adapter, "requires_tools_extra", False)) and not is_available("praisonai_tools"):
+            logger.warning(f"Tools are not available for {adapter.name}. To use tools, install:\n    {install_hint}")
 
         # Retain the resolved adapter as the canonical dispatch object (mirrors
         # AgentsGenerator, which stores self.framework_adapter). Downstream code
@@ -939,8 +976,8 @@ class AutoGenerator(BaseAutoGenerator):
         self._adapter = adapter
         self.topic = topic
         self.agent_file = agent_file
-        # Authoritative framework name comes from the adapter, not the raw arg.
-        self.framework = adapter.name or framework or "praisonai"
+        # Authoritative framework name comes from the resolved adapter.
+        self.framework = adapter.name
         self.pattern = pattern
         self.single_agent = single_agent
     
@@ -1380,8 +1417,9 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
     def __init__(self, topic: str = "Research and write about AI", 
                  workflow_file: str = "workflow.yaml",
                  config_list: Optional[List[Dict]] = None,
-                 framework: str = "praisonai",
-                 single_agent: bool = False):
+                 framework: Optional[str] = None,
+                 single_agent: bool = False,
+                 adapter_registry=None):
         """
         Initialize the WorkflowAutoGenerator.
         
@@ -1389,15 +1427,28 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
             topic: The task/topic for the workflow
             workflow_file: Output file name
             config_list: Optional LLM configuration
-            framework: Framework to use (praisonai, crewai, autogen)
+            framework: Framework to use (praisonai, crewai, autogen). When
+                omitted, resolves via the shared registry default selector so
+                the generate → run round-trip agrees on defaults. The adapter
+                is validated here rather than deferring the failure to a later
+                ``praisonai run`` invocation.
             single_agent: If True, generate a single agent workflow
         """
         # Initialize base class (handles config_list and client)
         super().__init__(config_list=config_list)
         
+        # Resolve + validate framework through the same single source of truth
+        # AutoGenerator and praisonai.run() use, instead of hardcoding a
+        # different per-class default and skipping validation.
+        from .framework_adapters.registry import get_default_registry
+        self._adapter_registry = adapter_registry or get_default_registry()
+        adapter = self._resolve_framework(
+            framework, self._adapter_registry, require_workflow=True
+        )
+        self._adapter = adapter
         self.topic = topic
         self.workflow_file = workflow_file
-        self.framework = framework
+        self.framework = adapter.name
         self.single_agent = single_agent
     
     def recommend_pattern_llm(self, topic: Optional[str] = None) -> Any:

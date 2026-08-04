@@ -822,27 +822,56 @@ class TestWorkflowMergeSupport:
 class TestWorkflowFrameworkSupport:
     """Test suite for framework support in WorkflowAutoGenerator."""
     
+    @staticmethod
+    def _fake_registry(name="crewai", default="praisonai", supports_workflow=True):
+        """Registry double whose adapter reports available, so framework
+        validation passes without the framework actually being installed.
+
+        ``supports_workflow`` mirrors the adapter ``SUPPORTS_WORKFLOW`` flag the
+        WorkflowAutoGenerator now enforces via ``require_workflow=True``.
+        """
+        from unittest.mock import MagicMock
+        adapter = MagicMock()
+        adapter.name = name
+        adapter.is_available.return_value = True
+        adapter.SUPPORTS_WORKFLOW = supports_workflow
+        registry = MagicMock()
+        registry.create.return_value = adapter
+        registry.pick_default.return_value = default
+        return registry
+
     def test_workflow_generator_accepts_framework_parameter(self):
-        """Test that WorkflowAutoGenerator accepts framework parameter."""
+        """Explicit framework goes straight to create() without pick_default()."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            registry = self._fake_registry("crewai")
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=registry,
             )
             assert generator.framework == "crewai"
+            registry.create.assert_called_once_with("crewai")
+            registry.pick_default.assert_not_called()
     
     def test_workflow_generator_default_framework_is_praisonai(self):
-        """Test that default framework is praisonai."""
+        """Omitted framework resolves via the shared registry default selector."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            generator = WorkflowAutoGenerator(topic="Test task")
+            registry = self._fake_registry("praisonai", default="praisonai")
+            generator = WorkflowAutoGenerator(
+                topic="Test task",
+                adapter_registry=registry,
+            )
             assert generator.framework == "praisonai"
+            registry.pick_default.assert_called_once()
+            registry.create.assert_called_once_with("praisonai")
     
     def test_save_workflow_respects_framework(self):
         """Test that _save_workflow uses the specified framework."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(
                 topic="Test task",
-                framework="crewai"
+                framework="crewai",
+                adapter_registry=self._fake_registry("crewai"),
             )
             # The framework should be stored and used in output
             assert generator.framework == "crewai"

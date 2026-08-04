@@ -129,6 +129,23 @@ class PushClient:
     def is_connected(self) -> bool:
         return self._connected and self._transport is not None and self._transport.is_connected
 
+    @property
+    def supports_publish(self) -> bool:
+        """Whether producer operations are available on the active transport.
+
+        ``False`` after a WebSocket → polling fallback: the polling contract
+        has no publish/create/presence-query routes, so ``publish``,
+        ``create_channel`` and ``get_presence`` would raise. Callers can gate
+        their producer code on this instead of discovering the drop at call time.
+
+        Requires an active connection: before connect, after ``disconnect()``,
+        or after a failed connect that never entered polling mode there is no
+        transport to publish through, so this reports ``False`` rather than a
+        false positive that would let gated producer calls proceed and fail
+        with ``ConnectionError``.
+        """
+        return self.is_connected and not self._using_polling
+
     # ------------------------------------------------------------------
     # Channel operations
     # ------------------------------------------------------------------
@@ -383,7 +400,12 @@ class PushClient:
             await self._transport.connect()
             self._connected = True
             self._using_polling = True
-            logger.info("Switched to polling transport")
+            logger.warning(
+                "PushClient fell back to polling transport. Unavailable "
+                "operations under polling: publish, create_channel, "
+                "get_presence (they will raise NotImplementedError). Gate "
+                "producer code on the `supports_publish` property."
+            )
         except Exception as e:
             logger.error("Polling transport failed: %s", e)
             self._connected = False
