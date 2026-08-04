@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2800 |
 | ✅ Security | 1 | 3 | 2991 |
-| ✅ Sessions | 4 | 13 | 5631 |
+| ✅ Sessions | 4 | 13 | 5635 |
 | ✅ Skills | 6 | 14 | 5346 |
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
