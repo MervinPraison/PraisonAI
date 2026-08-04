@@ -352,6 +352,54 @@ def _parse_shell_approvers(ch_cfg: Dict[str, Any], channel_type: str) -> List[st
     return []
 
 
+def _coerce_shell_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _gateway_bind_host(config: Optional[Any]) -> Optional[str]:
+    if config is None:
+        return None
+    for attr in ("bind_host", "host"):
+        host = getattr(config, attr, None)
+        if host:
+            return str(host)
+    return None
+
+
+def _shell_auto_approve_is_safe(config: Optional[Any], ch_cfg: Dict[str, Any]) -> bool:
+    """Blanket shell auto-approve is only safe on a loopback bind + non-group surface.
+
+    Mirrors the auth token's exposure-aware posture (``assert_external_bind_safe``):
+    an externally-bound gateway or a multi-user/group channel must not silently
+    grant RCE to every sender. Returns ``True`` only when the gateway binds to a
+    loopback interface AND the channel is not a multi-user/group surface.
+    """
+    bind_host = _gateway_bind_host(config)
+    if bind_host is not None:
+        try:
+            from praisonaiagents.gateway.protocols import is_loopback
+
+            if not is_loopback(bind_host):
+                return False
+        except ImportError:  # pragma: no cover - core always present in-tree
+            # Unknown exposure — fail closed on the highest-blast-radius path.
+            return False
+
+    group_policy = str(ch_cfg.get("group_policy") or "").strip().lower()
+    if group_policy and group_policy != "command_only":
+        # respond_all / mention_only / observe all imply a multi-user surface
+        # where any group member's message can reach the shell.
+        return False
+
+    return True
+
+
 def _channel_token(config: Optional[Any], ch_cfg: Dict[str, Any]) -> Optional[str]:
     token = ch_cfg.get("token") or (getattr(config, "token", None) if config else None)
     return str(token) if token else None
@@ -576,9 +624,26 @@ def enable_shell_tools(
     deny -= _SHELL_TOOL_NAMES
     agent._perm_deny = frozenset(deny)
 
-    auto_approve = ch_cfg.get("auto_approve_shell", True)
-    if isinstance(auto_approve, str):
-        auto_approve = auto_approve.strip().lower() in ("1", "true", "yes", "on")
+    auto_approve = _coerce_shell_bool(ch_cfg.get("auto_approve_shell", True), default=True)
+
+    # Exposure-aware downgrade: blanket auto-approval silently grants RCE to every
+    # sender on an externally-bound or multi-user/group surface. Only keep it where
+    # it is safe (loopback bind + non-group), unless the operator explicitly
+    # acknowledges the exposure — the same "calibrated by exposure" posture the
+    # gateway auth token already enforces via assert_external_bind_safe.
+    if auto_approve and not _shell_auto_approve_is_safe(config, ch_cfg):
+        acknowledged = _coerce_shell_bool(
+            ch_cfg.get("auto_approve_shell_acknowledge_exposed", False)
+        )
+        if not acknowledged:
+            logger.warning(
+                "Channel %r enables shell on an exposed/multi-user surface; "
+                "downgrading auto_approve_shell to require approval. Set "
+                "auto_approve_shell_acknowledge_exposed: true to keep blanket "
+                "auto-approval.",
+                channel_type or "?",
+            )
+            auto_approve = False
 
     if auto_approve:
         try:
