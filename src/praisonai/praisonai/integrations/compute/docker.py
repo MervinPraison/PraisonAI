@@ -113,9 +113,28 @@ class DockerCompute:
             "created_at": time.time(),
         }
 
-        # Install packages
-        if config.packages:
-            self._install_packages_sync(container, config.packages)
+        # Install packages / run setup. If either fails, tear down the
+        # just-started container so we don't leak an unreachable
+        # ``sleep infinity`` container + registry entry (the caller never
+        # receives an instance_id on failure).
+        try:
+            if config.packages:
+                self._install_packages_sync(container, config.packages)
+
+            # Run setup commands once, after provision, before agent work
+            setup = getattr(config, "setup", None)
+            if setup:
+                self._run_setup_sync(container, setup)
+        except Exception:
+            self._containers.pop(instance_id, None)
+            try:
+                container.remove(force=True)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "[docker_compute] cleanup after failed provision: %s",
+                    cleanup_err,
+                )
+            raise
 
         logger.info("[docker_compute] provisioned: %s image=%s", instance_id, config.image)
 
@@ -309,3 +328,23 @@ class DockerCompute:
             exit_code, output = container.exec_run(["sh", "-c", cmd])
             if exit_code != 0:
                 logger.warning("[docker_compute] npm install failed: %s", output)
+
+    def _run_setup_sync(self, container, setup: list) -> None:
+        """Run environment ``setup`` commands once, streaming output to logs.
+
+        A failing command is reported (not silently swallowed) and halts the
+        remaining setup so the failure surfaces to the caller.
+        """
+        for cmd in setup:
+            logger.info("[docker_compute] setup: %s", cmd)
+            exit_code, output = container.exec_run(["sh", "-c", cmd])
+            if output:
+                logger.info(
+                    "[docker_compute] setup output:\n%s",
+                    output.decode("utf-8", "replace")
+                    if isinstance(output, bytes) else output,
+                )
+            if exit_code != 0:
+                raise RuntimeError(
+                    f"[docker_compute] setup command failed (exit {exit_code}): {cmd}"
+                )
