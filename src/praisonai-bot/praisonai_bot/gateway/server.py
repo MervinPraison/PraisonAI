@@ -6410,6 +6410,18 @@ class WebSocketGateway:
         else:
             self._channel_shell_cfg.pop(channel_name, None)
 
+    def _resolve_gateway_bind_host(self) -> Optional[str]:
+        """Return the interface the gateway actually bound to, for shell wiring.
+
+        The per-channel ``BotConfig`` handed to ``enable_shell_tools`` does not
+        carry the gateway's bind host; it lives on the gateway's own server
+        config (``self.config.bind_host`` / ``self._host``). Passing it through
+        lets the exposure-aware auto-approve downgrade see an externally-bound
+        (``0.0.0.0``) gateway that would otherwise be invisible.
+        """
+        host = getattr(self.config, "bind_host", None) or getattr(self, "_host", None)
+        return str(host) if host else None
+
     def _apply_channel_shell(
         self, channel_name: str, agent: "Agent"
     ) -> "Agent":
@@ -6441,7 +6453,11 @@ class WebSocketGateway:
             clone = agent.clone_for_channel() if hasattr(agent, "clone_for_channel") else agent
             clone = apply_bot_smart_defaults(clone, config)
             enabled = enable_shell_tools(
-                clone, config, ch_cfg, channel_type=platform
+                clone,
+                config,
+                ch_cfg,
+                channel_type=platform,
+                gateway_bind_host=self._resolve_gateway_bind_host(),
             )
             self._shell_routed_agents[cache_key] = enabled
             return enabled
@@ -6537,6 +6553,7 @@ class WebSocketGateway:
                 config,
                 ch_cfg,
                 channel_type=channel_type,
+                gateway_bind_host=self._resolve_gateway_bind_host(),
             )
 
         # Check if agent ended up with zero tools after defaults and warn

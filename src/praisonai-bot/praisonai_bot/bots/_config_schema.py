@@ -347,6 +347,11 @@ class ChannelConfigSchema(BaseModel):
     # Shell execution opt-in for inbound channel bots (Slack/Telegram/etc.)
     allow_shell: bool = False
     auto_approve_shell: bool = True
+    # Blanket auto-approval of shell is only safe on a loopback-bound, single
+    # operator (DM) surface. On an externally-bound or multi-user/group channel
+    # it silently grants RCE to every sender, so it is downgraded to explicit
+    # approval unless the operator acknowledges the exposure here.
+    auto_approve_shell_acknowledge_exposed: bool = False
     approval_channel: Optional[str] = None
     approval_users: Optional[Union[str, List[str]]] = None
     # channel (default) | gateway | http | webhook
