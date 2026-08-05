@@ -27,6 +27,7 @@ Usage:
     tool = claude.as_tool()
 """
 
+import inspect
 import json
 import os
 from typing import AsyncIterator, Dict, Any, Optional, List
@@ -135,7 +136,13 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         # Add output format (local parameter takes precedence)
         fmt = output_format or self.output_format
         cmd.extend(["--output-format", fmt])
-        
+
+        # stream-json in print mode REQUIRES --verbose, and --include-partial-
+        # messages is what emits the token/tool-use deltas that make live
+        # progress visible. Without these, `claude -p --output-format
+        # stream-json` errors out, so stream() could never work.
+        stream_json = fmt == "stream-json"
+
         # Add continue flag if needed
         if continue_session:
             cmd.append("--continue")
@@ -156,13 +163,16 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         if self.disallowed_tools:
             cmd.extend(["--disallowedTools", ",".join(self.disallowed_tools)])
         
-        # Add verbose if needed
-        if options.get('verbose'):
+        # Add verbose if needed (forced for stream-json, which the CLI rejects
+        # without it).
+        if options.get('verbose') or stream_json:
             cmd.append("--verbose")
-        
+        if stream_json:
+            cmd.append("--include-partial-messages")
+
         # Add prompt last
         cmd.append(prompt)
-        
+
         return cmd
     
     async def execute(self, prompt: str, **options) -> str:
@@ -176,20 +186,35 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         Returns:
             str: The CLI output (parsed from JSON if output_format is "json")
         """
-        if self.use_sdk:
+        # Live progress requires the stream-json subprocess path; the SDK path
+        # yields no partial events. When a progress sink is supplied, route
+        # through the subprocess so callers are never silently dropped.
+        wants_progress = ("on_event" in options) or ("on_progress" in options)
+        if self.use_sdk and not wants_progress:
             return await self._execute_sdk(prompt, **options)
         
         return await self._execute_subprocess(prompt, **options)
     
     async def _execute_subprocess(self, prompt: str, **options) -> str:
-        """Execute using subprocess."""
+        """Execute using subprocess.
+
+        If an ``on_event`` (or ``on_progress``) callable is passed, the run is
+        streamed via ``stream()`` and every parsed event is handed to it while
+        it is still in flight, so a caller/UI can show live progress ("reading
+        X", "running tool Y") instead of blocking on a single final result. The
+        method still returns the final result text in every case.
+        """
+        on_event = options.pop("on_event", None) or options.pop("on_progress", None)
+        if on_event is not None:
+            return await self._execute_streaming(prompt, on_event, **options)
+
         output_format = options.pop("output_format", self.output_format)
         continue_session = options.pop("continue_session", False)
-        
+
         cmd = self._build_command(prompt, output_format=output_format, continue_session=continue_session, **options)
-        
+
         output = await self.execute_async(cmd)
-        
+
         # Parse JSON output if applicable
         if output_format == "json":
             try:
@@ -200,8 +225,39 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
                 return str(data)
             except json.JSONDecodeError:
                 return output
-        
+
         return output
+
+    async def _execute_streaming(self, prompt: str, on_event, **options) -> str:
+        """Stream the run, forward each event to ``on_event``, return final text.
+
+        ``on_event`` may be sync or ``async``; awaitable results are awaited so
+        coroutine callbacks actually run. A broken progress sink must not fail
+        the underlying work, so its exceptions are swallowed. The final text is
+        taken from the terminal ``result`` event when present, otherwise
+        accumulated from ``text_delta`` chunks.
+        """
+        options.pop("output_format", None)  # streaming forces stream-json
+        final_result = None
+        text_parts: List[str] = []
+        async for event in self.stream(prompt, **options):
+            try:
+                callback_result = on_event(event)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+            except Exception:
+                pass
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "result":
+                final_result = event.get("result")
+            elif event.get("type") == "stream_event":
+                delta = (event.get("event") or {}).get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    text_parts.append(delta.get("text", ""))
+        if final_result is not None:
+            return final_result
+        return "".join(text_parts)
     
     async def _execute_sdk(self, prompt: str, **options) -> str:
         """Execute using the Claude Code SDK."""
