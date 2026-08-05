@@ -26,8 +26,11 @@ from .protocols import (
     InstanceInfo,
     InstanceStatus,
     ManagedRuntimeProtocol,
+    SupportsCapture,
     load_environment_definition,
     find_environment_definition,
+    definition_hash,
+    capture_key,
 )
 
 __all__ = [
@@ -46,8 +49,11 @@ __all__ = [
     "InstanceStatus",
     "ManagedRuntimeProtocol",
     "ManagedBackendProtocol",
+    "SupportsCapture",
     "load_environment_definition",
     "find_environment_definition",
+    "definition_hash",
+    "capture_key",
 ]
 
 

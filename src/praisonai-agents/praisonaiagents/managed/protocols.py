@@ -81,8 +81,8 @@ _ENV_FILENAME = "environment.yaml"
 _ENV_DIRNAME = ".praisonai"
 
 _ENV_KNOWN_KEYS = {
-    "image", "packages", "setup", "env", "resources",
-    "network", "backend", "working_dir", "mount_paths",
+    "image", "packages", "setup", "refresh", "env", "resources",
+    "network", "backend", "working_dir", "mount_paths", "capture",
 }
 
 
@@ -171,6 +171,15 @@ def load_environment_definition(
             setup = [setup]
         _require("setup", setup, list, "a string or list of strings")
         cfg.setup = list(setup)
+    if "refresh" in data:
+        refresh = data["refresh"] or []
+        if isinstance(refresh, str):
+            refresh = [refresh]
+        _require("refresh", refresh, list, "a string or list of strings")
+        # ``refresh`` runs only when starting from a capture (cheap incremental
+        # step). Carried in metadata so no new dataclass field is added without
+        # a typed consumer; the docker capture path reads it.
+        cfg.metadata["refresh"] = list(refresh)
     if "env" in data:
         env = data["env"] or {}
         _require("env", env, dict, "a mapping")
@@ -198,8 +207,130 @@ def load_environment_definition(
         cfg.networking = {"type": data["network"]}
     if "backend" in data:
         cfg.metadata["backend"] = data["backend"]
+    if "capture" in data:
+        # Opt-in flag for backends where capture may carry provider cost
+        # (cloud snapshots). Local docker commit is free and always on.
+        cfg.metadata["capture"] = bool(data["capture"])
 
     return cfg
+
+
+def _definition_payload(config: "ComputeConfig") -> Dict[str, Any]:
+    """Normalised, order-insensitive view of the fields that change *what gets
+    built* (image, packages, setup, env variable names, resources, working_dir).
+
+    ``env`` **values** are deliberately excluded here — see :func:`definition_hash`.
+    """
+    def _norm_packages(pkgs: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        return {k: sorted(map(str, v or [])) for k, v in sorted((pkgs or {}).items())}
+
+    return {
+        "image": config.image,
+        "packages": _norm_packages(config.packages),
+        "setup": list(config.setup or []),
+        "env_names": sorted((config.env or {}).keys()),
+        "cpu": config.cpu,
+        "memory_mb": config.memory_mb,
+        "gpu": config.gpu,
+        "working_dir": config.working_dir,
+    }
+
+
+def definition_hash(config: "ComputeConfig") -> str:
+    """Stable content hash of an environment definition, for display/logging.
+
+    Hashes only the fields that change *what gets built* (image, packages,
+    setup, env variable names, resources, working_dir). Values of ``env`` are
+    excluded because they are typically secrets/tenant-specific and must not
+    leak into a hash that may be logged or shown in ``list_captures``. The
+    result is a short, stable sha256 hex digest: reordering keys/lists that
+    describe the same environment yields the same hash; changing a package or
+    setup step yields a new one.
+
+    .. note::
+        This value-free hash is safe to log but is **not** a safe reuse key on
+        its own: ``setup:`` runs with ``env`` values injected and may bake
+        env-derived state into the filesystem, so a capture must not be reused
+        across differing secret values. Use :func:`capture_key` for the actual
+        reuse/cache key — it additionally binds the ``env`` **values** so
+        different secrets produce a different capture, while never being logged.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest.
+    """
+    import hashlib
+    import json
+
+    blob = json.dumps(
+        _definition_payload(config), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def capture_key(config: "ComputeConfig") -> str:
+    """Secret-aware reuse key for capturing/reusing a provisioned environment.
+
+    Extends :func:`definition_hash` by additionally binding the ``env``
+    **values**. ``setup:`` executes with those values injected and may persist
+    env-derived state (tokens, tenant config) into the committed filesystem, so
+    a capture is only safe to reuse when the values match too. Two definitions
+    that are identical except for their secret values therefore get *different*
+    capture keys and never share a committed image.
+
+    The env values are folded into the digest (never returned in the clear and
+    never logged), so this key is suitable for an image tag
+    (``praisonai-env:{key}``) but should not itself be surfaced to users.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest that changes with any build input *or* secret value.
+    """
+    import hashlib
+    import json
+
+    payload = dict(_definition_payload(config))
+    payload["env_values"] = {
+        str(k): str(v) for k, v in sorted((config.env or {}).items())
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+@runtime_checkable
+class SupportsCapture(Protocol):
+    """Optional capability: capture a provisioned instance and reuse it.
+
+    Backends that can snapshot post-setup state (docker ``commit``, cloud SDK
+    pause/snapshot) implement this so a second provision of the same definition
+    starts *from the capture* — skipping pull + package install + ``setup:``.
+
+    Backends that cannot (subprocess/ssh) simply don't implement it; the
+    provision flow then falls back to today's ephemeral behaviour. Methods
+    return ``None`` to signal "no capture available", never raising, so a failed
+    capture degrades to ephemeral rather than blocking the run.
+    """
+
+    def capture(self, instance_id: str, ref: str) -> Optional[str]:
+        """Capture ``instance_id``'s current state under ``ref``.
+
+        Args:
+            instance_id: Instance to capture.
+            ref: Stable name to record the capture under (e.g. a definition hash).
+
+        Returns:
+            An opaque capture reference (image tag / snapshot id) on success,
+            or ``None`` if capture was unavailable or failed.
+        """
+        ...
+
+    def has_capture(self, ref: str) -> bool:
+        """Whether a reusable capture exists for ``ref``."""
+        ...
 
 
 @dataclass

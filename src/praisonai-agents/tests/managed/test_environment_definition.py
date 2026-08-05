@@ -11,6 +11,8 @@ import pytest
 
 from praisonaiagents.managed.protocols import (
     ComputeConfig,
+    capture_key,
+    definition_hash,
     find_environment_definition,
     load_environment_definition,
 )
@@ -101,6 +103,93 @@ backend: docker
             load_environment_definition(path)
         assert needle in str(exc.value)
         assert path in str(exc.value)
+
+
+class TestDefinitionHash:
+    def test_stable_across_key_and_list_reordering(self):
+        a = ComputeConfig(
+            image="python:3.12-slim",
+            packages={"pip": ["requests", "pytest"], "apt": ["git"]},
+            setup=["pip install -e ."],
+        )
+        b = ComputeConfig(
+            image="python:3.12-slim",
+            packages={"apt": ["git"], "pip": ["pytest", "requests"]},
+            setup=["pip install -e ."],
+        )
+        assert definition_hash(a) == definition_hash(b)
+
+    def test_changing_a_package_changes_hash(self):
+        a = ComputeConfig(packages={"pip": ["requests"]})
+        b = ComputeConfig(packages={"pip": ["requests", "numpy"]})
+        assert definition_hash(a) != definition_hash(b)
+
+    def test_changing_setup_changes_hash(self):
+        a = ComputeConfig(setup=["make install"])
+        b = ComputeConfig(setup=["make build"])
+        assert definition_hash(a) != definition_hash(b)
+
+    def test_env_values_excluded_from_hash(self):
+        a = ComputeConfig(env={"TOKEN": "secret-1"})
+        b = ComputeConfig(env={"TOKEN": "secret-2"})
+        assert definition_hash(a) == definition_hash(b)
+
+    def test_env_names_included_in_hash(self):
+        a = ComputeConfig(env={"TOKEN": "x"})
+        b = ComputeConfig(env={"OTHER": "x"})
+        assert definition_hash(a) != definition_hash(b)
+
+    def test_hash_is_short_hex(self):
+        h = definition_hash(ComputeConfig())
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+
+class TestCaptureKey:
+    def test_env_values_change_capture_key(self):
+        # Same definition, different secret values → different capture key so a
+        # setup-baked filesystem is never reused across secret contexts.
+        a = ComputeConfig(env={"TOKEN": "secret-1"}, setup=["make setup"])
+        b = ComputeConfig(env={"TOKEN": "secret-2"}, setup=["make setup"])
+        assert capture_key(a) != capture_key(b)
+
+    def test_definition_hash_stays_value_free(self):
+        # The loggable/display hash must remain identical across secret values.
+        a = ComputeConfig(env={"TOKEN": "secret-1"}, setup=["make setup"])
+        b = ComputeConfig(env={"TOKEN": "secret-2"}, setup=["make setup"])
+        assert definition_hash(a) == definition_hash(b)
+
+    def test_capture_key_stable_and_order_insensitive(self):
+        a = ComputeConfig(
+            packages={"pip": ["b", "a"]}, env={"Y": "2", "X": "1"},
+        )
+        b = ComputeConfig(
+            packages={"pip": ["a", "b"]}, env={"X": "1", "Y": "2"},
+        )
+        assert capture_key(a) == capture_key(b)
+
+    def test_capture_key_is_short_hex(self):
+        h = capture_key(ComputeConfig(env={"TOKEN": "x"}))
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+
+class TestRefreshAndCaptureKeys:
+    def test_refresh_carried_in_metadata(self, tmp_path):
+        path = _write_env(str(tmp_path), "refresh: pip install -e .\n")
+        cfg = load_environment_definition(path)
+        assert cfg.metadata["refresh"] == ["pip install -e ."]
+
+    def test_capture_flag_carried_in_metadata(self, tmp_path):
+        path = _write_env(str(tmp_path), "capture: true\n")
+        cfg = load_environment_definition(path)
+        assert cfg.metadata["capture"] is True
+
+    def test_refresh_bad_shape_raises(self, tmp_path):
+        path = _write_env(str(tmp_path), "refresh:\n  nested: 1\n")
+        with pytest.raises(ValueError) as exc:
+            load_environment_definition(path)
+        assert "refresh" in str(exc.value)
 
 
 class TestDiscovery:
