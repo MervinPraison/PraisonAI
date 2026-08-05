@@ -230,6 +230,15 @@ class SessionData:
             if last_compaction_data
             else None
         )
+        # Backward compatibility: `to_dict` mirrors select metadata keys to the
+        # top level, and older/externally-written session files may carry
+        # `model`/`llm` (etc.) only there. Fold those back into `metadata` so
+        # resume can recover the recorded model instead of silently reverting to
+        # the current default (Issue #3685). Existing metadata always wins.
+        metadata = dict(data.get("metadata") or {})
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+            if key not in metadata and data.get(key) is not None:
+                metadata[key] = data[key]
         return cls(
             session_id=data.get("session_id", ""),
             messages=messages,
@@ -237,7 +246,7 @@ class SessionData:
             updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
             agent_name=data.get("agent_name"),
             user_id=data.get("user_id"),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
             runtime_state=data.get("runtime_state") or {},

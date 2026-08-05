@@ -50,11 +50,51 @@ def test_get_session_model_falls_back_to_turn_metadata(tmp_path):
     assert store.get_session_model("sess") == "claude-3-5-sonnet"
 
 
+def test_get_session_model_latest_turn_wins(tmp_path):
+    """With multiple recorded turns, the most recent model is returned."""
+    store = DefaultSessionStore(session_dir=str(tmp_path / "s"))
+    store.add_message("sess", "assistant", "one", metadata={"model": "gpt-4o"})
+    store.add_message(
+        "sess", "assistant", "two", metadata={"model": "claude-3-5-sonnet"}
+    )
+    assert store.get_session_model("sess") == "claude-3-5-sonnet"
+
+
 def test_get_session_model_none_when_unrecorded(tmp_path):
     """No recorded model → None so the caller falls back to default resolution."""
     store = DefaultSessionStore(session_dir=str(tmp_path / "s"))
     store.add_message("sess", "user", "hello")
     assert store.get_session_model("sess") is None
+
+
+def test_from_dict_restores_legacy_top_level_model():
+    """Legacy sessions that stored ``model`` only at the top level still resolve.
+
+    ``to_dict`` mirrors metadata keys to the top level; a historical/externally
+    written file may carry ``model`` there but not under ``metadata``. ``from_dict``
+    must fold it back so resume recovers the recorded model (Issue #3685).
+    """
+    from praisonaiagents.session.store import SessionData
+
+    restored = SessionData.from_dict(
+        {"session_id": "legacy", "messages": [], "model": "gpt-4o"}
+    )
+    assert restored.metadata.get("model") == "gpt-4o"
+
+
+def test_from_dict_prefers_existing_metadata_over_top_level():
+    """Existing ``metadata`` always wins over the mirrored top-level value."""
+    from praisonaiagents.session.store import SessionData
+
+    restored = SessionData.from_dict(
+        {
+            "session_id": "legacy",
+            "messages": [],
+            "model": "gpt-4o",
+            "metadata": {"model": "claude-3-5-sonnet"},
+        }
+    )
+    assert restored.metadata.get("model") == "claude-3-5-sonnet"
 
 
 def test_find_session_model_resolves_recorded_model(project):
