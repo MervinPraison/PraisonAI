@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.MervinPraison%2Fpraisonai.svg)](https://mcptoplist.com/server/io.github.MervinPraison%2Fpraisonai)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo_dark.png" />
