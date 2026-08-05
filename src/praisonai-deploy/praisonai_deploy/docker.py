@@ -147,7 +147,7 @@ def build_docker_image(config: DockerConfig, build_context: str = ".") -> Deploy
         
         cmd.append(build_context)
         
-        print(f"🐳 Building Docker image: {image_tag}")
+        print(f"[docker] Building image: {image_tag}")
         
         # Run build
         result = subprocess.run(
@@ -227,7 +227,7 @@ def run_docker_container(
         
         cmd.append(image_tag)
         
-        print(f"🚀 Starting Docker container: {container_name}")
+        print(f"[docker] Starting container: {container_name}")
         
         # Run container
         result = subprocess.run(
@@ -286,7 +286,7 @@ def push_docker_image(config: DockerConfig) -> DeployResult:
         # Build image tag
         image_tag = f"{config.registry}/{config.image_name}:{config.tag}"
         
-        print(f"📤 Pushing Docker image to registry: {image_tag}")
+        print(f"[docker] Pushing image to registry: {image_tag}")
         
         # Push image
         result = subprocess.run(
@@ -471,7 +471,7 @@ def remove_docker_container(config: DockerConfig, force: bool = False) -> Destro
         deleted_resources = []
         
         # Stop container first
-        print(f"🛑 Stopping container: {container_name}")
+        print(f"[docker] Stopping container: {container_name}")
         subprocess.run(
             ['docker', 'stop', container_name],
             capture_output=True,
@@ -479,7 +479,7 @@ def remove_docker_container(config: DockerConfig, force: bool = False) -> Destro
         )
         
         # Remove container
-        print(f"🗑️ Removing container: {container_name}")
+        print(f"[docker] Removing container: {container_name}")
         result = subprocess.run(
             ['docker', 'rm', container_name] + (['-f'] if force else []),
             capture_output=True,
@@ -500,7 +500,7 @@ def remove_docker_container(config: DockerConfig, force: bool = False) -> Destro
         # Optionally remove image
         if force:
             image_tag = f"{config.image_name}:{config.tag}"
-            print(f"🗑️ Removing image: {image_tag}")
+            print(f"[docker] Removing image: {image_tag}")
             img_result = subprocess.run(
                 ['docker', 'rmi', image_tag, '-f'],
                 capture_output=True,

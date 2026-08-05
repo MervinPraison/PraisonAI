@@ -196,10 +196,10 @@ def start_api_server(
         else:
             # Run in foreground
             url = f"http://{config.host}:{config.port}"
-            print(f"\n🚀 Starting API server at {url}")
-            print(f"📁 Serving agents from: {agents_file}")
-            print(f"🔗 Health check: {url}/health")
-            print(f"💬 Chat endpoint: {url}/chat")
+            print(f"\n[api] Starting API server at {url}")
+            print(f"[api] Serving agents from: {agents_file}")
+            print(f"[api] Health check: {url}/health")
+            print(f"[api] Chat endpoint: {url}/chat")
             print("\nPress Ctrl+C to stop the server\n")
             
             process = subprocess.Popen([sys.executable, server_file], env=server_env)

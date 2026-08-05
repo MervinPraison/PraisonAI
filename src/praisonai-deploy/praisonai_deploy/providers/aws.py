@@ -78,7 +78,7 @@ class AWSProvider(BaseProvider):
             cluster_name = self.config.cluster_name or f"{self.config.service_name}-cluster"
             
             # Step 1: Create cluster if not exists
-            print(f"📦 Creating ECS cluster: {cluster_name}")
+            print(f"[aws] Creating ECS cluster: {cluster_name}")
             try:
                 subprocess.run(
                     ['aws', 'ecs', 'create-cluster',
@@ -91,7 +91,7 @@ class AWSProvider(BaseProvider):
                 pass  # Cluster may already exist
             
             # Step 2: Register task definition
-            print(f"📝 Registering task definition")
+            print(f"[aws] Registering task definition")
             
             task_def = {
                 "family": self.config.service_name,
@@ -134,7 +134,7 @@ class AWSProvider(BaseProvider):
                 )
             
             # Step 3: Create or update service
-            print(f"🚀 Deploying service: {self.config.service_name}")
+            print(f"[aws] Deploying service: {self.config.service_name}")
             
             # Try to update first, create if doesn't exist
             update_result = subprocess.run(
@@ -265,7 +265,7 @@ class AWSProvider(BaseProvider):
             deleted_resources = []
             
             # Step 1: Update service desired count to 0
-            print(f"🛑 Stopping service: {self.config.service_name}")
+            print(f"[aws] Stopping service: {self.config.service_name}")
             subprocess.run(
                 ['aws', 'ecs', 'update-service',
                  '--cluster', cluster_name,
@@ -277,7 +277,7 @@ class AWSProvider(BaseProvider):
             )
             
             # Step 2: Delete the service
-            print(f"🗑️ Deleting service: {self.config.service_name}")
+            print(f"[aws] Deleting service: {self.config.service_name}")
             result = subprocess.run(
                 ['aws', 'ecs', 'delete-service',
                  '--cluster', cluster_name,
@@ -301,7 +301,7 @@ class AWSProvider(BaseProvider):
             
             # Step 3: Optionally delete cluster if empty
             if force:
-                print(f"🗑️ Deleting cluster: {cluster_name}")
+                print(f"[aws] Deleting cluster: {cluster_name}")
                 cluster_result = subprocess.run(
                     ['aws', 'ecs', 'delete-cluster',
                      '--cluster', cluster_name,

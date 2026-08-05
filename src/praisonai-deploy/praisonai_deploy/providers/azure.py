@@ -85,7 +85,7 @@ class AzureProvider(BaseProvider):
                 )
             
             # Step 1: Create resource group if not exists
-            print(f"📦 Creating resource group: {self.config.resource_group}")
+            print(f"[azure] Creating resource group: {self.config.resource_group}")
             try:
                 subprocess.run(
                     ['az', 'group', 'create',
@@ -99,7 +99,7 @@ class AzureProvider(BaseProvider):
             
             # Step 2: Create Container Apps environment
             env_name = f"{self.config.service_name}-env"
-            print(f"🌍 Creating Container Apps environment: {env_name}")
+            print(f"[azure] Creating Container Apps environment: {env_name}")
             
             try:
                 subprocess.run(
@@ -114,7 +114,7 @@ class AzureProvider(BaseProvider):
                 pass  # May already exist
             
             # Step 3: Create or update Container App
-            print(f"🚀 Deploying Container App: {self.config.service_name}")
+            print(f"[azure] Deploying Container App: {self.config.service_name}")
             
             cmd = [
                 'az', 'containerapp', 'create',
@@ -316,7 +316,7 @@ class AzureProvider(BaseProvider):
             deleted_resources = []
             
             # Step 1: Delete the Container App
-            print(f"🗑️ Deleting Container App: {self.config.service_name}")
+            print(f"[azure] Deleting Container App: {self.config.service_name}")
             result = subprocess.run(
                 ['az', 'containerapp', 'delete',
                  '--name', self.config.service_name,
@@ -340,7 +340,7 @@ class AzureProvider(BaseProvider):
             # Step 2: Optionally delete environment if force
             if force:
                 env_name = f"{self.config.service_name}-env"
-                print(f"🗑️ Deleting Container Apps environment: {env_name}")
+                print(f"[azure] Deleting Container Apps environment: {env_name}")
                 env_result = subprocess.run(
                     ['az', 'containerapp', 'env', 'delete',
                      '--name', env_name,
