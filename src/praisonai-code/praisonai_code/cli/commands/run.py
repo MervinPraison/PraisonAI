@@ -1316,6 +1316,9 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         else:
             # Profiling for direct prompt
@@ -1330,6 +1333,9 @@ def run_main(
                 no_save=no_save,
                 no_rules=no_rules,
                 instructions=merged_instructions,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         return
     
@@ -1905,6 +1911,9 @@ def _run_from_file_profiled(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -1967,7 +1976,12 @@ def _run_from_file_profiled(
     if not no_save:
         import uuid
         auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-    if session_id or auto_save_name:
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) through
+    # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
+    # permission-gated identically to the non-profiled path instead of silently
+    # dropping the deny policy.
+    if session_id or auto_save_name or approval or approve_all_tools:
         class Args:
             pass
         
@@ -1975,6 +1989,12 @@ def _run_from_file_profiled(
         args.auto_save = auto_save_name
         args.resume_session = session_id
         args.cli_project_sessions = bool(session_id or auto_save_name)
+        if approval:
+            args.approval = approval
+        if approve_all_tools:
+            args.approve_all_tools = approve_all_tools
+        if approval_timeout is not None:
+            args.approval_timeout = approval_timeout
         
         praison.args = args
     
@@ -2344,6 +2364,9 @@ def _run_prompt_profiled(
     no_save: bool = False,
     no_rules: bool = False,
     instructions: Optional[List[str]] = None,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2378,7 +2401,16 @@ def _run_prompt_profiled(
     }
     if model:
         agent_config["llm"] = model
-    
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) into the
+    # profiled agent so a read-only planning run stays read-only under
+    # --profile instead of silently dropping the deny policy.
+    if approval:
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        agent_config["approval"] = resolve_approval_config(
+            approval, all_tools=approve_all_tools, timeout=approval_timeout,
+        )
+
     # Apply session continuity if requested
     session_id = None
     auto_save_name = None

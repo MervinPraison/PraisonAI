@@ -1477,6 +1477,20 @@ def _start_execution_worker(self, tools_list, console, session_state):
                         if not getattr(getattr(self, 'args', None), 'no_context', False):
                             _project_context = _load_cli_project_context(self)
 
+                        # Thread the resolved approval config (e.g. `code --plan`
+                        # -> PermissionMode.PLAN) into the REPL worker's agent so
+                        # a session advertised as read-only actually denies every
+                        # mutating tool, instead of silently falling back to the
+                        # legacy interactive approval prompt. Mirrors the
+                        # single-prompt path in _process_interactive_prompt.
+                        agent_extra_kwargs = {}
+                        _agent_approval = (
+                            getattr(self.args, 'agent_approval', None)
+                            if hasattr(self, 'args') else None
+                        )
+                        if _agent_approval is not None:
+                            agent_extra_kwargs['approval'] = _agent_approval
+
                         def _build_agent():
                             # Build the agent from the CURRENT conversation history
                             # so that a post-compaction retry rebuilds with the
@@ -1504,7 +1518,8 @@ def _start_execution_worker(self, tools_list, console, session_state):
                                 backstory=backstory,
                                 tools=tools_list if tools_list else None,
                                 output="minimal",
-                                llm=model
+                                llm=model,
+                                **agent_extra_kwargs,
                             )
 
                         agent = _build_agent()
