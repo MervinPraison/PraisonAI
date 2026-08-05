@@ -234,6 +234,32 @@ def list_project_sessions(
     return sessions[:limit]
 
 
+def find_session_model(
+    session_id: str, project_path: Optional[str] = None
+) -> Optional[str]:
+    """Return the model a resumable session was created / last run with.
+
+    Searches the canonical CLI stores (project-scoped first, then global) in the
+    same order as ``rehydrate_session``/``find_last_session`` and returns the
+    first recorded model, so ``--continue``/``--session`` can restore the model
+    the conversation was running instead of re-resolving the current default
+    (Issue #3685). Returns ``None`` when no model was ever recorded, letting the
+    caller fall back to normal default resolution.
+    """
+    if not session_id:
+        return None
+    for store in canonical_cli_stores(project_path):
+        try:
+            if not store.session_exists(session_id):
+                continue
+            model = store.get_session_model(session_id)
+        except Exception:
+            continue
+        if isinstance(model, str) and model:
+            return model
+    return None
+
+
 def build_cli_memory_config(
     session_id: Optional[str] = None,
     auto_save: Optional[str] = None,

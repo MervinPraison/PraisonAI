@@ -1297,7 +1297,33 @@ class DefaultSessionStore:
     def get_session(self, session_id: str) -> SessionData:
         """Get full session data."""
         return self._read_session_fresh(session_id)
-    
+
+    def get_session_model(self, session_id: str) -> Optional[str]:
+        """Return the model a session was created / last run with (Issue #3685).
+
+        Resolves the session-level model recorded in metadata (written by the
+        wrapper's session-continuity path as ``metadata["model"]``); if absent,
+        falls back to the most recent turn that carried a ``model`` in its own
+        metadata. Returns ``None`` when no model was ever recorded, so a caller
+        can fall back to default model resolution.
+
+        This lets a resume read "the model this session used" without scanning
+        or re-resolving the current default, so a change to the user's default
+        between runs no longer silently switches the model mid-conversation.
+        """
+        try:
+            session = self._read_session_fresh(session_id)
+        except Exception:
+            return None
+        model = session.metadata.get("model") or session.metadata.get("llm")
+        if isinstance(model, str) and model:
+            return model
+        for message in reversed(session.messages):
+            recorded = (message.metadata or {}).get("model")
+            if isinstance(recorded, str) and recorded:
+                return recorded
+        return None
+
     def set_agent_info(
         self,
         session_id: str,

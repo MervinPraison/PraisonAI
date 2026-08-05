@@ -1076,6 +1076,25 @@ def run_main(
         output.print_error("Cannot use both --continue and --session together")
         raise typer.Exit(1)
 
+    # Restore the resumed session's model when none was explicitly chosen
+    # (Issue #3685). Without this, resume re-resolves the *current* default, so
+    # a change to the user's default between runs silently switches the model
+    # mid-conversation. An explicit --model (or config model above) still wins
+    # and updates the session's recorded model for subsequent turns.
+    if model is None and (continue_session or session):
+        try:
+            from ..state.project_sessions import find_last_session, find_session_model
+
+            resumed_id = session or find_last_session()
+            if resumed_id:
+                recorded = find_session_model(resumed_id)
+                if recorded:
+                    model = recorded
+                    output.print_info(f"Restored session model: {model}")
+        except Exception:
+            # Model restore is best-effort; fall back to default resolution.
+            pass
+
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject
     # the combination up front rather than silently ignoring isolation.
