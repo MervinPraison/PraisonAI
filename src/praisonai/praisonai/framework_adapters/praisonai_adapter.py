@@ -393,10 +393,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # so CLI/YAML flags (--planning, --web, --autonomy, ...) are
             # honoured instead of being silently dropped. Each core param
             # accepts the wrapper's value directly (bool/str/dict/Config).
-            # NOTE: `handoff` is intentionally NOT forwarded here — the CLI
-            # emits a {'to': [...role names...]} dict, but core `handoffs=`
-            # expects resolved Agent/Handoff objects. Wiring that up needs
-            # role->Agent resolution that does not belong in this hot path.
+            # NOTE: `handoff` is handled after this loop by `_wire_handoffs`
+            # once every agent object exists, so role->Agent resolution is a
+            # plain dict lookup (see call at the end of this method).
             forwardable_fields = {
                 'planning': 'planning',
                 'reflection': 'reflection',
@@ -457,8 +456,92 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                         task.callback = task_callback
                     
                     tasks.append(task)
-        
+
+        # Resolve `handoff: {to: [role...], ...}` into core Agent.handoffs now
+        # that every agent object exists (role name -> Agent is a dict lookup).
+        self._wire_handoffs(agents, specs)
+
         return agents, tasks
+
+    def _wire_handoffs(self, agents, specs):
+        """Wire YAML/CLI ``handoff: {to: [role, ...], ...}`` into core
+        ``Agent.handoffs``.
+
+        The wrapper emits a dict (``{'to': [role names], 'timeout': ..., ...}``)
+        while core ``Agent(handoffs=...)`` expects resolved ``Agent``/``Handoff``
+        objects. This runs after every agent is built so each target role is a
+        plain dict lookup. Optional execution knobs (timeout/max_depth/
+        max_concurrent/detect_cycles) are mapped onto ``HandoffConfig`` when
+        present; otherwise the bare target ``Agent`` is forwarded and core's
+        ``_process_handoffs`` handles it directly.
+        """
+        for spec in specs:
+            handoff_spec = spec.extras.get('handoff') if isinstance(spec.extras, dict) else None
+            if not isinstance(handoff_spec, dict):
+                continue
+
+            source = agents.get(spec.key)
+            if source is None:
+                continue
+
+            config = self._build_handoff_config(handoff_spec)
+
+            targets = []
+            for to_role in handoff_spec.get('to') or []:
+                target = agents.get(to_role)
+                if target is None:
+                    logger.warning(
+                        "handoff on %r references unknown role %r; skipping.",
+                        spec.key, to_role,
+                    )
+                    continue
+                targets.append(self._make_handoff(target, config))
+
+            if targets:
+                source.handoffs = list(source.handoffs or []) + targets
+                if hasattr(source, '_process_handoffs'):
+                    source._process_handoffs()
+
+    @staticmethod
+    def _build_handoff_config(handoff_spec):
+        """Map the wrapper handoff dict onto a core ``HandoffConfig``.
+
+        Only forwards keys core understands. The wrapper ``policy`` (e.g.
+        "round-robin") is an orchestration hint with no core context-policy
+        equivalent, so it is intentionally left untouched here.
+        """
+        try:
+            from praisonaiagents.agent.handoff import HandoffConfig
+        except ImportError:
+            return None
+
+        kwargs = {}
+        if handoff_spec.get('timeout') is not None:
+            try:
+                kwargs['timeout_seconds'] = float(handoff_spec['timeout'])
+            except (TypeError, ValueError):
+                pass
+        for src_key, dst_key in (('max_depth', 'max_depth'),
+                                 ('max_concurrent', 'max_concurrent')):
+            if handoff_spec.get(src_key) is not None:
+                try:
+                    kwargs[dst_key] = int(handoff_spec[src_key])
+                except (TypeError, ValueError):
+                    pass
+        if handoff_spec.get('detect_cycles') is not None:
+            kwargs['detect_cycles'] = bool(handoff_spec['detect_cycles'])
+
+        return HandoffConfig(**kwargs) if kwargs else None
+
+    @staticmethod
+    def _make_handoff(target, config):
+        """Wrap a target ``Agent`` in a core ``Handoff`` (with optional config),
+        falling back to the bare agent when core is unavailable."""
+        try:
+            from praisonaiagents.agent.handoff import Handoff
+        except ImportError:
+            return target
+        return Handoff(agent=target, config=config) if config else Handoff(agent=target)
 
     @staticmethod
     def _resolve_session_continuity(cli_config):

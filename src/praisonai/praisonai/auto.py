@@ -1227,15 +1227,24 @@ class AutoGenerator(BaseAutoGenerator):
         if available_tools:
             tools_header = "AVAILABLE TOOLS (installed)"
             tools_reference = "\n".join(f"  - {t}" for t in available_tools)
-            legacy_tools = ", ".join(available_tools)
+            # Resolver path already lists the exact installed tools above, so a
+            # separate LEGACY TOOLS block would just duplicate that set to the
+            # LLM at the cost of prompt tokens for zero information gain.
+            legacy_tools = None
         else:
             tools_header = "AVAILABLE TOOLS BY CATEGORY"
             all_tools_by_category = []
             for category, tools in TOOL_CATEGORIES.items():
                 all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
             tools_reference = "\n".join(all_tools_by_category)
-            # Also include legacy tools for backward compatibility
+            # Only when the resolver is unavailable do we fall back to the static
+            # category reference; surface the legacy names for compatibility.
             legacy_tools = ", ".join(AVAILABLE_TOOLS)
+
+        legacy_tools_block = (
+            f"\nLEGACY TOOLS (for backward compatibility):\n{legacy_tools}\n"
+            if legacy_tools else ""
+        )
         
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
@@ -1270,10 +1279,7 @@ Each agent should have:
 
 {tools_header}:
 {tools_reference}
-
-LEGACY TOOLS (for backward compatibility):
-{legacy_tools}
-
+{legacy_tools_block}
 RECOMMENDED TOOLS FOR THIS TASK: {', '.join(recommended_tools)}
 Prioritize using the recommended tools. Only add others if specifically needed.
 
