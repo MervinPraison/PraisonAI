@@ -1065,9 +1065,18 @@ class AgentTeam(SpawnAnnounceProtocol):
         lands last in the insertion-ordered ``self.tasks`` dict. Snapshotting the
         real task ids up front lets the return path surface the final delegated
         task's result instead of the Manager's own generic answer.
+
+        A ``manager_task`` from a prior run of the same team can still be present
+        in ``self.tasks`` (it is not removed after a run), so it is explicitly
+        skipped here; otherwise a second ``.start()`` would return the previous
+        run's Manager output instead of the final user-task result.
         """
-        task_ids = list(self.tasks.keys())
-        return task_ids[-1] if task_ids else None
+        for task_id in reversed(self.tasks):
+            task = self.tasks.get(task_id)
+            if getattr(task, "name", None) == "manager_task":
+                continue
+            return task_id
+        return None
 
     def clean_json_output(self, output: str) -> str:
         # NOTE: This method is duplicated in chat_mixin.ChatMixin.clean_json_output.
