@@ -24,6 +24,7 @@ def code_main(
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools (file operations)"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
     safe_mode: bool = typer.Option(True, "--safe/--no-safe", help="Safe mode (default ON): require approval for file writes and commands"),
+    plan: bool = typer.Option(False, "--plan", help="Read-only planning mode: the agent may explore/read/search but every mutating tool is denied (no writes/edits/shell)"),
     dangerously_skip_approval: bool = typer.Option(False, "--dangerously-skip-approval", help="Skip all approval prompts and run dangerous tools unguarded (restores legacy behaviour)"),
     checkpoints: bool = typer.Option(False, "--checkpoints/--no-checkpoints", help="Auto-checkpoint the workspace before each file-mutating turn (enables in-session /undo and /revert)"),
     revert: Optional[str] = typer.Option(None, "--revert", help="Restore the workspace to a prior checkpoint (id, short id, or 'last') and exit"),
@@ -108,6 +109,18 @@ def code_main(
     # out with --no-safe or --dangerously-skip-approval. The latter also sets
     # PRAISONAI_TOOL_SAFETY=off so the core runtime skips its safe-by-default
     # ask path (see Agent.__init__ approval handling).
+    # --plan selects the read-only planning mode: the agent may explore/read but
+    # every mutating tool (write/edit/shell/exec) is denied. It is the opposite
+    # of skipping approval, so reject the contradictory combination up front
+    # rather than silently letting one win.
+    if plan and (dangerously_skip_approval or not safe_mode):
+        typer.echo(
+            "Error: --plan (read-only) cannot be combined with "
+            "--no-safe/--dangerously-skip-approval",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     if dangerously_skip_approval or not safe_mode:
         os.environ["PRAISON_APPROVAL_MODE"] = "auto"
         os.environ["PRAISONAI_TOOL_SAFETY"] = "off"
@@ -167,7 +180,17 @@ def code_main(
         # Apply the profile's model unless the user overrode it with --model.
         if not model and agent_profile.get("llm"):
             args.llm = agent_profile["llm"]
-    
+
+    # --plan overrides any profile scope with the read-only planning mode,
+    # threading PermissionMode.PLAN through the existing approval config so the
+    # code session denies every mutating tool. Non-interactive: PLAN is a hard
+    # read-only policy, not an ask-per-call prompt.
+    if plan:
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        args.agent_approval = resolve_approval_config(
+            "plan", non_interactive=True
+        )
+
     # Import and run the terminal-native interactive mode
     from praisonai_code._wrapper_bridge import wrapper_available
 

@@ -184,6 +184,31 @@ def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], pe
     return config if config else None
 
 
+def _plan_permission_conflicts(
+    approval: Optional[str],
+    allow: Optional[List[str]],
+    deny: Optional[List[str]],
+    permission_default: Optional[str],
+) -> List[str]:
+    """Return the permission flags that contradict ``--plan``.
+
+    ``--plan`` is a self-contained read-only preset (``PermissionMode.PLAN``);
+    combining it with an explicit approval backend or bespoke allow/deny rules
+    is unenforceable, so the caller fails closed. Returns the human-readable
+    flag names that were set, or an empty list when ``--plan`` may proceed.
+    """
+    return [
+        name
+        for name, value in (
+            ("--approval", approval),
+            ("--allow", allow),
+            ("--deny", deny),
+            ("--permission-default", permission_default),
+        )
+        if value
+    ]
+
+
 def _mcp_server_to_command(server: dict) -> Optional[tuple]:
     """Convert a resolved MCP server config entry to a (command, env) pair.
 
@@ -910,6 +935,7 @@ def run_main(
     deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
     permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
     permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
+    plan: bool = typer.Option(False, "--plan", help="Read-only planning mode: the agent may explore/read/search but every mutating tool is denied (maps to --approval plan)"),
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
@@ -980,6 +1006,25 @@ def run_main(
     except ValueError as exc:
         output.print_error(str(exc))
         raise typer.Exit(1)
+
+    # --plan is a discoverable alias for the existing read-only planning mode
+    # (--approval plan → PermissionMode.PLAN). It maps onto the same permission
+    # plumbing rather than a bespoke deny-set, so the agent may explore/read but
+    # every mutating tool is denied. Guard against contradictory permission
+    # flags so an unenforceable combination fails closed rather than silently
+    # dropping one intent.
+    if plan:
+        _conflicts = _plan_permission_conflicts(
+            approval, allow, deny, permission_default
+        )
+        if _conflicts:
+            output.print_error(
+                "--plan cannot be combined with "
+                + ", ".join(_conflicts)
+                + " (it already selects the read-only planning mode)"
+            )
+            raise typer.Exit(1)
+        approval = "plan"
 
     _require_wrapper_for_default_run(
         target, agent=agent, command=command, output_mode=output_mode
