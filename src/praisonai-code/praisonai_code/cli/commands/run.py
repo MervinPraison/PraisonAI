@@ -184,6 +184,31 @@ def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], pe
     return config if config else None
 
 
+def _plan_permission_conflicts(
+    approval: Optional[str],
+    allow: Optional[List[str]],
+    deny: Optional[List[str]],
+    permission_default: Optional[str],
+) -> List[str]:
+    """Return the permission flags that contradict ``--plan``.
+
+    ``--plan`` is a self-contained read-only preset (``PermissionMode.PLAN``);
+    combining it with an explicit approval backend or bespoke allow/deny rules
+    is unenforceable, so the caller fails closed. Returns the human-readable
+    flag names that were set, or an empty list when ``--plan`` may proceed.
+    """
+    return [
+        name
+        for name, value in (
+            ("--approval", approval),
+            ("--allow", allow),
+            ("--deny", deny),
+            ("--permission-default", permission_default),
+        )
+        if value
+    ]
+
+
 def _mcp_server_to_command(server: dict) -> Optional[tuple]:
     """Convert a resolved MCP server config entry to a (command, env) pair.
 
@@ -910,6 +935,7 @@ def run_main(
     deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
     permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
     permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
+    plan: bool = typer.Option(False, "--plan", help="Read-only planning mode: the agent may explore/read/search but every mutating tool is denied (maps to --approval plan)"),
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
@@ -980,6 +1006,25 @@ def run_main(
     except ValueError as exc:
         output.print_error(str(exc))
         raise typer.Exit(1)
+
+    # --plan is a discoverable alias for the existing read-only planning mode
+    # (--approval plan → PermissionMode.PLAN). It maps onto the same permission
+    # plumbing rather than a bespoke deny-set, so the agent may explore/read but
+    # every mutating tool is denied. Guard against contradictory permission
+    # flags so an unenforceable combination fails closed rather than silently
+    # dropping one intent.
+    if plan:
+        _conflicts = _plan_permission_conflicts(
+            approval, allow, deny, permission_default
+        )
+        if _conflicts:
+            output.print_error(
+                "--plan cannot be combined with "
+                + ", ".join(_conflicts)
+                + " (it already selects the read-only planning mode)"
+            )
+            raise typer.Exit(1)
+        approval = "plan"
 
     _require_wrapper_for_default_run(
         target, agent=agent, command=command, output_mode=output_mode
@@ -1271,6 +1316,9 @@ def run_main(
                 session=session,
                 fork=fork,
                 no_save=no_save,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         else:
             # Profiling for direct prompt
@@ -1285,6 +1333,9 @@ def run_main(
                 no_save=no_save,
                 no_rules=no_rules,
                 instructions=merged_instructions,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
             )
         return
     
@@ -1860,6 +1911,9 @@ def _run_from_file_profiled(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -1922,7 +1976,12 @@ def _run_from_file_profiled(
     if not no_save:
         import uuid
         auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-    if session_id or auto_save_name:
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) through
+    # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
+    # permission-gated identically to the non-profiled path instead of silently
+    # dropping the deny policy.
+    if session_id or auto_save_name or approval or approve_all_tools:
         class Args:
             pass
         
@@ -1930,6 +1989,12 @@ def _run_from_file_profiled(
         args.auto_save = auto_save_name
         args.resume_session = session_id
         args.cli_project_sessions = bool(session_id or auto_save_name)
+        if approval:
+            args.approval = approval
+        if approve_all_tools:
+            args.approve_all_tools = approve_all_tools
+        if approval_timeout is not None:
+            args.approval_timeout = approval_timeout
         
         praison.args = args
     
@@ -2299,6 +2364,9 @@ def _run_prompt_profiled(
     no_save: bool = False,
     no_rules: bool = False,
     instructions: Optional[List[str]] = None,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2333,7 +2401,16 @@ def _run_prompt_profiled(
     }
     if model:
         agent_config["llm"] = model
-    
+
+    # Thread the approval backend (e.g. --plan -> PermissionMode.PLAN) into the
+    # profiled agent so a read-only planning run stays read-only under
+    # --profile instead of silently dropping the deny policy.
+    if approval:
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        agent_config["approval"] = resolve_approval_config(
+            approval, all_tools=approve_all_tools, timeout=approval_timeout,
+        )
+
     # Apply session continuity if requested
     session_id = None
     auto_save_name = None
