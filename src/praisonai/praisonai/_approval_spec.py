@@ -7,13 +7,10 @@ ensuring consistent behavior across all entry points.
 """
 from dataclasses import dataclass
 from typing import Optional, Literal, Union, Dict, Any
-import logging
 
 Backend = Literal["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none"]
 ApprovalLevel = Literal["low", "medium", "high", "critical"]
 DefaultPolicy = Literal["deny", "prompt", "allow"]
-
-logger = logging.getLogger(__name__)
 
 
 def _parse_timeout(timeout_val: Optional[Union[str, int, float]]) -> Optional[float]:
@@ -150,96 +147,3 @@ class ApprovalSpec:
         if self.approve_tools is not None:
             result["approve_tools"] = self.approve_tools
         return result
-    
-    def _resolve_backend(self):
-        """Resolve ``self.backend`` (a name) to a core approval backend, or None.
-
-        ``"auto"`` / ``"none"`` mean "do not prompt" (auto-approve / disabled),
-        so they resolve to ``None`` and the hook falls through to allow. Only the
-        backends we can construct without extra config are wired here; unknown
-        names return ``None`` so we never block on a backend we can't drive.
-        """
-        if self.backend in (None, "none", "auto"):
-            return None
-        try:
-            if self.backend == "console":
-                from praisonaiagents.approval.backends import ConsoleBackend
-                return ConsoleBackend()
-        except ImportError:
-            return None
-        return None
-
-    def install_hook(self) -> None:
-        """Install a before_tool hook to enforce approval."""
-        try:
-            from praisonaiagents.hooks import add_hook
-            from praisonaiagents.hooks.events import BeforeToolInput
-            from praisonaiagents.hooks.types import HookResult
-        except ImportError:
-            logger.warning("Could not import praisonaiagents.hooks - approval enforcement unavailable")
-            return
-
-        backend = self._resolve_backend()
-
-        def approval_hook(data: BeforeToolInput) -> Optional[HookResult]:
-            """Check if tool execution should be approved."""
-            if not self.enabled:
-                return None  # No opinion, let other hooks decide
-
-            tool_name = data.tool_name
-
-            # Per-tool override: an explicit level entry means this tool must be
-            # gated regardless of the default policy.
-            requires_prompt = self.default_policy == "prompt"
-            if self.approve_tools and tool_name in self.approve_tools:
-                requires_prompt = True
-
-            # `approve_all_tools` / --trust auto-approve everything.
-            if self.approve_all_tools or self.backend == "auto":
-                return None
-
-            if self.default_policy == "deny":
-                logger.warning(f"Tool {tool_name} denied by default policy")
-                return HookResult.deny(f"Tool {tool_name} denied by default policy")
-            if self.default_policy == "allow" and not (
-                self.approve_tools and tool_name in self.approve_tools
-            ):
-                return None
-
-            if not requires_prompt:
-                return None
-
-            # Prompt via the resolved backend. Without a usable backend we cannot
-            # obtain consent, so fail safe by denying instead of silently allowing.
-            if backend is None:
-                logger.warning(
-                    "Tool %s requires approval but no usable backend (%s); denying.",
-                    tool_name, self.backend,
-                )
-                return HookResult.deny(
-                    f"Tool {tool_name} requires approval but backend {self.backend!r} is unavailable"
-                )
-
-            try:
-                from praisonaiagents.approval.protocols import ApprovalRequest
-                level = None
-                if self.approve_tools:
-                    level = self.approve_tools.get(tool_name)
-                request = ApprovalRequest(
-                    tool_name=tool_name,
-                    arguments=dict(getattr(data, "tool_input", {}) or {}),
-                    risk_level=level or self.approve_level or "medium",
-                )
-                decision = backend.request_approval_sync(request)
-            except Exception as exc:  # noqa: BLE001 - fail safe on any backend error
-                logger.error("Approval backend error for %s: %s", tool_name, exc)
-                return HookResult.deny(f"Approval error for {tool_name}: {exc}")
-
-            if getattr(decision, "approved", False):
-                return None
-            return HookResult.deny(
-                getattr(decision, "reason", None) or f"Tool {tool_name} denied"
-            )
-
-        add_hook("before_tool", approval_hook)
-        logger.info("Approval hook installed")
