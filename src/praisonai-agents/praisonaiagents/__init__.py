@@ -304,9 +304,10 @@ _LAZY_IMPORTS = {
     'CodeAgent': ('praisonaiagents.agent.code_agent', 'CodeAgent'),
     'CodeConfig': ('praisonaiagents.agent.code_agent', 'CodeConfig'),
     
-    # AgentTeam (primary) / AgentManager (alias)
+    # AgentTeam (primary) / AgentManager, PraisonAIAgents (aliases)
     'AgentTeam': ('praisonaiagents.agents.agents', 'AgentTeam'),
     'AgentManager': ('praisonaiagents.agents.agents', 'AgentManager'),  # Silent alias
+    'PraisonAIAgents': ('praisonaiagents.agents.agents', 'PraisonAIAgents'),  # Silent alias (pre-1.0 name)
     # Note: 'Agents' is handled by _custom_handler for deprecation warning
     'Task': ('praisonaiagents.task.task', 'Task'),
     'AutoAgents': ('praisonaiagents.agents.autoagents', 'AutoAgents'),
@@ -843,6 +844,7 @@ __all__ = [
     'RetryBackoffConfig',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
     'AgentManager',  # Silent alias for AgentTeam
+    'PraisonAIAgents',  # Silent alias for AgentTeam (pre-1.0 name)
     'Agents',  # Deprecated alias for AgentTeam (emits warning)
     'Task',
     
