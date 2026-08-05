@@ -1117,6 +1117,11 @@ class LocalManagedAgent:
             idle_timeout_s=kwargs.get("idle_timeout_s", 300),
         )
 
+        # Carry capture-related metadata (refresh commands, capture opt-in) from
+        # the definition so the backend's capture path can act on it.
+        if env_cfg is not None and getattr(env_cfg, "metadata", None):
+            config.metadata.update(env_cfg.metadata)
+
         info = await self._compute.provision(config)
         self._compute_instance_id = info.instance_id
         logger.info(
