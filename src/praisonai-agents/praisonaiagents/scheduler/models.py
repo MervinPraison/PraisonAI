@@ -246,6 +246,19 @@ class ScheduleJob:
                    key used by ``store.list(principal=...)`` to isolate one
                    gateway user's automations from another's. ``None`` means
                    global / single-tenant — preserving pre-scoping behaviour.
+        command: Optional shell command whose stdout is delivered verbatim.
+                 When set, the job runs this command on its schedule and
+                 delivers the output as-is to ``delivery`` — with NO agent
+                 resolved and NO model turn taken. This is a first-class
+                 model-free execution *action* (a cheap, deterministic
+                 watchdog: ``df -h``, ``uptime``, a health-check ``curl``),
+                 distinct from ``pre_run`` which is only a go/no-go *gate*
+                 feeding the model turn. Additive and backward-compatible:
+                 jobs without a ``command`` keep the existing agent path.
+        command_timeout: Maximum seconds the ``command`` may run before it is
+                 killed (with its process group on POSIX) and the tick is
+                 recorded as ``failed``. Bounds the action so a hung command
+                 cannot stall the ticker. Defaults to 60s.
     """
 
     name: str = ""
@@ -263,6 +276,8 @@ class ScheduleJob:
     pre_run: Optional[str] = None
     condition: Optional[str] = None
     principal: Optional[str] = None
+    command: Optional[str] = None
+    command_timeout: float = 60.0
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -289,6 +304,12 @@ class ScheduleJob:
             d["condition"] = self.condition
         if self.principal is not None:
             d["principal"] = self.principal
+        if self.command is not None:
+            d["command"] = self.command
+            # Only persist the timeout when a command is configured and it
+            # differs from the default, keeping agent-only jobs unchanged.
+            if self.command_timeout != 60.0:
+                d["command_timeout"] = self.command_timeout
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -319,6 +340,8 @@ class ScheduleJob:
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
             principal=d.get("principal"),
+            command=d.get("command"),
+            command_timeout=d.get("command_timeout", 60.0),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
