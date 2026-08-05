@@ -32,7 +32,6 @@ Usage:
 import inspect
 import functools
 import logging
-import copy
 import warnings
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
@@ -213,31 +212,6 @@ class FunctionTool(BaseTool):
         # Inject state for any Injected parameters
         kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(*args, **kwargs)
-    
-    def get_schema(self) -> Dict[str, Any]:
-        """Get OpenAI-compatible function schema for this tool.
-        
-        Applies dynamic schema overrides if present.
-        """
-        # Build base schema directly to avoid double override from parent
-        base_schema = {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": copy.deepcopy(self.parameters)
-            }
-        }
-        
-        # Apply dynamic override if present
-        if self._schema_override is not None:
-            try:
-                return self._schema_override(base_schema)
-            except Exception as e:
-                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
-                return base_schema
-        
-        return base_schema
     
     def check_availability(self) -> tuple[bool, str]:
         """Check if this tool is currently available to run.
