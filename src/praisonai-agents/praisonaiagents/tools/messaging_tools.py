@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from typing import List, Optional
 
@@ -48,6 +49,29 @@ _NO_GATEWAY_ASK_MSG = (
 )
 
 _MEDIA_RE = re.compile(r"MEDIA:(\S+)")
+
+# Default and hard upper bound for ``ask_conversation``'s bounded wait. The
+# target is model-controlled, so a steered/prompt-injected agent could pass a
+# negative, non-finite (NaN/inf), or absurdly large timeout. Any such value is
+# clamped so the tool's "never a silent hang" guarantee always holds.
+_DEFAULT_ASK_TIMEOUT_S = 120.0
+_MAX_ASK_TIMEOUT_S = 3600.0
+
+
+def _normalize_ask_timeout(timeout_s: object) -> float:
+    """Coerce ``timeout_s`` to a finite, positive, bounded number of seconds.
+
+    Falls back to :data:`_DEFAULT_ASK_TIMEOUT_S` for non-numeric, non-finite
+    (NaN/inf), or non-positive input, and clamps to :data:`_MAX_ASK_TIMEOUT_S`
+    so a pathological value can never make an agent turn wait indefinitely.
+    """
+    try:
+        timeout = float(timeout_s)
+    except (TypeError, ValueError):
+        return _DEFAULT_ASK_TIMEOUT_S
+    if not math.isfinite(timeout) or timeout <= 0:
+        return _DEFAULT_ASK_TIMEOUT_S
+    return min(timeout, _MAX_ASK_TIMEOUT_S)
 
 
 def _run_async(coro):
@@ -295,7 +319,9 @@ def ask_conversation(
             - "<alias>": a friendly alias for a known target
         text: The prompt to send to the target.
         timeout_s: Maximum seconds to wait for a reply before returning a
-            ``timeout`` outcome. Defaults to 120.
+            ``timeout`` outcome. Defaults to 120. Non-numeric, non-finite, or
+            non-positive values fall back to the default; values are clamped to
+            a practical upper bound so a request can never wait indefinitely.
 
     Returns:
         A JSON string describing the typed outcome (see above).
@@ -314,10 +340,7 @@ def ask_conversation(
         if denied is not None:
             return json.dumps({"status": "undelivered", "detail": denied})
 
-        try:
-            timeout = float(timeout_s)
-        except (TypeError, ValueError):
-            timeout = 120.0
+        timeout = _normalize_ask_timeout(timeout_s)
 
         reply = _run_async(requester.ask(target, text, timeout_s=timeout))
         return json.dumps(reply.as_dict())

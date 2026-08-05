@@ -109,6 +109,28 @@ def test_invalid_timeout_falls_back_to_default():
         clear_conversation_requester(token)
 
 
+def test_non_positive_and_non_finite_timeouts_fall_back_to_default():
+    requester = FakeRequester()
+    token = register_conversation_requester(requester)
+    try:
+        for bad in (0, -5, float("nan"), float("inf"), float("-inf")):
+            requester.asked.clear()
+            ask_conversation("slack:ops", "hi", timeout_s=bad)
+            assert requester.asked[0][2] == 120.0
+    finally:
+        clear_conversation_requester(token)
+
+
+def test_absurdly_large_timeout_is_clamped():
+    requester = FakeRequester()
+    token = register_conversation_requester(requester)
+    try:
+        ask_conversation("slack:ops", "hi", timeout_s=10_000_000)
+        assert requester.asked[0][2] == 3600.0
+    finally:
+        clear_conversation_requester(token)
+
+
 def test_denied_ask_is_not_delivered():
     requester = FakeRequester()
     rtoken = register_conversation_requester(requester)
