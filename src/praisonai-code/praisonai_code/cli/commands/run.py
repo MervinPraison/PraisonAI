@@ -1030,6 +1030,54 @@ def run_main(
         target, agent=agent, command=command, output_mode=output_mode
     )
 
+    # Validate session options before any model/credential resolution so an
+    # invalid combination fails closed and session-model restoration below sees
+    # a well-formed request.
+    if fork and not session:
+        output.print_error("--fork requires --session to specify which session to fork from")
+        raise typer.Exit(1)
+
+    if continue_session and session:
+        output.print_error("Cannot use both --continue and --session together")
+        raise typer.Exit(1)
+
+    # Resolve the effective model BEFORE the credential/local-endpoint gate so a
+    # resumed session (or config) model is honoured rather than being shadowed
+    # by the keyless local-first fallback (Issue #3685). Precedence:
+    #   explicit --model  >  config model  >  recorded session model  >  default
+    if model is None:
+        try:
+            config = resolve_config()
+            if config.agent.model:
+                model = config.agent.model
+                if verbose:
+                    output.print_info(f"Using model from config: {model}")
+        except (ValueError, OSError) as e:
+            # Continue if config resolution fails, but log in verbose mode
+            if verbose:
+                output.print_info(f"Skipping config-based model fallback: {e}")
+
+    # Restore the resumed session's model when none was explicitly chosen
+    # (Issue #3685). Without this, resume re-resolves the *current* default, so
+    # a change to the user's default between runs silently switches the model
+    # mid-conversation. An explicit --model (or config model above) still wins
+    # and updates the session's recorded model for subsequent turns. Placing it
+    # before the credential gate ensures a reachable local endpoint no longer
+    # silently shadows the recorded model on resume.
+    if model is None and (continue_session or session):
+        try:
+            from ..state.project_sessions import find_last_session, find_session_model
+
+            resumed_id = session or find_last_session()
+            if resumed_id:
+                recorded = find_session_model(resumed_id)
+                if recorded:
+                    model = recorded
+                    output.print_info(f"Restored session model: {model}")
+        except Exception:
+            # Model restore is best-effort; fall back to default resolution.
+            pass
+
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
         from praisonai_code.llm.credentials import (
@@ -1098,28 +1146,6 @@ def run_main(
                         "  - Or set environment variables like OPENAI_API_KEY"
                     )
                     raise typer.Exit(0)
-    
-    # Resolve configuration if model not explicitly provided
-    if model is None:
-        try:
-            config = resolve_config()
-            if config.agent.model:
-                model = config.agent.model
-                if verbose:
-                    output.print_info(f"Using model from config: {model}")
-        except (ValueError, OSError) as e:
-            # Continue if config resolution fails, but log in verbose mode
-            if verbose:
-                output.print_info(f"Skipping config-based model fallback: {e}")
-    
-    # Validate session options
-    if fork and not session:
-        output.print_error("--fork requires --session to specify which session to fork from")
-        raise typer.Exit(1)
-    
-    if continue_session and session:
-        output.print_error("Cannot use both --continue and --session together")
-        raise typer.Exit(1)
 
     # Worktree isolation runs the agent in a chdir'd worktree in-process; the
     # warm runtime is a separate process whose cwd we can't redirect, so reject

@@ -230,6 +230,15 @@ class SessionData:
             if last_compaction_data
             else None
         )
+        # Backward compatibility: `to_dict` mirrors select metadata keys to the
+        # top level, and older/externally-written session files may carry
+        # `model`/`llm` (etc.) only there. Fold those back into `metadata` so
+        # resume can recover the recorded model instead of silently reverting to
+        # the current default (Issue #3685). Existing metadata always wins.
+        metadata = dict(data.get("metadata") or {})
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+            if key not in metadata and data.get(key) is not None:
+                metadata[key] = data[key]
         return cls(
             session_id=data.get("session_id", ""),
             messages=messages,
@@ -237,7 +246,7 @@ class SessionData:
             updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
             agent_name=data.get("agent_name"),
             user_id=data.get("user_id"),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
             runtime_state=data.get("runtime_state") or {},
@@ -1297,7 +1306,33 @@ class DefaultSessionStore:
     def get_session(self, session_id: str) -> SessionData:
         """Get full session data."""
         return self._read_session_fresh(session_id)
-    
+
+    def get_session_model(self, session_id: str) -> Optional[str]:
+        """Return the model a session was created / last run with (Issue #3685).
+
+        Resolves the session-level model recorded in metadata (written by the
+        wrapper's session-continuity path as ``metadata["model"]``); if absent,
+        falls back to the most recent turn that carried a ``model`` in its own
+        metadata. Returns ``None`` when no model was ever recorded, so a caller
+        can fall back to default model resolution.
+
+        This lets a resume read "the model this session used" without scanning
+        or re-resolving the current default, so a change to the user's default
+        between runs no longer silently switches the model mid-conversation.
+        """
+        try:
+            session = self._read_session_fresh(session_id)
+        except Exception:
+            return None
+        model = session.metadata.get("model") or session.metadata.get("llm")
+        if isinstance(model, str) and model:
+            return model
+        for message in reversed(session.messages):
+            recorded = (message.metadata or {}).get("model")
+            if isinstance(recorded, str) and recorded:
+                return recorded
+        return None
+
     def set_agent_info(
         self,
         session_id: str,
