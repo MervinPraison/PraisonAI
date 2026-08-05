@@ -2501,6 +2501,87 @@ class ConversationRequestProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Agent-callable live status/health (Issue #3688)
+#
+# The gateway already computes rich live state (per-turn run status, active
+# sessions, delivery/DLQ backlog, degraded owners) but only humans/CLI/HTTP can
+# read it. This read-only protocol lets the running gateway bind a live source
+# into the per-turn context so the built-in ``gateway_status`` tool can report
+# it — mirroring how ``OutboundMessengerProtocol`` backs ``send_message``. Core
+# ships only the protocol + snapshot shape; the concrete binding (reading
+# ``health()`` / ``metrics_snapshot()`` / the session registry) lives in the
+# praisonai-bot wrapper. It is strictly read-only, redaction-aware and
+# visibility-scoped (no secrets, no cross-tenant leakage).
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GatewayStatus:
+    """Read-only snapshot of the gateway's live self-state (Issue #3688).
+
+    A neutral, serializable shape the agent can reason about and report. All
+    fields default to empty so a partial/minimal binding is valid and the tool
+    never dead-ends. The concrete binding populates only the visibility-scoped
+    facts it can safely expose.
+
+    Attributes:
+        run: Current turn/run status (e.g. "idle", "busy", "queued").
+        queued: Number of turns queued behind the current one.
+        active_sessions: Count of active sessions (visibility-scoped).
+        sessions_by_channel: Active-session counts keyed by channel/platform.
+        delivery: Delivery-health facts (e.g. outbox_depth, dlq, dead_targets).
+        degraded: Degraded owners as ``{"owner": ..., "reason": ...}`` entries
+            (channels/capabilities/routes flagged configured-unavailable).
+        detail: Optional free-form extra context for the model.
+    """
+
+    run: str = "idle"
+    queued: int = 0
+    active_sessions: int = 0
+    sessions_by_channel: Dict[str, int] = field(default_factory=dict)
+    delivery: Dict[str, Any] = field(default_factory=dict)
+    degraded: List[Dict[str, Any]] = field(default_factory=list)
+    detail: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {
+            "run": self.run,
+            "queued": self.queued,
+            "active_sessions": self.active_sessions,
+            "sessions_by_channel": dict(self.sessions_by_channel),
+            "delivery": dict(self.delivery),
+            "degraded": list(self.degraded),
+            "detail": self.detail,
+        }
+
+
+@runtime_checkable
+class GatewayStatusProtocol(Protocol):
+    """Protocol for agent-facing, read-only live status/health reporting.
+
+    A concrete implementation is provided by the running gateway/bot (in the
+    praisonai wrapper) and registered into the per-turn context so the built-in
+    ``gateway_status`` tool can resolve it. It reads the same live objects the
+    HTTP endpoints already serve (``health()`` / ``metrics_snapshot()`` / the
+    session registry) and returns a redaction-aware, visibility-scoped
+    :class:`GatewayStatus`.
+
+    Example usage (implementation in praisonai_bot.gateway)::
+
+        status = BotGatewayStatus(gateway)
+        token = register_gateway_status(status)
+        try:
+            ...  # agent runs; gateway_status tool resolves the source
+        finally:
+            clear_gateway_status(token)
+    """
+
+    def snapshot(self) -> "GatewayStatus":
+        """Return a read-only snapshot of the gateway's live self-state."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Outbound send-policy guard (Issue #2226)
 #
 # ``send_message`` lets the model choose where to deliver. Because the target
