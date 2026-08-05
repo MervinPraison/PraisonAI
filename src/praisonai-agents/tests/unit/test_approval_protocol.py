@@ -219,13 +219,24 @@ class TestApprovalRegistry:
         assert reg.is_already_approved("execute_command")
 
     def test_already_approved_skips_backend(self):
-        """Once approved, no backend call needed."""
+        """Once approved for an agent, no backend call needed for that agent."""
         from praisonaiagents.approval.registry import ApprovalRegistry
         reg = ApprovalRegistry()
-        reg.mark_approved("write_file")
+        # Approvals are scoped to the requesting agent, so mark with the same
+        # agent identity the approval is later resolved for.
+        reg.mark_approved("write_file", {}, agent_name="agent")
         decision = reg.approve_sync("agent", "write_file", {})
         assert decision.approved is True
         assert "already" in decision.reason.lower()
+
+    def test_approval_not_shared_across_agents(self):
+        """One agent's approval must not pre-authorize a different agent."""
+        from praisonaiagents.approval.registry import ApprovalRegistry
+        reg = ApprovalRegistry()
+        reg.mark_approved("write_file", {}, agent_name="permissive")
+        # A different agent's identical call is NOT considered pre-approved.
+        assert reg.is_already_approved("write_file", {}, agent_name="strict") is False
+        assert reg.is_already_approved("write_file", {}, agent_name="permissive") is True
 
     def test_yaml_approved_skips_backend(self):
         from praisonaiagents.approval.registry import ApprovalRegistry

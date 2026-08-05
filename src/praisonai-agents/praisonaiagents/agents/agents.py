@@ -839,6 +839,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             _max_retries = 3
         self.completion_checker = _completion_checker if _completion_checker else self.default_completion_checker
         self.task_id_counter = 0
+        # Last user-supplied task id, tracked for hierarchical runs so the
+        # return path never surfaces the synthetic manager_task's output.
+        self._last_real_task_id = None
         self._task_id_lock = threading.Lock()  # Thread-safe task ID assignment
         self._state_lock = threading.Lock()  # Thread-safe state mutations
         self.verbose = _verbose
@@ -1054,6 +1057,26 @@ class AgentTeam(SpawnAnnounceProtocol):
             self.tasks[task_id] = task
             self.task_id_counter += 1
             return task_id
+
+    def _last_hierarchical_task_id(self):
+        """Return the last user-supplied task id before hierarchical injection.
+
+        The hierarchical process injects a synthetic ``manager_task`` that always
+        lands last in the insertion-ordered ``self.tasks`` dict. Snapshotting the
+        real task ids up front lets the return path surface the final delegated
+        task's result instead of the Manager's own generic answer.
+
+        A ``manager_task`` from a prior run of the same team can still be present
+        in ``self.tasks`` (it is not removed after a run), so it is explicitly
+        skipped here; otherwise a second ``.start()`` would return the previous
+        run's Manager output instead of the final user-task result.
+        """
+        for task_id in reversed(self.tasks):
+            task = self.tasks.get(task_id)
+            if getattr(task, "name", None) == "manager_task":
+                continue
+            return task_id
+        return None
 
     def clean_json_output(self, output: str) -> str:
         # NOTE: This method is duplicated in chat_mixin.ChatMixin.clean_json_output.
@@ -1418,6 +1441,12 @@ class AgentTeam(SpawnAnnounceProtocol):
             # Execute any remaining async tasks at the end
             await flush_async_tasks()
         elif self.process == "hierarchical":
+            # Snapshot the real (user-supplied) task ids before the hierarchical
+            # generator injects its synthetic manager_task. The manager_task is
+            # always added last (highest id), so relying on dict-insertion order
+            # in the return path would surface the Manager's own generic answer
+            # instead of the final delegated task's result.
+            self._last_real_task_id = self._last_hierarchical_task_id()
             async for task_id in process.ahierarchical():
                 if isinstance(task_id, Task):
                     task_id = self.add_task(task_id)
@@ -1460,10 +1489,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # By default, return only the final agent's response
         if not return_dict:
-            # Get the last task (assuming sequential processing)
-            task_ids = list(self.tasks.keys())
-            if task_ids:
-                last_task_id = task_ids[-1]
+            # Prefer the tracked last real task id (set by hierarchical runs so
+            # the synthetic manager_task never masks the real final result);
+            # otherwise fall back to the last task in insertion order.
+            last_task_id = getattr(self, "_last_real_task_id", None)
+            if last_task_id is None:
+                task_ids = list(self.tasks.keys())
+                last_task_id = task_ids[-1] if task_ids else None
+            if last_task_id is not None:
                 last_result = self.get_task_result(last_task_id)
                 if last_result:
                     return last_result.raw
@@ -1611,6 +1644,10 @@ class AgentTeam(SpawnAnnounceProtocol):
             for task_id in process.sequential():
                 self.run_task(task_id)
         elif self.process == "hierarchical":
+            # See arun_all_tasks: capture the last real task id before the
+            # synthetic manager_task is injected so the return path doesn't
+            # surface the Manager's own generic output.
+            self._last_real_task_id = self._last_hierarchical_task_id()
             for task_id in process.hierarchical():
                 if isinstance(task_id, Task):
                     task_id = self.add_task(task_id)
@@ -1847,9 +1884,14 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         # By default, return only the final agent's response
         if not return_dict:
-            task_ids = list(self.tasks.keys())
-            if task_ids:
-                last_task_id = task_ids[-1]
+            # Prefer the tracked last real task id (set by hierarchical runs so
+            # the synthetic manager_task never masks the real final result);
+            # otherwise fall back to the last task in insertion order.
+            last_task_id = getattr(self, "_last_real_task_id", None)
+            if last_task_id is None:
+                task_ids = list(self.tasks.keys())
+                last_task_id = task_ids[-1] if task_ids else None
+            if last_task_id is not None:
                 last_result = self.get_task_result(last_task_id)
                 if last_result:
                     return last_result.raw

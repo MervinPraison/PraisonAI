@@ -351,6 +351,13 @@ class FileMemory:
             The generated memory ID
         """
         with self._lock:
+            # Re-read the current on-disk state before mutating so a concurrent
+            # writer sharing the same files (e.g. another agent with the same
+            # user_id) doesn't get its entries silently discarded by this save.
+            self._short_term = [
+                MemoryItem.from_dict(i)
+                for i in self._read_json(self.short_term_file, [])
+            ]
             item = MemoryItem(
                 id=self._generate_id(content),
                 content=content,
@@ -389,6 +396,12 @@ class FileMemory:
     def _auto_promote_to_long_term(self):
         """Promote high-importance short-term memories to long-term."""
         # Note: This method is called within _lock context from add_short_term
+        # Re-read long-term from disk before appending so concurrent writers
+        # sharing the same files aren't overwritten by the promotion save.
+        self._long_term = [
+            MemoryItem.from_dict(i)
+            for i in self._read_json(self.long_term_file, [])
+        ]
         threshold = self.config["importance_threshold"]
         promoted = []
         
@@ -426,6 +439,13 @@ class FileMemory:
             The generated memory ID
         """
         with self._lock:
+            # Re-read the current on-disk state before mutating so a concurrent
+            # writer sharing the same files (e.g. another agent with the same
+            # user_id) doesn't get its entries silently discarded by this save.
+            self._long_term = [
+                MemoryItem.from_dict(i)
+                for i in self._read_json(self.long_term_file, [])
+            ]
             item = MemoryItem(
                 id=self._generate_id(content),
                 content=content,
@@ -482,6 +502,13 @@ class FileMemory:
             The entity ID
         """
         with self._lock:
+            # Re-read the current on-disk state before mutating so a concurrent
+            # writer sharing the same files (e.g. another agent with the same
+            # user_id) doesn't get its entries silently discarded by this save.
+            self._entities = {
+                k: EntityItem.from_dict(v)
+                for k, v in self._read_json(self.entities_file, {}).items()
+            }
             entity_id = self._generate_id(f"{name}:{entity_type}")
             
             # Check if entity exists

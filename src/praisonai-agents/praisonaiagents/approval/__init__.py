@@ -97,11 +97,19 @@ def get_approval_callback() -> Optional[Callable]:
     """Get the current approval callback function (legacy API)."""
     return approval_callback
 
-def mark_approved(tool_name: str, arguments: Optional[Dict] = None) -> None:
-    get_approval_registry().mark_approved(tool_name, arguments)
+def mark_approved(
+    tool_name: str,
+    arguments: Optional[Dict] = None,
+    agent_name: Optional[str] = None,
+) -> None:
+    get_approval_registry().mark_approved(tool_name, arguments, agent_name)
 
-def is_already_approved(tool_name: str, arguments: Optional[Dict] = None) -> bool:
-    return get_approval_registry().is_already_approved(tool_name, arguments)
+def is_already_approved(
+    tool_name: str,
+    arguments: Optional[Dict] = None,
+    agent_name: Optional[str] = None,
+) -> bool:
+    return get_approval_registry().is_already_approved(tool_name, arguments, agent_name)
 
 def is_yaml_approved(tool_name: str) -> bool:
     return get_approval_registry().is_yaml_approved(tool_name)
