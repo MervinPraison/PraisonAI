@@ -27,6 +27,7 @@ Usage:
     tool = claude.as_tool()
 """
 
+import inspect
 import json
 import os
 from typing import AsyncIterator, Dict, Any, Optional, List
@@ -185,7 +186,11 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         Returns:
             str: The CLI output (parsed from JSON if output_format is "json")
         """
-        if self.use_sdk:
+        # Live progress requires the stream-json subprocess path; the SDK path
+        # yields no partial events. When a progress sink is supplied, route
+        # through the subprocess so callers are never silently dropped.
+        wants_progress = ("on_event" in options) or ("on_progress" in options)
+        if self.use_sdk and not wants_progress:
             return await self._execute_sdk(prompt, **options)
         
         return await self._execute_subprocess(prompt, **options)
@@ -226,17 +231,20 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
     async def _execute_streaming(self, prompt: str, on_event, **options) -> str:
         """Stream the run, forward each event to ``on_event``, return final text.
 
-        ``on_event`` may raise nothing meaningful -- a broken progress sink must
-        not fail the underlying work -- so its exceptions are swallowed. The
-        final text is taken from the terminal ``result`` event when present,
-        otherwise accumulated from ``text_delta`` chunks.
+        ``on_event`` may be sync or ``async``; awaitable results are awaited so
+        coroutine callbacks actually run. A broken progress sink must not fail
+        the underlying work, so its exceptions are swallowed. The final text is
+        taken from the terminal ``result`` event when present, otherwise
+        accumulated from ``text_delta`` chunks.
         """
         options.pop("output_format", None)  # streaming forces stream-json
         final_result = None
         text_parts: List[str] = []
         async for event in self.stream(prompt, **options):
             try:
-                on_event(event)
+                callback_result = on_event(event)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
             except Exception:
                 pass
             if not isinstance(event, dict):

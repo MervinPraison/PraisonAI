@@ -172,7 +172,10 @@ class TestClaudeCodeIntegrationAsync:
             async for event in integration.stream("Say hello"):
                 events.append(event)
 
-            assert len(events) >= 0  # May be empty if stream_async not called correctly
+            assert events == [
+                {"type": "assistant", "content": "Hello"},
+                {"type": "result", "content": "Done"},
+            ]
 
     @pytest.mark.asyncio
     async def test_execute_forwards_progress_events_and_returns_final(self):
@@ -220,6 +223,29 @@ class TestClaudeCodeIntegrationAsync:
             result = await integration.execute("x", on_event=boom)
 
         assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_async_progress_callback_is_awaited(self):
+        """An async on_event callback must actually run (its coroutine awaited),
+        not be created and discarded."""
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+
+        integration = ClaudeCodeIntegration()
+
+        async def mock_stream_async(cmd, *args, **kwargs):
+            yield json.dumps({"type": "system", "subtype": "init"})
+            yield json.dumps({"type": "result", "result": "done"})
+
+        seen = []
+
+        async def async_sink(event):
+            seen.append(event)
+
+        with patch.object(integration, 'stream_async', side_effect=mock_stream_async):
+            result = await integration.execute("x", on_event=async_sink)
+
+        assert result == "done"
+        assert [e.get("type") for e in seen] == ["system", "result"]
 
 
 class TestClaudeCodeSDKIntegration:
