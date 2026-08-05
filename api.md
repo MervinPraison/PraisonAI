@@ -25,7 +25,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import Agent, AutoAgents, AutoRagAgent, ContextAgent, DeepResearchAgent, ImageAgent, PlanningAgent, PromptExpanderAgent, QueryRewriterAgent, create_context_agent
+from praisonaiagents import Agent, AutoAgents, AutoRagAgent, ContextAgent, DeepResearchAgent, ImageAgent, PlanningAgent, PraisonAIAgents, PromptExpanderAgent, QueryRewriterAgent, create_context_agent
 ```
 
 Methods:
@@ -180,6 +180,7 @@ Methods:
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">get_schema</a>() -> Dict[str, Any]</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">run</a>(**kwargs) -> Any</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">safe_run</a>(**kwargs) -> ToolResult</code>
+* <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">to_model_output</a>(result: Any) -> Optional[Any]</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate</a>() -> bool</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_class</a>() -> bool</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_schema_roundtrip</a>() -> bool</code>
@@ -188,6 +189,7 @@ Methods:
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">get_schema</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">injected_params</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">run</a>(**kwargs) -> Any</code>
+* <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">to_model_output</a>(result: Any) -> Optional[Any]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">clear</a>() -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
