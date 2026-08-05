@@ -155,6 +155,13 @@ class SandboxConfig:
         )
 
     @classmethod
+    def novita(cls) -> "SandboxConfig":
+        """Create a Novita sandbox configuration."""
+        return cls(
+            sandbox_type="novita",
+        )
+
+    @classmethod
     def capsule(cls) -> "SandboxConfig":
         """Create a Capsule sandbox configuration.
 

@@ -45,6 +45,11 @@ def _e2b_loader():
     return E2BSandbox
 
 
+def _novita_loader():
+    from .novita import NovitaSandbox
+    return NovitaSandbox
+
+
 # Built-in sandbox types with lazy loading
 _BUILTIN_SANDBOXES = {
     "docker": _docker_loader,
@@ -54,6 +59,7 @@ _BUILTIN_SANDBOXES = {
     "modal": _modal_loader,
     "daytona": _daytona_loader,
     "e2b": _e2b_loader,
+    "novita": _novita_loader,
 }
 
 
