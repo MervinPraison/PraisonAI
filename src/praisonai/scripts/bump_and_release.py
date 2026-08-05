@@ -624,34 +624,63 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
     else:
         run(["git", "add", "-A"], cwd=root)
         
-    run(["git", "commit", "-m", f"Release {tag}"], cwd=root, check=False)
-    
+    # Distinguish "nothing to commit" (legitimate rerun) from a real commit
+    # failure (hook, index lock): the latter must abort, or the tag below
+    # would point at the previous HEAD and the GitHub release would ship a
+    # tree that doesn't match the PyPI artifact.
+    staged = run(["git", "diff", "--cached", "--quiet"], cwd=root, check=False, silent=True)
+    if staged.returncode == 0:
+        print("  ℹ️  Nothing to commit (release files unchanged — likely a rerun).")
+    else:
+        run(["git", "commit", "-m", f"Release {tag}"], cwd=root)
+
     # 5. Create git tag
     print(f"\n🏷️  Creating tag {tag}...")
     run(["git", "tag", "-f", tag], cwd=root)
-    
+
     # 6. Pull rebase and push to GitHub
     print("\n⬆️  Pushing to GitHub...")
     # First fetch and rebase to handle any remote changes (e.g., auto-generated api.md)
     result = run(["git", "pull", "--rebase", "origin", "main"], cwd=root, check=False)
     if result.returncode != 0:
-        print("  ⚠️  Rebase failed, trying to continue...")
-    
+        # A conflicted rebase leaves the repo mid-rebase on a detached HEAD;
+        # "continuing" from there tags the wrong commit and the push fails.
+        # Abort and retry favoring the release commit ("theirs" during a
+        # rebase is the commit being replayed), then abort hard if that
+        # still fails.
+        print("  ⚠️  Rebase conflicted; retrying with release changes taking precedence...")
+        run(["git", "rebase", "--abort"], cwd=root, check=False)
+        result = run(
+            ["git", "pull", "--rebase", "-X", "theirs", "origin", "main"],
+            cwd=root, check=False,
+        )
+        if result.returncode != 0:
+            run(["git", "rebase", "--abort"], cwd=root, check=False)
+            print("  ❌ Rebase failed even preferring release changes; aborting before push.")
+            sys.exit(1)
+
     # Recreate tag after rebase (commit hash may have changed)
     run(["git", "tag", "-f", tag], cwd=root)
-    
-    # Push changes
+
+    # Push changes (only this release's tag — a blanket `--tags -f` would
+    # force-move historical tags and corrupt old releases' provenance)
     run(["git", "push"], cwd=root)
-    run(["git", "push", "--tags", "-f"], cwd=root)
-    
-    # 7. Create GitHub release
-    print(f"\n🎉 Creating GitHub release {tag}...")
-    run([
-        "gh", "release", "create", tag,
-        "--title", f"PraisonAI {tag}",
-        "--notes", f"Release {tag}",
-        "--latest"
-    ], cwd=root)
+    run(["git", "push", "origin", "-f", f"refs/tags/{tag}"], cwd=root)
+
+    # 7. Create GitHub release (idempotent: a rerun after a transient failure
+    # must not die on "release already exists" — that would permanently block
+    # the recovery path, since the wrapper publish runs after this step)
+    existing = run(["gh", "release", "view", tag], cwd=root, check=False, silent=True)
+    if existing.returncode == 0:
+        print(f"\nℹ️  GitHub release {tag} already exists; skipping create.")
+    else:
+        print(f"\n🎉 Creating GitHub release {tag}...")
+        run([
+            "gh", "release", "create", tag,
+            "--title", f"PraisonAI {tag}",
+            "--notes", f"Release {tag}",
+            "--latest"
+        ], cwd=root)
     
     print(f"\n✅ Released PraisonAI {tag}")
     print("\nNext step:")

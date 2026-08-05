@@ -41,7 +41,7 @@ jobs:
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.event == 'push' &&
         !startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
-        !startsWith(github.event.workflow_run.head_commit.message, 'Bump praisonai')
+        !startsWith(github.event.workflow_run.head_commit.message, 'chore(release):')
       )
     runs-on: ubuntu-latest
     env:
@@ -68,6 +68,10 @@ jobs:
 
       - name: Fetch main and tags
         run: git fetch --tags origin main
+
+      # Guards the gate logic itself — no workflow ran these selftests before.
+      - name: Selftest release-gate script
+        run: node .github/scripts/release-gate-selftest.js
 
       - name: Preflight — path changes, CI SHA, dedupe
         id: preflight

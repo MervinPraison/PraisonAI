@@ -66,6 +66,24 @@ on:
         required: false
         default: false
         type: boolean
+      # NOTE: GitHub caps workflow_dispatch at 25 top-level inputs; this
+      # workflow has 23. Adding a 10th package (skip_* + *_version) hits 25.
+      only:
+        description: 'Release ONLY this package (forces skip on all others); all = no restriction'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - agents
+          - code
+          - bot
+          - train
+          - browser
+          - mcp
+          - sandbox
+          - deploy
+          - wrapper
       agents_version:
         description: 'Override agents version (empty = auto bump from pyproject.toml)'
         required: false
@@ -205,6 +223,36 @@ jobs:
           echo "Dry run: ${{ inputs.dry_run }}"
           echo "Environment: ${{ (inputs.source == 'ci' || inputs.source == 'nightly') && inputs.bump == 'patch' && 'pypi-auto' || 'pypi' }}"
 
+      # Single source of truth for which packages this run releases. `only`
+      # inverts into the skip flags here; everything downstream (version
+      # computation, PyPI detection, publish conditions) consumes these
+      # outputs, so a dedicated one-package release is one input instead of
+      # eight skip flags.
+      - name: Resolve effective skips
+        id: flags
+        env:
+          ONLY: ${{ inputs.only }}
+          SKIP_AGENTS: ${{ inputs.skip_agents }}
+          SKIP_CODE: ${{ inputs.skip_code }}
+          SKIP_BOT: ${{ inputs.skip_bot }}
+          SKIP_TRAIN: ${{ inputs.skip_train }}
+          SKIP_BROWSER: ${{ inputs.skip_browser }}
+          SKIP_MCP: ${{ inputs.skip_mcp }}
+          SKIP_SANDBOX: ${{ inputs.skip_sandbox }}
+          SKIP_DEPLOY: ${{ inputs.skip_deploy }}
+          SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
+        run: |
+          set -euo pipefail
+          for pkg in agents code bot train browser mcp sandbox deploy wrapper; do
+            var="SKIP_$(echo "$pkg" | tr '[:lower:]' '[:upper:]')"
+            skip="${!var}"
+            if [ -n "${ONLY}" ] && [ "${ONLY}" != "all" ] && [ "${ONLY}" != "$pkg" ]; then
+              skip=true
+            fi
+            echo "skip_${pkg}=${skip}" >> "$GITHUB_OUTPUT"
+            echo "skip_${pkg}=${skip}"
+          done
+
       - name: Compute release versions
         id: versions
         env:
@@ -218,14 +266,14 @@ jobs:
           MCP_OVERRIDE: ${{ inputs.mcp_version }}
           SANDBOX_OVERRIDE: ${{ inputs.sandbox_version }}
           DEPLOY_OVERRIDE: ${{ inputs.deploy_version }}
-          SKIP_AGENTS: ${{ inputs.skip_agents }}
-          SKIP_CODE: ${{ inputs.skip_code }}
-          SKIP_BOT: ${{ inputs.skip_bot }}
-          SKIP_TRAIN: ${{ inputs.skip_train }}
-          SKIP_BROWSER: ${{ inputs.skip_browser }}
-          SKIP_MCP: ${{ inputs.skip_mcp }}
-          SKIP_SANDBOX: ${{ inputs.skip_sandbox }}
-          SKIP_DEPLOY: ${{ inputs.skip_deploy }}
+          SKIP_AGENTS: ${{ steps.flags.outputs.skip_agents }}
+          SKIP_CODE: ${{ steps.flags.outputs.skip_code }}
+          SKIP_BOT: ${{ steps.flags.outputs.skip_bot }}
+          SKIP_TRAIN: ${{ steps.flags.outputs.skip_train }}
+          SKIP_BROWSER: ${{ steps.flags.outputs.skip_browser }}
+          SKIP_MCP: ${{ steps.flags.outputs.skip_mcp }}
+          SKIP_SANDBOX: ${{ steps.flags.outputs.skip_sandbox }}
+          SKIP_DEPLOY: ${{ steps.flags.outputs.skip_deploy }}
         run: |
           python <<'PY'
           import os
@@ -475,15 +523,15 @@ jobs:
           SANDBOX_VERSION: ${{ steps.versions.outputs.sandbox_version }}
           DEPLOY_VERSION: ${{ steps.versions.outputs.deploy_version }}
           WRAPPER_VERSION: ${{ steps.versions.outputs.wrapper_version }}
-          INPUT_SKIP_AGENTS: ${{ inputs.skip_agents }}
-          INPUT_SKIP_CODE: ${{ inputs.skip_code }}
-          INPUT_SKIP_BOT: ${{ inputs.skip_bot }}
-          INPUT_SKIP_TRAIN: ${{ inputs.skip_train }}
-          INPUT_SKIP_BROWSER: ${{ inputs.skip_browser }}
-          INPUT_SKIP_MCP: ${{ inputs.skip_mcp }}
-          INPUT_SKIP_SANDBOX: ${{ inputs.skip_sandbox }}
-          INPUT_SKIP_DEPLOY: ${{ inputs.skip_deploy }}
-          INPUT_SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
+          INPUT_SKIP_AGENTS: ${{ steps.flags.outputs.skip_agents }}
+          INPUT_SKIP_CODE: ${{ steps.flags.outputs.skip_code }}
+          INPUT_SKIP_BOT: ${{ steps.flags.outputs.skip_bot }}
+          INPUT_SKIP_TRAIN: ${{ steps.flags.outputs.skip_train }}
+          INPUT_SKIP_BROWSER: ${{ steps.flags.outputs.skip_browser }}
+          INPUT_SKIP_MCP: ${{ steps.flags.outputs.skip_mcp }}
+          INPUT_SKIP_SANDBOX: ${{ steps.flags.outputs.skip_sandbox }}
+          INPUT_SKIP_DEPLOY: ${{ steps.flags.outputs.skip_deploy }}
+          INPUT_SKIP_WRAPPER: ${{ steps.flags.outputs.skip_wrapper }}
         run: |
           set -euo pipefail
           skip_agents="${INPUT_SKIP_AGENTS}"
@@ -495,32 +543,51 @@ jobs:
           skip_sandbox="${INPUT_SKIP_SANDBOX}"
           skip_deploy="${INPUT_SKIP_DEPLOY}"
           skip_wrapper="${INPUT_SKIP_WRAPPER}"
+          # Returns 0 if published, 1 if definitively absent (404). Any other
+          # HTTP status (PyPI outage, 5xx, rate limit) FAILS the run: guessing
+          # "not published" would lead to a duplicate-upload failure midway
+          # through the release, which is strictly worse than stopping here
+          # before anything has been published.
+          pypi_published() { # $1=package $2=version
+            local code attempt
+            for attempt in 1 2 3; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+                "https://pypi.org/pypi/$1/$2/json" || echo "000")
+              case "$code" in
+                200) return 0 ;;
+                404) return 1 ;;
+                *) echo "PyPI check $1==$2 returned HTTP ${code} (attempt ${attempt}/3)"; sleep 5 ;;
+              esac
+            done
+            echo "❌ Cannot determine PyPI state for $1==$2; refusing to guess." >&2
+            exit 2
+          }
           if [ "$skip_agents" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonaiagents/${AGENTS_VERSION}/json" >/dev/null && skip_agents=true || true
+            pypi_published praisonaiagents "${AGENTS_VERSION}" && skip_agents=true || true
           fi
           if [ "$skip_code" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-code/${CODE_VERSION}/json" >/dev/null && skip_code=true || true
+            pypi_published praisonai-code "${CODE_VERSION}" && skip_code=true || true
           fi
           if [ "$skip_bot" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-bot/${BOT_VERSION}/json" >/dev/null && skip_bot=true || true
+            pypi_published praisonai-bot "${BOT_VERSION}" && skip_bot=true || true
           fi
           if [ "$skip_train" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-train/${TRAIN_VERSION}/json" >/dev/null && skip_train=true || true
+            pypi_published praisonai-train "${TRAIN_VERSION}" && skip_train=true || true
           fi
           if [ "$skip_browser" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-browser/${BROWSER_VERSION}/json" >/dev/null && skip_browser=true || true
+            pypi_published praisonai-browser "${BROWSER_VERSION}" && skip_browser=true || true
           fi
           if [ "$skip_mcp" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-mcp/${MCP_VERSION}/json" >/dev/null && skip_mcp=true || true
+            pypi_published praisonai-mcp "${MCP_VERSION}" && skip_mcp=true || true
           fi
           if [ "$skip_sandbox" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-sandbox/${SANDBOX_VERSION}/json" >/dev/null && skip_sandbox=true || true
+            pypi_published praisonai-sandbox "${SANDBOX_VERSION}" && skip_sandbox=true || true
           fi
           if [ "$skip_deploy" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai-deploy/${DEPLOY_VERSION}/json" >/dev/null && skip_deploy=true || true
+            pypi_published praisonai-deploy "${DEPLOY_VERSION}" && skip_deploy=true || true
           fi
           if [ "$skip_wrapper" != "true" ]; then
-            curl -fsSL "https://pypi.org/pypi/praisonai/${WRAPPER_VERSION}/json" >/dev/null && skip_wrapper=true || true
+            pypi_published praisonai "${WRAPPER_VERSION}" && skip_wrapper=true || true
           fi
           echo "skip_agents=${skip_agents}" >> "$GITHUB_OUTPUT"
           echo "skip_code=${skip_code}" >> "$GITHUB_OUTPUT"
@@ -553,34 +620,43 @@ jobs:
         if: inputs.dry_run
         run: |
           echo "Dry run — no publish, commit, or push."
+          echo "Only:            ${{ inputs.only }}"
           echo "Agents version:  ${{ steps.versions.outputs.agents_version }}"
           echo "Code version:    ${{ steps.versions.outputs.code_version }}"
           echo "Bot version:     ${{ steps.versions.outputs.bot_version }}"
           echo "Train version:   ${{ steps.versions.outputs.train_version }}"
           echo "Browser version: ${{ steps.versions.outputs.browser_version }}"
           echo "MCP version:     ${{ steps.versions.outputs.mcp_version }}"
+          echo "Sandbox version: ${{ steps.versions.outputs.sandbox_version }}"
+          echo "Deploy version:  ${{ steps.versions.outputs.deploy_version }}"
           echo "Wrapper version: ${{ steps.versions.outputs.wrapper_version }}"
           echo ""
-          if [ "${{ inputs.skip_agents }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_agents }}" != "true" ]; then
             echo "Would publish praisonaiagents ${{ steps.versions.outputs.agents_version }}"
           fi
-          if [ "${{ inputs.skip_code }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_code }}" != "true" ]; then
             echo "Would publish praisonai-code ${{ steps.versions.outputs.code_version }}"
           fi
-          if [ "${{ inputs.skip_bot }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_bot }}" != "true" ]; then
             echo "Would publish praisonai-bot ${{ steps.versions.outputs.bot_version }}"
           fi
-          if [ "${{ inputs.skip_train }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_train }}" != "true" ]; then
             echo "Would publish praisonai-train ${{ steps.versions.outputs.train_version }}"
           fi
-          if [ "${{ inputs.skip_browser }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_browser }}" != "true" ]; then
             echo "Would publish praisonai-browser ${{ steps.versions.outputs.browser_version }}"
           fi
-          if [ "${{ inputs.skip_mcp }}" != "true" ]; then
+          if [ "${{ steps.flags.outputs.skip_mcp }}" != "true" ]; then
             echo "Would publish praisonai-mcp ${{ steps.versions.outputs.mcp_version }}"
           fi
-          if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
-            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }} --mcp-pin ${{ steps.versions.outputs.mcp_version }}"
+          if [ "${{ steps.flags.outputs.skip_sandbox }}" != "true" ]; then
+            echo "Would publish praisonai-sandbox ${{ steps.versions.outputs.sandbox_version }}"
+          fi
+          if [ "${{ steps.flags.outputs.skip_deploy }}" != "true" ]; then
+            echo "Would publish praisonai-deploy ${{ steps.versions.outputs.deploy_version }}"
+          fi
+          if [ "${{ steps.flags.outputs.skip_wrapper }}" != "true" ]; then
+            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }} --mcp-pin ${{ steps.versions.outputs.mcp_version }} --sandbox-pin ${{ steps.versions.outputs.sandbox_version }} --deploy-pin ${{ steps.versions.outputs.deploy_version }}"
             echo "Would uv publish praisonai ${{ steps.versions.outputs.wrapper_version }}"
           fi
 
@@ -608,7 +684,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonaiagents on PyPI
         if: >-
@@ -665,7 +743,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-code on PyPI
         if: >-
@@ -722,7 +802,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-bot on PyPI
         if: >-
@@ -779,7 +861,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-train on PyPI
         if: >-
@@ -836,7 +920,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-browser on PyPI
         if: >-
@@ -893,7 +979,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-mcp on PyPI
         if: >-
@@ -950,7 +1038,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-sandbox on PyPI
         if: >-
@@ -1007,7 +1097,9 @@ jobs:
           rm -rf dist
           uv lock
           uv build
-          uv publish
+          # --check-url makes re-uploads idempotent: files already on PyPI are
+          # skipped instead of failing the publish (partial-upload recovery).
+          uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai-deploy on PyPI
         if: >-
@@ -1046,6 +1138,9 @@ jobs:
       - name: Refresh GitHub App token
         id: app-token-final
         if: ${{ !cancelled() && inputs.dry_run != true }}
+        # A failed re-mint must not fail the release: the original token may
+        # still be valid, and the next step only swaps tokens on success.
+        continue-on-error: true
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
@@ -1053,8 +1148,12 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
 
+      # Guarded on the refresh actually succeeding: if the re-mint failed
+      # (API blip), the ORIGINAL token — still wired into the remote URL and
+      # GH_TOKEN — may well be valid, and overwriting it with an empty string
+      # would turn a recoverable situation into a guaranteed auth failure.
       - name: Use refreshed GitHub App token
-        if: ${{ !cancelled() && inputs.dry_run != true }}
+        if: ${{ !cancelled() && inputs.dry_run != true && steps.app-token-final.outcome == 'success' }}
         env:
           APP_TOKEN: ${{ steps.app-token-final.outputs.token }}
           REPO: ${{ github.repository }}
@@ -1064,6 +1163,7 @@ jobs:
           echo "GH_TOKEN=${APP_TOKEN}" >> "$GITHUB_ENV"
 
       - name: Bump and release wrapper
+        id: wrapper
         if: >-
           inputs.dry_run != true &&
           inputs.skip_wrapper != true &&
@@ -1087,7 +1187,7 @@ jobs:
           inputs.skip_wrapper != true &&
           steps.pypi_exists.outputs.skip_wrapper != 'true'
         working-directory: src/praisonai
-        run: uv publish
+        run: uv publish --check-url https://pypi.org/simple/
 
       - name: Wait for praisonai on PyPI
         if: >-
@@ -1116,55 +1216,33 @@ jobs:
             sleep "$INTERVAL"
           done
 
+      # Actually probes PyPI — previously this step only echoed checkmarks
+      # from the input flags, so it "verified" publishes that never happened.
       - name: Verify PyPI versions
         if: inputs.dry_run != true
         run: |
           set -euo pipefail
-          AGENTS="${{ steps.versions.outputs.agents_version }}"
-          CODE="${{ steps.versions.outputs.code_version }}"
-          BOT="${{ steps.versions.outputs.bot_version }}"
-          TRAIN="${{ steps.versions.outputs.train_version }}"
-          BROWSER="${{ steps.versions.outputs.browser_version }}"
-          MCP="${{ steps.versions.outputs.mcp_version }}"
-          SANDBOX="${{ steps.versions.outputs.sandbox_version }}"
-          DEPLOY="${{ steps.versions.outputs.deploy_version }}"
-          WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
-
-          if [ "${{ inputs.skip_agents }}" != "true" ]; then
-            echo "✅ praisonaiagents==${AGENTS}"
-          fi
-
-          if [ "${{ inputs.skip_code }}" != "true" ]; then
-            echo "✅ praisonai-code==${CODE}"
-          fi
-
-          if [ "${{ inputs.skip_bot }}" != "true" ]; then
-            echo "✅ praisonai-bot==${BOT}"
-          fi
-
-          if [ "${{ inputs.skip_train }}" != "true" ]; then
-            echo "✅ praisonai-train==${TRAIN}"
-          fi
-
-          if [ "${{ inputs.skip_browser }}" != "true" ]; then
-            echo "✅ praisonai-browser==${BROWSER}"
-          fi
-
-          if [ "${{ inputs.skip_mcp }}" != "true" ]; then
-            echo "✅ praisonai-mcp==${MCP}"
-          fi
-
-          if [ "${{ inputs.skip_sandbox }}" != "true" ]; then
-            echo "✅ praisonai-sandbox==${SANDBOX}"
-          fi
-
-          if [ "${{ inputs.skip_deploy }}" != "true" ]; then
-            echo "✅ praisonai-deploy==${DEPLOY}"
-          fi
-
-          if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
-            echo "✅ praisonai==${WRAPPER}"
-          fi
+          verify() { # $1=pypi-name $2=version $3=effective-skip
+            if [ "$3" = "true" ]; then
+              echo "⏭️  $1 skipped"
+              return 0
+            fi
+            if curl -fsSL --max-time 30 "https://pypi.org/pypi/$1/$2/json" >/dev/null; then
+              echo "✅ $1==$2"
+            else
+              echo "❌ $1==$2 NOT found on PyPI"
+              exit 1
+            fi
+          }
+          verify praisonaiagents  "${{ steps.versions.outputs.agents_version }}"  "${{ steps.flags.outputs.skip_agents }}"
+          verify praisonai-code   "${{ steps.versions.outputs.code_version }}"    "${{ steps.flags.outputs.skip_code }}"
+          verify praisonai-bot    "${{ steps.versions.outputs.bot_version }}"     "${{ steps.flags.outputs.skip_bot }}"
+          verify praisonai-train  "${{ steps.versions.outputs.train_version }}"   "${{ steps.flags.outputs.skip_train }}"
+          verify praisonai-browser "${{ steps.versions.outputs.browser_version }}" "${{ steps.flags.outputs.skip_browser }}"
+          verify praisonai-mcp    "${{ steps.versions.outputs.mcp_version }}"     "${{ steps.flags.outputs.skip_mcp }}"
+          verify praisonai-sandbox "${{ steps.versions.outputs.sandbox_version }}" "${{ steps.flags.outputs.skip_sandbox }}"
+          verify praisonai-deploy "${{ steps.versions.outputs.deploy_version }}"  "${{ steps.flags.outputs.skip_deploy }}"
+          verify praisonai        "${{ steps.versions.outputs.wrapper_version }}" "${{ steps.flags.outputs.skip_wrapper }}"
 
       # Safety net. On a clean run the wrapper's "Release v…" commit already
       # carries every bump and this is a no-op. It only fires when the single
@@ -1175,6 +1253,22 @@ jobs:
         if: ${{ !cancelled() && inputs.dry_run != true }}
         run: |
           set -euo pipefail
+          # If the wrapper release did not complete, drop any uncommitted
+          # wrapper-side rewrites (version.py, Dockerfiles, pins): committing
+          # them would put a wrapper version on main that never reached PyPI,
+          # and the next auto-bump would skip past it forever. Committed
+          # changes are untouched (checkout only reverts the working tree),
+          # and if the wrapper was skipped these files were never modified.
+          if [ "${{ steps.wrapper.outcome }}" != "success" ]; then
+            git checkout -- \
+              src/praisonai/praisonai/version.py \
+              src/praisonai/pyproject.toml \
+              src/praisonai/uv.lock \
+              src/praisonai/README.md \
+              src/praisonai/praisonai.rb \
+              src/praisonai-deploy/praisonai_deploy/docker.py \
+              docker/ 2>/dev/null || true
+          fi
           # -u = tracked modifications only; uv build output under dist/ is
           # untracked and stays out of the commit.
           git add -u
@@ -1191,5 +1285,70 @@ jobs:
           fi
           echo "Commit message: ${MSG}"
           git commit -m "$MSG"
-          git pull --rebase origin main
-          git push origin main
+          # This step fires exactly when the release went sideways — i.e. when
+          # main is most likely to have moved — so the rebase+push retries.
+          # Losing this commit deadlocks future auto-releases: the packages
+          # are on PyPI at N+1 while the repo says N, so every later run
+          # detects "already published" and skips both publish and bump.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              # During rebase, "theirs" is the commit being replayed — the
+              # version bumps — so they win any conflict.
+              if ! git rebase -X theirs origin/main; then
+                git rebase --abort || true
+                echo "Rebase attempt ${attempt}/3 failed"
+                sleep 5
+                continue
+              fi
+            fi
+            if git push origin main; then
+              echo "Pushed version bumps (attempt ${attempt}/3)"
+              exit 0
+            fi
+            echo "Push attempt ${attempt}/3 rejected; retrying..."
+            sleep 5
+          done
+          echo "❌ Could not push version bumps after 3 attempts."
+          echo "   Repo is now BEHIND PyPI; commit the version files on main manually"
+          echo "   or future auto-releases will no-op ('already published')."
+          exit 1
+
+      # Dedicated releases (skip_wrapper) create no "Release v…" tag — the
+      # wrapper drives that — so tag each published package individually for
+      # provenance. Full releases keep their single v… tag unchanged.
+      - name: Tag dedicated package releases
+        if: >-
+          ${{ !cancelled() && inputs.dry_run != true &&
+              steps.flags.outputs.skip_wrapper == 'true' &&
+              steps.versions.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          tag_pkg() { # $1=effective-skip $2=pypi-name $3=version
+            if [ "$1" = "true" ]; then
+              return 0
+            fi
+            local tag="$2-v$3"
+            # Only tag what is confirmed on PyPI — a package whose publish
+            # failed must not get a tag claiming it shipped.
+            if ! curl -fsSL --max-time 30 "https://pypi.org/pypi/$2/$3/json" >/dev/null; then
+              echo "⏭️  $2==$3 not on PyPI; not tagging"
+              return 0
+            fi
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "tag ${tag} already exists"
+              return 0
+            fi
+            git tag "${tag}"
+            git push origin "refs/tags/${tag}"
+            echo "🏷️  ${tag}"
+          }
+          tag_pkg "${{ steps.flags.outputs.skip_agents }}"  praisonaiagents  "${{ steps.versions.outputs.agents_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_code }}"    praisonai-code   "${{ steps.versions.outputs.code_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_bot }}"     praisonai-bot    "${{ steps.versions.outputs.bot_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_train }}"   praisonai-train  "${{ steps.versions.outputs.train_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_browser }}" praisonai-browser "${{ steps.versions.outputs.browser_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_mcp }}"     praisonai-mcp    "${{ steps.versions.outputs.mcp_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_sandbox }}" praisonai-sandbox "${{ steps.versions.outputs.sandbox_version }}"
+          tag_pkg "${{ steps.flags.outputs.skip_deploy }}"  praisonai-deploy "${{ steps.versions.outputs.deploy_version }}"
