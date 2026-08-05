@@ -19,9 +19,12 @@ Sources:
 - https://docs.litellm.ai/docs/completion/prompt_caching
 """
 
+from functools import lru_cache
+
 from ._litellm_loader import get_litellm as _get_litellm
 
 
+@lru_cache(maxsize=256)
 def supports_structured_outputs(model_name: str) -> bool:
     """
     Check if a model supports structured outputs (JSON schema).
@@ -50,6 +53,7 @@ def supports_structured_outputs(model_name: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=256)
 def supports_function_calling(model_name: str) -> bool:
     """
     Check if a model supports function calling.
@@ -78,6 +82,7 @@ def supports_function_calling(model_name: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=256)
 def supports_parallel_function_calling(model_name: str) -> bool:
     """
     Check if a model supports parallel function calling.
@@ -124,6 +129,7 @@ def supports_streaming_with_tools(model_name: str) -> bool:
 GEMINI_INTERNAL_TOOLS = {'googleSearch', 'urlContext', 'codeExecution'}
 
 
+@lru_cache(maxsize=256)
 def supports_web_search(model_name: str) -> bool:
     """
     Check if a model supports native web search via LiteLLM.
@@ -162,6 +168,7 @@ def supports_web_search(model_name: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=256)
 def supports_prompt_caching(model_name: str) -> bool:
     """
     Check if a model supports prompt caching via LiteLLM.
@@ -219,6 +226,7 @@ MODELS_SUPPORTING_WEB_FETCH = {
 }
 
 
+@lru_cache(maxsize=256)
 def supports_web_fetch(model_name: str) -> bool:
     """
     Check if a model supports web fetch via LiteLLM.
