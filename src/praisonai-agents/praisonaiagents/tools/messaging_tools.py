@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from typing import List, Optional
 
@@ -41,7 +42,36 @@ _NO_GATEWAY_MSG = (
     "CLI/one-shot runs."
 )
 
+_NO_GATEWAY_ASK_MSG = (
+    "No active gateway: ask_conversation is only available inside a running "
+    "bot/gateway (e.g. Telegram, Slack, Discord). It is unavailable for "
+    "CLI/one-shot runs."
+)
+
 _MEDIA_RE = re.compile(r"MEDIA:(\S+)")
+
+# Default and hard upper bound for ``ask_conversation``'s bounded wait. The
+# target is model-controlled, so a steered/prompt-injected agent could pass a
+# negative, non-finite (NaN/inf), or absurdly large timeout. Any such value is
+# clamped so the tool's "never a silent hang" guarantee always holds.
+_DEFAULT_ASK_TIMEOUT_S = 120.0
+_MAX_ASK_TIMEOUT_S = 3600.0
+
+
+def _normalize_ask_timeout(timeout_s: object) -> float:
+    """Coerce ``timeout_s`` to a finite, positive, bounded number of seconds.
+
+    Falls back to :data:`_DEFAULT_ASK_TIMEOUT_S` for non-numeric, non-finite
+    (NaN/inf), or non-positive input, and clamps to :data:`_MAX_ASK_TIMEOUT_S`
+    so a pathological value can never make an agent turn wait indefinitely.
+    """
+    try:
+        timeout = float(timeout_s)
+    except (TypeError, ValueError):
+        return _DEFAULT_ASK_TIMEOUT_S
+    if not math.isfinite(timeout) or timeout <= 0:
+        return _DEFAULT_ASK_TIMEOUT_S
+    return min(timeout, _MAX_ASK_TIMEOUT_S)
 
 
 def _run_async(coro):
@@ -259,4 +289,64 @@ def send_message(
         return f"Error sending message: {e}"
 
 
-__all__ = ["send_message"]
+def ask_conversation(
+    target: str,
+    text: str = "",
+    timeout_s: float = 120.0,
+) -> str:
+    """Ask another conversation something and await its reply (Issue #3689).
+
+    Unlike ``send_message`` (which is fire-and-deliver and only returns a
+    delivery receipt), this sends a prompt to ``target`` and waits for that
+    target's *next* reply, handing the answer back into your current turn so you
+    can act on it — e.g. "Ask the ops channel whether we can deploy, and tell me
+    what they say". Requires a running bot/gateway; it is unavailable for plain
+    CLI/one-shot runs.
+
+    The request always resolves to exactly one typed outcome — it never hangs
+    silently:
+
+    - ``{"status": "reply", "from": <target>, "text": <reply>}`` — got an answer
+    - ``{"status": "timeout"}`` — delivered, but no reply within ``timeout_s``
+    - ``{"status": "undelivered"}`` — the prompt could not be delivered
+    - ``{"status": "no_route"}`` — the target could not be resolved
+
+    Args:
+        target: Symbolic destination. One of:
+            - "origin": the chat this conversation came from
+            - "<platform>": that platform's home channel (e.g. "telegram")
+            - "<platform>:<chat_id>[:<thread_id>]": an explicit chat
+            - "<alias>": a friendly alias for a known target
+        text: The prompt to send to the target.
+        timeout_s: Maximum seconds to wait for a reply before returning a
+            ``timeout`` outcome. Defaults to 120. Non-numeric, non-finite, or
+            non-positive values fall back to the default; values are clamped to
+            a practical upper bound so a request can never wait indefinitely.
+
+    Returns:
+        A JSON string describing the typed outcome (see above).
+    """
+    try:
+        from ..session.context import get_conversation_requester
+
+        requester = get_conversation_requester()
+        if requester is None:
+            return _NO_GATEWAY_ASK_MSG
+
+        # Reuse the same operator send-policy guard as ``send_message`` so a
+        # steered/prompt-injected agent cannot route a question to a channel the
+        # operator never intended. Absent a policy, allow-all is preserved.
+        denied = _check_send_policy(target)
+        if denied is not None:
+            return json.dumps({"status": "undelivered", "detail": denied})
+
+        timeout = _normalize_ask_timeout(timeout_s)
+
+        reply = _run_async(requester.ask(target, text, timeout_s=timeout))
+        return json.dumps(reply.as_dict())
+    except Exception as e:
+        logger.error("ask_conversation failed: %s", e, exc_info=True)
+        return json.dumps({"status": "undelivered", "detail": str(e)})
+
+
+__all__ = ["send_message", "ask_conversation"]

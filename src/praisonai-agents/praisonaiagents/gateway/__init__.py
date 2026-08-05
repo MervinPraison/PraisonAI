@@ -43,6 +43,10 @@ from .protocols import (
     OutboundMessengerProtocol,
     DeliveryResult,
     TargetInfo,
+    # Agent-callable cross-conversation request/reply (Issue #3689)
+    ConversationReply,
+    ConversationReplyStatus,
+    ConversationRequestProtocol,
     # Inbound route binding (Issue #2225)
     RouteBinding,
     RouteFacts,
@@ -280,6 +284,10 @@ __all__ = [
     "OutboundMessengerProtocol",
     "DeliveryResult",
     "TargetInfo",
+    # Agent-callable cross-conversation request/reply (Issue #3689)
+    "ConversationReply",
+    "ConversationReplyStatus",
+    "ConversationRequestProtocol",
     # Inbound route binding (Issue #2225)
     "RouteBinding",
     "RouteFacts",
