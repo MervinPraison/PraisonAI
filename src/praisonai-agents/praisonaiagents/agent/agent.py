@@ -2718,16 +2718,7 @@ Your Goal: {self.goal}
                 from ..context.models import ContextConfig as _ContextConfig
                 if isinstance(self._context_param, _ContextConfig):
                     # Build ManagerConfig from ContextConfig fields
-                    manager_config = ManagerConfig(
-                        auto_compact=self._context_param.auto_compact,
-                        compact_threshold=self._context_param.compact_threshold,
-                        strategy=self._context_param.strategy,
-                        output_reserve=self._context_param.output_reserve,
-                        default_tool_output_max=self._context_param.tool_output_max,  # Map field name
-                        protected_tools=list(self._context_param.protected_tools),
-                        keep_recent_turns=self._context_param.keep_recent_turns,
-                        monitor_enabled=self._context_param.monitor.enabled if self._context_param.monitor else False,
-                    )
+                    manager_config = self._manager_config_from_context_config(self._context_param)
                     # Check if llm_summarize is enabled in ContextConfig
                     llm_summarize_enabled = getattr(self._context_param, 'llm_summarize', False)
                     if llm_summarize_enabled:
@@ -2756,16 +2747,7 @@ Your Goal: {self.goal}
                 try:
                     from ..context.models import ContextConfig as _ContextConfig
                     context_config = _ContextConfig(**preset_config)
-                    manager_config = ManagerConfig(
-                        auto_compact=context_config.auto_compact,
-                        compact_threshold=context_config.compact_threshold,
-                        strategy=context_config.strategy,
-                        output_reserve=context_config.output_reserve,
-                        default_tool_output_max=context_config.tool_output_max,
-                        protected_tools=list(context_config.protected_tools),
-                        keep_recent_turns=context_config.keep_recent_turns,
-                        monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
-                    )
+                    manager_config = self._manager_config_from_context_config(context_config)
                     self._context_manager = ContextManager(
                         model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
                         config=manager_config,
@@ -2784,16 +2766,7 @@ Your Goal: {self.goal}
             try:
                 from ..context.models import ContextConfig as _ContextConfig
                 context_config = _ContextConfig(**self._context_param)
-                manager_config = ManagerConfig(
-                    auto_compact=context_config.auto_compact,
-                    compact_threshold=context_config.compact_threshold,
-                    strategy=context_config.strategy,
-                    output_reserve=context_config.output_reserve,
-                    default_tool_output_max=context_config.tool_output_max,
-                    protected_tools=list(context_config.protected_tools),
-                    keep_recent_turns=context_config.keep_recent_turns,
-                    monitor_enabled=context_config.monitor.enabled if context_config.monitor else False,
-                )
+                manager_config = self._manager_config_from_context_config(context_config)
                 llm_summarize_enabled = self._context_param.get('llm_summarize', False)
                 self._context_manager = ContextManager(
                     model=self.llm if isinstance(self.llm, str) else "gpt-4o-mini",
@@ -2817,6 +2790,20 @@ Your Goal: {self.goal}
         """Set context manager directly."""
         self._context_manager = value
         self._context_manager_initialized = True
+
+    def _manager_config_from_context_config(self, cc: Any) -> Any:
+        """Build a ManagerConfig from a ContextConfig (single source of truth)."""
+        from ..context import ManagerConfig
+        return ManagerConfig(
+            auto_compact=cc.auto_compact,
+            compact_threshold=cc.compact_threshold,
+            strategy=cc.strategy,
+            output_reserve=cc.output_reserve,
+            default_tool_output_max=cc.tool_output_max,  # Map field name
+            protected_tools=list(cc.protected_tools),
+            keep_recent_turns=cc.keep_recent_turns,
+            monitor_enabled=cc.monitor.enabled if cc.monitor else False,
+        )
 
     def _create_llm_summarize_fn(self) -> Optional[Callable]:
         """
