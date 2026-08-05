@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import os
 import socket
 import subprocess
@@ -496,7 +497,17 @@ class ScheduledAgentExecutor:
         non-zero exit surfaces the exit code and output rather than being
         silently dropped, and output is bounded before delivery.
         """
-        timeout = float(getattr(job, "command_timeout", 60.0) or 60.0)
+        # Defensively normalise the timeout: a corrupt persisted value (e.g.
+        # ``"five"`` from a hand-edited store) must fail only *this* job, never
+        # escape ``float(...)`` and break the ticker loop for every other job.
+        # Non-numeric, non-positive, or non-finite values fall back to 60s.
+        raw_timeout = getattr(job, "command_timeout", 60.0)
+        try:
+            timeout = float(raw_timeout)
+            if not math.isfinite(timeout) or timeout <= 0:
+                timeout = 60.0
+        except (TypeError, ValueError):
+            timeout = 60.0
         try:
             output, code = await asyncio.to_thread(
                 self._run_command, command, timeout,

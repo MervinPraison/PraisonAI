@@ -126,3 +126,15 @@ def test_command_round_trips_through_store_schema():
     restored = ScheduleJob.from_dict(job.to_dict())
     assert restored.command == "df -h /"
     assert restored.command_timeout == 15.0
+
+
+def test_corrupt_timeout_fails_only_this_job():
+    # A hand-edited / corrupt persisted timeout must not escape float() and
+    # break the ticker loop; it falls back to the default and the job still runs.
+    delivered: list = []
+    ex = _executor(delivered)
+    job = _cmd_job(f'{sys.executable} -c "print(\'ok\')"')
+    job.command_timeout = "five"  # non-numeric — would raise before the fix
+    result = _run(ex._execute_one(job))
+    assert result.status == "succeeded"
+    assert result.result == "ok"
