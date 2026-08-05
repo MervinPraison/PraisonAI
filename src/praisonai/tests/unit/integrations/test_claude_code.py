@@ -91,11 +91,35 @@ class TestClaudeCodeIntegration:
     def test_build_command_with_allowed_tools(self):
         """Test building command with allowed tools."""
         from praisonai.integrations.claude_code import ClaudeCodeIntegration
-        
+
         integration = ClaudeCodeIntegration(allowed_tools=["Read", "Write"])
         cmd = integration._build_command("Hello")
-        
+
         assert "--allowedTools" in cmd
+
+    def test_stream_json_forces_verbose_and_partial_messages(self):
+        """`claude -p --output-format stream-json` errors without --verbose, and
+        needs --include-partial-messages to emit progress deltas. Both must be
+        added automatically so stream() actually works."""
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+
+        integration = ClaudeCodeIntegration()
+        cmd = integration._build_command("Hello", output_format="stream-json")
+
+        assert "--output-format" in cmd
+        assert cmd[cmd.index("--output-format") + 1] == "stream-json"
+        assert "--verbose" in cmd
+        assert "--include-partial-messages" in cmd
+
+    def test_json_format_does_not_add_streaming_flags(self):
+        """The default json path must stay a single blocking envelope."""
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+
+        integration = ClaudeCodeIntegration()
+        cmd = integration._build_command("Hello")  # json default
+
+        assert "--include-partial-messages" not in cmd
+        assert "--verbose" not in cmd
 
 
 class TestClaudeCodeIntegrationAsync:
@@ -136,19 +160,66 @@ class TestClaudeCodeIntegrationAsync:
     async def test_stream_yields_events(self):
         """Test that stream yields parsed events."""
         from praisonai.integrations.claude_code import ClaudeCodeIntegration
-        
+
         integration = ClaudeCodeIntegration()
-        
+
         async def mock_stream(*args, **kwargs):
             yield '{"type": "assistant", "content": "Hello"}'
             yield '{"type": "result", "content": "Done"}'
-        
+
         with patch.object(integration, 'stream_async', side_effect=mock_stream):
             events = []
             async for event in integration.stream("Say hello"):
                 events.append(event)
-            
+
             assert len(events) >= 0  # May be empty if stream_async not called correctly
+
+    @pytest.mark.asyncio
+    async def test_execute_forwards_progress_events_and_returns_final(self):
+        """With on_event, execute streams every event to the callback while the
+        run is in flight and still returns the final result text."""
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+
+        integration = ClaudeCodeIntegration()
+
+        async def mock_stream_async(cmd, *args, **kwargs):
+            # stream-json JSONL: init, a tool-use delta, then the result.
+            yield json.dumps({"type": "system", "subtype": "init",
+                              "session_id": "s1", "model": "claude-opus-5"})
+            yield json.dumps({"type": "stream_event", "event": {
+                "type": "content_block_start",
+                "content_block": {"type": "tool_use", "name": "Read"}}})
+            yield json.dumps({"type": "result", "subtype": "success",
+                              "result": "All done.", "total_cost_usd": 0.01})
+
+        seen = []
+        with patch.object(integration, 'stream_async', side_effect=mock_stream_async):
+            result = await integration.execute("Do the thing",
+                                               on_event=lambda e: seen.append(e))
+
+        assert result == "All done."
+        types = [e.get("type") for e in seen]
+        assert "system" in types and "result" in types
+        # The tool-use event carries progress the UI can show.
+        assert any(e.get("type") == "stream_event" for e in seen)
+
+    @pytest.mark.asyncio
+    async def test_progress_sink_errors_do_not_break_the_run(self):
+        """A broken on_event callback must not fail the underlying work."""
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+
+        integration = ClaudeCodeIntegration()
+
+        async def mock_stream_async(cmd, *args, **kwargs):
+            yield json.dumps({"type": "result", "result": "ok"})
+
+        def boom(_event):
+            raise RuntimeError("sink is down")
+
+        with patch.object(integration, 'stream_async', side_effect=mock_stream_async):
+            result = await integration.execute("x", on_event=boom)
+
+        assert result == "ok"
 
 
 class TestClaudeCodeSDKIntegration:
