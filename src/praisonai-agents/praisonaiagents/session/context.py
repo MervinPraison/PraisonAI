@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         ConversationRequestProtocol,
         OutboundMessengerProtocol,
         SendPolicyProtocol,
+        GatewayStatusProtocol,
     )
 
 
@@ -307,6 +308,41 @@ def clear_send_policy(token: Token) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Gateway live status/health source (Issue #3688)
+#
+# The running gateway/bot registers a concrete GatewayStatusProtocol impl into
+# this task-local slot so the built-in ``gateway_status`` tool can report the
+# gateway's live self-state (run status, active sessions, delivery/DLQ backlog,
+# degraded owners). When nothing is registered (CLI / one-shot runs), the tool
+# is simply not offered — a clean gate, never a dead-end failure.
+# ---------------------------------------------------------------------------
+
+_GATEWAY_STATUS: ContextVar[Optional["GatewayStatusProtocol"]] = ContextVar(
+    "praisonai_gateway_status", default=None
+)
+
+
+def register_gateway_status(
+    source: Optional["GatewayStatusProtocol"],
+) -> Token:
+    """Register the active gateway status source for this task. Returns a token."""
+    return _GATEWAY_STATUS.set(source)
+
+
+def get_gateway_status() -> Optional["GatewayStatusProtocol"]:
+    """Return the active gateway status source, or ``None`` if no gateway is running."""
+    return _GATEWAY_STATUS.get()
+
+
+def clear_gateway_status(token: Token) -> None:
+    """Restore the previous gateway status source using the token from register."""
+    try:
+        _GATEWAY_STATUS.reset(token)
+    except (LookupError, ValueError):
+        _GATEWAY_STATUS.set(None)
+
+
+# ---------------------------------------------------------------------------
 # Gateway event loop registry (Issue #2183)
 #
 # Sync agent tools (e.g. ``send_message``) usually execute in an executor
@@ -353,6 +389,9 @@ __all__ = [
     "register_send_policy",
     "get_send_policy",
     "clear_send_policy",
+    "register_gateway_status",
+    "get_gateway_status",
+    "clear_gateway_status",
     "register_gateway_loop",
     "get_gateway_loop",
     "clear_gateway_loop",

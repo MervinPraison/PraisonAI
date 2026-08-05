@@ -47,6 +47,9 @@ from .protocols import (
     ConversationReply,
     ConversationReplyStatus,
     ConversationRequestProtocol,
+    # Agent-facing live status/health (Issue #3688)
+    GatewayStatusProtocol,
+    GatewayStatus,
     # Inbound route binding (Issue #2225)
     RouteBinding,
     RouteFacts,
@@ -288,6 +291,9 @@ __all__ = [
     "ConversationReply",
     "ConversationReplyStatus",
     "ConversationRequestProtocol",
+    # Agent-facing live status/health (Issue #3688)
+    "GatewayStatusProtocol",
+    "GatewayStatus",
     # Inbound route binding (Issue #2225)
     "RouteBinding",
     "RouteFacts",
