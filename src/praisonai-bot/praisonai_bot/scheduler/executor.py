@@ -35,6 +35,7 @@ import logging
 import os
 import socket
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -565,12 +566,40 @@ class ScheduledAgentExecutor:
         process group (shell + children) instead of orphaning them. On timeout
         the process is killed and a ``124`` exit code (the conventional
         ``timeout(1)`` code) is returned with whatever output was captured.
+
+        Output is bounded *as it is read* rather than buffered in full: a chatty
+        or runaway command in the long-running gateway cannot grow the capture
+        past ``_MAX_COMMAND_OUTPUT_CHARS`` (+ marker), so it cannot exhaust
+        gateway memory. The wall-clock ``timeout`` still bounds total runtime and
+        kills the process group on breach.
         """
         popen_kwargs: dict = {}
         if _POSIX:
             popen_kwargs["start_new_session"] = True
 
+        # Hard cap the number of chars we retain in memory regardless of how much
+        # the command emits; once past the cap we keep reading (to let the pipe
+        # drain / the process finish) but discard the excess.
+        cap = _MAX_COMMAND_OUTPUT_CHARS
+        chunks: List[str] = []
+        retained = 0
+        truncated = False
+        deadline = time.monotonic() + max(timeout, 0.0)
+
+        def _drain(stream) -> None:
+            nonlocal retained, truncated
+            for line in iter(stream.readline, ""):
+                if retained < cap:
+                    room = cap - retained
+                    chunks.append(line[:room])
+                    retained += min(len(line), room)
+                    if retained >= cap:
+                        truncated = True
+                else:
+                    truncated = True
+
         proc = None
+        timed_out = False
         try:
             proc = subprocess.Popen(
                 command,
@@ -578,32 +607,49 @@ class ScheduledAgentExecutor:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                bufsize=1,
                 **popen_kwargs,
             )
-            stdout, _ = proc.communicate(timeout=timeout)
-            code = proc.returncode
-            output = stdout or ""
-        except subprocess.TimeoutExpired:
+            reader = threading.Thread(
+                target=_drain, args=(proc.stdout,), daemon=True,
+            )
+            reader.start()
+            remaining = deadline - time.monotonic()
+            reader.join(timeout=max(remaining, 0.0))
+            if reader.is_alive() or proc.poll() is None:
+                # Still running past the deadline → timed out.
+                timed_out = proc.poll() is None
+                if timed_out:
+                    try:
+                        if _POSIX:
+                            os.killpg(os.getpgid(proc.pid), 9)
+                        else:  # pragma: no cover - non-POSIX
+                            proc.kill()
+                    except (ProcessLookupError, PermissionError, OSError):  # pragma: no cover
+                        proc.kill()
+            proc.wait(timeout=5)
+            reader.join(timeout=5)
+            code = 124 if timed_out else (proc.returncode if proc.returncode is not None else 0)
+        except Exception:  # pragma: no cover - defensive: reap and surface
             if proc is not None:
                 try:
-                    if _POSIX:
-                        os.killpg(os.getpgid(proc.pid), 9)
-                    else:  # pragma: no cover - non-POSIX
-                        proc.kill()
-                except (ProcessLookupError, PermissionError, OSError):  # pragma: no cover
                     proc.kill()
+                except Exception:
+                    pass
+            raise
+        finally:
+            if proc is not None and proc.stdout is not None:
                 try:
-                    partial, _ = proc.communicate(timeout=5)
-                except Exception:  # pragma: no cover - best-effort reap
-                    partial = ""
-            else:  # pragma: no cover - defensive
-                partial = ""
-            output = (partial or "") + f"\n[timed out after {timeout:.0f}s]"
-            code = 124
+                    proc.stdout.close()
+                except Exception:  # pragma: no cover
+                    pass
 
+        output = "".join(chunks)
+        if timed_out:
+            output = f"{output}\n[timed out after {timeout:.0f}s]"
         output = output.rstrip("\n")
-        if len(output) > _MAX_COMMAND_OUTPUT_CHARS:
-            output = output[:_MAX_COMMAND_OUTPUT_CHARS] + "\n…[output truncated]"
+        if truncated:
+            output += "\n…[output truncated]"
         return output, code
 
     # ── condition-gate helpers ───────────────────────────────────────
