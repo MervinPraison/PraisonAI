@@ -29,6 +29,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 from praisonaiagents._logging import get_logger
@@ -70,8 +71,13 @@ def gateway_status() -> str:
 
         status = source.snapshot()
         as_dict = getattr(status, "as_dict", None)
-        payload = as_dict() if callable(as_dict) else status
-        return json.dumps(payload)
+        if callable(as_dict):
+            payload = as_dict()
+        elif dataclasses.is_dataclass(status) and not isinstance(status, type):
+            payload = dataclasses.asdict(status)
+        else:
+            payload = status
+        return json.dumps(payload, default=str)
     except Exception as e:
         logger.error("gateway_status failed: %s", e, exc_info=True)
         return f"Error reading gateway status: {e}"
