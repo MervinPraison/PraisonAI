@@ -2396,6 +2396,111 @@ class OutboundMessengerProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Agent-callable cross-conversation request/reply (Issue #3689)
+#
+# ``send_message`` is fire-and-deliver: it returns a delivery receipt, not the
+# target's answer. This adds the missing *ask another conversation and await
+# the reply* capability — an agent can route a question to a symbolic target
+# and get the next correlated inbound reply back into its own turn, bounded by
+# a timeout. It reuses ``send_message``'s target resolution and the outbound
+# send-policy guard; the only new surface is a one-shot reply correlation.
+#
+# Core owns only the *shape*: the typed outcome (:class:`ConversationReply`),
+# the protocol seam (:class:`ConversationRequestProtocol`), the context-var
+# registration slot (in ``session.context``), and the built-in
+# ``ask_conversation`` tool. The correlation-aware reply source is bound by the
+# running gateway/bot exactly as ``register_outbound_messenger`` binds the
+# outbound side — no heavy import lives in core. Every path ends in a recorded
+# outcome (reply | timeout | undelivered | no_route) — never a silent hang.
+# ---------------------------------------------------------------------------
+
+ConversationReplyStatus = Literal["reply", "timeout", "undelivered", "no_route"]
+"""Closed set of outcomes for an :func:`ask_conversation` request.
+
+* ``reply`` — the target replied within the timeout; ``text`` carries it.
+* ``timeout`` — the prompt was delivered but no reply arrived in time.
+* ``undelivered`` — the prompt could not be delivered to the target.
+* ``no_route`` — the target could not be resolved to a reachable channel.
+"""
+
+
+@dataclass
+class ConversationReply:
+    """Outcome of an agent-initiated cross-conversation request (Issue #3689).
+
+    Every request resolves to exactly one of the :data:`ConversationReplyStatus`
+    outcomes, so the agent always gets a typed answer back into its turn rather
+    than a silent hang.
+
+    Attributes:
+        status: The outcome (``reply`` / ``timeout`` / ``undelivered`` /
+            ``no_route``).
+        target: The resolved target the prompt was routed to.
+        text: The reply text, populated only when ``status == "reply"``.
+        detail: Optional extra information (error text, message id, etc.).
+    """
+
+    status: ConversationReplyStatus
+    target: str = ""
+    text: str = ""
+    detail: Optional[str] = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for the tool return value."""
+        data: Dict[str, Any] = {"status": self.status}
+        if self.target:
+            data["from"] = self.target
+        if self.status == "reply":
+            data["text"] = self.text
+        if self.detail:
+            data["detail"] = self.detail
+        return data
+
+
+@runtime_checkable
+class ConversationRequestProtocol(Protocol):
+    """Protocol for agent-facing cross-conversation request/reply.
+
+    A concrete implementation is provided by the running gateway/bot (in the
+    praisonai wrapper) and registered into the per-turn context so the built-in
+    ``ask_conversation`` tool can resolve it. It sends the prompt via the same
+    delivery stack ``send_message`` uses, then correlates the *next inbound
+    reply* from that target (via the existing ``correlation_id``) with a bounded
+    timeout, returning a typed :class:`ConversationReply`.
+
+    Example usage (implementation in praisonai_bot.gateway)::
+
+        requester = BotConversationRequester(router, origin=origin)
+        token = register_conversation_requester(requester)
+        try:
+            ...  # agent runs; ask_conversation tool resolves the requester
+        finally:
+            clear_conversation_requester(token)
+    """
+
+    async def ask(
+        self,
+        target: str,
+        text: str,
+        *,
+        timeout_s: float = 120.0,
+    ) -> "ConversationReply":
+        """Send ``text`` to ``target`` and await the next correlated reply.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            text: The prompt to send.
+            timeout_s: Maximum seconds to wait for a reply before returning a
+                ``timeout`` outcome.
+
+        Returns:
+            A :class:`ConversationReply` describing the outcome.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Outbound send-policy guard (Issue #2226)
 #
 # ``send_message`` lets the model choose where to deliver. Because the target

@@ -41,6 +41,12 @@ _NO_GATEWAY_MSG = (
     "CLI/one-shot runs."
 )
 
+_NO_GATEWAY_ASK_MSG = (
+    "No active gateway: ask_conversation is only available inside a running "
+    "bot/gateway (e.g. Telegram, Slack, Discord). It is unavailable for "
+    "CLI/one-shot runs."
+)
+
 _MEDIA_RE = re.compile(r"MEDIA:(\S+)")
 
 
@@ -259,4 +265,65 @@ def send_message(
         return f"Error sending message: {e}"
 
 
-__all__ = ["send_message"]
+def ask_conversation(
+    target: str,
+    text: str = "",
+    timeout_s: float = 120.0,
+) -> str:
+    """Ask another conversation something and await its reply (Issue #3689).
+
+    Unlike ``send_message`` (which is fire-and-deliver and only returns a
+    delivery receipt), this sends a prompt to ``target`` and waits for that
+    target's *next* reply, handing the answer back into your current turn so you
+    can act on it — e.g. "Ask the ops channel whether we can deploy, and tell me
+    what they say". Requires a running bot/gateway; it is unavailable for plain
+    CLI/one-shot runs.
+
+    The request always resolves to exactly one typed outcome — it never hangs
+    silently:
+
+    - ``{"status": "reply", "from": <target>, "text": <reply>}`` — got an answer
+    - ``{"status": "timeout"}`` — delivered, but no reply within ``timeout_s``
+    - ``{"status": "undelivered"}`` — the prompt could not be delivered
+    - ``{"status": "no_route"}`` — the target could not be resolved
+
+    Args:
+        target: Symbolic destination. One of:
+            - "origin": the chat this conversation came from
+            - "<platform>": that platform's home channel (e.g. "telegram")
+            - "<platform>:<chat_id>[:<thread_id>]": an explicit chat
+            - "<alias>": a friendly alias for a known target
+        text: The prompt to send to the target.
+        timeout_s: Maximum seconds to wait for a reply before returning a
+            ``timeout`` outcome. Defaults to 120.
+
+    Returns:
+        A JSON string describing the typed outcome (see above).
+    """
+    try:
+        from ..session.context import get_conversation_requester
+
+        requester = get_conversation_requester()
+        if requester is None:
+            return _NO_GATEWAY_ASK_MSG
+
+        # Reuse the same operator send-policy guard as ``send_message`` so a
+        # steered/prompt-injected agent cannot route a question to a channel the
+        # operator never intended. Absent a policy, allow-all is preserved.
+        denied = _check_send_policy(target)
+        if denied is not None:
+            return json.dumps({"status": "undelivered", "detail": denied})
+
+        try:
+            timeout = float(timeout_s)
+        except (TypeError, ValueError):
+            timeout = 120.0
+
+        reply = _run_async(requester.ask(target, text, timeout_s=timeout))
+        return json.dumps(reply.as_dict())
+    except Exception as e:
+        logger.error("ask_conversation failed: %s", e, exc_info=True)
+        return json.dumps({"status": "undelivered", "detail": str(e)})
+
+
+__all__ = ["send_message", "ask_conversation"]

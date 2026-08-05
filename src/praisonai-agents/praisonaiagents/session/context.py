@@ -37,7 +37,11 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 if TYPE_CHECKING:
-    from ..gateway.protocols import OutboundMessengerProtocol, SendPolicyProtocol
+    from ..gateway.protocols import (
+        ConversationRequestProtocol,
+        OutboundMessengerProtocol,
+        SendPolicyProtocol,
+    )
 
 
 def neutralize_untrusted_text(value: object, *, max_chars: int = 240) -> str:
@@ -235,6 +239,40 @@ def clear_outbound_messenger(token: Token) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cross-conversation request/reply requester (Issue #3689)
+#
+# The running gateway/bot registers a concrete ConversationRequestProtocol impl
+# into this task-local slot so the built-in ``ask_conversation`` tool can ask
+# another conversation something and await the correlated reply mid-turn. When
+# unbound the tool reports that no gateway is available (gating, not a hang).
+# ---------------------------------------------------------------------------
+
+_CONVERSATION_REQUESTER: ContextVar[Optional["ConversationRequestProtocol"]] = ContextVar(
+    "praisonai_conversation_requester", default=None
+)
+
+
+def register_conversation_requester(
+    requester: Optional["ConversationRequestProtocol"],
+) -> Token:
+    """Register the active conversation requester for this task. Returns a token."""
+    return _CONVERSATION_REQUESTER.set(requester)
+
+
+def get_conversation_requester() -> Optional["ConversationRequestProtocol"]:
+    """Return the active conversation requester, or ``None`` if no gateway is running."""
+    return _CONVERSATION_REQUESTER.get()
+
+
+def clear_conversation_requester(token: Token) -> None:
+    """Restore the previous conversation requester using the token from register."""
+    try:
+        _CONVERSATION_REQUESTER.reset(token)
+    except (LookupError, ValueError):
+        _CONVERSATION_REQUESTER.set(None)
+
+
+# ---------------------------------------------------------------------------
 # Outbound send-policy guard (Issue #2226)
 #
 # An optional task-local policy authorising where an agent may proactively
@@ -309,6 +347,9 @@ __all__ = [
     "register_outbound_messenger",
     "get_outbound_messenger",
     "clear_outbound_messenger",
+    "register_conversation_requester",
+    "get_conversation_requester",
+    "clear_conversation_requester",
     "register_send_policy",
     "get_send_policy",
     "clear_send_policy",

@@ -203,6 +203,7 @@ TOOL_MAPPINGS = {
 
     # Proactive messaging (agent-facing gateway delivery)
     'send_message': ('.messaging_tools', None),
+    'ask_conversation': ('.messaging_tools', None),
     'messaging_tools': ('.messaging_tools', None),
     
     # Search Tools (fast, capped content grep + file glob)
