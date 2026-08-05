@@ -88,7 +88,7 @@ class GCPProvider(BaseProvider):
                 )
             
             # Step 1: Enable Cloud Run API
-            print(f"🔧 Enabling Cloud Run API")
+            print(f"[gcp] Enabling Cloud Run API")
             try:
                 subprocess.run(
                     ['gcloud', 'services', 'enable', 'run.googleapis.com',
@@ -100,7 +100,7 @@ class GCPProvider(BaseProvider):
                 pass  # May already be enabled
             
             # Step 2: Deploy to Cloud Run
-            print(f"🚀 Deploying to Cloud Run: {self.config.service_name}")
+            print(f"[gcp] Deploying to Cloud Run: {self.config.service_name}")
             
             cmd = [
                 'gcloud', 'run', 'deploy', self.config.service_name,
@@ -274,7 +274,7 @@ class GCPProvider(BaseProvider):
             deleted_resources = []
             
             # Delete the Cloud Run service
-            print(f"🗑️ Deleting Cloud Run service: {self.config.service_name}")
+            print(f"[gcp] Deleting Cloud Run service: {self.config.service_name}")
             result = subprocess.run(
                 ['gcloud', 'run', 'services', 'delete',
                  self.config.service_name,
