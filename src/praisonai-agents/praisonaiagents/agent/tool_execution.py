@@ -1827,7 +1827,9 @@ class ToolExecutionMixin:
             logging.info(f"Using modified arguments: {arguments}")
 
         from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name, arguments)
+        get_approval_registry().mark_approved(
+            function_name, arguments, agent_name=getattr(self, "name", None)
+        )
         return None, arguments
 
     async def _check_tool_approval_async(self, function_name, arguments):
@@ -1858,7 +1860,9 @@ class ToolExecutionMixin:
             logging.info(f"Using modified arguments: {arguments}")
 
         from ..approval import get_approval_registry
-        get_approval_registry().mark_approved(function_name, arguments)
+        get_approval_registry().mark_approved(
+            function_name, arguments, agent_name=getattr(self, "name", None)
+        )
         return None, arguments
 
     def _execute_tool_with_circuit_breaker(self, function_name, arguments):

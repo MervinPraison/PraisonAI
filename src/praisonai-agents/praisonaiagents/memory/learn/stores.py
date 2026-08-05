@@ -142,6 +142,10 @@ class BaseStore(ABC):
         Checks for exact content matches to prevent duplicate learnings.
         If a duplicate is found, returns the existing entry instead of creating a new one.
         """
+        # Re-read the current on-disk state before mutating so a concurrent
+        # writer sharing the same store (e.g. another agent with the same
+        # user_id) isn't silently overwritten by this save.
+        self._load()
         # Deduplication: Check for exact content match
         content_normalized = content.strip().lower()
         for existing_entry in self._entries.values():

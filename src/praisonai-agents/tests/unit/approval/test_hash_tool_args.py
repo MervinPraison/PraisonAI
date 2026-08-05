@@ -68,7 +68,8 @@ class TestIdentityParity:
         registry_key = ApprovalRegistry._approval_cache_key("execute_command", args)
         doom_hash = DoomLoopDetector()._hash_arguments(args)
 
-        assert registry_key == f"execute_command:{doom_hash}"
+        # The cache key is agent-scoped; with no agent it uses the ``*`` sentinel.
+        assert registry_key == f"*:execute_command:{doom_hash}"
         assert doom_hash == hash_tool_args(args)
 
     def test_reordered_args_yield_same_identity(self):
