@@ -4,12 +4,31 @@
 
 const https = require('https');
 
-const PACKAGE_PATHS = ['src/praisonai', 'src/praisonai-agents', 'src/praisonai-code'];
+/** Every directory whose changes should make a release eligible — all nine
+ * published packages (mirrors the skip_* inputs in pypi-release.yml). */
+const PACKAGE_PATHS = [
+  'src/praisonai',
+  'src/praisonai-agents',
+  'src/praisonai-code',
+  'src/praisonai-bot',
+  'src/praisonai-train',
+  'src/praisonai-browser',
+  'src/praisonai-mcp',
+  'src/praisonai-sandbox',
+  'src/praisonai-deploy',
+];
 /** Minimum days between successful patch auto-releases. */
 const PATCH_RELEASE_INTERVAL_DAYS = 3;
 const ACTIVE_RELEASE_STATUSES = new Set([
   'queued', 'in_progress', 'waiting', 'pending', 'requested',
 ]);
+/** A run stuck in `waiting` (environment approval) longer than this no longer
+ * blocks the gate. GitHub only auto-fails unapproved deployments after 30
+ * days, so without a cutoff one forgotten manual dispatch stalls all
+ * auto-releases for up to a month. The run is warned about, never cancelled —
+ * if later approved, the pypi-release concurrency group serializes it and its
+ * pypi_exists checks no-op anything already published. */
+const STALE_WAITING_HOURS = 6;
 
 function bumpPatch(version) {
   const parts = version.split('.');
@@ -65,16 +84,27 @@ function pypiVersionExists(packageName, version) {
   });
 }
 
-async function hasActiveReleaseRun(github, owner, repo) {
+async function hasActiveReleaseRun(github, owner, repo, now = new Date(), core = null) {
   const runs = await github.rest.actions.listWorkflowRuns({
     owner,
     repo,
     workflow_id: 'pypi-release.yml',
     per_page: 20,
   });
-  return runs.data.workflow_runs.some(
-    (r) => ACTIVE_RELEASE_STATUSES.has(r.status) && !r.conclusion
-  );
+  const staleCutoff = now.getTime() - STALE_WAITING_HOURS * 60 * 60 * 1000;
+  return runs.data.workflow_runs.some((r) => {
+    if (!ACTIVE_RELEASE_STATUSES.has(r.status) || r.conclusion) return false;
+    if (r.status === 'waiting' && new Date(r.created_at).getTime() < staleCutoff) {
+      if (core) {
+        core.warning(
+          `Ignoring release run waiting >${STALE_WAITING_HOURS}h for environment approval: `
+          + `${r.html_url} — approve or cancel it. It no longer blocks auto-releases.`
+        );
+      }
+      return false;
+    }
+    return true;
+  });
 }
 
 function utcDayStart(now = new Date()) {
@@ -93,15 +123,18 @@ async function hasSuccessfulReleaseWithinDays(
   intervalDays = PATCH_RELEASE_INTERVAL_DAYS,
 ) {
   const windowStart = releaseIntervalStart(now, intervalDays);
-  const runs = await github.rest.actions.listWorkflowRuns({
+  // Dedupe on GitHub releases (v* tags) rather than run conclusions: a
+  // dry_run=true dispatch concludes 'success' without publishing anything and
+  // must not consume the release window. Only a real full release creates a
+  // v* GitHub release (bump_and_release.py's `gh release create`).
+  const releases = await github.rest.repos.listReleases({
     owner,
     repo,
-    workflow_id: 'pypi-release.yml',
-    status: 'completed',
-    per_page: 30,
+    per_page: 10,
   });
-  return runs.data.workflow_runs.some(
-    (r) => r.conclusion === 'success' && new Date(r.created_at) >= windowStart
+  return releases.data.some(
+    (r) => r.tag_name && r.tag_name.startsWith('v')
+      && new Date(r.published_at || r.created_at) >= windowStart
   );
 }
 
@@ -146,12 +179,13 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
     return out;
   }
 
-  if (await hasActiveReleaseRun(github, owner, repo)) {
+  const referenceTime = options.now instanceof Date ? options.now : new Date();
+
+  if (await hasActiveReleaseRun(github, owner, repo, referenceTime, core)) {
     reasons.push('PyPI Release already in progress or awaiting approval');
     return out;
   }
 
-  const referenceTime = options.now instanceof Date ? options.now : new Date();
   if (await hasSuccessfulReleaseWithinDays(github, owner, repo, referenceTime)) {
     reasons.push(
       `already released within last ${PATCH_RELEASE_INTERVAL_DAYS} days; `
@@ -226,8 +260,35 @@ async function evaluateReleasePreflight(github, owner, repo, options, core) {
     out.headSha = evalSha;
     const greenSha = await lastGreenCoreTestsSha(github, owner, repo);
     if (greenSha !== evalSha) {
-      reasons.push(`CI not green on HEAD (last green: ${greenSha ? greenSha.slice(0, 7) : 'none'})`);
-      return out;
+      // Core Tests has path filters and honors [skip ci] (the release
+      // safety-net commit uses it), so the tip of main may legitimately have
+      // no Core Tests run of its own — e.g. a docs-only commit, or the
+      // "chore(release): … [skip ci]" commit right after a release. Accept a
+      // green ancestor when nothing under the released package paths changed
+      // after it; otherwise the cron path stalls until the next src/** push.
+      let greenAncestorOk = false;
+      if (greenSha && /^[0-9a-f]{40}$/.test(greenSha)) {
+        try {
+          execSync(`git merge-base --is-ancestor ${greenSha} ${evalSha}`);
+          const delta = execSync(
+            `git diff --name-only ${greenSha} ${evalSha} -- ${PACKAGE_PATHS.join(' ')}`,
+            { encoding: 'utf8' }
+          ).trim();
+          greenAncestorOk = delta === '';
+        } catch {
+          greenAncestorOk = false;
+        }
+      }
+      if (!greenAncestorOk) {
+        reasons.push(`CI not green on HEAD (last green: ${greenSha ? greenSha.slice(0, 7) : 'none'})`);
+        return out;
+      }
+      if (core) {
+        core.info(
+          `HEAD ${evalSha.slice(0, 7)} has no Core Tests run; accepting green ancestor `
+          + `${greenSha.slice(0, 7)} (no package-path changes since).`
+        );
+      }
     }
   }
 
@@ -242,7 +303,9 @@ module.exports = {
   readVersionsFromTree,
   pypiVersionExists,
   PATCH_RELEASE_INTERVAL_DAYS,
+  STALE_WAITING_HOURS,
   releaseIntervalStart,
+  hasActiveReleaseRun,
   hasSuccessfulReleaseWithinDays,
   hasSuccessfulReleaseToday,
   utcDayStart,
