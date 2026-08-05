@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-08-04",
+  "lastUpdated": "2026-08-05",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 409,
+    "pythonCoreFeatures": 410,
     "rustFeatures": 667,
-    "gapCount": 127,
-    "parityPercentage": 163.1
+    "gapCount": 128,
+    "parityPercentage": 162.7
   },
   "pythonCoreSDK": {
     "exports": [
@@ -220,6 +220,7 @@
       "PluginParseError",
       "PluginProtocol",
       "PluginsConfig",
+      "PraisonAIAgents",
       "PraisonAIConfigError",
       "PraisonAIError",
       "PraisonConfig",
@@ -4353,6 +4354,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "PraisonAIAgents",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "agents"
       },
       {
         "feature": "PraisonAIConfigError",

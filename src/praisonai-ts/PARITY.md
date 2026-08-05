@@ -1,13 +1,13 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-08-04
+> **Version:** 1.5.87 | **Last Updated:** 2026-08-05
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 409 |
+| Python Core Features | 410 |
 | Python Wrapper Features | 21 |
 | TypeScript Features | 1190 |
 | **Gap Count** | **116** |
@@ -159,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 103 todo)
+### P3_Advanced (181 done, 103 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -360,6 +360,7 @@
 | `PluginParseError` | ✅ | ✅ | low | ✅ DONE |
 | `PluginProtocol` | ✅ | ✅ | medium | ✅ DONE |
 | `PluginsConfig` | ✅ | ✅ | low | ✅ DONE |
+| `PraisonAIAgents` | ✅ | ✅ | high | ✅ DONE |
 | `PraisonConfig` | ✅ | ✅ | low | ✅ DONE |
 | `ProviderStatus` | ✅ | ✅ | high | ✅ DONE |
 | `REFLECTION\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -461,10 +462,10 @@ from praisonaiagents import Agent, AudioAgent, AudioConfig, CodeAgent, CodeConfi
 </details>
 
 <details>
-<summary><strong>agents</strong> (6 exports)</summary>
+<summary><strong>agents</strong> (7 exports)</summary>
 
 ```python
-from praisonaiagents import AgentManager, AgentTeam, AutoAgents, AutoRagAgent, AutoRagConfig, RagRetrievalPolicy
+from praisonaiagents import AgentManager, AgentTeam, AutoAgents, AutoRagAgent, AutoRagConfig, PraisonAIAgents, RagRetrievalPolicy
 ```
 
 </details>
