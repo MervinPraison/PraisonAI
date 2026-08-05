@@ -267,3 +267,51 @@ def test_deploy_docker_auth_enabled_no_override(
 
     env_vars = mock_run.call_args.kwargs["env_vars"]
     assert "PRAISONAI_API_AUTH" not in env_vars
+
+
+def _make_cp1252_stream():
+    """A text stream backed by a cp1252 buffer, mimicking a legacy Windows console."""
+    import io
+    return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+
+
+@patch('praisonai_deploy.docker.subprocess.run')
+@patch('praisonai_deploy.docker.check_docker_installed', return_value=True)
+def test_build_docker_image_status_print_survives_cp1252(mock_check, mock_run):
+    """Regression for #3680: docker.py status prints must not crash on cp1252 stdout.
+
+    The Python API path (Deploy.deploy) does not run the CLI's UTF-8 stdio
+    bootstrap, so emoji in bare print() previously raised UnicodeEncodeError on
+    default Windows consoles and was masked as "Docker build failed".
+    """
+    import sys
+    from praisonai_deploy.docker import build_docker_image
+    from praisonai_deploy.models import DockerConfig
+
+    mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+    stream = _make_cp1252_stream()
+    with patch.object(sys, "stdout", stream):
+        result = build_docker_image(DockerConfig(image_name="cp1252-app"))
+
+    assert result.success is True
+    assert "charmap" not in (result.error or "")
+
+
+@patch('praisonai_deploy.docker.subprocess.run')
+def test_run_docker_container_status_print_survives_cp1252(mock_run):
+    """run_docker_container status print must not crash on cp1252 stdout (#3680)."""
+    import sys
+    from praisonai_deploy.docker import run_docker_container
+    from praisonai_deploy.models import DockerConfig
+
+    mock_run.return_value = Mock(returncode=0, stdout="cid123", stderr="")
+
+    stream = _make_cp1252_stream()
+    with patch.object(sys, "stdout", stream):
+        result = run_docker_container(
+            DockerConfig(image_name="cp1252-app"), replace_existing=False
+        )
+
+    assert result.success is True
+    assert "charmap" not in (result.error or "")
