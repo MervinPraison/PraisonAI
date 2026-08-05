@@ -27,10 +27,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2736 |
 | ✅ Bots | 7 | 31 | 12800 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35410 |
+| ✅ CLI | 5 | 121 | 35425 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4316 |
+| ✅ Code Execution | 2 | 14 | 4424 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3045 |
 | ✅ Context Management | 16 | 34 | 13278 |
@@ -43,7 +43,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 6 | 2084 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 64 | 23580 |
+| ✅ Gateway | 7 | 65 | 23917 |
 | ✅ Guardrails | 4 | 4 | 1833 |
 | ✅ Handoffs | 11 | 6 | 2563 |
 | ✅ Hooks | 2 | 9 | 4221 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2815 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 135 | 38937 |
+| ✅ Tools | 12 | 136 | 39161 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |
