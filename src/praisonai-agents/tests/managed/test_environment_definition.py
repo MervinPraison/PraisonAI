@@ -11,6 +11,7 @@ import pytest
 
 from praisonaiagents.managed.protocols import (
     ComputeConfig,
+    capture_key,
     definition_hash,
     find_environment_definition,
     load_environment_definition,
@@ -140,6 +141,35 @@ class TestDefinitionHash:
 
     def test_hash_is_short_hex(self):
         h = definition_hash(ComputeConfig())
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+
+class TestCaptureKey:
+    def test_env_values_change_capture_key(self):
+        # Same definition, different secret values → different capture key so a
+        # setup-baked filesystem is never reused across secret contexts.
+        a = ComputeConfig(env={"TOKEN": "secret-1"}, setup=["make setup"])
+        b = ComputeConfig(env={"TOKEN": "secret-2"}, setup=["make setup"])
+        assert capture_key(a) != capture_key(b)
+
+    def test_definition_hash_stays_value_free(self):
+        # The loggable/display hash must remain identical across secret values.
+        a = ComputeConfig(env={"TOKEN": "secret-1"}, setup=["make setup"])
+        b = ComputeConfig(env={"TOKEN": "secret-2"}, setup=["make setup"])
+        assert definition_hash(a) == definition_hash(b)
+
+    def test_capture_key_stable_and_order_insensitive(self):
+        a = ComputeConfig(
+            packages={"pip": ["b", "a"]}, env={"Y": "2", "X": "1"},
+        )
+        b = ComputeConfig(
+            packages={"pip": ["a", "b"]}, env={"X": "1", "Y": "2"},
+        )
+        assert capture_key(a) == capture_key(b)
+
+    def test_capture_key_is_short_hex(self):
+        h = capture_key(ComputeConfig(env={"TOKEN": "x"}))
         assert len(h) == 12
         assert all(c in "0123456789abcdef" for c in h)
 

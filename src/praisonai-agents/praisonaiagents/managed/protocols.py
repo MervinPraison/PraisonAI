@@ -215,30 +215,16 @@ def load_environment_definition(
     return cfg
 
 
-def definition_hash(config: "ComputeConfig") -> str:
-    """Stable content hash of an environment definition, for capture reuse.
+def _definition_payload(config: "ComputeConfig") -> Dict[str, Any]:
+    """Normalised, order-insensitive view of the fields that change *what gets
+    built* (image, packages, setup, env variable names, resources, working_dir).
 
-    Hashes only the fields that change *what gets built* (image, packages,
-    setup, env variable names, resources, working_dir). Values of ``env`` are
-    excluded because they are typically secrets/tenant-specific and must not
-    change the cache key (nor leak into a hash that may be logged). The result
-    is a short, stable sha256 hex digest: reordering keys/lists that describe
-    the same environment yields the same hash; changing a package or setup step
-    yields a new one.
-
-    Args:
-        config: The :class:`ComputeConfig` to fingerprint.
-
-    Returns:
-        A 12-char hex digest suitable for an image tag (``praisonai-env:{h}``).
+    ``env`` **values** are deliberately excluded here — see :func:`definition_hash`.
     """
-    import hashlib
-    import json
-
     def _norm_packages(pkgs: Dict[str, List[str]]) -> Dict[str, List[str]]:
         return {k: sorted(map(str, v or [])) for k, v in sorted((pkgs or {}).items())}
 
-    payload = {
+    return {
         "image": config.image,
         "packages": _norm_packages(config.packages),
         "setup": list(config.setup or []),
@@ -247,6 +233,69 @@ def definition_hash(config: "ComputeConfig") -> str:
         "memory_mb": config.memory_mb,
         "gpu": config.gpu,
         "working_dir": config.working_dir,
+    }
+
+
+def definition_hash(config: "ComputeConfig") -> str:
+    """Stable content hash of an environment definition, for display/logging.
+
+    Hashes only the fields that change *what gets built* (image, packages,
+    setup, env variable names, resources, working_dir). Values of ``env`` are
+    excluded because they are typically secrets/tenant-specific and must not
+    leak into a hash that may be logged or shown in ``list_captures``. The
+    result is a short, stable sha256 hex digest: reordering keys/lists that
+    describe the same environment yields the same hash; changing a package or
+    setup step yields a new one.
+
+    .. note::
+        This value-free hash is safe to log but is **not** a safe reuse key on
+        its own: ``setup:`` runs with ``env`` values injected and may bake
+        env-derived state into the filesystem, so a capture must not be reused
+        across differing secret values. Use :func:`capture_key` for the actual
+        reuse/cache key — it additionally binds the ``env`` **values** so
+        different secrets produce a different capture, while never being logged.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest.
+    """
+    import hashlib
+    import json
+
+    blob = json.dumps(
+        _definition_payload(config), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def capture_key(config: "ComputeConfig") -> str:
+    """Secret-aware reuse key for capturing/reusing a provisioned environment.
+
+    Extends :func:`definition_hash` by additionally binding the ``env``
+    **values**. ``setup:`` executes with those values injected and may persist
+    env-derived state (tokens, tenant config) into the committed filesystem, so
+    a capture is only safe to reuse when the values match too. Two definitions
+    that are identical except for their secret values therefore get *different*
+    capture keys and never share a committed image.
+
+    The env values are folded into the digest (never returned in the clear and
+    never logged), so this key is suitable for an image tag
+    (``praisonai-env:{key}``) but should not itself be surfaced to users.
+
+    Args:
+        config: The :class:`ComputeConfig` to fingerprint.
+
+    Returns:
+        A 12-char hex digest that changes with any build input *or* secret value.
+    """
+    import hashlib
+    import json
+
+    payload = dict(_definition_payload(config))
+    payload["env_values"] = {
+        str(k): str(v) for k, v in sorted((config.env or {}).items())
     }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]

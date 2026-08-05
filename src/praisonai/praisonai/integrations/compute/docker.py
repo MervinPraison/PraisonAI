@@ -8,12 +8,13 @@ Requires: ``pip install docker``
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,63 @@ def _load_registry() -> Dict[str, Dict[str, Any]]:
 def _save_registry(registry: Dict[str, Dict[str, Any]]) -> None:
     try:
         os.makedirs(_REGISTRY_DIR, exist_ok=True)
-        tmp = _REGISTRY_PATH + ".tmp"
+        tmp = f"{_REGISTRY_PATH}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, sort_keys=True)
         os.replace(tmp, _REGISTRY_PATH)
     except OSError as e:
         logger.warning("[docker_compute] could not write env registry: %s", e)
+
+
+@contextlib.contextmanager
+def _registry_lock() -> Iterator[None]:
+    """Best-effort cross-process advisory lock around the registry file.
+
+    Serialises the load→mutate→save cycle so concurrent provisions don't drop
+    each other's entries (lost update). Uses ``fcntl`` where available (POSIX)
+    and silently degrades to a no-op elsewhere (e.g. Windows) — captures still
+    work, just without the guarantee under heavy concurrency.
+    """
+    try:
+        import fcntl  # POSIX only
+    except ImportError:
+        yield
+        return
+
+    try:
+        os.makedirs(_REGISTRY_DIR, exist_ok=True)
+    except OSError:
+        yield
+        return
+
+    lock_path = f"{_REGISTRY_PATH}.lock"
+    fh = None
+    try:
+        fh = open(lock_path, "w", encoding="utf-8")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    except OSError as e:
+        logger.debug("[docker_compute] registry lock unavailable: %s", e)
+        yield
+    finally:
+        if fh is not None:
+            with contextlib.suppress(Exception):
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            fh.close()
+
+
+def _update_registry(
+    mutate: Callable[[Dict[str, Dict[str, Any]]], None],
+) -> None:
+    """Atomically read-modify-write the registry under the file lock.
+
+    ``mutate`` receives the freshest registry dict and edits it in place, so an
+    entry written by a concurrent provision is preserved rather than clobbered.
+    """
+    with _registry_lock():
+        registry = _load_registry()
+        mutate(registry)
+        _save_registry(registry)
 
 
 class DockerCompute:
@@ -111,6 +163,7 @@ class DockerCompute:
         from praisonaiagents.managed.protocols import (
             InstanceInfo,
             InstanceStatus,
+            capture_key,
             definition_hash,
         )
 
@@ -127,9 +180,16 @@ class DockerCompute:
         # Capture reuse: if a prior provision of this exact definition was
         # committed to a local image, start from it and skip pull+install+setup.
         # A hit is only worthwhile when there is setup to amortise; a change to
-        # the definition yields a new hash → miss → fresh build + new capture.
+        # the definition yields a new key → miss → fresh build + new capture.
+        #
+        # The reuse key is ``capture_key`` (binds env *values*), NOT the
+        # value-free ``definition_hash``: ``setup:`` runs with env values
+        # injected and may bake secret-derived state into the filesystem, so a
+        # capture must not be shared across differing secrets. ``definition_hash``
+        # is kept only as a non-sensitive display label in the registry.
+        cap_key = capture_key(config)
         defn_hash = definition_hash(config)
-        capture_ref = self._capture_tag(defn_hash)
+        capture_ref = self._capture_tag(cap_key)
         from_capture = bool(config.setup or config.packages) and self.has_capture(
             capture_ref
         )
@@ -177,7 +237,7 @@ class DockerCompute:
                     refresh = [refresh]
                 if refresh:
                     self._run_setup_sync(container, refresh)
-                self._touch_capture(defn_hash)
+                self._touch_capture(cap_key)
             else:
                 if config.packages:
                     self._install_packages_sync(container, config.packages)
@@ -202,7 +262,7 @@ class DockerCompute:
         # A failed commit degrades to today's ephemeral behaviour with a log
         # line — it never blocks the run.
         if not from_capture and (config.setup or config.packages):
-            self.capture(instance_id, capture_ref)
+            self.capture(instance_id, capture_ref, definition=defn_hash)
 
         logger.info("[docker_compute] provisioned: %s image=%s", instance_id, base_image)
 
@@ -231,11 +291,21 @@ class DockerCompute:
         except Exception:
             return False
 
-    def capture(self, instance_id: str, ref: str) -> Optional[str]:
+    def capture(
+        self, instance_id: str, ref: str, definition: Optional[str] = None,
+    ) -> Optional[str]:
         """``docker commit`` ``instance_id`` to local image ``ref``.
 
         Records the capture in the registry. Returns the ref on success or
         ``None`` on failure (never raises) so the caller degrades to ephemeral.
+
+        Args:
+            instance_id: Container to commit.
+            ref: Local image ref to commit to (``praisonai-env:{key}``); the
+                ``{key}`` is a secret-aware :func:`capture_key`.
+            definition: Optional non-sensitive :func:`definition_hash` recorded
+                for display so ``list_captures`` can be shown without leaking the
+                secret-bearing key.
         """
         info = self._containers.get(instance_id)
         if not info:
@@ -251,27 +321,31 @@ class DockerCompute:
             )
             return None
 
-        defn_hash = tag or "latest"
+        cap_key = tag or "latest"
         now = time.time()
-        registry = _load_registry()
-        existing = registry.get(defn_hash, {})
-        registry[defn_hash] = {
-            "backend": "docker",
-            "ref": ref,
-            "created_at": existing.get("created_at", now),
-            "last_used": now,
-        }
-        _save_registry(registry)
+
+        def _mutate(registry: Dict[str, Dict[str, Any]]) -> None:
+            existing = registry.get(cap_key, {})
+            registry[cap_key] = {
+                "backend": "docker",
+                "ref": ref,
+                "definition": definition or existing.get("definition"),
+                "created_at": existing.get("created_at", now),
+                "last_used": now,
+            }
+
+        _update_registry(_mutate)
         logger.info("[docker_compute] captured %s -> %s", instance_id, ref)
         return ref
 
-    def _touch_capture(self, defn_hash: str) -> None:
+    def _touch_capture(self, cap_key: str) -> None:
         """Update ``last_used`` for a capture that was just reused."""
-        registry = _load_registry()
-        entry = registry.get(defn_hash[:12])
-        if entry:
-            entry["last_used"] = time.time()
-            _save_registry(registry)
+        def _mutate(registry: Dict[str, Dict[str, Any]]) -> None:
+            entry = registry.get(cap_key[:12])
+            if entry:
+                entry["last_used"] = time.time()
+
+        _update_registry(_mutate)
 
     def list_captures(self) -> List[Dict[str, Any]]:
         """Return recorded captures ``[{hash, backend, ref, created_at, last_used}]``."""
@@ -286,21 +360,31 @@ class DockerCompute:
         list of pruned definition hashes.
         """
         now = time.time()
-        registry = _load_registry()
         pruned: List[str] = []
-        for defn_hash, meta in list(registry.items()):
-            if now - meta.get("last_used", 0) < max_age_s:
-                continue
-            ref = meta.get("ref")
-            if ref:
-                try:
-                    self._get_client().images.remove(ref, force=True)
-                except Exception as e:
-                    logger.debug("[docker_compute] prune image %s: %s", ref, e)
-            registry.pop(defn_hash, None)
-            pruned.append(defn_hash)
+        refs: List[str] = []
+
+        # Select + drop stale entries atomically under the lock so a concurrent
+        # capture writer is preserved. Image deletion (slow, external) happens
+        # afterwards, outside the lock.
+        def _mutate(registry: Dict[str, Dict[str, Any]]) -> None:
+            for defn_hash, meta in list(registry.items()):
+                if now - meta.get("last_used", 0) < max_age_s:
+                    continue
+                ref = meta.get("ref")
+                if ref:
+                    refs.append(ref)
+                registry.pop(defn_hash, None)
+                pruned.append(defn_hash)
+
+        _update_registry(_mutate)
+
+        for ref in refs:
+            try:
+                self._get_client().images.remove(ref, force=True)
+            except Exception as e:
+                logger.debug("[docker_compute] prune image %s: %s", ref, e)
+
         if pruned:
-            _save_registry(registry)
             logger.info("[docker_compute] pruned %d capture(s)", len(pruned))
         return pruned
 

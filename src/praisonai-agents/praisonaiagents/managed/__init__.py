@@ -30,6 +30,7 @@ from .protocols import (
     load_environment_definition,
     find_environment_definition,
     definition_hash,
+    capture_key,
 )
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     "load_environment_definition",
     "find_environment_definition",
     "definition_hash",
+    "capture_key",
 ]
 
 

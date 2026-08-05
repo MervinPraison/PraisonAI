@@ -217,3 +217,52 @@ def test_touch_capture_updates_last_used(registry_tmp):
     _run(prov.provision(config))  # capture hit → touch
     second = prov.list_captures()[0]["last_used"]
     assert second >= first
+
+
+def test_differing_env_values_do_not_share_capture(registry_tmp):
+    # Same definition, different secret values → separate captures. The second
+    # provision must NOT reuse the first's committed filesystem (which ran setup
+    # with different secrets), so setup runs again under a distinct image tag.
+    client = _FakeClient(existing_images={"python:3.12-slim"})
+
+    prov1 = _provider(client)
+    _run(prov1.provision(ComputeConfig(setup=["make setup"], env={"TOKEN": "a"})))
+    ref_a = client.commit_log[0]
+
+    client.exec_log.clear()
+    prov2 = _provider(client)
+    _run(prov2.provision(ComputeConfig(setup=["make setup"], env={"TOKEN": "b"})))
+    # Setup ran again (not a reuse) and a *different* capture image was created.
+    assert client.exec_log == [["sh", "-c", "make setup"]]
+    ref_b = client.commit_log[1]
+    assert ref_a != ref_b
+    assert len(prov2.list_captures()) == 2
+
+
+def test_concurrent_captures_preserve_each_other(registry_tmp):
+    # Two providers commit different definitions "concurrently": the read-modify
+    # -write must not drop either entry (lost-update). Simulated by interleaving
+    # capture() calls; the file-lock/re-read keeps both.
+    client = _FakeClient(existing_images={"python:3.12-slim"})
+    prov = _provider(client)
+
+    _run(prov.provision(ComputeConfig(setup=["make one"])))
+    _run(prov.provision(ComputeConfig(setup=["make two"])))
+
+    hashes = {c["hash"] for c in prov.list_captures()}
+    assert len(hashes) == 2  # both captures survived
+
+
+def test_registry_records_definition_label(registry_tmp):
+    from praisonaiagents.managed.protocols import definition_hash
+
+    client = _FakeClient(existing_images={"python:3.12-slim"})
+    config = ComputeConfig(setup=["make setup"], env={"TOKEN": "x"})
+    prov = _provider(client)
+    _run(prov.provision(config))
+
+    entry = prov.list_captures()[0]
+    # The non-sensitive definition_hash is stored for display; the registry key
+    # (secret-aware capture_key) differs from it.
+    assert entry["definition"] == definition_hash(config)
+    assert entry["hash"] != entry["definition"]
