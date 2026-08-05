@@ -872,12 +872,34 @@ class ToolExecutionMixin:
             # model-visible image parts via format_tool_result_messages().
             _is_multimodal_result = _normalize_multimodal_result(result) is not None
 
+            # Context economy: if the tool declared a compact, model-facing view
+            # (ToolResult.model_output, or a to_model_output(result) hook on the
+            # @tool/BaseTool), resolve it now while the FULL result is still
+            # intact for tracing/hooks/display below. The compact view is only
+            # swapped in at the very end, right before the string returned to
+            # the model is built, so downstream consumers keep the full payload.
+            _model_facing_override = None
+            if not _is_multimodal_result:
+                _model_facing_override = self._resolve_model_facing_result(
+                    function_name, result
+                )
+
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             if not _is_multimodal_result:
                 try:
                     from ..tools.trust import wrap_if_external
                     result = wrap_if_external(function_name, result)
+                    # The compact, model-facing view is untrusted external
+                    # content too when the producing tool is external, so it
+                    # MUST pass through the same prompt-injection fence before
+                    # it can reach the model. Resolving it above (pre-fence)
+                    # kept the full payload intact for hooks/tracing; fence the
+                    # override here so it never bypasses the security markers.
+                    if _model_facing_override is not None:
+                        _model_facing_override = wrap_if_external(
+                            function_name, _model_facing_override
+                        )
                 except Exception:
                     # Trust module unavailable (partial/broken install) must not
                     # abort tool execution; fall through with the raw result.
@@ -1017,7 +1039,18 @@ class ToolExecutionMixin:
                     tool_error = self._last_normalized_result.error_message
                 # Clean up temporary attribute
                 delattr(self, '_last_normalized_result')
-            
+
+            # Context economy: ``result`` stays the FULL output through the
+            # AFTER_TOOL hook, result-aware loop detection, and the loop guard
+            # (below), so those channels keep seeing real, changing outcomes.
+            # A tool-declared compact model-facing view (if any) is only swapped
+            # in at the very end, right before ``return``, purely to shrink what
+            # the LLM sees. No override => behaviour is unchanged. Model-facing
+            # annotations added below (AFTER_TOOL additional_context, loop-guard
+            # notices) are collected here so they can be re-applied to the
+            # compact view and therefore always reach the model.
+            _model_facing_annotations = []
+
             # Only build the input if an AFTER_TOOL hook is actually registered
             if self._hook_runner.registry.has_hooks(HookEvent.AFTER_TOOL):
                 after_tool_input = AfterToolInput(
@@ -1046,6 +1079,9 @@ class ToolExecutionMixin:
                         result.setdefault("_additional_context", extra_context)
                     else:
                         result = {"value": result, "_additional_context": extra_context}
+                    # Mirror any model-facing annotation onto the compact view so
+                    # it survives the context-economy swap at the end.
+                    _model_facing_annotations.append(extra_context)
             
             # Back-fill the result hash so the result-aware detector can tell a
             # genuine stall (identical output) from legitimate polling (changing
@@ -1089,10 +1125,28 @@ class ToolExecutionMixin:
                     else:
                         # Wrap non-string/dict/list results to preserve original data plus warning
                         result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+                    # Ensure the loop-guard notice also reaches the model when a
+                    # compact model-facing view replaces ``result`` below.
+                    _model_facing_annotations.append(f"[loop-guard] {decision.message}")
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
-            
+
+            # Context economy: now that tracing, hooks, loop detection and the
+            # loop guard have all observed the FULL result, swap in the compact,
+            # tool-declared model-facing view for the LLM. Re-apply any
+            # model-facing annotations so they are never lost. No override =>
+            # the full result is returned exactly as before.
+            if _model_facing_override is not None:
+                result = _model_facing_override
+                for _annotation in _model_facing_annotations:
+                    if isinstance(result, str):
+                        result = f"{result}\n\n{_annotation}"
+                    elif isinstance(result, dict):
+                        result.setdefault("_additional_context", _annotation)
+                    else:
+                        result = {"value": result, "_additional_context": _annotation}
+
             return result
         except Exception as e:
             # Emit tool call end with error for exceptions that escape the retry loop
@@ -2300,6 +2354,49 @@ class ToolExecutionMixin:
             return name
         if callable(tool) or inspect.isclass(tool):
             return getattr(tool, '__name__', None)
+        return None
+
+    def _resolve_model_facing_result(self, function_name, result):
+        """Return a tool's compact, model-facing view for ``result``, or ``None``.
+
+        Resolution order (first hit wins):
+
+        1. ``result.model_output`` — a ToolResult carrying its own compact view.
+        2. The producing tool's ``to_model_output(output)`` hook — set via
+           ``@tool(to_model_output=fn)`` or a ``BaseTool`` override.
+
+        The hook is invoked with the tool's raw output **value**, matching the
+        single ``BaseTool.to_model_output`` contract: if ``result`` is a
+        ``ToolResult`` the enclosed ``output`` is passed, otherwise ``result``
+        itself. ``None`` means the tool opted out, so the caller keeps today's
+        full stringification (fully backward-compatible).
+        """
+        try:
+            from ..tools.base import resolve_model_output
+            compact = resolve_model_output(result)
+            if compact is not None:
+                return compact
+        except Exception:
+            pass
+
+        # Unwrap to the raw output value so the hook receives the same payload
+        # BaseTool.safe_run passes (the ``output`` channel), keeping one contract.
+        hook_input = getattr(result, 'output', result)
+        try:
+            for name, tool in self._iter_active_named_tools():
+                if name != function_name:
+                    continue
+                hook = getattr(tool, 'to_model_output', None)
+                if callable(hook):
+                    try:
+                        return hook(hook_input)
+                    except Exception as e:
+                        logging.debug(
+                            f"to_model_output hook failed for '{function_name}': {e}"
+                        )
+                return None
+        except Exception:
+            pass
         return None
 
     def _iter_active_named_tools(self):
