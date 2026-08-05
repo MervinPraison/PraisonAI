@@ -32,8 +32,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import os
 import socket
+import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -55,6 +58,15 @@ if TYPE_CHECKING:
     RunPolicy = Any  # optional wrapper ``praisonai.scheduler.run_policy.RunPolicy``
 
 logger = logging.getLogger(__name__)
+
+# On POSIX, start the command in its own session so a timeout can kill the whole
+# process group (shell + children) rather than orphaning them. Mirrors the
+# pattern used by the pre-run ``ShellConditionGate``.
+_POSIX = os.name == "posix"
+
+# Bound the delivered output so a chatty command cannot flood the channel or
+# disk. stdout is truncated to this many characters (with a marker) verbatim.
+_MAX_COMMAND_OUTPUT_CHARS = 8000
 
 
 @dataclass
@@ -230,6 +242,16 @@ class ScheduledAgentExecutor:
     async def _execute_one(self, job: "ScheduleJob") -> JobResult:
         """Execute a single job and return the result."""
         started = time.time()
+
+        # Model-free command action: when the job carries a ``command`` it runs
+        # that command on its schedule and delivers stdout verbatim — no agent
+        # is resolved and no model turn is taken. Checked before the agent path
+        # so a deterministic watchdog (``df -h``, ``uptime``, a health-check
+        # ``curl``) costs no tokens and cannot be reformatted by a model.
+        command = str(getattr(job, "command", "") or "").strip()
+        if command:
+            return await self._execute_command(job, command, started)
+
         message = str(getattr(job, "message", "") or "")
         agent_id = getattr(job, "agent_id", None)
 
@@ -460,6 +482,186 @@ class ScheduledAgentExecutor:
         job_result.delivered = delivered
         job_result.delivery_error = delivery_error
         return job_result
+
+    # ── command-action helpers ───────────────────────────────────────
+
+    async def _execute_command(
+        self, job: "ScheduleJob", command: str, started: float,
+    ) -> JobResult:
+        """Run a job's ``command`` and deliver its stdout verbatim.
+
+        No agent is resolved and no model turn is taken. The command runs off
+        the event loop (via :func:`asyncio.to_thread`) so a slow command does
+        not block other ticks / deliveries; it is bounded by
+        ``job.command_timeout`` and killed with its process group on POSIX. A
+        non-zero exit surfaces the exit code and output rather than being
+        silently dropped, and output is bounded before delivery.
+        """
+        # Defensively normalise the timeout: a corrupt persisted value (e.g.
+        # ``"five"`` from a hand-edited store) must fail only *this* job, never
+        # escape ``float(...)`` and break the ticker loop for every other job.
+        # Non-numeric, non-positive, or non-finite values fall back to 60s.
+        raw_timeout = getattr(job, "command_timeout", 60.0)
+        try:
+            timeout = float(raw_timeout)
+            if not math.isfinite(timeout) or timeout <= 0:
+                timeout = 60.0
+        except (TypeError, ValueError):
+            timeout = 60.0
+        try:
+            output, code = await asyncio.to_thread(
+                self._run_command, command, timeout,
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            err = f"command failed to launch: {e}"
+            logger.warning("Job '%s' %s", job.id, err)
+            duration = time.time() - started
+            self._runner.mark_run(job, status="failed", error=err, duration=duration)
+            if self._on_failure:
+                self._on_failure(job, err)
+            return JobResult(job=job, status="failed", error=err, duration=duration)
+
+        duration = time.time() - started
+        succeeded = code == 0
+        text = output if succeeded else f"[exit {code}] {output}".rstrip()
+
+        # Deliver verbatim through the existing DeliveryTarget path, unchanged.
+        delivered = False
+        delivery_error: Optional[str] = None
+        delivery = getattr(job, "delivery", None)
+        if text and delivery and self._deliver:
+            try:
+                coro = self._deliver(delivery, text)
+                if inspect.isawaitable(coro):
+                    await coro
+                delivered = True
+                logger.info(
+                    "Delivered command job '%s' output to %s:%s",
+                    job.id, delivery.channel, delivery.channel_id,
+                )
+            except Exception as e:
+                delivery_error = str(e)
+                logger.warning(
+                    "Delivery failed for command job '%s': %s", job.id, e,
+                )
+
+        status = "succeeded" if succeeded else "failed"
+        self._runner.mark_run(
+            job,
+            status=status,
+            result=text if succeeded else None,
+            error=None if succeeded else text,
+            duration=duration,
+            delivered=delivered,
+        )
+        if succeeded and self._on_success:
+            self._on_success(job, text)
+        elif not succeeded and self._on_failure:
+            self._on_failure(job, text)
+
+        return JobResult(
+            job=job,
+            result=text if succeeded else None,
+            status=status,
+            error=None if succeeded else text,
+            duration=duration,
+            delivered=delivered,
+            delivery_error=delivery_error,
+        )
+
+    @staticmethod
+    def _run_command(command: str, timeout: float) -> Tuple[str, int]:
+        """Run ``command`` in a shell, returning ``(bounded_output, exit_code)``.
+
+        On POSIX the shell runs in its own session so a timeout kills the whole
+        process group (shell + children) instead of orphaning them. On timeout
+        the process is killed and a ``124`` exit code (the conventional
+        ``timeout(1)`` code) is returned with whatever output was captured.
+
+        Output is bounded *as it is read* rather than buffered in full: a chatty
+        or runaway command in the long-running gateway cannot grow the capture
+        past ``_MAX_COMMAND_OUTPUT_CHARS`` (+ marker), so it cannot exhaust
+        gateway memory. The wall-clock ``timeout`` still bounds total runtime and
+        kills the process group on breach.
+        """
+        popen_kwargs: dict = {}
+        if _POSIX:
+            popen_kwargs["start_new_session"] = True
+
+        # Hard cap the number of chars we retain in memory regardless of how much
+        # the command emits; once past the cap we keep reading (to let the pipe
+        # drain / the process finish) but discard the excess.
+        cap = _MAX_COMMAND_OUTPUT_CHARS
+        chunks: List[str] = []
+        retained = 0
+        truncated = False
+        deadline = time.monotonic() + max(timeout, 0.0)
+
+        def _drain(stream) -> None:
+            nonlocal retained, truncated
+            for line in iter(stream.readline, ""):
+                if retained < cap:
+                    room = cap - retained
+                    chunks.append(line[:room])
+                    retained += min(len(line), room)
+                    if retained >= cap:
+                        truncated = True
+                else:
+                    truncated = True
+
+        proc = None
+        timed_out = False
+        try:
+            proc = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                **popen_kwargs,
+            )
+            reader = threading.Thread(
+                target=_drain, args=(proc.stdout,), daemon=True,
+            )
+            reader.start()
+            remaining = deadline - time.monotonic()
+            reader.join(timeout=max(remaining, 0.0))
+            if reader.is_alive() or proc.poll() is None:
+                # Still running past the deadline → timed out.
+                timed_out = proc.poll() is None
+                if timed_out:
+                    try:
+                        if _POSIX:
+                            os.killpg(os.getpgid(proc.pid), 9)
+                        else:  # pragma: no cover - non-POSIX
+                            proc.kill()
+                    except (ProcessLookupError, PermissionError, OSError):  # pragma: no cover
+                        proc.kill()
+            proc.wait(timeout=5)
+            reader.join(timeout=5)
+            code = 124 if timed_out else (proc.returncode if proc.returncode is not None else 0)
+        except Exception:  # pragma: no cover - defensive: reap and surface
+            if proc is not None:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            raise
+        finally:
+            if proc is not None and proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except Exception:  # pragma: no cover
+                    pass
+
+        output = "".join(chunks)
+        if timed_out:
+            output = f"{output}\n[timed out after {timeout:.0f}s]"
+        output = output.rstrip("\n")
+        if truncated:
+            output += "\n…[output truncated]"
+        return output, code
 
     # ── condition-gate helpers ───────────────────────────────────────
 
