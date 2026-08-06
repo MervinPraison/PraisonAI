@@ -514,6 +514,7 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">patch</a>(name: str, old_string: str, new_string: str, file_path: Optional[str] = None, replace_all: bool = False, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">patch_skill</a>(name: str, old_string: str, new_string: str, file_path: str = None, replace_all: bool = False, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">reject</a>(identifier: str) -> dict</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">reload</a>() -> Dict[str, List[str]]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">remove_file</a>(name: str, file_path: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">remove_skill_file</a>(name: str, file_path: str, propose: Optional[bool] = None) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">resolve</a>(selectors: List[str]) -> List[str]</code>
