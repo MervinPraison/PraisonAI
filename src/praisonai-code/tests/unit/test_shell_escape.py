@@ -113,6 +113,41 @@ def test_repl_double_bang_attaches_context(shell_on):
     assert "attach-me" in repl._pending_context[0]
 
 
+def test_repl_double_bang_attaches_failed_output(shell_on):
+    # A failed !!cmd still attaches its diagnostic output — the user explicitly
+    # asked for it, so it must not be silently dropped.
+    repl = InteractiveREPL()
+    repl.io.info = lambda msg: None
+    repl.io.tool_error = lambda msg: None
+    repl.io.success = lambda msg: None
+
+    repl._handle_shell_escape("!!sh -c 'echo boom >&2; exit 3'")
+
+    assert len(repl._pending_context) == 1
+
+
+def test_repl_pending_context_retained_on_model_failure(shell_on):
+    # If the model call raises, explicitly attached context must survive so the
+    # user can retry without re-running the command.
+    repl = InteractiveREPL()
+    repl.io.info = lambda msg: None
+    repl.io.tool_error = lambda msg: None
+    repl.io.success = lambda msg: None
+
+    repl._handle_shell_escape("!!echo keep-me")
+    assert len(repl._pending_context) == 1
+
+    class _BoomAgent:
+        def start(self, *a, **k):
+            raise RuntimeError("model down")
+
+    repl._agent = _BoomAgent()
+    repl._execute_prompt("hello")
+
+    assert len(repl._pending_context) == 1
+    assert "keep-me" in repl._pending_context[0]
+
+
 # ---------------------------------------------------------------------------
 # TUI wiring
 # ---------------------------------------------------------------------------
@@ -132,3 +167,19 @@ def test_tui_double_bang_attaches_context(shell_on):
 
     assert len(tui._pending_context) == 1
     assert "tui-attach" in tui._pending_context[0]
+
+
+def test_tui_pending_context_retained_on_model_failure(shell_on):
+    tui = PraisonTUI()
+    tui._handle_shell_escape("!!echo tui-keep")
+    assert len(tui._pending_context) == 1
+
+    class _BoomAgent:
+        def start(self, *a, **k):
+            raise RuntimeError("model down")
+
+    tui._agent = _BoomAgent()
+    tui._execute_prompt("hello")
+
+    assert len(tui._pending_context) == 1
+    assert "tui-keep" in tui._pending_context[0]

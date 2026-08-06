@@ -263,7 +263,7 @@ class InteractiveREPL:
             else:
                 self.io.info(result.output)
 
-        if attach and not result.error:
+        if attach:
             self._pending_context.append(
                 f"$ {result.command}\n{result.output}"
             )
@@ -274,11 +274,13 @@ class InteractiveREPL:
         try:
             agent = self._get_agent()
 
-            # Prepend any `!!cmd` shell output stashed for this turn.
-            if self._pending_context:
-                context = "\n\n".join(self._pending_context)
+            # Prepend any `!!cmd` shell output stashed for this turn. Retain it
+            # until the model call succeeds so an error does not silently drop
+            # context the user explicitly attached.
+            attached_context = self._pending_context
+            if attached_context:
+                context = "\n\n".join(attached_context)
                 prompt = f"[shell output]\n{context}\n\n{prompt}"
-                self._pending_context = []
 
             # Add to history
             self._conversation_history.append({
@@ -288,6 +290,10 @@ class InteractiveREPL:
             
             # Execute
             response = agent.start(prompt)
+
+            # Model call succeeded: the attached context has been consumed.
+            if attached_context:
+                self._pending_context = []
             
             # Add response to history
             if response:

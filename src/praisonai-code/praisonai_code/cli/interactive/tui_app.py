@@ -331,7 +331,7 @@ Available Commands:
         if result.output:
             self.messages.append(Message(role="system", content=result.output))
 
-        if attach and not result.error:
+        if attach:
             self._pending_context.append(f"$ {result.command}\n{result.output}")
             self.messages.append(
                 Message(
@@ -346,13 +346,19 @@ Available Commands:
         try:
             agent = self._get_agent()
 
-            # Prepend any `!!cmd` shell output stashed for this turn.
-            if self._pending_context:
-                context = "\n\n".join(self._pending_context)
+            # Prepend any `!!cmd` shell output stashed for this turn. Retain it
+            # until the model call succeeds so an error does not silently drop
+            # context the user explicitly attached.
+            attached_context = self._pending_context
+            if attached_context:
+                context = "\n\n".join(attached_context)
                 prompt = f"[shell output]\n{context}\n\n{prompt}"
-                self._pending_context = []
 
             response = agent.start(prompt)
+
+            # Model call succeeded: the attached context has been consumed.
+            if attached_context:
+                self._pending_context = []
             return str(response) if response else None
         except Exception as e:
             return f"Error: {e}"
