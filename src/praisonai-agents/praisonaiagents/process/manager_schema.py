@@ -16,8 +16,8 @@ class ManagerInstructions(BaseModel):
         ...,
         description=(
             "Exact task_id integer of the task to run next, chosen from the "
-            "task_id values shown in the tasks list. Never select manager_task "
-            "and never invent an id."
+            "task_id values shown in the tasks list (these ids are 0-based). "
+            "Never select manager_task and never invent an id."
         ),
     )
     agent_name: str = Field(..., description="Name of the agent assigned to the task")

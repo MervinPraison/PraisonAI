@@ -993,7 +993,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tk.name == "manager_task":
+                if tid == manager_task_id:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1066,9 +1066,11 @@ Provide a JSON with the structure:
                 break
 
             selected_task = self.tasks.get(selected_task_id)
-            if selected_task is None or getattr(selected_task, "name", None) == "manager_task":
-                # Reject unknown ids and the synthetic manager_task (it must never
-                # delegate to itself). Re-prompt with the delegable IDs only.
+            if selected_task is None or selected_task_id == manager_task_id:
+                # Reject unknown ids and the synthetic manager_task by its actual id
+                # (it must never delegate to itself). Matching by id avoids colliding
+                # with a legitimate user task that happens to be named "manager_task".
+                # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
                     logging.error(
@@ -1077,7 +1079,7 @@ Provide a JSON with the structure:
                     break
 
                 valid_task_ids = [
-                    tid for tid, tk in self.tasks.items() if tk.name != "manager_task"
+                    tid for tid in self.tasks if tid != manager_task_id
                 ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
@@ -1580,7 +1582,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tk.name == "manager_task":
+                if tid == manager_task_id:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1626,9 +1628,11 @@ Provide a JSON with the structure:
                 break
 
             selected_task = self.tasks.get(selected_task_id)
-            if selected_task is None or getattr(selected_task, "name", None) == "manager_task":
-                # Reject unknown ids and the synthetic manager_task (it must never
-                # delegate to itself). Re-prompt with the delegable IDs only.
+            if selected_task is None or selected_task_id == manager_task_id:
+                # Reject unknown ids and the synthetic manager_task by its actual id
+                # (it must never delegate to itself). Matching by id avoids colliding
+                # with a legitimate user task that happens to be named "manager_task".
+                # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
                     logging.error(
@@ -1637,7 +1641,7 @@ Provide a JSON with the structure:
                     break
 
                 valid_task_ids = [
-                    tid for tid, tk in self.tasks.items() if tk.name != "manager_task"
+                    tid for tid in self.tasks if tid != manager_task_id
                 ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "

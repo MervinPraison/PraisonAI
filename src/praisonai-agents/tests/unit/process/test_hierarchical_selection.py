@@ -142,3 +142,30 @@ def test_reject_manager_task_id_selection_async():
     yielded = _drive_async(process, add_task, seq)
     assert yielded == [0]
     assert 1 not in yielded
+
+
+def test_user_task_named_manager_task_is_still_delegable_sync():
+    """Rejection must key off the synthetic task's *id*, not its name, so a
+    legitimate user task named ``manager_task`` (id 0) still executes while the
+    synthetic manager (id 1) is refused."""
+    worker = Agent(name="Worker", role="Analyst", goal="Analyze", backstory="Analyst")
+    user_task = Task(
+        name="manager_task",  # user deliberately reuses the reserved-looking name
+        description="Say BANANA",
+        expected_output="BANANA",
+        agent=worker,
+    )
+    tasks = {}
+    process = Process(tasks=tasks, agents=[worker], manager_llm="gpt-4o-mini")
+
+    def add_task(task):
+        tid = len(tasks)
+        task.id = tid
+        tasks[tid] = task
+        return tid
+
+    add_task(user_task)  # id 0
+    seq = [ManagerInstructions(task_id=0, agent_name="Worker", action="execute")]
+    yielded, _ = _drive_sync(process, add_task, seq)
+    # The user task at id 0 must run even though it shares the synthetic name.
+    assert yielded == [0]

@@ -41,4 +41,5 @@ def test_task_id_description_is_not_one_based():
     """Runtime task IDs are 0-based; the schema must not claim 1-based (issue #3700)."""
     description = ManagerInstructions.model_fields["task_id"].description or ""
     assert "1-based" not in description
+    assert "0-based" in description
     assert "manager_task" in description
