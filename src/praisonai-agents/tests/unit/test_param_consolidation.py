@@ -366,3 +366,16 @@ class TestMaxRpmAutoWiresRateLimiter:
         from praisonaiagents.config.feature_configs import ExecutionConfig
         with pytest.raises(ValueError):
             Agent(name="test", instructions="test", execution=ExecutionConfig(max_rpm=0))
+
+    def test_max_rpm_invalid_raises_even_with_explicit_limiter(self):
+        import pytest
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        from praisonaiagents.llm.rate_limiter import RateLimiter
+        custom = RateLimiter(requests_per_minute=15)
+        with pytest.raises(ValueError):
+            Agent(
+                name="test",
+                instructions="test",
+                execution=ExecutionConfig(max_rpm=-1, rate_limiter=custom),
+            )
