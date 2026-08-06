@@ -280,11 +280,12 @@ class InteractiveREPL:
         """
         keep = False
         question = args.strip()
-        # Parse the opt-in --keep flag from anywhere in the argument string.
-        tokens = [t for t in question.split() if t]
-        if "--keep" in tokens:
+        # Parse the opt-in --keep flag only when it is the leading option, so a
+        # legitimate question like "/btw what does --keep mean?" is untouched.
+        tokens = question.split(maxsplit=1)
+        if tokens and tokens[0] == "--keep":
             keep = True
-            question = " ".join(t for t in tokens if t != "--keep").strip()
+            question = tokens[1].strip() if len(tokens) > 1 else ""
 
         if not question:
             self.io.tool_warning("Usage: /btw [--keep] <question>")
@@ -334,6 +335,9 @@ class InteractiveREPL:
                 "You are a helpful assistant answering a quick side question. "
                 "Be concise. Do not modify any files or run commands."
             ),
+            # Explicitly disabled so a side question can never trigger the
+            # autonomous tool-using loop, regardless of ambient config.
+            "autonomy": False,
         }
         if self.config.model:
             agent_kwargs["llm"] = self.config.model
@@ -346,7 +350,16 @@ class InteractiveREPL:
 
             agent = self._build_side_agent()
             prompt = f"(cwd: {os.getcwd()})\n\n{question}"
-            response = agent.start(prompt)
+            # Force non-streaming: in a TTY ``start()`` auto-streams and returns
+            # a generator, which would otherwise be str()'d into a repr rather
+            # than the answer. Fall back for agents that take no kwargs.
+            try:
+                response = agent.start(prompt, stream=False)
+            except TypeError:
+                response = agent.start(prompt)
+            # Defensively materialize any generator that still slips through.
+            if hasattr(response, "__iter__") and not isinstance(response, (str, bytes)):
+                response = "".join(str(chunk) for chunk in response)
             return str(response) if response else None
         except Exception as exc:
             logger.exception("Error answering side question")

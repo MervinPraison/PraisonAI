@@ -65,12 +65,12 @@ class _RecordingAgent:
     def __init__(self):
         self.prompts = []
 
-    def start(self, prompt):
+    def start(self, prompt, **kwargs):
         self.prompts.append(prompt)
         return "REDIS_TLS_URL enables TLS for the Redis connection."
 
 
-def test_btw_answers_without_touching_main_history(monkeypatch):
+def test_btw_answers_without_touching_main_history(monkeypatch, capsys):
     repl = _make_repl()
     # Seed a realistic main conversation.
     repl._conversation_history = [
@@ -86,8 +86,8 @@ def test_btw_answers_without_touching_main_history(monkeypatch):
 
     # Main transcript must be byte-identical after a side question.
     assert repl._conversation_history == before
-    # The answer was rendered (as a distinct block).
-    assert any("REDIS_TLS_URL" in str(m) for _, m in repl.io.messages) or True
+    # The answer was actually rendered as a distinct [btw] block.
+    assert "[btw] REDIS_TLS_URL enables TLS" in capsys.readouterr().out
     # The side question actually ran against the throwaway agent.
     assert side_agent.prompts
     assert "REDIS_TLS_URL" in side_agent.prompts[0]
@@ -127,6 +127,21 @@ def test_btw_keep_records_single_note(monkeypatch):
     note = repl._conversation_history[-1]
     assert note["role"] == "note"
     assert note["content"] == "[btw] how do I run tests?"
+
+
+def test_btw_keep_only_parsed_as_leading_option(monkeypatch):
+    """A later '--keep' is question text, not the flag."""
+    repl = _make_repl()
+    side_agent = _RecordingAgent()
+    monkeypatch.setattr(repl, "_build_side_agent", lambda: side_agent)
+
+    repl._handle_command("/btw what does --keep mean?")
+
+    # No note recorded: --keep was NOT treated as the flag here.
+    assert repl._conversation_history == []
+    # The full question (including "--keep") reached the side agent.
+    assert side_agent.prompts
+    assert "--keep mean?" in side_agent.prompts[0]
 
 
 def test_btw_empty_question_warns(monkeypatch):
@@ -169,3 +184,27 @@ def test_btw_side_agent_is_read_only(monkeypatch):
     assert isinstance(agent, _FakeAgent)
     # Read-only: no tools wired into the side agent.
     assert "tools" not in captured
+    # Autonomy is explicitly disabled so it can never run the tool-using loop.
+    assert captured.get("autonomy") is False
+
+
+def test_btw_materializes_streaming_generator(monkeypatch, capsys):
+    """A streaming (generator) response is consumed, not str()'d to a repr."""
+
+    class _StreamingAgent:
+        def start(self, prompt, **kwargs):
+            # Emulate a TTY streaming agent: yield chunks lazily.
+            def _gen():
+                yield "REDIS_TLS_URL "
+                yield "enables TLS"
+
+            return _gen()
+
+    repl = _make_repl()
+    monkeypatch.setattr(repl, "_build_side_agent", lambda: _StreamingAgent())
+
+    repl._handle_command("/btw what is REDIS_TLS_URL?")
+
+    out = capsys.readouterr().out
+    assert "[btw] REDIS_TLS_URL enables TLS" in out
+    assert "generator object" not in out
