@@ -830,11 +830,15 @@ class DefaultSessionStore:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return SessionData.from_dict(data)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Malformed content — the parsed data is unusable, but the raw file
             # may still hold recoverable bytes. Quarantine it aside so the next
             # write cannot silently overwrite (and permanently destroy) it, and
             # surface the event instead of leaving only a log line.
+            # ``UnicodeDecodeError`` (invalid UTF-8, e.g. a truncated/binary
+            # file) is a ``ValueError`` subclass like ``JSONDecodeError`` but is
+            # raised by the decoder before JSON parsing, so it is handled here
+            # too rather than being allowed to propagate.
             quarantine_path = self._quarantine_corrupt(filepath)
             logger.error(
                 "Session file %s contains invalid JSON; quarantined to %s and "
@@ -883,7 +887,15 @@ class DefaultSessionStore:
         success, else ``None``. Caller must hold the session ``FileLock``.
         """
         try:
-            quarantine_path = f"{filepath}.corrupt-{int(time.time() * 1000)}"
+            base = f"{filepath}.corrupt-{int(time.time() * 1000)}"
+            # Guard against clobbering an earlier quarantine that landed in the
+            # same millisecond: pick the first non-existing suffix so every
+            # corrupt copy is preserved distinctly.
+            quarantine_path = base
+            attempt = 1
+            while os.path.exists(quarantine_path):
+                quarantine_path = f"{base}-{attempt}"
+                attempt += 1
             os.replace(filepath, quarantine_path)
             return quarantine_path
         except OSError as e:  # pragma: no cover - defensive

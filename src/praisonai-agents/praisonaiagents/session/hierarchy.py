@@ -174,7 +174,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return ExtendedSessionData.from_dict(data)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Invalid UTF-8 (``UnicodeDecodeError``) is handled alongside
+            # malformed JSON so a corrupt binary file is quarantined here too
+            # rather than propagating and matching the base-store contract.
             quarantine_path = self._quarantine_corrupt(filepath)
             logger.error(
                 "Session file %s contains invalid JSON; quarantined to %s and "
