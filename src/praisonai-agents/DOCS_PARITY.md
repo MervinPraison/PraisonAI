@@ -59,7 +59,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
-| ✅ Plugins | 8 | 3 | 1900 |
+| ✅ Plugins | 8 | 4 | 2134 |
 | ✅ Prompts | 2 | 9 | 1965 |
 | ✅ Providers | 1 | 56 | 7723 |
 | ✅ Query | 1 | 2 | 736 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
-| ✅ Tools | 12 | 136 | 39161 |
+| ✅ Tools | 12 | 137 | 39454 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1207 |
 | ✅ Video | 2 | 6 | 649 |
