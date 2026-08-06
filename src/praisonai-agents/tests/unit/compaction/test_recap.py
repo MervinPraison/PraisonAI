@@ -60,3 +60,32 @@ def test_recap_naive_summary_when_no_persisted():
     out = build_recap(history)
     # The naive summariser tags its output; recap surfaces that distilled line.
     assert "📌" in out
+
+
+def test_recap_bounds_large_persisted_summary():
+    """A huge persisted summary must not produce an unbounded recap.
+
+    Guards channel delivery (e.g. Telegram's 4096-char limit): the rendered
+    recap stays within the cap while the recent tail is always preserved.
+    """
+    big_summary = "[Previous conversation summary]\n" + ("x" * 20000)
+    history = [
+        {"role": "system", "content": big_summary, "_compacted": True},
+        {"role": "user", "content": "latest question"},
+        {"role": "assistant", "content": "latest answer"},
+    ]
+    out = build_recap(history)
+    assert len(out) <= 3500
+    # Recent activity survives the trim (the summary is what gets truncated).
+    assert "latest answer" in out
+
+
+def test_recap_max_chars_disabled_keeps_full_summary():
+    """max_chars<=0 disables the cap for callers that want the full block."""
+    big_summary = "[Previous conversation summary]\n" + ("x" * 8000)
+    history = [
+        {"role": "system", "content": big_summary, "_compacted": True},
+        {"role": "user", "content": "q"},
+    ]
+    out = build_recap(history, max_chars=0)
+    assert len(out) > 3500

@@ -13,6 +13,13 @@ from typing import Any, Dict, List
 
 RECAP_HEADER = "Recap — where we were:"
 
+# A recap is a *glanceable* re-entry aid, not a full transcript. Bound the
+# rendered block so a large persisted/compaction summary can never produce an
+# output that overflows a delivery channel (e.g. Telegram's 4096-char message
+# limit) or scrolls a terminal. Kept comfortably under that ceiling so channel
+# framing/markdown never tips it over.
+RECAP_MAX_CHARS = 3500
+
 
 def _persisted_summary(history: List[Dict[str, Any]]) -> str:
     """Return an already-distilled summary embedded in the transcript, if any.
@@ -61,7 +68,11 @@ def _naive_summary(history: List[Dict[str, Any]]) -> str:
     return ""
 
 
-def build_recap(history: List[Dict[str, Any]], tail: int = 4) -> str:
+def build_recap(
+    history: List[Dict[str, Any]],
+    tail: int = 4,
+    max_chars: int = RECAP_MAX_CHARS,
+) -> str:
     """Render a read-only "where were we" summary of a transcript.
 
     Reuses the existing summariser (a persisted compaction summary when one is
@@ -69,9 +80,16 @@ def build_recap(history: List[Dict[str, Any]], tail: int = 4) -> str:
     most recent ``tail`` messages so the recap reflects the latest activity.
     The input ``history`` is never modified and no compaction is triggered.
 
+    The rendered block is bounded to ``max_chars`` so a large persisted summary
+    can never overflow a delivery channel (e.g. Telegram's 4096-char message
+    limit) or flood a terminal; the recent tail is always preserved and the
+    (older) summary is what gets trimmed, keeping the most relevant context.
+
     Args:
         history: The conversation messages (not modified).
         tail: How many recent messages to append verbatim.
+        max_chars: Upper bound on the rendered recap length. ``0`` or negative
+            disables the cap.
 
     Returns:
         A short, human-readable recap block, or a "nothing yet" note.
@@ -91,7 +109,24 @@ def build_recap(history: List[Dict[str, Any]], tail: int = 4) -> str:
                 snippet = snippet[:160] + "…"
             tail_lines.append(f"• {role}: {snippet}")
 
-    parts: List[str] = [f"📌 {RECAP_HEADER}"]
+    header = f"📌 {RECAP_HEADER}"
+
+    if max_chars and max_chars > 0 and summary_text:
+        # Reserve room for the header, the recent tail, and joining newlines so
+        # the *most recent* activity is never dropped in favour of the older
+        # summary. Only the summary is trimmed to fit the budget.
+        tail_block = ""
+        if tail_lines:
+            tail_block = "\n".join(["Recent:", *tail_lines])
+        # +2 accounts for the newlines that will join header/summary/tail.
+        reserved = len(header) + len(tail_block) + 2
+        budget = max_chars - reserved
+        if budget <= 0:
+            summary_text = ""
+        elif len(summary_text) > budget:
+            summary_text = summary_text[: max(0, budget - 1)].rstrip() + "…"
+
+    parts: List[str] = [header]
     if summary_text:
         parts.append(summary_text)
     if tail_lines:
