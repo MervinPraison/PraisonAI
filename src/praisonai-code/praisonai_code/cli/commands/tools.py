@@ -232,6 +232,84 @@ def tools_info(
         console.print(f"\n[blue]Source:[/blue] {labels.get(sources[name], labels['builtin'])}")
 
 
+def _resolve_installer():
+    """Resolve the installer command, honouring how PraisonAI was installed."""
+    import shutil
+    import sys
+
+    if shutil.which("uv"):
+        return ["uv", "pip", "install"]
+    return [sys.executable, "-m", "pip", "install"]
+
+
+@app.command("add")
+def tools_add(
+    package: str = typer.Argument(..., help="Tool package to install (pip requirement spec)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Only run discovery/verification, do not install"
+    ),
+    upgrade: bool = typer.Option(
+        False, "--upgrade", "-U", help="Upgrade the package if already installed"
+    ),
+):
+    """Install a tool package and verify its tools become available.
+
+    Installs the package into the active environment, refreshes tool
+    discovery, and reports exactly which tools became available — or a clear
+    error if nothing new was discovered.
+
+    Examples:
+        praisonai tools add praisonai-my-tools
+        praisonai tools add praisonai-my-tools --upgrade
+        praisonai tools add praisonai-my-tools --dry-run
+    """
+    from praisonai_code.tool_resolver import ToolResolver
+
+    resolver = ToolResolver()
+    before = set(resolver.list_available().keys())
+
+    if not dry_run:
+        import subprocess
+
+        cmd = _resolve_installer()
+        if upgrade:
+            cmd = cmd + ["--upgrade"]
+        cmd = cmd + [package]
+        console.print(f"Installing {package} ...")
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            console.print(f"[red]Error: installation failed for '{package}'.[/red]")
+            raise typer.Exit(1)
+
+    resolver.invalidate()
+    available = resolver.list_available()
+    after = set(available.keys())
+    new_names = sorted(after - before)
+
+    if not new_names:
+        console.print(
+            f"[yellow]No new tools were registered by '{escape(package)}'.[/yellow]\n"
+            "[dim]The package installed but exposed no discoverable tools, "
+            "or an entry point failed to load. Run 'praisonai tools list' to inspect.[/dim]"
+        )
+        raise typer.Exit(1)
+
+    sources = resolver.list_available_sources()
+    verb = "Discovered" if dry_run else "Registered"
+    table = Table(
+        title=f"{verb} {len(new_names)} tool(s) from {escape(package)}",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Tool Name", style="green")
+    table.add_column("Source", style="blue")
+
+    for name in new_names:
+        table.add_row(name, sources.get(name, "builtin"))
+
+    console.print(table)
+
+
 @app.command("test")
 def tools_test(
     name: str = typer.Argument(..., help="Tool name to test"),
