@@ -33,7 +33,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Code Execution | 2 | 14 | 4424 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3045 |
-| ✅ Context Management | 16 | 34 | 13278 |
+| ✅ Context Management | 16 | 34 | 13335 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -43,10 +43,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 777 |
-| ✅ Gateway | 7 | 65 | 23917 |
+| ✅ Gateway | 7 | 65 | 23919 |
 | ✅ Guardrails | 4 | 4 | 1833 |
 | ✅ Handoffs | 11 | 6 | 2563 |
-| ✅ Hooks | 2 | 9 | 4221 |
+| ✅ Hooks | 2 | 9 | 4225 |
 | ✅ Image | 1 | 11 | 1255 |
 | ✅ Knowledge | 4 | 13 | 4160 |
 | ✅ LLM | 3 | 14 | 4919 |
@@ -59,7 +59,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
-| ✅ Plugins | 8 | 4 | 2134 |
+| ✅ Plugins | 8 | 4 | 2253 |
 | ✅ Prompts | 2 | 9 | 1965 |
 | ✅ Providers | 1 | 56 | 7723 |
 | ✅ Query | 1 | 2 | 736 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2806 |
 | ✅ Security | 1 | 3 | 2991 |
-| ✅ Sessions | 4 | 15 | 6142 |
+| ✅ Sessions | 4 | 15 | 6226 |
 | ✅ Skills | 6 | 14 | 5346 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
