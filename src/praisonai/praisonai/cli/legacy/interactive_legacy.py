@@ -499,7 +499,11 @@ def _start_interactive_mode(self, args):
                                 console.print(f"[cyan]Forks:[/cyan] {', '.join(children)}")
                         continue
                     elif cmd == "branch":
-                        _handle_branch_command(self, console, cmd_args, session_state)
+                        _handle_branch_command(
+                            self, console, cmd_args, session_state,
+                            worker_state=worker_state,
+                            execution_queue=execution_queue,
+                        )
                         continue
                     elif cmd == "history":
                         # Show conversation history
@@ -870,7 +874,9 @@ def _process_at_mentions(self, user_input, console):
     
     return processed_input
 
-def _handle_branch_command(self, console, args, session_state):
+def _handle_branch_command(
+    self, console, args, session_state, worker_state=None, execution_queue=None
+):
     """Handle /branch command - fork the current conversation mid-session.
 
     Forks the live session at the current message index, switches the REPL to
@@ -882,6 +888,27 @@ def _handle_branch_command(self, console, args, session_state):
     us = session_state.get('unified_session')
     if not store or not us:
         console.print("[yellow]No active session to branch from.[/yellow]")
+        return
+
+    # Refuse to branch while a turn is still executing: the async worker reads
+    # ``session_state['unified_session']`` when it finishes and would otherwise
+    # save the parent's in-flight turn onto the freshly-switched fork,
+    # contaminating the fork and losing the parent's completed turn. Ask the
+    # user to wait until the current work settles.
+    busy = False
+    if worker_state is not None and worker_state.get('current_task'):
+        busy = True
+    if execution_queue is not None:
+        try:
+            if execution_queue.qsize() > 0:
+                busy = True
+        except Exception:
+            pass
+    if busy:
+        console.print(
+            "[yellow]A response is still processing. Wait for it to finish "
+            "before branching (see /status).[/yellow]"
+        )
         return
 
     # Parse "--at N" out of the free-form argument; the remainder is the title.

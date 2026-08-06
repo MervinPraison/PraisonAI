@@ -91,3 +91,46 @@ def test_branch_at_too_far_back_is_rejected(temp_session_dir):
     # No fork created; still on parent.
     assert state["unified_session"].session_id == "parent"
     assert any("user turns available" in line for line in console.lines)
+
+
+def test_branch_refused_while_worker_busy(temp_session_dir):
+    # Branching while a turn is still executing would let the async worker save
+    # the parent's in-flight turn onto the freshly-switched fork. Refuse and
+    # keep the REPL on the parent.
+    store = UnifiedSessionStore(session_dir=temp_session_dir)
+    state = _seeded_state(store)
+    console = _RecordingConsole()
+
+    class _Queue:
+        def qsize(self):
+            return 0
+
+    _handle_branch_command(
+        None, console, "alt approach", state,
+        worker_state={"current_task": {"prompt": "still running"}},
+        execution_queue=_Queue(),
+    )
+
+    # Still on parent; no fork created.
+    assert state["unified_session"].session_id == "parent"
+    assert store.load("parent").children_ids == []
+    assert any("still processing" in line for line in console.lines)
+
+
+def test_branch_refused_while_queue_pending(temp_session_dir):
+    store = UnifiedSessionStore(session_dir=temp_session_dir)
+    state = _seeded_state(store)
+    console = _RecordingConsole()
+
+    class _Queue:
+        def qsize(self):
+            return 2
+
+    _handle_branch_command(
+        None, console, "alt approach", state,
+        worker_state={"current_task": None},
+        execution_queue=_Queue(),
+    )
+
+    assert state["unified_session"].session_id == "parent"
+    assert store.load("parent").children_ids == []

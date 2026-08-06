@@ -88,3 +88,49 @@ def test_cli_session_fork_at_message_truncates(project):
 def test_cli_session_fork_missing_is_clean_not_found(project):
     with pytest.raises(typer.Exit):
         session_fork("does-not-exist", at_message=None, title=None)
+
+
+@pytest.mark.parametrize("bad_index", [-1, 4, 99])
+def test_cli_session_fork_rejects_out_of_range_at_message(project, bad_index):
+    # 4 messages -> valid indices are 0..3; negative or >= count must be
+    # rejected up front rather than silently wrapping via slice semantics.
+    _create_project_session("sess-fork-oor")
+
+    with pytest.raises(typer.Exit):
+        session_fork("sess-fork-oor", at_message=bad_index, title=None)
+
+    # No fork should have been created on the parent.
+    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+    from praisonai_code.cli.utils.project import get_project_sessions_dir
+
+    store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+    assert _forked_id(store, "sess-fork-oor") is None
+
+
+def test_cli_session_fork_copies_global_only_session_history(project):
+    # A session living only in the global default store must fork its real
+    # history, not produce an empty fork from the project-scoped store. Write
+    # the parent directly into the (monkeypatched) global sessions dir that the
+    # fork command falls back to, so the test is independent of the cached
+    # default-store singleton.
+    from praisonai_code.cli.state.project_sessions import canonical_cli_stores
+
+    # The global default store is the last canonical store; write the parent
+    # directly into whatever directory it resolves to so the fork command's
+    # existence check and store resolution find the same record.
+    global_store = canonical_cli_stores()[-1]
+    global_dir = global_store.session_dir
+    global_store.add_message("sess-global", "user", "g-first")
+    global_store.add_message("sess-global", "assistant", "g-reply")
+
+    session_fork("sess-global", at_message=None, title=None)
+
+    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+
+    store = HierarchicalSessionStore(global_dir)
+    new_id = _forked_id(store, "sess-global")
+
+    assert new_id is not None
+    forked = store._load_extended_session(new_id, force_reload=True)
+    # The fork carries the parent's real history, not an empty transcript.
+    assert len(forked.messages) == 2

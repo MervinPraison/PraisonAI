@@ -348,8 +348,40 @@ def session_fork(
 
     from praisonaiagents.session.hierarchy import HierarchicalSessionStore
     from ..utils.project import get_project_sessions_dir
+    from ..state.project_sessions import canonical_cli_stores
 
-    store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+    # A session may live in the project-scoped store or the global default
+    # store (e.g. created by the gateway/TUI). Point the hierarchical store at
+    # the directory that actually holds the session so a global-only session
+    # forks its real history instead of producing an empty fork. Resolve the
+    # directory from the *same* canonical stores ``session_exists_anywhere``
+    # searched (project first, then global) so the fork source and the
+    # existence check stay consistent.
+    store_dir = str(get_project_sessions_dir())
+    for candidate in canonical_cli_stores():
+        candidate_dir = getattr(candidate, "session_dir", None)
+        if not candidate_dir:
+            continue
+        if (Path(candidate_dir) / f"{session_id}.json").exists():
+            store_dir = str(candidate_dir)
+            break
+
+    store = HierarchicalSessionStore(store_dir)
+
+    # Reject an out-of-range ``--at-message`` up front. Without this a negative
+    # index selects an unintended slice and an oversized one silently copies the
+    # whole history while still reporting success (Python slice semantics).
+    if at_message is not None:
+        parent = store._load_extended_session(session_id, force_reload=True)
+        message_count = len(getattr(parent, "messages", []) or [])
+        if at_message < 0 or at_message >= message_count:
+            output.print_error(
+                f"--at-message {at_message} is out of range "
+                f"(session has {message_count} messages, valid 0..{max(message_count - 1, 0)})",
+                remediation="Choose a 0-based index within the session's message range",
+            )
+            raise typer.Exit(1)
+
     forked_id = store.fork_session(
         session_id,
         from_message_index=at_message,
