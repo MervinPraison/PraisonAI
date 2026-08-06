@@ -53,6 +53,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from praisonaiagents.scheduler import ScheduleRunner, ScheduleJob
+    from praisonaiagents.scheduler.models import DeliveryTarget
     from praisonaiagents.scheduler.protocols import JobConditionProtocol
 
     RunPolicy = Any  # optional wrapper ``praisonai.scheduler.run_policy.RunPolicy``
@@ -110,7 +111,11 @@ class ScheduledAgentExecutor:
             ``(delivery: DeliveryTarget, text: str) -> None``.
             Called after successful execution when the job has a
             delivery target.  Typically routes to a channel bot's
-            ``send_message()``.
+            ``send_message()``.  When it is ``None`` (``praisonai schedule
+            tick`` run out of process with no live gateway) delivery falls back
+            to a stateless, token-authenticated standalone sender for the target
+            platform (Telegram/Slack/Discord) using the same ``{PLATFORM}_BOT_TOKEN``
+            env the gateway uses, so scheduled delivery works unattended.
         on_success: Optional callback ``(job, result) -> None``.
         on_failure: Optional callback ``(job, error) -> None``.
         run_policy: Optional :class:`~praisonai.scheduler.run_policy.RunPolicy`
@@ -448,11 +453,9 @@ class ScheduledAgentExecutor:
             logger.info(
                 "Job '%s' chose intentional silence; delivery suppressed", job.id,
             )
-        elif delivery and self._deliver:
+        elif delivery and self._can_deliver(delivery):
             try:
-                coro = self._deliver(delivery, result_str)
-                if inspect.isawaitable(coro):
-                    await coro
+                await self._dispatch_delivery(delivery, result_str)
                 delivered = True
                 logger.info(
                     "Delivered job '%s' result to %s:%s",
@@ -529,11 +532,9 @@ class ScheduledAgentExecutor:
         delivered = False
         delivery_error: Optional[str] = None
         delivery = getattr(job, "delivery", None)
-        if text and delivery and self._deliver:
+        if text and delivery and self._can_deliver(delivery):
             try:
-                coro = self._deliver(delivery, text)
-                if inspect.isawaitable(coro):
-                    await coro
+                await self._dispatch_delivery(delivery, text)
                 delivered = True
                 logger.info(
                     "Delivered command job '%s' output to %s:%s",
@@ -800,6 +801,47 @@ class ScheduledAgentExecutor:
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("Failed to write run audit for job '%s': %s", job.id, e)
 
+    def _can_deliver(self, delivery: "DeliveryTarget") -> bool:
+        """Whether a configured ``delivery`` target should be dispatched.
+
+        A configured target is *always* dispatched so that a target with no
+        delivery mechanism (no live handler and no standalone sender for its
+        platform) surfaces an actionable ``delivery_error`` via
+        :meth:`_dispatch_delivery` instead of being silently dropped. Only a
+        missing target (``None``) short-circuits — there is nothing to deliver.
+        The capability decision (live handler vs. standalone sender vs. neither)
+        is made in :meth:`_dispatch_delivery`, which raises when neither exists.
+        """
+        return delivery is not None
+
+    async def _dispatch_delivery(
+        self, delivery: "DeliveryTarget", text: str,
+    ) -> None:
+        """Deliver ``text`` to ``delivery``, preferring the live adapter.
+
+        When a live ``delivery_handler`` is wired (a running gateway) it is used
+        unchanged. When it is absent — ``praisonai schedule tick`` run out of
+        process as a plain OS-cron / CI / serverless job — this falls back to a
+        stateless, token-authenticated standalone sender for the target platform
+        so scheduled delivery works without a persistent gateway. If neither is
+        available the send raises, so the caller records ``delivery_error``
+        exactly as it does for any other delivery failure.
+        """
+        if self._deliver is not None:
+            coro = self._deliver(delivery, text)
+            if inspect.isawaitable(coro):
+                await coro
+            return
+        from ._standalone_sender import resolve_standalone_sender
+
+        sender = resolve_standalone_sender(getattr(delivery, "channel", ""))
+        if sender is None:
+            raise RuntimeError(
+                "no live adapter and no standalone sender for channel "
+                f"{getattr(delivery, 'channel', '')!r}"
+            )
+        await sender(delivery, text)
+
     async def _maybe_deliver_failure(
         self, job: "ScheduleJob", result: JobResult,
     ) -> None:
@@ -812,16 +854,14 @@ class ScheduledAgentExecutor:
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
         delivery = getattr(job, "delivery", None)
-        if not delivery or not self._deliver:
+        if not delivery or not self._can_deliver(delivery):
             return
         summary = (
             f"⚠️ Scheduled job '{getattr(job, 'name', job.id)}' failed: "
             f"{result.error or 'unknown error'}"
         )
         try:
-            coro = self._deliver(delivery, summary)
-            if inspect.isawaitable(coro):
-                await coro
+            await self._dispatch_delivery(delivery, summary)
             logger.info("Delivered failure summary for job '%s'", job.id)
         except Exception as e:
             result.delivery_error = str(e)
