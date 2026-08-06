@@ -993,7 +993,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tk.name == "manager_task":
+                if tid == manager_task_id:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1065,16 +1065,22 @@ Provide a JSON with the structure:
                 logging.info("Manager decided to stop task execution")
                 break
 
-            if selected_task_id not in self.tasks:
-                # Re-prompt the manager with valid task IDs instead of terminating
+            selected_task = self.tasks.get(selected_task_id)
+            if selected_task is None or selected_task_id == manager_task_id:
+                # Reject unknown ids and the synthetic manager_task by its actual id
+                # (it must never delegate to itself). Matching by id avoids colliding
+                # with a legitimate user task that happens to be named "manager_task".
+                # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
                     logging.error(
                         f"Manager produced {invalid_selection_attempts} invalid task selections; aborting."
                     )
                     break
-                
-                valid_task_ids = list(self.tasks.keys())
+
+                valid_task_ids = [
+                    tid for tid in self.tasks if tid != manager_task_id
+                ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
                     f"(attempt {invalid_selection_attempts}/{MAX_INVALID_SELECTIONS}); valid IDs: {valid_task_ids}"
@@ -1082,7 +1088,8 @@ Provide a JSON with the structure:
                 # Set error context for next iteration (instead of appending to prompt that gets rebuilt)
                 error_context = (
                     f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
-                    f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
+                    f"Valid task IDs are: {valid_task_ids}. Never select manager_task. "
+                    f"Please select again from the valid options."
                 )
                 continue  # Re-prompt the manager instead of breaking
             
@@ -1090,10 +1097,10 @@ Provide a JSON with the structure:
             invalid_selection_attempts = 0
             error_context = ""
 
-            original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
+            original_agent = selected_task.agent.name if selected_task.agent else "None"
             for a in self.agents:
                 if a.name == selected_agent_name:
-                    self.tasks[selected_task_id].agent = a
+                    selected_task.agent = a
                     logging.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
                     break
 
@@ -1575,7 +1582,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             tasks_summary = []
             for tid, tk in self.tasks.items():
-                if tk.name == "manager_task":
+                if tid == manager_task_id:
                     continue
                 task_info = {
                     "task_id": tid,
@@ -1620,16 +1627,22 @@ Provide a JSON with the structure:
                 logging.info("Manager decided to stop task execution")
                 break
 
-            if selected_task_id not in self.tasks:
-                # Re-prompt the manager with valid task IDs instead of terminating
+            selected_task = self.tasks.get(selected_task_id)
+            if selected_task is None or selected_task_id == manager_task_id:
+                # Reject unknown ids and the synthetic manager_task by its actual id
+                # (it must never delegate to itself). Matching by id avoids colliding
+                # with a legitimate user task that happens to be named "manager_task".
+                # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
                     logging.error(
                         f"Manager produced {invalid_selection_attempts} invalid task selections; aborting."
                     )
                     break
-                
-                valid_task_ids = list(self.tasks.keys())
+
+                valid_task_ids = [
+                    tid for tid in self.tasks if tid != manager_task_id
+                ]
                 logging.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
                     f"(attempt {invalid_selection_attempts}/{MAX_INVALID_SELECTIONS}); valid IDs: {valid_task_ids}"
@@ -1637,7 +1650,8 @@ Provide a JSON with the structure:
                 # Set error context for next iteration (instead of appending to prompt that gets rebuilt)
                 error_context = (
                     f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
-                    f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
+                    f"Valid task IDs are: {valid_task_ids}. Never select manager_task. "
+                    f"Please select again from the valid options."
                 )
                 continue  # Re-prompt the manager instead of breaking
             
@@ -1645,10 +1659,10 @@ Provide a JSON with the structure:
             invalid_selection_attempts = 0
             error_context = ""
 
-            original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
+            original_agent = selected_task.agent.name if selected_task.agent else "None"
             for a in self.agents:
                 if a.name == selected_agent_name:
-                    self.tasks[selected_task_id].agent = a
+                    selected_task.agent = a
                     logging.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
                     break
 

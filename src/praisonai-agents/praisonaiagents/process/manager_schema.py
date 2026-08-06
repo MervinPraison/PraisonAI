@@ -12,6 +12,13 @@ class ManagerInstructions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    task_id: int = Field(..., description="1-based index of the task to run next")
+    task_id: int = Field(
+        ...,
+        description=(
+            "Exact task_id integer of the task to run next, chosen from the "
+            "task_id values shown in the tasks list (these ids are 0-based). "
+            "Never select manager_task and never invent an id."
+        ),
+    )
     agent_name: str = Field(..., description="Name of the agent assigned to the task")
     action: str = Field(..., description="'execute' to run the task or 'stop' to end the workflow")
