@@ -72,7 +72,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Security | 1 | 3 | 2991 |
 | ✅ Sessions | 4 | 15 | 6142 |
 | ✅ Skills | 6 | 14 | 5346 |
-| ✅ Tasks | 2 | 6 | 2815 |
+| ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
 | ✅ Templates | 1 | 8 | 1663 |
 | ✅ Tools | 12 | 136 | 39161 |
