@@ -43,6 +43,7 @@ __all__ = [
     "maybe_enable_from_config",
     "list_plugins",
     "is_enabled",
+    "get_plugin_registry",
     # Core
     "PluginManager",
     "Plugin",
@@ -302,6 +303,119 @@ def is_enabled(name: str = None) -> bool:
     from .manager import get_plugin_manager
     manager = get_plugin_manager()
     return manager.is_enabled(name)
+
+
+def get_plugin_registry() -> list:
+    """Return a truthful, unified view of all discoverable plugins.
+
+    Combines three real sources — no hardcoded/fake entries:
+
+    - Entry-point plugins (installed pip packages registering in the
+      ``praisonai.plugins`` group), reported with their ``source`` as their
+      distribution/entry-point provenance.
+    - Registered ``Plugin`` instances held by the :class:`PluginManager`.
+    - Project/user single-file plugins discovered on disk (``.praisonai/plugins``
+      and ``~/.praisonai/plugins``), reported without executing them.
+
+    Each entry is a dict with ``name``, ``version``, ``source``
+    (``entry_point`` | ``registered`` | ``single_file``), ``enabled`` state,
+    ``hooks`` and ``description``. Enabled state reflects both the live manager
+    and the persisted config allow-list, so a truthful CLI can render it
+    without a running agent.
+
+    Returns:
+        List of plugin entry dicts.
+    """
+    from .manager import get_plugin_manager
+
+    manager = get_plugin_manager()
+
+    # Config-driven enabled allow-list (None => all enabled when plugins on).
+    config_enabled = None
+    try:
+        from ..config.loader import get_enabled_plugins
+
+        config_enabled = get_enabled_plugins()
+    except Exception:
+        config_enabled = None
+
+    def _config_says_enabled(name: str) -> bool:
+        if config_enabled is None:
+            return manager.is_enabled(name)
+        return name in config_enabled
+
+    entries: list = []
+    seen: set = set()
+
+    # 1. Registered Plugin instances (includes entry-point plugins already
+    #    loaded via discover_entry_points()).
+    for info in manager.list_plugins():
+        name = getattr(info, "name", None)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        hooks = [
+            h.value if hasattr(h, "value") else str(h)
+            for h in (getattr(info, "hooks", None) or [])
+        ]
+        entries.append({
+            "name": name,
+            "version": getattr(info, "version", "1.0.0"),
+            "description": getattr(info, "description", ""),
+            "source": "registered",
+            "enabled": manager.is_enabled(name) or _config_says_enabled(name),
+            "hooks": hooks,
+        })
+
+    # 2. Entry-point plugins present on the system but not yet loaded, so
+    #    `list` shows provenance even before enable().
+    try:
+        import importlib.metadata as _md
+
+        try:
+            eps = _md.entry_points(group="praisonai.plugins")
+        except TypeError:
+            eps = _md.entry_points().get("praisonai.plugins", [])
+        for ep in eps:
+            if ep.name in seen:
+                continue
+            seen.add(ep.name)
+            dist = getattr(getattr(ep, "dist", None), "name", None)
+            entries.append({
+                "name": ep.name,
+                "version": "-",
+                "description": "",
+                "source": f"entry_point:{dist}" if dist else "entry_point",
+                "enabled": _config_says_enabled(ep.name),
+                "hooks": [],
+            })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Entry-point plugin scan failed: {e}")
+
+    # 3. Single-file plugins discovered on disk (metadata only, no exec).
+    try:
+        from .discovery import discover_plugins
+
+        for meta in discover_plugins():
+            name = meta.get("name")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            entries.append({
+                "name": name,
+                "version": meta.get("version", "1.0.0"),
+                "description": meta.get("description", ""),
+                "source": "single_file",
+                "enabled": manager.is_enabled(name) or _config_says_enabled(name),
+                "hooks": list(meta.get("hooks", []) or []),
+                "path": meta.get("path"),
+            })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Single-file plugin discovery failed: {e}")
+
+    return entries
 
 
 def __getattr__(name: str):
