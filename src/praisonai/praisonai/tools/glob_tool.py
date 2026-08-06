@@ -10,14 +10,29 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def _workspace_root() -> str:
-    """Resolve the workspace root that file tools are confined to."""
-    return os.path.realpath(os.getenv("PRAISONAI_WORKSPACE", os.getcwd()))
+def _workspace_root() -> Optional[str]:
+    """Resolve the workspace root that file tools are confined to.
+
+    Confinement is *opt-in*: it only applies when ``PRAISONAI_WORKSPACE`` is
+    explicitly set. Without it we return ``None`` (no sandbox) so callers that
+    legitimately pass an arbitrary ``directory`` keep working — ``cwd`` is not a
+    real security boundary and enforcing it would break normal usage.
+    """
+    root = os.getenv("PRAISONAI_WORKSPACE")
+    if not root:
+        return None
+    return os.path.realpath(root)
 
 
 def _within_workspace(path: str) -> bool:
-    """Return True if ``path`` is inside the workspace root."""
+    """Return True if ``path`` is inside the configured workspace root.
+
+    When no ``PRAISONAI_WORKSPACE`` is configured, confinement is disabled and
+    every path is permitted.
+    """
     root = _workspace_root()
+    if root is None:
+        return True
     try:
         return os.path.commonpath([os.path.realpath(path), root]) == root
     except ValueError:

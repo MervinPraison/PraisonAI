@@ -298,8 +298,16 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
             # No token configured. Allow only loopback binds (development);
             # refuse to serve unauthenticated traffic on any public bind so a
             # forgotten env var cannot silently expose the live event stream.
-            bind_host = os.getenv("PRAISONAI_A2U_BIND_HOST", "")
-            if bind_host not in {"127.0.0.1", "::1", "localhost", ""}:
+            #
+            # The unified server records its chosen bind address in
+            # ``PRAISONAI_CALL_BIND_HOST``; honour an explicit
+            # ``PRAISONAI_A2U_BIND_HOST`` override first. When neither is set the
+            # bind host is unknown — fail closed rather than assuming loopback.
+            bind_host = (
+                os.getenv("PRAISONAI_A2U_BIND_HOST")
+                or os.getenv("PRAISONAI_CALL_BIND_HOST")
+            )
+            if bind_host is None or bind_host not in {"127.0.0.1", "::1", "localhost"}:
                 return JSONResponse(
                     {"error": "A2U_AUTH_TOKEN not configured; "
                               "refusing non-loopback traffic"},
