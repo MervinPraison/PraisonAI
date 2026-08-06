@@ -20,7 +20,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ AGUI | 1 | 2 | 420 |
 | ✅ Agent | 22 | 49 | 15427 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 608 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 684 |
 | ✅ Approval | 1 | 5 | 2500 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 3005 |
@@ -41,7 +41,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Events | 1 | 2 | 749 |
 | ✅ Execution | 3 | 4 | 1560 |
 | ✅ Failover | 2 | 1 | 432 |
-| ✅ Files | 2 | 6 | 2084 |
+| ✅ Files | 2 | 7 | 2273 |
 | ✅ Flow | 1 | 3 | 777 |
 | ✅ Gateway | 7 | 65 | 23917 |
 | ✅ Guardrails | 4 | 4 | 1833 |
