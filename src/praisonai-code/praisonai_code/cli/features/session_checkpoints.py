@@ -323,3 +323,90 @@ class SessionCheckpointManager:
                 )
         except Exception:
             pass
+
+    def _baseline_checkpoint_id(self, turn_only: bool = False) -> Optional[str]:
+        """
+        Resolve the ``from`` checkpoint for a ``/diff`` against the working dir.
+
+        Session scope (default) diffs from the first recorded turn (the
+        session-start baseline). ``turn_only`` diffs from the previous turn's
+        checkpoint so only the last turn's changes are shown. Returns ``None``
+        when there is no suitable baseline (e.g. nothing checkpointed yet).
+        """
+        if not self._turns:
+            return None
+        if turn_only:
+            # Diff the most recent checkpoint against the working directory:
+            # the last turn's changes are everything since that checkpoint.
+            return self._turns[-1].checkpoint_id
+        return self._turns[0].checkpoint_id
+
+    def diff(self, turn_only: bool = False, path: Optional[str] = None):
+        """
+        Return the file changes made this session (or last turn), as a
+        :class:`~praisonaiagents.checkpoints.types.CheckpointDiff`.
+
+        Diffs the session-start baseline (or the previous turn when
+        ``turn_only``) against the current working directory, optionally
+        filtered to a single ``path``. Returns ``None`` when checkpointing is
+        disabled or there is no baseline to diff from. Never raises into the
+        REPL/TUI loop.
+        """
+        if not self.enabled:
+            return None
+        from_id = self._baseline_checkpoint_id(turn_only=turn_only)
+        if from_id is None:
+            return None
+        try:
+            handler = self._get_handler()
+
+            async def _diff():
+                service = await handler._get_service()
+                return await service.diff(from_id, None)
+
+            result = self._run(_diff())
+        except Exception:
+            return None
+        if result is None:
+            return result
+        if path:
+            wanted = path.strip()
+            filtered = [
+                f for f in result.files
+                if f.path == wanted or f.path.endswith("/" + wanted)
+            ]
+            from praisonaiagents.checkpoints.types import CheckpointDiff
+            result = CheckpointDiff(
+                from_checkpoint=result.from_checkpoint,
+                to_checkpoint=result.to_checkpoint,
+                files=filtered,
+            )
+        return result
+
+    @staticmethod
+    def render_diff(diff, scope: str = "session") -> str:
+        """
+        Render a :class:`CheckpointDiff` as a compact per-file summary string.
+
+        Text-only (no rich console), so callers such as the TUI can push it
+        straight into a message pane. ``scope`` is used only in the header.
+        """
+        if diff is None:
+            return (
+                "Workspace checkpointing is disabled. Enable it with "
+                "`checkpoints.auto: true` in config or `PRAISONAI_CHECKPOINTS=on`."
+            )
+        files = getattr(diff, "files", None) or []
+        if not files:
+            return f"No file changes this {scope}."
+        lines = [f"Changes this {scope}:", ""]
+        for f in files:
+            lines.append(
+                f"  {f.status:>8}  {f.path}  (+{f.additions}/-{f.deletions})"
+            )
+        lines.append("")
+        lines.append(
+            f"  +{diff.total_additions} / -{diff.total_deletions} "
+            f"across {len(files)} file(s)"
+        )
+        return "\n".join(lines)

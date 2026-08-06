@@ -479,6 +479,9 @@ def _start_interactive_mode(self, args):
                     elif cmd == "revert":
                         _handle_revert_command(self, console, cmd_args, session_state)
                         continue
+                    elif cmd == "diff":
+                        _handle_diff_command(self, console, cmd_args, session_state)
+                        continue
                     elif cmd == "queue":
                         _handle_queue_command(self, console, cmd_args, session_state)
                         continue
@@ -759,6 +762,7 @@ def _print_interactive_help(self, console):
     console.print("  /compact       - Compress conversation history")
     console.print("  /undo          - Undo last response (and workspace files if checkpointing on)")
     console.print("  /revert [n]    - Roll workspace back n turns (needs checkpoints.auto)")
+    console.print("  /diff [--turn|<file>] - Show file changes this session (needs checkpoints.auto)")
     console.print("  /queue         - Show queued messages")
     console.print("  /queue clear   - Clear message queue")
     console.print("\n[bold]Session Commands:[/bold]")
@@ -1269,6 +1273,54 @@ def _handle_revert_command(self, console, args, session_state):
         )
     else:
         console.print("[yellow]Failed to revert workspace[/yellow]")
+
+def _handle_diff_command(self, console, args, session_state):
+    """
+    Handle /diff - show file changes made this session (or last turn / one file).
+
+    Usage:
+    - /diff              - all changes since session start
+    - /diff --turn       - only the last turn's changes
+    - /diff <file>       - changes to a single file since session start
+
+    Requires auto-checkpointing (checkpoints.auto in config or
+    PRAISONAI_CHECKPOINTS=on); reports how to enable it when disabled rather
+    than failing silently.
+    """
+    ckpt = session_state.get('session_checkpoints')
+    if ckpt is None or not getattr(ckpt, 'enabled', False):
+        console.print(
+            "[yellow]Workspace checkpointing is disabled, so /diff has no "
+            "session baseline to compare against.[/yellow] Enable it with "
+            "[cyan]checkpoints.auto: true[/cyan] in config or "
+            "[cyan]PRAISONAI_CHECKPOINTS=on[/cyan]."
+        )
+        return
+
+    turn_only = False
+    path = None
+    tokens = (args or "").split()
+    for token in tokens:
+        if token in ("--turn", "-t"):
+            turn_only = True
+        elif not token.startswith("-"):
+            path = token
+
+    scope = "turn" if turn_only else "session"
+    diff = ckpt.diff(turn_only=turn_only, path=path)
+    if diff is None:
+        console.print(f"[dim]No checkpoints yet — nothing to diff this {scope}.[/dim]")
+        return
+    if not diff.files:
+        target = f"'{path}'" if path else f"this {scope}"
+        console.print(f"[dim]No file changes for {target}.[/dim]")
+        return
+
+    try:
+        handler = ckpt._get_handler()
+        handler._print_diff(diff)
+    except Exception:
+        console.print(ckpt.render_diff(diff, scope=scope))
 
 def _handle_queue_command(self, console, args, session_state):
     """

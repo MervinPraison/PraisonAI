@@ -318,6 +318,124 @@ def test_no_session_store_is_file_only(monkeypatch):
             assert f.read() == "v0\n"
 
 
+def test_diff_disabled_returns_none(monkeypatch):
+    """/diff engine is inert when checkpointing is disabled (default-safe)."""
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+    with tempfile.TemporaryDirectory() as workspace:
+        mgr = SessionCheckpointManager.from_config(workspace_dir=workspace)
+        assert mgr.enabled is False
+        assert mgr.diff() is None
+        # render_diff turns a None diff into an enable-me hint, not a crash.
+        assert "checkpointing is disabled" in mgr.render_diff(None).lower()
+
+
+def test_diff_lists_session_changes(monkeypatch):
+    """Editing two files surfaces both in /diff against the session baseline."""
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+    with tempfile.TemporaryDirectory() as workspace:
+        a = os.path.join(workspace, "a.py")
+        b = os.path.join(workspace, "b.py")
+        _write(a, "a0\n")
+        _write(b, "b0\n")
+
+        mgr = SessionCheckpointManager.from_config(
+            workspace_dir=workspace,
+            config={"checkpoints": {"auto": True}},
+        )
+        # Session-start baseline.
+        assert mgr.checkpoint_turn("session start") is not None
+
+        # Agent edits both files across the session.
+        _write(a, "a0\na1\n")
+        _write(b, "b0\nb1\n")
+
+        diff = mgr.diff()
+        assert diff is not None
+        paths = {f.path for f in diff.files}
+        assert {"a.py", "b.py"} <= paths
+        assert diff.total_additions >= 2
+
+        rendered = mgr.render_diff(diff)
+        assert "a.py" in rendered and "b.py" in rendered
+
+
+def test_diff_turn_scope(monkeypatch):
+    """/diff --turn shows only the last turn's changes, not the whole session."""
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+    with tempfile.TemporaryDirectory() as workspace:
+        a = os.path.join(workspace, "a.py")
+        b = os.path.join(workspace, "b.py")
+        _write(a, "a0\n")
+        _write(b, "b0\n")
+
+        mgr = SessionCheckpointManager.from_config(
+            workspace_dir=workspace,
+            config={"checkpoints": {"auto": True}},
+        )
+        assert mgr.checkpoint_turn("session start") is not None
+
+        # Turn 1 touches a.py.
+        assert mgr.checkpoint_turn("turn 1") is not None
+        _write(a, "a0\na1\n")
+        # Turn 2 (current) touches b.py.
+        assert mgr.checkpoint_turn("turn 2") is not None
+        _write(b, "b0\nb1\n")
+
+        session_diff = mgr.diff()
+        session_paths = {f.path for f in session_diff.files}
+        assert {"a.py", "b.py"} <= session_paths
+
+        # Turn scope diffs from the latest checkpoint -> only b.py changed since.
+        turn_diff = mgr.diff(turn_only=True)
+        turn_paths = {f.path for f in turn_diff.files}
+        assert turn_paths == {"b.py"}
+
+
+def test_diff_single_file_scope(monkeypatch):
+    """/diff <file> filters the session diff to a single path."""
+    monkeypatch.delenv("PRAISONAI_CHECKPOINTS", raising=False)
+    with tempfile.TemporaryDirectory() as workspace:
+        a = os.path.join(workspace, "a.py")
+        b = os.path.join(workspace, "b.py")
+        _write(a, "a0\n")
+        _write(b, "b0\n")
+
+        mgr = SessionCheckpointManager.from_config(
+            workspace_dir=workspace,
+            config={"checkpoints": {"auto": True}},
+        )
+        assert mgr.checkpoint_turn("session start") is not None
+        _write(a, "a0\na1\n")
+        _write(b, "b0\nb1\n")
+
+        diff = mgr.diff(path="a.py")
+        assert {f.path for f in diff.files} == {"a.py"}
+
+
+def test_context_mapping_fixed():
+    """The `context` command resolves via the wrapper-resident route (not dead).
+
+    Guards the incidental defect: the `.commands.context` placeholder has no
+    local module, so `context` must be registered as wrapper-resident and
+    resolvable to a real command object when the wrapper is installed.
+    """
+    from praisonai_code.cli import app as code_app
+
+    # Advertised in the lazy registry and marked wrapper-resident so the
+    # placeholder path is never imported directly.
+    assert "context" in code_app._LAZY_COMMANDS
+    assert "context" in code_app._WRAPPER_RESIDENT_COMMANDS
+
+    # And it actually resolves to a command (no dead mapping) with wrapper present.
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    if wrapper_available():
+        import importlib
+
+        module = importlib.import_module("praisonai.cli.commands.context")
+        assert getattr(module, "app", None) is not None
+
+
 def test_standalone_checkpoint_command_honors_configured_storage_dir(monkeypatch):
     """`praisonai checkpoint` reads the same store as `code --checkpoints`.
 
