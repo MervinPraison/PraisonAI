@@ -482,8 +482,15 @@ def cmd_map(context: CommandContext, args: str) -> Dict[str, Any]:
 # Registry Setup
 # ============================================================================
 
-def create_default_registry() -> SlashCommandRegistry:
-    """Create registry with default built-in commands."""
+def create_slash_command_registry() -> SlashCommandRegistry:
+    """Create a legacy ``SlashCommandRegistry`` with built-in commands.
+
+    NOTE: This is *not* the canonical interactive command registry. The single
+    source of truth for ``/help``, autocomplete and ``praisonai run --command``
+    is ``praisonai_code.cli.interactive.command_registry.create_default_registry``.
+    This factory only backs the standalone :class:`SlashCommandHandler` and is
+    named distinctly to avoid a duplicate ``create_default_registry`` symbol.
+    """
     registry = SlashCommandRegistry()
     
     # Core commands
@@ -579,7 +586,7 @@ class SlashCommandHandler:
     
     def __init__(self, verbose: bool = False, discover_custom: bool = True):
         self.verbose = verbose
-        self.registry = create_default_registry()
+        self.registry = create_slash_command_registry()
         self.parser = SlashCommandParser(self.registry)
         self._context: Optional[CommandContext] = None
         
