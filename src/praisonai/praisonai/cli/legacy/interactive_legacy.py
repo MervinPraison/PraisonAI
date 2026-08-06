@@ -545,7 +545,19 @@ def _start_interactive_mode(self, args):
                             setter = getattr(backend, 'set_permission_mode', None)
                             enforced = callable(setter)
                             if enforced:
-                                setter(PermissionMode.PLAN if enable else PermissionMode.DEFAULT)
+                                if enable:
+                                    # Remember the launch-time policy (e.g.
+                                    # accept-edits/bypass) so exiting PLAN
+                                    # restores it instead of forcing DEFAULT.
+                                    current = getattr(backend, 'permission_mode', None)
+                                    if current is not None and current != PermissionMode.PLAN:
+                                        session_state['prev_permission_mode'] = current
+                                    setter(PermissionMode.PLAN)
+                                else:
+                                    restore = session_state.pop(
+                                        'prev_permission_mode', None
+                                    ) or PermissionMode.DEFAULT
+                                    setter(restore)
                         except Exception:
                             enforced = False
                         session_state['plan_mode'] = enable

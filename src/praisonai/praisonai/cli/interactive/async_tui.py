@@ -215,6 +215,9 @@ class AsyncTUI:
         self._runtime = None  # InteractiveRuntime for ACP/LSP
         self._runtime_started = False
         self._registry = None  # Unified command registry (lazy)
+        self._prev_permission_mode = None  # Approval mode to restore when leaving PLAN
+        # Sync PLAN indicator/toggle with a backend launched via --approval plan.
+        self._sync_plan_mode_from_backend()
         
         # Terminal size
         self.term_width, self.term_height = shutil.get_terminal_size((80, 24))
@@ -499,6 +502,14 @@ class AsyncTUI:
         if self._app:
             self._app.invalidate()
 
+    def _get_live_backend(self):
+        """Return the live interactive approval backend, or ``None``."""
+        try:
+            from praisonaiagents.approval import get_approval_registry
+            return get_approval_registry().get_backend()
+        except Exception:
+            return None
+
     def _apply_permission_mode(self, mode) -> bool:
         """Switch the live approval backend into ``mode`` (e.g. PLAN).
 
@@ -507,21 +518,49 @@ class AsyncTUI:
         delete/bash/shell. Returns ``True`` when a compatible backend accepted
         the mode so callers can honestly report enforcement status.
         """
-        try:
-            from praisonaiagents.approval import get_approval_registry
-            backend = get_approval_registry().get_backend()
-        except Exception:
-            backend = None
+        backend = self._get_live_backend()
         setter = getattr(backend, "set_permission_mode", None)
         if callable(setter):
             setter(mode)
             return True
         return False
 
+    def _sync_plan_mode_from_backend(self) -> None:
+        """Align ``config.plan_mode`` with the live backend on startup.
+
+        When launched with ``--approval plan`` the backend already enforces
+        PLAN; without this the ``[PLAN]`` indicator would be missing and the
+        first no-arg ``/plan`` would *enable* an already-active mode instead of
+        toggling it off (Greptile P1: startup unsynchronized).
+        """
+        try:
+            from praisonaiagents.permissions import PermissionMode
+        except Exception:
+            return
+        backend = self._get_live_backend()
+        current = getattr(backend, "permission_mode", None)
+        if current is not None:
+            self.config.plan_mode = (current == PermissionMode.PLAN)
+
     def _set_plan_mode(self, enabled: bool) -> bool:
-        """Enter/exit read-only PLAN mode, returning whether it is enforced."""
+        """Enter/exit read-only PLAN mode, returning whether it is enforced.
+
+        On exit we restore the mode the session launched with (e.g.
+        ``accept-edits``/``bypass``) rather than blindly forcing DEFAULT, so a
+        user who selected an approval policy keeps it (Greptile P1: plan exit
+        must not discard the approval mode).
+        """
         from praisonaiagents.permissions import PermissionMode
-        mode = PermissionMode.PLAN if enabled else PermissionMode.DEFAULT
+        if enabled:
+            # Remember whatever mode is currently active so we can restore it.
+            backend = self._get_live_backend()
+            current = getattr(backend, "permission_mode", None)
+            if current is not None and current != PermissionMode.PLAN:
+                self._prev_permission_mode = current
+            mode = PermissionMode.PLAN
+        else:
+            mode = getattr(self, "_prev_permission_mode", None) or PermissionMode.DEFAULT
+            self._prev_permission_mode = None
         enforced = self._apply_permission_mode(mode)
         self.config.plan_mode = enabled
         if self._app:
@@ -883,7 +922,7 @@ Tips:
                 self._set_plan_mode(True)
                 self.messages.append(ChatMessage(
                     role="system",
-                    content=f"[PLAN] Creating read-only plan for: {args}\nRun /plan off to leave plan mode and execute."
+                    content=f"[PLAN] Creating plan (read-only) for: {args}\nRun /plan off to leave plan mode and execute."
                 ))
                 self._update_output()
 

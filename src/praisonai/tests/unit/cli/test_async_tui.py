@@ -700,7 +700,11 @@ class TestPlanningIntegration:
     """Tests for planning integration (/plan command)."""
     
     def test_plan_command_no_args(self):
-        """Test /plan command without arguments shows usage."""
+        """Test /plan with no args toggles the persistent read-only plan mode.
+
+        /plan is now a real read-only enforcement toggle (not a one-shot prompt):
+        the first no-arg /plan enables plan mode; a second one disables it.
+        """
         from praisonai.cli.interactive.async_tui import AsyncTUI
         
         tui = AsyncTUI()
@@ -708,8 +712,13 @@ class TestPlanningIntegration:
         
         assert result is True
         assert len(tui.messages) == 1
-        assert "Usage:" in tui.messages[0].content
-        assert "/plan" in tui.messages[0].content
+        assert "Plan mode enabled" in tui.messages[0].content
+        assert tui.config.plan_mode is True
+        
+        # Toggling again exits plan mode.
+        tui._handle_command("/plan")
+        assert tui.config.plan_mode is False
+        assert "disabled" in tui.messages[1].content.lower()
     
     def test_plan_command_with_task(self):
         """Test /plan command with a task description."""
