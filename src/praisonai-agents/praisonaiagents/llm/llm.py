@@ -5428,7 +5428,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.timeout:
             params["timeout"] = self.timeout
         if self.max_tokens:
-            params["max_tokens"] = self.max_tokens
+            # Reasoning models (o1/o3/gpt-5.x) require max_completion_tokens and
+            # reject the legacy max_tokens parameter.
+            from .model_capabilities import is_reasoning_model
+            if is_reasoning_model(self.model):
+                params["max_completion_tokens"] = self.max_tokens
+            else:
+                params["max_tokens"] = self.max_tokens
         if self.top_p:
             params["top_p"] = self.top_p
         if self.presence_penalty:
@@ -5489,7 +5495,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         ]
         for param in internal_params:
             params.pop(param, None)
-        
+
+        # Reasoning models (o1/o3/gpt-5.x) reject several sampling parameters.
+        # Drop them to avoid 400 errors rather than passing them through.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(self.model):
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
+
         if output_json or output_pydantic:
             from .model_capabilities import supports_structured_outputs
             schema_model = output_json or output_pydantic
