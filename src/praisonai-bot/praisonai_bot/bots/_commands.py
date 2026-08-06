@@ -600,12 +600,19 @@ class CustomCommandResolver:
 
         wd = Path(working_dir) if working_dir else None
         template = getattr(command, "template", "") or ""
+        # Require BOTH the deployment opt-in and the command's own frontmatter
+        # to enable live shell substitution: a deployment enabling
+        # ``bots.commands.allow_shell`` must not silently upgrade a command that
+        # declared ``allow_shell: false``.
+        effective_allow_shell = self.allow_shell and bool(
+            getattr(command, "allow_shell", False)
+        )
         try:
             return interpolator.interpolate(
                 template,
                 arguments=arguments,
                 working_dir=wd,
-                allow_shell=self.allow_shell,
+                allow_shell=effective_allow_shell,
             )
         except shell_error:
             # Safe-by-default: a command carrying live ``!`cmd``` shell

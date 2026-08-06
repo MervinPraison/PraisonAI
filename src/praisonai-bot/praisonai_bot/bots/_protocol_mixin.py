@@ -190,6 +190,26 @@ class ChatCommandMixin:
             info = info_map.get(name)
             extra[name] = getattr(info, 'description', '') or "Custom command"
 
+        # File-based / entry-point custom commands (Issue #3729): include them in
+        # the native command menu so typed-``/`` autocomplete lists them too.
+        # Builtins and adapter-registered handlers keep precedence: only add a
+        # file command whose name is not already a builtin (in the registry) or
+        # an adapter-registered handler (already in ``extra``). Best-effort — a
+        # resolver error never breaks native-menu building.
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is not None:
+            try:
+                builtin_names = registry.get_command_names()
+            except Exception:  # noqa: BLE001
+                builtin_names = set()
+            try:
+                for name, description in resolver.descriptions().items():
+                    if name in extra or name in builtin_names:
+                        continue
+                    extra[name] = description or "Custom command"
+            except Exception:  # noqa: BLE001 — menu building must never raise
+                pass
+
         policy = getattr(self, '_command_policy', None)
         try:
             return registry.menu_entries(

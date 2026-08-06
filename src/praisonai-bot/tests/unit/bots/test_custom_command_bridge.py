@@ -97,6 +97,28 @@ def test_shell_opt_in_enables_execution(project):
     assert "HELLO" in rendered
 
 
+def test_shell_disabled_per_command_overrides_deployment_optin(project):
+    """A command with ``allow_shell: false`` must NOT execute even when the
+    deployment opts in via ``allow_shell=True`` (per-command opt-in required)."""
+    _write_command(
+        project,
+        "safecmd",
+        """\
+        ---
+        allow_shell: false
+        ---
+        Output: !`echo SHOULD_NOT_RUN`
+        """,
+    )
+    # Deployment enables shell, but the command declared it off: both must
+    # agree, so the marker is rendered inert rather than executed.
+    resolver = CustomCommandResolver(allow_shell=True)
+    rendered = resolver.render("safecmd", "")
+    assert rendered is not None
+    assert "SHOULD_NOT_RUN" not in rendered.replace("echo SHOULD_NOT_RUN", "")
+    assert "`echo SHOULD_NOT_RUN`" in rendered
+
+
 def test_expose_allowlist(project):
     """A non-listed command is not exposed (falls through to normal chat)."""
     _write_command(project, "alpha", "Alpha body $ARGUMENTS")
