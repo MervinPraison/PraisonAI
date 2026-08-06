@@ -21,8 +21,30 @@ logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: "weakref.WeakSet" = weakref.WeakSet()
 
 # Bound in-process state so an unauthenticated flood cannot exhaust memory.
-_MAX_SUBS = int(os.getenv("PRAISONAI_A2U_MAX_SUBS", "1024"))
-_QUEUE_MAX = int(os.getenv("PRAISONAI_A2U_QUEUE_MAX", "1000"))
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive-int limit from the environment.
+
+    ``asyncio.Queue(maxsize<=0)`` is *unbounded*, so a stray ``0``/``-1`` here
+    would silently defeat the memory bound. Fall back to ``default`` on any
+    non-positive or unparsable value rather than fail-open into an unbounded
+    queue.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s must be a positive integer (got %d); using default %d", name, value, default)
+        return default
+    return value
+
+
+_MAX_SUBS = _positive_int_env("PRAISONAI_A2U_MAX_SUBS", 1024)
+_QUEUE_MAX = _positive_int_env("PRAISONAI_A2U_QUEUE_MAX", 1000)
 
 
 @dataclass

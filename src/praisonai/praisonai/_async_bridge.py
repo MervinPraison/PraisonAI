@@ -309,11 +309,24 @@ def run_sync_or_offload(
 
     result: list[T] = []
     error: list[BaseException] = []
+    # Hold the concurrent.futures.Future for the in-flight coroutine so the
+    # caller can cancel the async work if the worker join times out (otherwise
+    # a stuck coroutine keeps running on the bridge loop after we've raised).
+    fut_box: list[concurrent.futures.Future] = []
+    bridge = _default_bridge()
 
     def _runner() -> None:
         try:
-            result.append(run_sync(coro, timeout=timeout))
+            fut = bridge.submit(coro)
+            fut_box.append(fut)
+            result.append(fut.result(timeout=timeout))
+        except (TimeoutError, concurrent.futures.TimeoutError) as e:
+            if fut_box:
+                fut_box[0].cancel()
+            error.append(e)
         except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
+            if fut_box:
+                fut_box[0].cancel()
             error.append(e)
 
     thread = threading.Thread(
@@ -324,12 +337,16 @@ def run_sync_or_offload(
     thread.start()
     # Bound the join so a stuck coroutine cannot pin the caller — which, when
     # the caller *is* the event-loop thread, means it cannot pin the loop past
-    # ``timeout``. The worker itself already enforces ``timeout`` on the coro via
-    # ``run_sync``; the small grace margin covers thread hand-off/teardown so we
-    # do not spuriously time out before the worker records its own error.
+    # ``timeout``. The worker itself already enforces ``timeout`` on the coro; the
+    # small grace margin covers thread hand-off/teardown so we do not spuriously
+    # time out before the worker records its own error. If the worker is still
+    # alive past the grace window we cancel the in-flight future ourselves so the
+    # async work stops instead of lingering on the bridge loop.
     if timeout is not None:
         thread.join(timeout + 1.0)
         if thread.is_alive():
+            if fut_box:
+                fut_box[0].cancel()
             raise TimeoutError(
                 f"run_sync_or_offload() worker did not complete within {timeout}s"
             )
