@@ -755,6 +755,96 @@ class TestPluginDiscovery:
         assert tool is not None
         assert tool.run() == "lazy"
 
+    def _make_ep(self, name, obj):
+        from unittest.mock import MagicMock
+        ep = MagicMock()
+        ep.name = name
+        ep.load.return_value = obj
+        return ep
+
+    def _patch_groups(self, group_to_eps):
+        """Patch registry entry-point loading to serve per-group entry points.
+
+        Returns a context-manager patcher for ``_get_entry_points`` so the
+        canonical/alias group iteration in discover_plugins() is exercised
+        directly, without relying on pytest-mock.
+        """
+        from unittest.mock import patch
+        import praisonaiagents.tools.registry as registry_module
+
+        def fake_entry_points(*, group):
+            return list(group_to_eps.get(group, []))
+
+        return patch.object(
+            registry_module, "_get_entry_points", return_value=fake_entry_points
+        )
+
+    def test_discover_canonical_group(self):
+        """Tools registered under the canonical praisonai.tools group resolve."""
+        from praisonaiagents import ToolRegistry
+
+        def canonical_tool(x: str) -> str:
+            return f"canon: {x}"
+
+        eps = {"praisonai.tools": [self._make_ep("canonical_tool", canonical_tool)]}
+        with self._patch_groups(eps):
+            registry = ToolRegistry()
+            count = registry.discover_plugins()
+
+        assert count == 1
+        assert "canonical_tool" in registry
+        assert registry.get("canonical_tool")("y") == "canon: y"
+
+    def test_legacy_alias_group_still_resolves_with_warning(self):
+        """Legacy praisonaiagents.tools group resolves but warns (deprecated)."""
+        import warnings
+        from praisonaiagents import ToolRegistry
+
+        def legacy_tool(x: str) -> str:
+            return f"legacy: {x}"
+
+        eps = {"praisonaiagents.tools": [self._make_ep("legacy_tool", legacy_tool)]}
+        with self._patch_groups(eps):
+            registry = ToolRegistry()
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                count = registry.discover_plugins()
+
+        assert count == 1
+        assert "legacy_tool" in registry
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+
+    def test_canonical_group_wins_on_name_collision(self):
+        """A name in both canonical and alias groups resolves to canonical."""
+        from praisonaiagents import ToolRegistry
+
+        def canon(x: str) -> str:
+            return "canonical"
+
+        def alias(x: str) -> str:
+            return "alias"
+
+        eps = {
+            "praisonai.tools": [self._make_ep("dup", canon)],
+            "praisonaiagents.tools": [self._make_ep("dup", alias)],
+        }
+        with self._patch_groups(eps):
+            registry = ToolRegistry()
+            count = registry.discover_plugins()
+
+        assert count == 1
+        assert registry.get("dup")("_") == "canonical"
+
+    def test_no_third_party_packages_is_noop(self):
+        """Behaviour is unchanged (0 tools) when no packages are installed."""
+        from praisonaiagents import ToolRegistry
+
+        with self._patch_groups({}):
+            registry = ToolRegistry()
+            count = registry.discover_plugins()
+
+        assert count == 0
+
 
 class TestToolValidation:
     """Tests for tool validation."""
