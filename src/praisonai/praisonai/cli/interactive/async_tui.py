@@ -15,6 +15,7 @@ Key fixes:
 
 import logging
 import os
+import shlex
 import shutil
 import threading
 import time
@@ -62,6 +63,15 @@ if os.environ.get("PRAISON_DEBUG", "").lower() in ("1", "true", "yes"):
 # ============================================================================
 
 from praisonai_code.cli.branding import get_logo, get_version
+
+
+class ReviewDiffError(RuntimeError):
+    """Raised when the review diff could not be collected.
+
+    Distinguishes a genuine collection failure (import/repo/Git error) from a
+    successful-but-empty diff so the caller does not mislabel errors as a clean
+    working tree.
+    """
 
 
 # ============================================================================
@@ -200,6 +210,7 @@ class AsyncTUI:
         self.messages: List[ChatMessage] = []
         self._running = False
         self._agent = None
+        self._review_agent = None  # Cached read-only agent for review commands
         self._interrupt_controller = None  # Cooperative cancellation for in-flight turns
         self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
@@ -208,6 +219,10 @@ class AsyncTUI:
         self._app = None
         self._output_buffer = None
         self._prompt_queue: List[str] = []  # Queue for pending prompts
+        # ids of queued prompts whose body is untrusted (skip @file expansion)
+        self._no_mention_prompts: set = set()
+        # ids of queued prompts that must run against the read-only review agent
+        self._read_only_prompts: set = set()
         self._conversation_history: List[dict] = []  # Full conversation history
         self._total_tokens = 0
         self._total_cost = 0.0
@@ -276,15 +291,43 @@ class AsyncTUI:
             return prompt + "\n" + "\n".join(file_contents)
         return prompt
     
-    def _get_agent(self):
-        """Lazy-load the agent with tools."""
+    # Tool names that can mutate the workspace or run commands. Review turns
+    # run with these filtered OUT so a purported read-only review cannot write
+    # files or execute commands even if the model attempts a write tool call.
+    _WRITE_TOOL_NAMES = frozenset({
+        "write_file", "edit_file", "apply_patch", "create_file", "delete_file",
+        "move_file", "execute_command", "run_command", "shell", "bash",
+    })
+
+    def _get_agent(self, read_only: bool = False):
+        """Lazy-load the agent with tools.
+
+        When ``read_only`` is True a separate, cached agent is built whose tool
+        set excludes write/command-execution tools (see ``_WRITE_TOOL_NAMES``),
+        enforcing review commands at the capability level rather than by prompt
+        instruction alone.
+        """
+        if read_only:
+            if self._review_agent is None:
+                self._review_agent = self._build_agent(read_only=True)
+            return self._review_agent
         if self._agent is None:
-            logger.debug("Creating new agent...")
-            try:
+            self._agent = self._build_agent(read_only=False)
+        return self._agent
+
+    def _build_agent(self, read_only: bool = False):
+        """Construct an Agent, optionally with a read-only tool set."""
+        logger.debug("Creating new agent (read_only=%s)...", read_only)
+        try:
                 from praisonaiagents import Agent
                 
                 # Load interactive tools (read_file, write_file, execute_command, etc.)
                 tools = self._load_tools()
+                if read_only and tools:
+                    tools = [
+                        t for t in tools
+                        if getattr(t, "__name__", "") not in self._WRITE_TOOL_NAMES
+                    ]
                 logger.debug(f"Tools for agent: {len(tools) if tools else 0}")
                 
                 # Auto-inject project instruction files unless disabled
@@ -334,22 +377,29 @@ class AsyncTUI:
                 
                 # Wire cooperative cancellation so Ctrl-C during a turn can stop
                 # an in-flight generation / tool call at the next step boundary
-                # while keeping the warm agent and session intact.
+                # while keeping the warm agent and session intact. Only the
+                # primary agent owns the shared interrupt controller; the
+                # read-only review agent reuses it so Ctrl-C still cancels.
                 try:
                     from praisonaiagents.agent.interrupt import InterruptController
-                    self._interrupt_controller = InterruptController()
-                    agent_config["interrupt_controller"] = self._interrupt_controller
+                    if not read_only or self._interrupt_controller is None:
+                        controller = InterruptController()
+                        if not read_only:
+                            self._interrupt_controller = controller
+                    else:
+                        controller = self._interrupt_controller
+                    agent_config["interrupt_controller"] = controller
                 except ImportError:
-                    self._interrupt_controller = None
+                    if not read_only:
+                        self._interrupt_controller = None
 
                 logger.debug(f"Agent config: model={self.config.model}, tools={len(tools) if tools else 0}")
-                self._agent = Agent(**agent_config)
+                agent = Agent(**agent_config)
                 logger.debug("Agent created successfully")
-            except ImportError as e:
+                return agent
+        except ImportError as e:
                 logger.error(f"Failed to import praisonaiagents: {e}")
                 raise RuntimeError(f"Failed to import praisonaiagents: {e}")
-        
-        return self._agent
     
     async def _start_runtime(self):
         """Start the InteractiveRuntime with ACP/LSP servers."""
@@ -587,6 +637,8 @@ class AsyncTUI:
         "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
         "debug": "Toggle debug logging",
         "plan": "Toggle read-only plan mode (/plan off to exit; /plan <task> to plan)",
+        "code-review": "Review the uncommitted diff for bugs (read-only)",
+        "security-review": "Audit the uncommitted diff for security issues (read-only)",
         "handoff": "Delegate to specialized agent (code/research/review/docs)",
         "compact": "Toggle compact output mode",
         "multiline": "Toggle multiline input mode",
@@ -647,6 +699,8 @@ class AsyncTUI:
   /auto            Toggle autonomy mode (auto-delegate complex tasks)
   /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
   /plan [task|off] Toggle read-only plan mode (/plan <task> plans; /plan off exits)
+  /code-review [file|--staged]   Review the uncommitted diff for bugs (read-only)
+  /security-review [file|--staged]  Audit the uncommitted diff for security issues (read-only)
   /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
   /compact         Toggle compact output mode
   /multiline       Toggle multiline input mode
@@ -696,6 +750,7 @@ Tips:
             if args:
                 self.config.model = args
                 self._agent = None
+                self._review_agent = None
                 self.messages.append(ChatMessage(role="system", content=f"Model changed to: {args}"))
             else:
                 self.messages.append(ChatMessage(role="system", content=f"Current model: {self.config.model}"))
@@ -866,6 +921,7 @@ Tips:
             ))
             # Recreate agent with autonomy setting
             self._agent = None
+            self._review_agent = None
             return True
         
         elif cmd == "debug":
@@ -939,7 +995,63 @@ Provide:
 
                 self._queue_or_execute(planning_prompt)
             return True
-        
+
+        elif cmd in ("code-review", "security-review"):
+            # Review the uncommitted (or staged/per-file) diff using the shipped
+            # read-only "review" agent preset. `security` swaps in a security
+            # rubric; both attach the fenced diff so the reviewer sees the exact
+            # changed lines. No writes are possible during review.
+            security = cmd == "security-review"
+            staged = False
+            file_path = None
+            usage = f"Usage: /{cmd} [file] [--staged] [--security]"
+            try:
+                tokens = shlex.split(args)
+            except ValueError:
+                # Malformed quoting (e.g. an unbalanced quote in a path).
+                self.messages.append(ChatMessage(role="system", content=usage))
+                return True
+            for token in tokens:
+                if token == "--staged":
+                    staged = True
+                elif token == "--security":
+                    security = True
+                elif not token.startswith("-"):
+                    if file_path is not None:
+                        # Only a single positional file path is supported.
+                        self.messages.append(ChatMessage(role="system", content=usage))
+                        return True
+                    file_path = token
+
+            try:
+                prompt = self._build_review_prompt(
+                    security=security, staged=staged, file_path=file_path
+                )
+            except ReviewDiffError as exc:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content=f"Could not collect diff for review: {exc}",
+                ))
+                return True
+            if prompt is None:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content="Working tree clean — no uncommitted changes to review.",
+                ))
+                return True
+
+            label = "security review" if security else "code review"
+            self.messages.append(ChatMessage(
+                role="system", content=f"🔍 Running {label} on the uncommitted diff..."
+            ))
+            self._update_output()
+            # The prompt embeds an untrusted diff; skip @file expansion so a
+            # `@../../secret` token inside the diff cannot exfiltrate files, and
+            # run against the read-only review agent so write/exec tools are
+            # unavailable regardless of what the model attempts.
+            self._queue_or_execute(prompt, skip_file_mentions=True, read_only=True)
+            return True
+
         elif cmd == "handoff":
             # Handoff to a specialized sub-agent
             if not args:
@@ -1012,8 +1124,12 @@ Example: /handoff code "refactor the auth module" """
             self.messages.append(ChatMessage(role="system", content=f"Unknown command: /{cmd}. Use /help for available commands."))
             return True
     
-    def _execute_prompt(self, prompt: str) -> Optional[str]:
-        """Execute a prompt and return the response (suppresses agent output)."""
+    def _execute_prompt(self, prompt: str, read_only: bool = False) -> Optional[str]:
+        """Execute a prompt and return the response (suppresses agent output).
+
+        ``read_only`` selects the review agent whose tool set excludes
+        write/command-execution tools.
+        """
         import sys
         import io
         import asyncio
@@ -1022,7 +1138,7 @@ Example: /handoff code "refactor the auth module" """
         
         self._last_error = None
         try:
-            agent = self._get_agent()
+            agent = self._get_agent(read_only=read_only)
             logger.debug(f"Agent loaded: {agent.name if hasattr(agent, 'name') else 'unnamed'}")
             logger.debug(f"Agent tools: {[t.__name__ if hasattr(t, '__name__') else str(t) for t in (agent.tools or [])]}")
             
@@ -1184,8 +1300,19 @@ Example: /handoff code "refactor the auth module" """
 
         return result.get("response")
 
-    def _execute_in_background(self, prompt: str):
-        """Execute prompt in background thread (non-blocking)."""
+    def _execute_in_background(
+        self, prompt: str, skip_file_mentions: bool = False, read_only: bool = False
+    ):
+        """Execute prompt in background thread (non-blocking).
+
+        ``skip_file_mentions`` bypasses ``@file`` expansion for prompts whose
+        body is generated from untrusted content (e.g. a review diff), so a
+        ``@../../secret`` token inside a diff cannot exfiltrate files.
+
+        ``read_only`` routes the turn through a review agent whose tool set
+        excludes write/command-execution tools, enforcing review commands at the
+        capability level instead of by prompt instruction alone.
+        """
         # Track tool calls for visibility
         tool_calls = []
         
@@ -1223,8 +1350,12 @@ Example: /handoff code "refactor the auth module" """
             self._status_text = "Praison AI is thinking..."
             self._update_output()
             
-            # Process @file mentions
-            processed_prompt = self._process_file_mentions(prompt)
+            # Process @file mentions (skipped for generated prompts whose body
+            # is untrusted, e.g. a review diff, to prevent @file exfiltration).
+            processed_prompt = (
+                prompt if skip_file_mentions
+                else self._process_file_mentions(prompt)
+            )
             
             # Add to conversation history
             self._conversation_history.append({"role": "user", "content": prompt})
@@ -1240,7 +1371,7 @@ Example: /handoff code "refactor the auth module" """
             
             def execute_llm():
                 try:
-                    result[0] = self._execute_prompt(processed_prompt)
+                    result[0] = self._execute_prompt(processed_prompt, read_only=read_only)
                 except Exception as e:
                     error[0] = str(e)
                 finally:
@@ -1286,26 +1417,101 @@ Example: /handoff code "refactor the auth module" """
             # Process next item in queue if any
             if self._prompt_queue:
                 next_prompt = self._prompt_queue.pop(0)
+                next_skip = id(next_prompt) in self._no_mention_prompts
+                next_ro = id(next_prompt) in self._read_only_prompts
+                self._no_mention_prompts.discard(id(next_prompt))
+                self._read_only_prompts.discard(id(next_prompt))
                 self.messages.append(ChatMessage(role="user", content=next_prompt))
                 self._update_output()
-                self._execute_in_background(next_prompt)
+                self._execute_in_background(
+                    next_prompt, skip_file_mentions=next_skip, read_only=next_ro
+                )
         
         # Run in background thread
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
     
-    def _queue_or_execute(self, prompt: str):
-        """Queue prompt if processing, otherwise execute immediately."""
+    def _build_review_prompt(
+        self,
+        security: bool = False,
+        staged: bool = False,
+        file_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Build a review prompt from the uncommitted diff.
+
+        Collects the working-tree (or staged/per-file) diff via the shipped
+        ``GitManager`` and wraps it in a review rubric fenced as ``diff`` so the
+        read-only ``review`` agent preset can cite exact file:line locations.
+        Returns ``None`` when the diff query succeeds but there is nothing to
+        review, so the caller can report a clean working tree. Raises
+        ``ReviewDiffError`` when the diff could not be collected (import,
+        repository, or Git failure) so the caller can surface the real error
+        instead of masking it as a clean tree.
+        """
+        try:
+            from praisonai_code.cli.features.git_integration import GitManager
+
+            git = GitManager(repo_path=self.config.workspace or None)
+            diff = git.get_diff_content(staged=staged, file_path=file_path)
+        except Exception as exc:
+            logger.debug("Diff collection failed: %s", exc)
+            raise ReviewDiffError(str(exc)) from exc
+
+        if not diff or not diff.strip():
+            return None
+
+        if security:
+            rubric = (
+                "You are a security reviewer. Audit ONLY the diff below for "
+                "security vulnerabilities. Cover these categories: injection "
+                "(SQL/command/template), authentication & authorization flaws, "
+                "secrets or credentials committed, unsafe deserialization, path "
+                "traversal, SSRF, insecure crypto, and unvalidated input. "
+                "Do NOT modify any files."
+            )
+        else:
+            rubric = (
+                "You are a code reviewer. Review ONLY the diff below for bugs, "
+                "logic errors, edge cases, error handling gaps, and "
+                "maintainability issues. Do NOT modify any files."
+            )
+
+        return (
+            f"{rubric}\n\n"
+            "For each finding report: severity (high/medium/low), the "
+            "file:line it applies to, and a short rationale. If you find no "
+            "issues, say so explicitly.\n\n"
+            "```diff\n"
+            f"{diff}\n"
+            "```"
+        )
+
+    def _queue_or_execute(
+        self, prompt: str, skip_file_mentions: bool = False, read_only: bool = False
+    ):
+        """Queue prompt if processing, otherwise execute immediately.
+
+        ``skip_file_mentions`` and ``read_only`` propagate to background
+        execution so generated prompts (e.g. review diffs) skip ``@file``
+        expansion and run against the write-restricted review agent, even when
+        drained from the queue on a later turn.
+        """
         if self._processing:
             # Add to queue
             self._prompt_queue.append(prompt)
+            if skip_file_mentions:
+                self._no_mention_prompts.add(id(prompt))
+            if read_only:
+                self._read_only_prompts.add(id(prompt))
             self.messages.append(ChatMessage(role="system", content=f"Queued: {prompt[:50]}..."))
             self._update_output()
         else:
             # Execute immediately
             self.messages.append(ChatMessage(role="user", content=prompt))
             self._update_output()
-            self._execute_in_background(prompt)
+            self._execute_in_background(
+                prompt, skip_file_mentions=skip_file_mentions, read_only=read_only
+            )
     
     def run(self) -> None:
         """Run the async TUI."""
@@ -1389,10 +1595,10 @@ Example: /handoff code "refactor the auth module" """
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.completion import Completer, Completion
         
-        # Create completer for commands and files
-        commands = ["help", "exit", "quit", "clear", "new", "model", "session", "sessions",
-                    "continue", "history", "export", "import", "cost", "status", "auto",
-                    "debug", "plan", "handoff", "compact", "multiline", "files", "queue"]
+        # Create completer for commands and files. Derive the list from the
+        # single source of truth (_BUILTIN_COMMANDS) so registration and
+        # autocomplete never drift (e.g. code-review/security-review).
+        commands = list(self._BUILTIN_COMMANDS.keys())
         workspace_files = self._workspace_files
         
         class PraisonCompleter(Completer):
