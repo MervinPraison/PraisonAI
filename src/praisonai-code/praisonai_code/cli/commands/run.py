@@ -958,6 +958,7 @@ def run_main(
     # Per-run git-worktree isolation: run on a fresh branch/worktree.
     worktree: bool = typer.Option(False, "--worktree", help="Run on an isolated git worktree/branch (branch-per-task); no-op when not a git repo"),
     keep: bool = typer.Option(False, "--keep", help="With --worktree, keep the worktree/branch after the run for review instead of tearing it down"),
+    append_system_prompt: Optional[str] = typer.Option(None, "--append-system-prompt", help="Append text (or @file) to the system prompt for this invocation only. Env fallback: PRAISONAI_APPEND_SYSTEM_PROMPT"),
 ):
     """
     Run agents from a file or prompt.
@@ -990,6 +991,11 @@ def run_main(
     if restore:
         _restore_checkpoint(restore)
         return
+
+    # Resolve --append-system-prompt (literal text or @file) and export it so
+    # every downstream agent-construction path appends it to the system prompt.
+    from ..utils.append_prompt import apply_append_system_prompt
+    apply_append_system_prompt(append_system_prompt)
 
     # Merge config-declared instruction sources (layered global→project) with
     # repeatable ``--instructions`` flags so both the prompt and profiled run
