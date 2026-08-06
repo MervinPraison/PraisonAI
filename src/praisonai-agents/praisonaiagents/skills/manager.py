@@ -61,6 +61,10 @@ class SkillManager:
         # the same directories a live session was started with.
         self._discover_dirs: Optional[List[str]] = None
         self._discover_include_defaults: bool = True
+        # Names of skills that entered the index via discover()/reload(), so
+        # reload() can distinguish discovery-owned skills from ones added out
+        # of band via add_skill() (which must be preserved on reload).
+        self._discovered_names: set = set()
         self._validation_cache: Dict[str, ValidationResult] = {}
         
         # Initialize capability validator
@@ -112,8 +116,13 @@ class SkillManager:
         props_list = discover_skills(skill_dirs, include_defaults)
 
         for props in props_list:
+            self._discovered_names.add(props.name)
             if props.name not in self._skills:
-                self._skills[props.name] = LoadedSkill(properties=props)
+                skill = LoadedSkill(properties=props)
+                # Record the SKILL.md mtime at load time so an edit made after
+                # discover() but before the first reload() is detected.
+                skill._source_mtime = self._current_mtime(props)
+                self._skills[props.name] = skill
 
         # Remember discovery scope so reload() can re-scan the same sources.
         self._discover_dirs = list(skill_dirs) if skill_dirs else None
@@ -157,14 +166,23 @@ class SkillManager:
         for props in props_list:
             new_props.setdefault(props.name, props)
 
-        old_names = set(self._skills.keys())
         new_names = set(new_props.keys())
+        # Only reason about skills this manager discovered. Skills registered
+        # out of band via add_skill() are preserved verbatim and never reported
+        # as removed, so reload() stays backward compatible with add_skill().
+        old_discovered = self._discovered_names & set(self._skills.keys())
 
-        added = sorted(new_names - old_names)
-        removed = sorted(old_names - new_names)
+        added = sorted(new_names - old_discovered)
+        removed = sorted(old_discovered - new_names)
 
         changed: List[str] = []
         rebuilt: Dict[str, LoadedSkill] = {}
+
+        # Preserve explicitly added (non-discovery) skills as-is.
+        for name, skill in self._skills.items():
+            if name not in self._discovered_names and name not in new_props:
+                rebuilt[name] = skill
+
         for name, props in new_props.items():
             existing = self._skills.get(name)
             if existing is not None and not self._skill_changed(existing, props):
@@ -173,8 +191,10 @@ class SkillManager:
                 rebuilt[name] = existing
             else:
                 # New or content changed: load fresh (drops stale instructions).
-                rebuilt[name] = LoadedSkill(properties=props)
-                if existing is not None:
+                fresh = LoadedSkill(properties=props)
+                fresh._source_mtime = self._current_mtime(props)
+                rebuilt[name] = fresh
+                if existing is not None and name in old_discovered:
                     changed.append(name)
 
         # Deactivate skills that disappeared so any cached instructions are
@@ -186,6 +206,7 @@ class SkillManager:
 
         # Atomic swap of the index; drop caches keyed by the old registry.
         self._skills = rebuilt
+        self._discovered_names = new_names
         self._validation_cache.clear()
         self._discovered = True
 
@@ -194,6 +215,20 @@ class SkillManager:
             "changed": sorted(changed),
             "removed": removed,
         }
+
+    @staticmethod
+    def _current_mtime(props: "SkillProperties") -> Optional[float]:
+        """Return the SKILL.md modification time for a skill, or None."""
+        path = getattr(props, "path", None)
+        if path is None:
+            return None
+        skill_md = find_skill_md(path)
+        if skill_md is None:
+            return None
+        try:
+            return skill_md.stat().st_mtime
+        except OSError:
+            return None
 
     @staticmethod
     def _skill_changed(existing: LoadedSkill, props: "SkillProperties") -> bool:
@@ -215,11 +250,11 @@ class SkillManager:
         except OSError:
             return True
         old_mtime = getattr(existing, "_source_mtime", None)
-        # Record the current mtime for the next comparison regardless.
-        existing._source_mtime = new_mtime
         if old_mtime is None:
-            # No baseline recorded yet: treat as unchanged (first observation)
-            # so a freshly discovered-but-unedited skill isn't flagged.
+            # No baseline was recorded (e.g. skill added via add_skill() with
+            # no readable SKILL.md at load time); adopt the current mtime and
+            # treat as unchanged so a valid skill isn't needlessly reloaded.
+            existing._source_mtime = new_mtime
             return False
         return new_mtime != old_mtime
 
@@ -341,6 +376,7 @@ class SkillManager:
         """
         skill = self._loader.load_metadata(skill_path)
         if skill:
+            skill._source_mtime = self._current_mtime(skill.properties)
             self._skills[skill.properties.name] = skill
         return skill
 
@@ -1145,6 +1181,10 @@ version: 1.0.0
                 props.path,
                 {"use-count": props.use_count, "last-used": props.last_used},
             )
+            # Telemetry writes rewrite SKILL.md and bump its mtime; refresh the
+            # change-detection baseline so the next reload() doesn't misread a
+            # telemetry-only update as a content change and drop activation.
+            self._refresh_mtime_baseline(skill)
         except Exception:
             logger.debug("Failed to record skill use telemetry", exc_info=True)
 
@@ -1156,8 +1196,23 @@ version: 1.0.0
             self._update_frontmatter_fields(
                 props.path, {"patch-count": props.patch_count}
             )
+            # This manager already applied+reactivated the edit in-process, so
+            # refresh the baseline to keep the same LoadedSkill object across a
+            # subsequent reload() rather than replacing it.
+            self._refresh_mtime_baseline(skill)
         except Exception:
             logger.debug("Failed to record skill patch telemetry", exc_info=True)
+
+    def _refresh_mtime_baseline(self, skill) -> None:
+        """Reset a skill's change-detection baseline to the current mtime.
+
+        Called after a manager-owned write to SKILL.md so the next reload()
+        does not misread that write as an external content change.
+        """
+        try:
+            skill._source_mtime = self._current_mtime(skill.properties)
+        except Exception:
+            logger.debug("Failed to refresh skill mtime baseline", exc_info=True)
 
     def _update_frontmatter_fields(self, skill_path, fields: dict) -> None:
         """Update or insert simple scalar keys in a SKILL.md frontmatter block.
@@ -1650,6 +1705,7 @@ version: 1.0.0
         self._skills.clear()
         self._bundles.clear()
         self._selected_bundles.clear()
+        self._discovered_names.clear()
         self._validation_cache.clear()
         self._validator.clear_cache()
         self._discovered = False

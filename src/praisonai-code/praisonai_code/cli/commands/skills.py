@@ -380,11 +380,14 @@ def skills_reload(
         None, "--dirs", "-d", help="Comma-separated skill directories"
     ),
 ):
-    """Re-scan skills and report what changed (+added/~changed/-removed).
+    """Re-scan skill directories and report the skills now available.
 
-    Picks up newly installed or edited skills without restarting a session.
-    Run this after ``praisonai skills install <url>`` or after editing a
-    SKILL.md so the change is reflected on the next turn.
+    ``SkillManager.reload()`` is the live-session primitive: a running session
+    calls it to pick up newly installed or edited skills on the *next* turn
+    without a restart. This standalone CLI command is a convenience scan that
+    lists the skills currently discoverable on disk (there is no live session
+    to refresh from a separate process), so run it to confirm a
+    ``praisonai skills install <url>`` or a SKILL.md edit landed on disk.
 
     Examples:
         praisonai skills reload
@@ -399,30 +402,16 @@ def skills_reload(
     dirs = skill_dirs.split(",") if skill_dirs else None
 
     manager = SkillManager()
-    # Establish a baseline, then reload so the diff reflects on-disk state.
     manager.discover(dirs, include_defaults=dirs is None)
-    diff = manager.reload()
-
-    added = diff.get("added", [])
-    changed = diff.get("changed", [])
-    removed = diff.get("removed", [])
 
     from rich.console import Console
 
     console = Console()
-    for name in added:
-        console.print(f"[green]+ {name}[/green]")
-    for name in changed:
-        console.print(f"[yellow]~ {name}[/yellow]")
-    for name in removed:
-        console.print(f"[red]- {name}[/red]")
+    names = sorted(manager.skill_names)
+    for name in names:
+        console.print(f"[green]• {name}[/green]")
 
-    total = len(manager)
-    console.print(
-        f"Reloaded skills: [green]+{len(added)}[/green] "
-        f"[yellow]~{len(changed)}[/yellow] [red]-{len(removed)}[/red] "
-        f"({total} active)"
-    )
+    console.print(f"Skills available: [green]{len(names)}[/green]")
 
 
 @app.command("search")
