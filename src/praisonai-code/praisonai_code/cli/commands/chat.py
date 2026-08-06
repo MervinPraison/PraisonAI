@@ -127,7 +127,7 @@ def chat_main(
         is_flag=False,
         flag_value="true",
     ),
-    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
+    approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, plan, accept-edits, bypass, auto, agent, slack, telegram, discord, webhook, http, none"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging to ~/.praisonai/async_tui_debug.log"),

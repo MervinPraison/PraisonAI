@@ -531,6 +531,31 @@ def _start_interactive_mode(self, args):
                         if not current and queue_size == 0:
                             console.print("[dim]Idle - no messages processing[/dim]")
                         continue
+                    elif cmd == "plan":
+                        # Real read-only plan mode: flip the live approval
+                        # backend into PermissionMode.PLAN so writes/edits/shell
+                        # are denied until /plan off. Reuses the shipped
+                        # enforcement layer instead of a prompt template.
+                        sub = (cmd_args or "").strip().lower()
+                        enable = False if sub == "off" else not session_state.get('plan_mode', False)
+                        try:
+                            from praisonaiagents.approval import get_approval_registry
+                            from praisonaiagents.permissions import PermissionMode
+                            backend = get_approval_registry().get_backend()
+                            setter = getattr(backend, 'set_permission_mode', None)
+                            enforced = callable(setter)
+                            if enforced:
+                                setter(PermissionMode.PLAN if enable else PermissionMode.DEFAULT)
+                        except Exception:
+                            enforced = False
+                        session_state['plan_mode'] = enable
+                        if enable:
+                            console.print("[cyan][PLAN] Plan mode enabled — read-only. Writes/edits/commands denied until /plan off.[/cyan]")
+                            if not enforced:
+                                console.print("[dim](No interactive approval backend active; enforcement is advisory.)[/dim]")
+                        else:
+                            console.print("[cyan]Plan mode disabled. Writes/edits/commands allowed again.[/cyan]")
+                        continue
                     else:
                         console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
                         continue

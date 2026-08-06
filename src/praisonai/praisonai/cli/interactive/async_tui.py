@@ -82,6 +82,7 @@ class AsyncTUIConfig:
     autonomy_mode: bool = True  # Enable autonomous task delegation (aligned with InteractiveConfig)
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
     no_rules: bool = False  # Disable auto-injection of project instruction files
+    plan_mode: bool = False  # Read-only PLAN mode: deny writes/edits/shell until confirmed
 
 
 # ============================================================================
@@ -497,7 +498,36 @@ class AsyncTUI:
             )
         if self._app:
             self._app.invalidate()
-    
+
+    def _apply_permission_mode(self, mode) -> bool:
+        """Switch the live approval backend into ``mode`` (e.g. PLAN).
+
+        Reuses the already-shipped enforcement layer: the interactive backend's
+        ``set_permission_mode`` makes PLAN unconditionally deny write/edit/
+        delete/bash/shell. Returns ``True`` when a compatible backend accepted
+        the mode so callers can honestly report enforcement status.
+        """
+        try:
+            from praisonaiagents.approval import get_approval_registry
+            backend = get_approval_registry().get_backend()
+        except Exception:
+            backend = None
+        setter = getattr(backend, "set_permission_mode", None)
+        if callable(setter):
+            setter(mode)
+            return True
+        return False
+
+    def _set_plan_mode(self, enabled: bool) -> bool:
+        """Enter/exit read-only PLAN mode, returning whether it is enforced."""
+        from praisonaiagents.permissions import PermissionMode
+        mode = PermissionMode.PLAN if enabled else PermissionMode.DEFAULT
+        enforced = self._apply_permission_mode(mode)
+        self.config.plan_mode = enabled
+        if self._app:
+            self._app.invalidate()
+        return enforced
+
     # Built-in slash commands registered into the unified registry so /help
     # and autocomplete stay in lock-step with the dispatch branches below.
     _BUILTIN_COMMANDS = {
@@ -517,7 +547,7 @@ class AsyncTUI:
         "status": "Show ACP/LSP runtime status",
         "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
         "debug": "Toggle debug logging",
-        "plan": "Create a step-by-step plan for a task",
+        "plan": "Toggle read-only plan mode (/plan off to exit; /plan <task> to plan)",
         "handoff": "Delegate to specialized agent (code/research/review/docs)",
         "compact": "Toggle compact output mode",
         "multiline": "Toggle multiline input mode",
@@ -577,7 +607,7 @@ class AsyncTUI:
   /status          Show ACP/LSP runtime status
   /auto            Toggle autonomy mode (auto-delegate complex tasks)
   /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
-  /plan <task>     Create a step-by-step plan for a task
+  /plan [task|off] Toggle read-only plan mode (/plan <task> plans; /plan off exits)
   /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
   /compact         Toggle compact output mode
   /multiline       Toggle multiline input mode
@@ -814,18 +844,49 @@ Tips:
             return True
         
         elif cmd == "plan":
-            # Planning mode - create a plan for a complex task
-            if not args:
+            # Real plan mode: a persistent read-only permission mode enforced by
+            # the approval backend (PLAN denies write/edit/delete/bash/shell),
+            # not just a one-shot prompt. Reuses set_permission_mode so the very
+            # next turn is actually blocked from mutating the workspace.
+            sub = args.strip().lower() if args else ""
+            if sub == "off":
+                # Explicit exit — flip enforcement back to normal.
+                self._set_plan_mode(False)
                 self.messages.append(ChatMessage(
-                    role="system", 
-                    content="Usage: /plan <task description>\nCreates a step-by-step plan before execution."
+                    role="system",
+                    content="Plan mode disabled. Writes/edits/commands are allowed again."
                 ))
+            elif not args:
+                # Toggle: /plan with no args flips read-only mode on/off.
+                enabled = not self.config.plan_mode
+                enforced = self._set_plan_mode(enabled)
+                if enabled:
+                    note = (
+                        "Plan mode enabled [PLAN] — read-only exploration. "
+                        "Writes/edits/commands are denied until you /plan off."
+                    )
+                    if not enforced:
+                        note += (
+                            "\n(Note: no interactive approval backend is active, "
+                            "so enforcement is advisory in this session.)"
+                        )
+                    self.messages.append(ChatMessage(role="system", content=note))
+                else:
+                    self.messages.append(ChatMessage(
+                        role="system",
+                        content="Plan mode disabled. Writes/edits/commands are allowed again."
+                    ))
             else:
-                # Execute with planning enabled
-                self.messages.append(ChatMessage(role="system", content=f"📋 Creating plan for: {args}"))
+                # /plan <task>: enter read-only mode first, then ask the agent to
+                # produce a plan. Enforcement means the plan step cannot mutate;
+                # run /plan off (or approve) to execute afterwards.
+                self._set_plan_mode(True)
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content=f"[PLAN] Creating read-only plan for: {args}\nRun /plan off to leave plan mode and execute."
+                ))
                 self._update_output()
-                
-                # Use planning agent to create plan
+
                 planning_prompt = f"""Create a detailed step-by-step plan for the following task. 
 Do NOT execute anything yet, just analyze and plan.
 
@@ -836,7 +897,7 @@ Provide:
 2. Step-by-step plan with clear actions
 3. Potential risks or considerations
 4. Estimated complexity (simple/medium/complex)"""
-                
+
                 self._queue_or_execute(planning_prompt)
             return True
         
@@ -1444,7 +1505,8 @@ Example: /handoff code "refactor the auth module" """
             left = "? for help | PageUp/Down to scroll"
             center = self.config.model
             right = f"Session: {self.session_id}"
-            return f" {left}  |  {center}  |  {right} "
+            plan = "[PLAN] " if self.config.plan_mode else ""
+            return f" {plan}{left}  |  {center}  |  {right} "
         
         # Layout: Output (top, scrollable) + Status bar + Input (bottom, fixed)
         # Use FloatContainer to show completion menu as floating overlay
