@@ -156,7 +156,7 @@ def plugins_enable(
         from praisonaiagents.config.loader import set_plugin_enabled
 
         path = set_plugin_enabled(plugin_id, True)
-        typer.echo(f"[green]✓[/green] Plugin enabled: {plugin_id} ({path})")
+        typer.echo(f"Plugin enabled: {plugin_id} ({path})")
 
         # If a runtime is live in this process, wire it in immediately.
         try:
@@ -165,12 +165,16 @@ def plugins_enable(
             manager = get_plugin_manager()
             if manager.enable(plugin_id):
                 manager.wire_into_hook_registry()
-        except Exception:
-            pass
+        except Exception as wire_err:
+            typer.echo(
+                f"Note: could not wire '{plugin_id}' into the live runtime: "
+                f"{wire_err}",
+                err=True,
+            )
 
     except Exception as e:
         typer.echo(f"Error enabling plugin: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("disable")
@@ -186,19 +190,41 @@ def plugins_disable(
         from praisonaiagents.config.loader import set_plugin_enabled
 
         path = set_plugin_enabled(plugin_id, False)
-        typer.echo(f"[yellow]![/yellow] Plugin disabled: {plugin_id} ({path})")
+        typer.echo(f"Plugin disabled: {plugin_id} ({path})")
 
         # If a runtime is live in this process, unwire its hooks immediately.
         try:
             from praisonaiagents.plugins.manager import get_plugin_manager
 
             get_plugin_manager().disable(plugin_id)
-        except Exception:
-            pass
+        except Exception as wire_err:
+            typer.echo(
+                f"Note: could not unwire '{plugin_id}' hooks from the live "
+                f"runtime: {wire_err}",
+                err=True,
+            )
+
+        # A single-file plugin also contributes tools to the global registry;
+        # manager.disable() only unwires hooks, so unload the module to remove
+        # its tools instead of leaving them callable for the rest of the run.
+        try:
+            from praisonaiagents.plugins.manager import get_plugin_manager
+            from praisonaiagents.plugins.discovery import unload_plugin
+
+            meta = get_plugin_manager().get_single_file_plugin(plugin_id)
+            module_name = meta.get("module") if meta else None
+            if module_name:
+                unload_plugin(module_name)
+        except Exception as unload_err:
+            typer.echo(
+                f"Note: could not unload single-file plugin '{plugin_id}' "
+                f"tools: {unload_err}",
+                err=True,
+            )
 
     except Exception as e:
         typer.echo(f"Error disabling plugin: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("doctor")
@@ -247,9 +273,15 @@ def plugins_doctor():
             if source == "single_file" and not gate_open:
                 issues.append("blocked: set PRAISONAI_ALLOW_PROJECT_PLUGINS=true")
 
-            # Registered/entry-point plugins without wired hooks may be inert.
+            # A registered plugin with no hooks is wired but contributes no
+            # lifecycle behaviour (it may still expose tools).
+            if source == "registered" and not plugin.get("hooks"):
+                issues.append("no hooks wired")
+
+            # An entry-point plugin present but not yet loaded imports its
+            # hooks only when enabled, so hooks are empty until then.
             if source.startswith("entry_point") and not plugin.get("hooks"):
-                issues.append("no hooks wired (import on enable)")
+                issues.append("not loaded (hooks import on enable)")
 
             if issues:
                 status = "[red]✗ Issues[/red]"
@@ -288,19 +320,40 @@ def plugins_reload():
     """
     try:
         from praisonaiagents.plugins.manager import get_plugin_manager
-    except ImportError:
+        from praisonaiagents.plugins.discovery import unload_plugin
+    except ImportError as exc:
         typer.echo("Error: praisonaiagents package not found.", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     try:
         manager = get_plugin_manager()
-        manager.auto_discover_plugins()
-        manager.discover_entry_points()
+
+        # Unload previously-loaded single-file plugins first so an edited file
+        # is re-executed and re-registered cleanly. Without this, the old
+        # tool stays in the registry and rediscovery skips re-registration,
+        # leaving agents on the stale implementation.
+        for meta in manager.list_single_file_plugins():
+            module_name = meta.get("module")
+            if module_name:
+                unload_plugin(module_name)
+
+        single_file = manager.auto_discover_plugins()
+        entry_points = manager.discover_entry_points()
         wired = manager.wire_into_hook_registry()
-        typer.echo(f"[green]✓[/green] Reloaded plugins ({wired} hook(s) wired)")
+        typer.echo(
+            f"Reloaded plugins: {single_file} single-file, "
+            f"{entry_points} entry-point, {wired} hook(s) wired"
+        )
+        if single_file == 0:
+            typer.echo(
+                "No single-file plugins were loaded. Set "
+                "PRAISONAI_ALLOW_PLUGIN_DISCOVERY=true (and "
+                "PRAISONAI_ALLOW_PROJECT_PLUGINS=true for project-local "
+                "plugins) to load them."
+            )
     except Exception as e:
         typer.echo(f"Error reloading plugins: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("add")

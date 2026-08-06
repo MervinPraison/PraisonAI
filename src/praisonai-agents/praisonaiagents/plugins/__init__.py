@@ -389,8 +389,9 @@ def get_plugin_registry() -> list:
                 "enabled": _config_says_enabled(ep.name),
                 "hooks": [],
             })
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Entry-point plugin scan failed: {e}")
 
     # 3. Single-file plugins discovered on disk (metadata only, no exec).
     try:
@@ -410,8 +411,9 @@ def get_plugin_registry() -> list:
                 "hooks": list(meta.get("hooks", []) or []),
                 "path": meta.get("path"),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Single-file plugin discovery failed: {e}")
 
     return entries
 

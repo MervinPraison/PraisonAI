@@ -20,6 +20,7 @@ Usage:
 
 import importlib.util
 import os
+import threading
 from praisonaiagents._logging import get_logger
 import sys
 from pathlib import Path
@@ -33,6 +34,10 @@ logger = get_logger(__name__)
 # Maps a loaded plugin's generated module name to the tool names it harvested,
 # so unload_plugin can unregister them instead of leaking active tools.
 _loaded_plugin_tools: Dict[str, List[str]] = {}
+# Guards the read-modify-write of _loaded_plugin_tools so concurrent load and
+# unload calls from different threads cannot leave a tool registered with no
+# tracking entry.
+_loaded_plugin_tools_lock = threading.Lock()
 
 
 def _project_plugins_allowed() -> bool:
@@ -64,13 +69,28 @@ def _project_plugins_allowed() -> bool:
 
 
 def _is_project_local(path: Path) -> bool:
-    """True when ``path`` lives under the project-local plugins directory."""
+    """True when ``path`` is reached via the project-local plugins directory.
+
+    The trust gate must fire on *how the file was reached*, not on where a
+    symlink ultimately points. A repository-controlled symlink at
+    ``.praisonai/plugins/evil.py -> /tmp/evil.py`` is still project-controlled
+    code, so we compare the file's own (un-resolved) location against the
+    project plugins directory. We resolve only the parent directories (not the
+    final component) so a project ``plugins`` symlink is still recognised while
+    a symlinked plugin *file* inside it cannot slip the gate by resolving
+    elsewhere.
+    """
     try:
         project_plugins = (get_project_data_dir() / "plugins").resolve()
     except Exception:
         return False
     try:
-        path.resolve().relative_to(project_plugins)
+        # Resolve the containing directory (following any symlinked dirs) but
+        # keep the file's own name un-resolved, so a symlinked plugin file is
+        # judged by its location under .praisonai/plugins, not its target.
+        located = path.expanduser()
+        candidate = located.parent.resolve() / located.name
+        candidate.relative_to(project_plugins)
         return True
     except ValueError:
         return False
@@ -178,8 +198,12 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
     Returns:
         Plugin metadata dict with 'tools' and 'hooks' lists, or None on error
     """
-    path = Path(filepath).resolve()
-    
+    # Keep the caller's location un-resolved for the trust gate so a
+    # repository-controlled symlink under .praisonai/plugins cannot escape the
+    # gate by pointing its target elsewhere.
+    located = Path(filepath).expanduser()
+    path = located.resolve()
+
     if not path.exists():
         logger.error(f"Plugin file not found: {filepath}")
         return None
@@ -192,7 +216,7 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
     # extension surface (they can hook every lifecycle event and intercept
     # every tool call), so refuse to exec them unless explicitly authorised —
     # matching the opt-in required for project-local tools.
-    if _is_project_local(path) and not _project_plugins_allowed():
+    if _is_project_local(located) and not _project_plugins_allowed():
         logger.warning(
             "Refusing to load project plugin %s: set "
             "PRAISONAI_ALLOW_PROJECT_PLUGINS=true (or plugins.allow_project_plugins "
@@ -225,7 +249,15 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
         
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        
+
+        # Snapshot the registry before exec: the @tool decorator auto-registers
+        # on module load, so any tool name present *after* exec but not before
+        # is one this module contributed and therefore owns.
+        try:
+            pre_exec_tools = set(registry.list_tools())
+        except Exception:
+            pre_exec_tools = set()
+
         try:
             spec.loader.exec_module(module)
         except Exception as e:
@@ -237,22 +269,31 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
         # The @tool decorator creates FunctionTool instances but may not
         # register them if the registry wasn't fully initialized
         new_tools = []
+        owned_tools = []
         for attr_name in dir(module):
             if attr_name.startswith('_'):
                 continue
             attr = getattr(module, attr_name, None)
             if isinstance(attr, BaseTool):
                 tool_name = attr.name
-                # Register if not already registered
+                # Register any tool not already present (e.g. if the decorator
+                # could not auto-register).
                 if registry.get(tool_name) is None:
                     registry.register(attr)
+                # A tool is "owned" (safe to unregister on unload) only if it
+                # was absent before this module executed — tools already present
+                # belong to another plugin or the core registry.
+                if tool_name not in pre_exec_tools:
+                    owned_tools.append(tool_name)
                 new_tools.append(tool_name)
         
         # Add discovered tools to metadata
         metadata["tools"] = new_tools
         metadata["module"] = module_name
-        # Remember which tools this module contributed so unload can clean up.
-        _loaded_plugin_tools[module_name] = list(new_tools)
+        # Remember only the tools this module actually registered so unload can
+        # clean them up without removing tools still in use elsewhere.
+        with _loaded_plugin_tools_lock:
+            _loaded_plugin_tools[module_name] = owned_tools
         
         logger.info(f"Loaded plugin: {metadata['name']} (tools: {new_tools})")
         return metadata
@@ -303,7 +344,8 @@ def unload_plugin(module_name: str) -> bool:
     Returns:
         True if the module was present and unloaded, False if not found
     """
-    tools = _loaded_plugin_tools.pop(module_name, [])
+    with _loaded_plugin_tools_lock:
+        tools = _loaded_plugin_tools.pop(module_name, [])
     if tools:
         try:
             from ..tools.registry import get_registry

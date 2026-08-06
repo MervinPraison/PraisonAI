@@ -94,25 +94,115 @@ class TestTrustGate:
         assert result is not None
 
 
+UNLOAD_PLUGIN_BODY = textwrap.dedent(
+    '''\
+    """
+    Plugin Name: unload_demo
+    Description: A plugin used to verify unload cleanup
+    Version: 1.0.0
+    """
+
+    from praisonaiagents import tool
+
+    @tool
+    def unload_demo_tool(query: str) -> str:
+        """Echo the query."""
+        return f"unload-echo: {query}"
+    '''
+)
+
+
 class TestUnloadCleanup:
     def test_unload_unregisters_harvested_tools(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PRAISONAI_ALLOW_PROJECT_PLUGINS", "true")
-        plugin_file = _write_project_plugin(tmp_path, name="unload_demo.py")
+        plugins_dir = tmp_path / ".praisonai" / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        plugin_file = plugins_dir / "unload_demo.py"
+        plugin_file.write_text(UNLOAD_PLUGIN_BODY)
 
         from praisonaiagents.plugins.discovery import load_plugin, unload_plugin
         from praisonaiagents.tools.registry import get_registry
 
-        result = load_plugin(str(plugin_file))
-        assert result is not None
-        module_name = result["module"]
-        tool_name = result["tools"][0]
-
         registry = get_registry()
-        assert registry.get(tool_name) is not None
+        result = None
+        try:
+            result = load_plugin(str(plugin_file))
+            assert result is not None
+            module_name = result["module"]
+            tool_name = result["tools"][0]
+            assert tool_name == "unload_demo_tool"
 
-        assert unload_plugin(module_name) is True
-        assert registry.get(tool_name) is None
+            assert registry.get(tool_name) is not None
+
+            assert unload_plugin(module_name) is True
+            assert registry.get(tool_name) is None
+        finally:
+            # Guard against leaking the tool into other tests on failure.
+            try:
+                registry.unregister("unload_demo_tool")
+            except Exception:
+                pass
+
+
+class TestSymlinkGate:
+    def test_symlinked_project_plugin_is_gated(self, tmp_path, monkeypatch):
+        """A symlink under .praisonai/plugins pointing elsewhere is still gated."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PRAISONAI_ALLOW_PROJECT_PLUGINS", raising=False)
+
+        # Real plugin body lives outside the project tree.
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "evil.py"
+        target.write_text(PLUGIN_BODY)
+
+        plugins_dir = tmp_path / ".praisonai" / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        link = plugins_dir / "evil.py"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported on this platform")
+
+        from praisonaiagents.plugins.discovery import load_plugin
+
+        # Ungated: the symlink must not bypass the project trust gate.
+        assert load_plugin(str(link)) is None
+
+
+class TestSetPluginEnabledBoolean:
+    def test_enable_when_all_enabled_is_noop(self, tmp_path, monkeypatch):
+        """enabled: true stays intact when enabling a plugin (no collapse to [])."""
+        pytest.importorskip("yaml")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PRAISONAI_PLUGINS", raising=False)
+        cfg = tmp_path / ".praisonai" / "config.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("plugins:\n  enabled: true\n")
+
+        from praisonaiagents.config import loader
+
+        loader.clear_config_cache()
+        loader.set_plugin_enabled("x", True)
+        loader.clear_config_cache()
+        # Still "all enabled" (None), not a truncated allow-list.
+        assert loader.get_enabled_plugins() is None
+
+    def test_disable_when_all_enabled_is_rejected(self, tmp_path, monkeypatch):
+        """Disabling under enabled: true is ambiguous and must be refused."""
+        pytest.importorskip("yaml")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PRAISONAI_PLUGINS", raising=False)
+        cfg = tmp_path / ".praisonai" / "config.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("plugins:\n  enabled: true\n")
+
+        from praisonaiagents.config import loader
+
+        loader.clear_config_cache()
+        with pytest.raises(ValueError):
+            loader.set_plugin_enabled("x", False)
 
 
 class TestRegistry:

@@ -616,17 +616,18 @@ def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
     else:
         try:
             import tomli_w
-
-            with open(path, "wb") as f:
-                tomli_w.dump(data, f)
         except ImportError:
-            # No TOML writer available; fall back to a YAML sidecar so the
-            # write is never silently dropped.
-            import yaml
-
-            yaml_path = path.with_suffix(".yaml")
-            with open(yaml_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+            # Do NOT write a YAML sidecar: the runtime keeps reading the
+            # original .toml (higher precedence), so the write would be
+            # silently lost and re-introduce the config split-brain. Fail
+            # fast with a remediation hint instead.
+            raise RuntimeError(
+                f"Cannot write TOML config {path}: no TOML writer available. "
+                "Install tomli-w (pip install tomli-w), or convert the config "
+                "to .praisonai/config.yaml."
+            ) from None
+        with open(path, "wb") as f:
+            tomli_w.dump(data, f)
 
 
 def set_plugin_enabled(name: str, enabled: bool) -> Path:
@@ -654,13 +655,34 @@ def set_plugin_enabled(name: str, enabled: bool) -> Path:
         plugins = {}
         raw["plugins"] = plugins
 
+    has_enabled_key = "enabled" in plugins
     current = plugins.get("enabled")
     # Normalise the enabled flag into a list of names we can mutate.
     if isinstance(current, list):
         names = [str(n) for n in current]
     elif isinstance(current, str) and current.strip():
         names = [current.strip()]
+    elif current is True:
+        # Explicit "all plugins enabled" mode. Collapsing this to an allow-list
+        # would silently disable every other plugin, so we only touch this
+        # state when the requested change is well-defined:
+        #   - enable: already enabled, no-op (leave "all enabled" intact)
+        #   - disable: cannot be expressed as an allow-list without naming the
+        #     full set, so refuse rather than disable everything.
+        if enabled:
+            clear_config_cache()
+            return target
+        raise ValueError(
+            f"Cannot disable '{name}': plugins.enabled is currently set to "
+            "'all' (true). Set plugins.enabled to an explicit list of plugin "
+            "names first, then disable individual plugins."
+        )
+    elif current is None and not has_enabled_key:
+        # No allow-list configured yet (fresh config): start an empty list so
+        # the first enable produces [name] and the first disable is a no-op.
+        names = []
     else:
+        # Falsy explicit value (e.g. enabled: false) — start from empty.
         names = []
 
     if enabled:
