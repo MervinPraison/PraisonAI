@@ -19,6 +19,7 @@ Usage:
 """
 
 import importlib.util
+import os
 from praisonaiagents._logging import get_logger
 import sys
 from pathlib import Path
@@ -28,6 +29,51 @@ from .parser import parse_plugin_header_from_file, PluginParseError
 from ..paths import get_plugins_dir, get_project_data_dir
 
 logger = get_logger(__name__)
+
+# Maps a loaded plugin's generated module name to the tool names it harvested,
+# so unload_plugin can unregister them instead of leaking active tools.
+_loaded_plugin_tools: Dict[str, List[str]] = {}
+
+
+def _project_plugins_allowed() -> bool:
+    """Whether executing project-local single-file plugins is authorised.
+
+    Single-file plugins in ``./.praisonai/plugins/*.py`` can hook every
+    lifecycle event and intercept every tool call, so they are the most
+    privileged extension surface. They therefore share the same opt-in trust
+    gate that project-local tools use: an explicit environment flag. This
+    mirrors ``PRAISONAI_ALLOW_LOCAL_TOOLS`` for tools; a cloned repo carrying a
+    malicious ``.praisonai/plugins/exfil.py`` will not run until the user opts
+    in.
+
+    User-global plugins (``~/.praisonai/plugins/``) are treated as trusted
+    (the user placed them there themselves), matching entry-point plugins
+    installed via pip.
+    """
+    env = os.environ.get("PRAISONAI_ALLOW_PROJECT_PLUGINS", "").strip().lower()
+    if env in ("true", "1", "yes", "on"):
+        return True
+    if env in ("false", "0", "no", "off"):
+        return False
+    try:
+        from ..config.loader import get_plugins_config
+
+        return bool(getattr(get_plugins_config(), "allow_project_plugins", False))
+    except Exception:
+        return False
+
+
+def _is_project_local(path: Path) -> bool:
+    """True when ``path`` lives under the project-local plugins directory."""
+    try:
+        project_plugins = (get_project_data_dir() / "plugins").resolve()
+    except Exception:
+        return False
+    try:
+        path.resolve().relative_to(project_plugins)
+        return True
+    except ValueError:
+        return False
 
 def get_default_plugin_dirs() -> List[Path]:
     """Get default plugin directory locations.
@@ -141,7 +187,20 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
     if not path.suffix == '.py':
         logger.error(f"Plugin must be a Python file: {filepath}")
         return None
-    
+
+    # Trust gate: project-local single-file plugins are the most privileged
+    # extension surface (they can hook every lifecycle event and intercept
+    # every tool call), so refuse to exec them unless explicitly authorised —
+    # matching the opt-in required for project-local tools.
+    if _is_project_local(path) and not _project_plugins_allowed():
+        logger.warning(
+            "Refusing to load project plugin %s: set "
+            "PRAISONAI_ALLOW_PROJECT_PLUGINS=true (or plugins.allow_project_plugins "
+            "in .praisonai/config.yaml) to enable.",
+            path,
+        )
+        return None
+
     try:
         # Parse header first
         metadata = parse_plugin_header_from_file(str(path))
@@ -192,6 +251,8 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
         # Add discovered tools to metadata
         metadata["tools"] = new_tools
         metadata["module"] = module_name
+        # Remember which tools this module contributed so unload can clean up.
+        _loaded_plugin_tools[module_name] = list(new_tools)
         
         logger.info(f"Loaded plugin: {metadata['name']} (tools: {new_tools})")
         return metadata
@@ -230,17 +291,32 @@ def discover_and_load_plugins(
     return loaded
 
 def unload_plugin(module_name: str) -> bool:
-    """Unload a plugin module.
-    
-    Note: This removes the module from sys.modules but does NOT
-    unregister tools or hooks that were already registered.
-    
+    """Unload a plugin module and unregister the tools it harvested.
+
+    Removes the module from ``sys.modules`` and unregisters every tool the
+    module contributed to the global tool registry, so a disable-by-unload no
+    longer leaks active tools.
+
     Args:
         module_name: The module name (from plugin metadata)
-        
+
     Returns:
-        True if unloaded, False if not found
+        True if the module was present and unloaded, False if not found
     """
+    tools = _loaded_plugin_tools.pop(module_name, [])
+    if tools:
+        try:
+            from ..tools.registry import get_registry
+
+            registry = get_registry()
+            for tool_name in tools:
+                try:
+                    registry.unregister(tool_name)
+                except Exception as e:
+                    logger.debug(f"Failed to unregister tool '{tool_name}': {e}")
+        except Exception as e:
+            logger.debug(f"Failed to access tool registry during unload: {e}")
+
     if module_name in sys.modules:
         del sys.modules[module_name]
         return True
