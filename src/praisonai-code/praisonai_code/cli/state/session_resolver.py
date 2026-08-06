@@ -161,6 +161,36 @@ def delete_session(session_id: str, project_path: Optional[str] = None) -> bool:
     return deleted or legacy_deleted
 
 
+def rename_session(
+    session_id: str,
+    title: str,
+    project_path: Optional[str] = None,
+) -> bool:
+    """Give a session a human-readable title (Issue #3737).
+
+    Renames in the *first* canonical store carrying the id — the same store
+    :func:`resolve_session` selects — so a title is set on the exact record the
+    CLI lists/resumes. Falls back to the legacy ``SessionManager`` store for
+    legacy-only sessions so any id :func:`resolve_session` accepts is also
+    renameable (mirrors :func:`delete_session`). Returns ``True`` only when a
+    store confirms the write.
+    """
+    store = _store_for(session_id, project_path)
+    if store is not None:
+        renamer = getattr(store, "rename_session", None)
+        if renamer is not None:
+            try:
+                return bool(renamer(session_id, title))
+            except Exception:
+                return False
+        return False
+
+    # Deprecation-window fallback: a session that lives only in the legacy
+    # SessionManager store is still resolvable/listable, so it must be
+    # renameable too rather than erroring on an otherwise-manageable id.
+    return _legacy_rename(session_id, title)
+
+
 def export_session(
     session_id: str,
     format: str = "md",
@@ -258,6 +288,20 @@ def _legacy_delete(session_id: str) -> bool:
         from .sessions import get_session_manager
 
         return get_session_manager().delete(session_id)
+    except Exception:
+        return False
+
+
+def _legacy_rename(session_id: str, title: str) -> bool:
+    """Rename in the legacy ``SessionManager`` store (best-effort).
+
+    The legacy metadata already carries a ``name`` field, so an empty title
+    clears it — matching the canonical store's title semantics.
+    """
+    try:
+        from .sessions import get_session_manager
+
+        return get_session_manager().rename(session_id, title)
     except Exception:
         return False
 

@@ -234,6 +234,117 @@ def test_delete_sweeps_legacy_duplicate(project, monkeypatch):
     assert resolve_session("dup-id").found is False
 
 
+def test_rename_persists_and_lists(project):
+    """`session rename` sets a title that surfaces in `list` (Issue #3737)."""
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+    from praisonai_code.cli.state.session_resolver import rename_session
+
+    _create_project_session("sess-rename")
+
+    assert rename_session("sess-rename", "fix-auth-bug") is True
+
+    listed = {s.get("session_id"): s for s in list_project_sessions()}
+    assert listed["sess-rename"].get("title") == "fix-auth-bug"
+
+
+def test_resume_by_unrenamed_still_works(project):
+    """An un-renamed session stays resolvable/resumable by id (no title)."""
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+    from praisonai_code.cli.state.session_resolver import resolve_session
+
+    _create_project_session("sess-plain")
+
+    listed = {s.get("session_id"): s for s in list_project_sessions()}
+    assert listed["sess-plain"].get("title") is None
+    assert resolve_session("sess-plain").found is True
+
+
+def test_cli_rename_then_list_shows_title(project):
+    """End-to-end: `session rename` sets a title that `list` renders as Name."""
+    from typer.testing import CliRunner
+
+    from praisonai_code.cli.commands.session import app
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+
+    _create_project_session("sess-cli-rename")
+    runner = CliRunner()
+
+    renamed = runner.invoke(app, ["rename", "sess-cli-rename", "my-title"])
+    assert renamed.exit_code == 0, renamed.output
+
+    # The listing row carries the title; the list renderer prefers it for Name.
+    row = {s.get("session_id"): s for s in list_project_sessions()}["sess-cli-rename"]
+    assert row.get("title") == "my-title"
+
+    listed = runner.invoke(app, ["list"])
+    assert listed.exit_code == 0, listed.output
+    assert "my-title" in listed.output
+
+
+def test_cli_rename_missing_session_errors(project):
+    """Renaming an unknown id exits non-zero (Issue #3737)."""
+    from typer.testing import CliRunner
+
+    from praisonai_code.cli.commands.session import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["rename", "nope", "whatever"])
+    assert result.exit_code == 1
+
+
+def test_rename_legacy_only_session(project, monkeypatch):
+    """A legacy-only session is renameable, not just resolvable (Issue #3737).
+
+    `resolve_session` accepts legacy-only ids via the deprecation fallback, so
+    `rename_session` must reach the same store instead of erroring on an
+    otherwise-manageable conversation.
+    """
+    from praisonai_code.cli.state import sessions as sessions_mod
+    from praisonai_code.cli.state.identifiers import RunContext
+    from praisonai_code.cli.state.session_resolver import (
+        rename_session,
+        resolve_session,
+    )
+
+    legacy_dir = project / "legacy_sessions"
+    manager = sessions_mod.SessionManager(sessions_dir=legacy_dir)
+    monkeypatch.setattr(sessions_mod, "_session_manager", manager)
+
+    ctx = RunContext(run_id="legacy-rename", trace_id="t", workspace=str(project))
+    manager.create(ctx, name="Legacy")
+
+    # It resolves (so the CLI's preflight passes) — it must also rename.
+    assert resolve_session("legacy-rename").found is True
+    assert rename_session("legacy-rename", "renamed-legacy") is True
+    assert manager.get("legacy-rename").name == "renamed-legacy"
+    # The new name surfaces on the resolved view too.
+    assert resolve_session("legacy-rename").agent_name == "renamed-legacy"
+
+    # Empty title clears the name back to None (canonical parity).
+    assert rename_session("legacy-rename", "  ") is True
+    assert manager.get("legacy-rename").name is None
+
+
+def test_cli_rename_legacy_only_session_succeeds(project, monkeypatch):
+    """End-to-end: `session rename` exits 0 for a legacy-only id (Issue #3737)."""
+    from typer.testing import CliRunner
+
+    from praisonai_code.cli.commands.session import app
+    from praisonai_code.cli.state import sessions as sessions_mod
+    from praisonai_code.cli.state.identifiers import RunContext
+
+    legacy_dir = project / "legacy_sessions"
+    manager = sessions_mod.SessionManager(sessions_dir=legacy_dir)
+    monkeypatch.setattr(sessions_mod, "_session_manager", manager)
+    ctx = RunContext(run_id="legacy-cli", trace_id="t", workspace=str(project))
+    manager.create(ctx, name="Legacy")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["rename", "legacy-cli", "cli-legacy-title"])
+    assert result.exit_code == 0, result.output
+    assert manager.get("legacy-cli").name == "cli-legacy-title"
+
+
 def test_list_and_resolver_enumerate_identical_stores(project):
     """list/continue and show/delete/export enumerate the *same* stores.
 
