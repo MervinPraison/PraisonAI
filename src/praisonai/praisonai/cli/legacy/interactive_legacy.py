@@ -491,6 +491,15 @@ def _start_interactive_mode(self, args):
                             console.print(f"[cyan]Created:[/cyan] {us.created_at}")
                             console.print(f"[cyan]Updated:[/cyan] {us.updated_at}")
                             console.print(f"[cyan]Total tokens:[/cyan] {us.total_input_tokens + us.total_output_tokens}")
+                            parent_id = getattr(us, 'parent_id', None)
+                            if parent_id:
+                                console.print(f"[cyan]Forked from:[/cyan] {parent_id}")
+                            children = getattr(us, 'children_ids', None) or []
+                            if children:
+                                console.print(f"[cyan]Forks:[/cyan] {', '.join(children)}")
+                        continue
+                    elif cmd == "branch":
+                        _handle_branch_command(self, console, cmd_args, session_state)
                         continue
                     elif cmd == "history":
                         # Show conversation history
@@ -762,9 +771,11 @@ def _print_interactive_help(self, console):
     console.print("  /queue         - Show queued messages")
     console.print("  /queue clear   - Clear message queue")
     console.print("\n[bold]Session Commands:[/bold]")
-    console.print("  /session       - Show current session info")
+    console.print("  /session       - Show current session info (incl. fork lineage)")
     console.print("  /history       - Show conversation history")
     console.print("  /new           - Start a new session")
+    console.print("  /branch [title]  - Fork the conversation here; switch to the fork")
+    console.print("  /branch --at N   - Fork from N user turns back")
     console.print("\n[bold]@ Mentions:[/bold]")
     console.print("  @file.txt      - Include file content in prompt")
     console.print("  @src/          - Include directory listing")
@@ -858,6 +869,82 @@ def _process_at_mentions(self, user_input, console):
         processed_input = processed_input + "\n" + "\n".join(file_contents)
     
     return processed_input
+
+def _handle_branch_command(self, console, args, session_state):
+    """Handle /branch command - fork the current conversation mid-session.
+
+    Forks the live session at the current message index, switches the REPL to
+    the fork (announcing both ids), and keeps the parent timeline resumable.
+    ``/branch --at N`` forks from N user turns back; ``/branch <title>`` names
+    the fork.
+    """
+    store = session_state.get('session_store')
+    us = session_state.get('unified_session')
+    if not store or not us:
+        console.print("[yellow]No active session to branch from.[/yellow]")
+        return
+
+    # Parse "--at N" out of the free-form argument; the remainder is the title.
+    title = None
+    from_message_index = None
+    tokens = (args or "").split()
+    remaining = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in ("--at", "-a") and i + 1 < len(tokens):
+            try:
+                turns_back = int(tokens[i + 1])
+            except ValueError:
+                console.print("[yellow]/branch --at expects a number of turns.[/yellow]")
+                return
+            if turns_back <= 0:
+                console.print("[yellow]/branch --at expects a positive number.[/yellow]")
+                return
+            # Fork point is `turns_back` user turns back from the end: find the
+            # index of the corresponding user message and truncate there.
+            user_indices = [
+                idx for idx, m in enumerate(us.messages)
+                if m.get("role") == "user"
+            ]
+            if turns_back > len(user_indices):
+                console.print(
+                    f"[yellow]Only {len(user_indices)} user turns available; "
+                    f"cannot go {turns_back} back.[/yellow]"
+                )
+                return
+            from_message_index = user_indices[-turns_back]
+            i += 2
+        else:
+            remaining.append(tokens[i])
+            i += 1
+    if remaining:
+        title = " ".join(remaining)
+
+    forked = store.fork_session(
+        us.session_id,
+        from_message_index=from_message_index,
+        title=title,
+    )
+    if forked is None:
+        console.print("[yellow]Could not fork the current session.[/yellow]")
+        return
+
+    parent_id = us.session_id
+    # Switch the live REPL onto the fork: rebind the session and reload history
+    # so the next turn continues on the new timeline.
+    session_state['unified_session'] = forked
+    session_state['conversation_history'] = forked.get_chat_history()
+
+    console.print(
+        f"[green]✓ Branched:[/green] {parent_id} → [cyan]{forked.session_id}[/cyan]"
+    )
+    if title:
+        console.print(f"[dim]Title: {title}[/dim]")
+    console.print(
+        f"[dim]Now on fork {forked.session_id} "
+        f"({forked.message_count} messages). Parent {parent_id} kept.[/dim]"
+    )
+
 
 def _handle_model_command(self, console, args, session_state):
     """Handle /model command - show or change current model."""
