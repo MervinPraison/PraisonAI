@@ -113,6 +113,24 @@ def _coerce_bool(value: Any) -> bool:
     return False
 
 
+def _normalize_tools_list(value: Any) -> Optional[List[str]]:
+    """Normalize an allowed-tools frontmatter value to a clean list of names.
+
+    Accepts a YAML list or a comma/space separated string. Returns None when
+    empty so a command without the field is indistinguishable from before.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.replace(",", " ").split()]
+        cleaned = [p for p in parts if p]
+        return cleaned or None
+    if isinstance(value, (list, tuple)):
+        cleaned = [str(v).strip() for v in value if str(v).strip()]
+        return cleaned or None
+    return None
+
+
 # Built-in, zero-config agent presets shipped with the wrapper.
 # Resolved before user/project definitions so they can be overridden by name.
 # Each entry maps a preset name to its CustomAgent field kwargs.
@@ -216,6 +234,9 @@ class CustomCommand:
     template: str = ""
     allow_shell: bool = False  # per-command opt-in for live `!`cmd`` substitution
     source: str = "unknown"  # 'user' or 'project'
+    argument_hint: Optional[str] = None  # e.g. "<pr-number> [reviewer]" for help/preview
+    model: Optional[str] = None  # preferred model when the command runs the agent
+    tools: Optional[List[str]] = None  # allowed-tools hint for the command
 
 
 @dataclass
@@ -389,14 +410,23 @@ class CustomDefinitionsDiscovery:
         
         try:
             frontmatter, body = self._parse_markdown_frontmatter(file_path)
-            
+
+            argument_hint = frontmatter.get("argument-hint") or frontmatter.get("argument_hint")
+            tools = frontmatter.get("tools")
+            if tools is None:
+                tools = frontmatter.get("allowed-tools") or frontmatter.get("allowed_tools")
+            tools = _normalize_tools_list(tools)
+
             return CustomCommand(
                 name=name,
                 path=file_path,
                 description=frontmatter.get("description"),
                 template=body,
                 allow_shell=_coerce_bool(frontmatter.get("allow_shell", False)),
-                source=source
+                source=source,
+                argument_hint=(str(argument_hint).strip() if argument_hint else None),
+                model=(str(frontmatter["model"]).strip() if frontmatter.get("model") else None),
+                tools=tools,
             )
         
         except Exception as e:
@@ -587,6 +617,13 @@ class TemplateInterpolator:
         # Escape literal $(...) from the template.
         result = TemplateInterpolator._escape_shell_substitution(template)
 
+        # Inject positional $1..$n from the untrusted arguments. Done BEFORE
+        # $ARGUMENTS injection so it scans only the template author's text, never
+        # user-injected content; each token is escaped like $ARGUMENTS so it can
+        # never introduce shell substitution. Out-of-range positions collapse to
+        # empty, mirroring shell semantics.
+        result = TemplateInterpolator._interpolate_positional(result, arguments)
+
         # Inject untrusted $ARGUMENTS, escaping $(...) it carries so it can never
         # be executed downstream.
         safe_arguments = TemplateInterpolator._escape_shell_substitution(arguments)
@@ -600,7 +637,36 @@ class TemplateInterpolator:
             result = TemplateInterpolator._restore_shell(result, shell_outputs)
 
         return result
-    
+
+    # Positional argument reference: $1, $2, ... ($0 is not a position).
+    POSITIONAL_PATTERN = re.compile(r'\$([1-9][0-9]*)')
+
+    @staticmethod
+    def _interpolate_positional(text: str, arguments: str) -> str:
+        """Replace ``$1``..``$n`` with shell-style positional tokens.
+
+        Arguments are split on whitespace (respecting simple quoting) into
+        positional tokens; ``$1`` is the first token. Each substituted token is
+        escaped exactly like ``$ARGUMENTS`` so untrusted input can never
+        introduce ``$(...)`` shell substitution. Out-of-range positions become
+        empty strings.
+        """
+        if "$" not in text:
+            return text
+        try:
+            import shlex
+            tokens = shlex.split(arguments)
+        except ValueError:
+            tokens = arguments.split()
+
+        def replace_positional(match: "re.Match") -> str:
+            index = int(match.group(1))
+            if 1 <= index <= len(tokens):
+                return TemplateInterpolator._escape_shell_substitution(tokens[index - 1])
+            return ""
+
+        return TemplateInterpolator.POSITIONAL_PATTERN.sub(replace_positional, text)
+
     @staticmethod
     def _interpolate_files(text: str, working_dir: Optional[Path] = None) -> str:
         """Replace @file references with file contents."""
