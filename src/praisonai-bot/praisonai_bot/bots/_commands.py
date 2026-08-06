@@ -133,6 +133,7 @@ class CommandRegistry:
         self.register("model", {"description": "Switch LLM model for this session", "builtin": True})
         self.register("usage", {"description": "Show token usage and estimated cost", "builtin": True})
         self.register("compress", {"description": "Compress conversation to free context window", "builtin": True})
+        self.register("recap", {"description": "Show a 'where were we' summary of this session (read-only)", "builtin": True})
         self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
         # Learn a grounded skill from sources (codebase, docs, PDFs, or this chat)
         self.register("learn", {"description": "Learn a reusable skill from sources you describe (e.g. /learn deploy steps from this repo)", "builtin": True})
@@ -1312,6 +1313,42 @@ def handle_compress_command(
     except Exception as e:
         logger.error(f"Compression failed: {e}")
         return f"❌ Compression failed: {e}"
+
+
+def handle_recap_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /recap — a read-only session summary on demand.
+
+    Unlike /compress this never mutates the conversation or triggers
+    compaction; it only renders a "where were we" block from the user's
+    existing history so returning to a session (``--continue``, bot chats) is
+    quick to re-enter.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+        agent: Current agent instance (unused; kept for dispatch symmetry).
+
+    Returns:
+        A short recap block, or guidance when there is nothing to recap.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    history: List[Dict[str, Any]] = []
+    if hasattr(session_manager, "_histories"):
+        history = session_manager._histories.get(storage_key, []) or []
+
+    from praisonaiagents.compaction import build_recap
+
+    return build_recap(history)
 
 
 def handle_queue_command(

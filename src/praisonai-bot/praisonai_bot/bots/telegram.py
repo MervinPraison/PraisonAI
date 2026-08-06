@@ -39,6 +39,7 @@ from ._commands import (
     handle_model_command,
     handle_usage_command,
     handle_compress_command,
+    handle_recap_command,
     handle_queue_command,
     handle_learn_command,
     handle_undo_command,
@@ -1103,7 +1104,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
             response = handle_compress_command(self._session, user_id, self._agent)
             await update.message.reply_text(response)
-        
+
+        async def handle_recap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "recap"):
+                await update.message.reply_text("⛔ You are not permitted to run /recap")
+                return
+            response = handle_recap_command(self._session, user_id, self._agent)
+            await update.message.reply_text(response)
+
         async def handle_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.text:
                 return
@@ -1272,6 +1286,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("model", handle_model))
         self._application.add_handler(CommandHandler("usage", handle_usage))
         self._application.add_handler(CommandHandler("compress", handle_compress))
+        self._application.add_handler(CommandHandler("recap", handle_recap))
         self._application.add_handler(CommandHandler("queue", handle_queue))
         self._application.add_handler(CommandHandler("learn", handle_learn))
         self._application.add_handler(CommandHandler("undo", handle_undo))
