@@ -569,6 +569,10 @@ class DeferredResolver:
 
     def __init__(self) -> None:
         self._pending: Dict[str, _DeferredRegistration] = {}
+        # Values that arrived before their handle was registered. Buffered so a
+        # background job that finishes faster than the run loop registers is not
+        # lost; delivered immediately when register()/register_if_absent() runs.
+        self._early: Dict[str, Any] = {}
         self._lock = threading.Lock()
 
     def register(
@@ -580,32 +584,70 @@ class DeferredResolver:
         """Register a resolution callback for a deferred ``handle_id``.
 
         ``on_resolved`` is invoked as ``on_resolved(handle_id, value,
-        session_id)`` once :meth:`resolve` is called for the same handle.
+        session_id)`` once :meth:`resolve` is called for the same handle. If the
+        value already arrived before this call (an early resolution), the
+        callback fires immediately with the buffered value.
+        """
+        self.register_if_absent(handle_id, on_resolved, session_id)
+
+    def register_if_absent(
+        self,
+        handle_id: str,
+        on_resolved: Callable[[str, Any, Optional[str]], None],
+        session_id: Optional[str] = None,
+    ) -> bool:
+        """Atomically register only if ``handle_id`` is not already pending.
+
+        Returns ``True`` if this call stored the registration, ``False`` if a
+        registration already existed (left untouched). Prevents a check-then-set
+        race where concurrent turns replace each other's callback. If an early
+        resolution was buffered for this handle, its value is delivered
+        immediately and no registration is stored.
         """
         with self._lock:
-            self._pending[handle_id] = _DeferredRegistration(
-                on_resolved=on_resolved, session_id=session_id
+            if handle_id in self._pending:
+                return False
+            early = self._early.pop(handle_id, None)
+            if early is None:
+                self._pending[handle_id] = _DeferredRegistration(
+                    on_resolved=on_resolved, session_id=session_id
+                )
+        if early is not None:
+            self._fire(on_resolved, handle_id, early[0], session_id)
+        return True
+
+    @staticmethod
+    def _fire(
+        on_resolved: Callable[[str, Any, Optional[str]], None],
+        handle_id: str,
+        value: Any,
+        session_id: Optional[str],
+    ) -> None:
+        try:
+            on_resolved(handle_id, value, session_id)
+        except Exception as e:  # noqa: BLE001 — resolution must never crash worker
+            logger.warning(
+                "Deferred resolution callback for %s raised (non-fatal): %s",
+                handle_id, e,
             )
 
     def resolve(self, handle_id: str, value: Any) -> bool:
         """Deliver ``value`` for ``handle_id`` and drop the registration.
 
         Returns ``True`` if a matching registration was found and its callback
-        fired, ``False`` if the handle was unknown (already resolved or never
-        registered). A callback exception is swallowed and logged so a delivery
-        failure never crashes the completing worker.
+        fired, ``False`` if the handle was not yet registered. In the latter
+        case the value is buffered as an early resolution and delivered when the
+        handle is later registered, so a fast background job is never lost. A
+        callback exception is swallowed and logged so a delivery failure never
+        crashes the completing worker.
         """
         with self._lock:
             reg = self._pending.pop(handle_id, None)
+            if reg is None:
+                self._early[handle_id] = (value,)
         if reg is None:
             return False
-        try:
-            reg.on_resolved(handle_id, value, reg.session_id)
-        except Exception as e:  # noqa: BLE001 — resolution must never crash worker
-            logger.warning(
-                "Deferred resolution callback for %s raised (non-fatal): %s",
-                handle_id, e,
-            )
+        self._fire(reg.on_resolved, handle_id, value, reg.session_id)
         return True
 
     def is_pending(self, handle_id: str) -> bool:
@@ -616,9 +658,11 @@ class DeferredResolver:
     def cancel(self, handle_id: str) -> bool:
         """Drop a pending registration without resolving it.
 
-        Returns ``True`` if a registration was removed.
+        Returns ``True`` if a registration was removed. Also clears any buffered
+        early resolution for the handle.
         """
         with self._lock:
+            self._early.pop(handle_id, None)
             return self._pending.pop(handle_id, None) is not None
 
 

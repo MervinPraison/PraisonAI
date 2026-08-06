@@ -1850,22 +1850,24 @@ Respond with ONLY a valid JSON tool call in this format:
         try:
             from ..tools.call_executor import get_deferred_resolver
             resolver = get_deferred_resolver()
-            if resolver.is_pending(deferred.handle_id):
-                return
             tool_call_id = tool_result.tool_call_id
             function_name = tool_result.function_name
 
             def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
                 # Best-effort: this closure is invoked from a background worker
-                # thread; appending to the list the run loop shares makes the
-                # resolved value available on the next turn.
+                # thread; appending to the LLM's persistent ``chat_history``
+                # (the same list follow-up turns replay via _build_messages)
+                # makes the resolved value available on the next turn.
                 self.chat_history.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "content": f"[deferred:{function_name}] {value}",
                 })
 
-            resolver.register(deferred.handle_id, _reinject)
+            # Atomic: only register when not already pending, so a gateway that
+            # registered its own resolver for this handle first is never
+            # overridden and concurrent turns cannot clobber each other.
+            resolver.register_if_absent(deferred.handle_id, _reinject)
         except Exception as e:  # noqa: BLE001 — registration must never break the turn
             logging.debug("Deferred registration skipped (non-fatal): %s", e)
 

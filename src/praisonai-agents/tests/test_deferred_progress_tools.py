@@ -288,6 +288,45 @@ def test_global_resolver_helpers_end_to_end():
     assert resolver.is_pending(handle) is False
 
 
+def test_deferred_early_resolution_is_buffered_then_delivered():
+    # Background job finishes BEFORE the run loop registers the handle: the
+    # value must be buffered and delivered on registration, not discarded.
+    resolver = DeferredResolver()
+    assert resolver.resolve("job-early", "report") is False
+    assert resolver.is_pending("job-early") is False
+
+    seen = []
+    resolver.register("job-early", lambda h, v, s: seen.append((h, v, s)),
+                      session_id="s-1")
+    assert seen == [("job-early", "report", "s-1")]
+    # Buffer consumed; no lingering pending registration.
+    assert resolver.is_pending("job-early") is False
+
+
+def test_register_if_absent_is_atomic_and_no_clobber():
+    resolver = DeferredResolver()
+    first = []
+    second = []
+
+    assert resolver.register_if_absent("job-a", lambda h, v, s: first.append(v)) is True
+    # Second concurrent registration must NOT replace the first callback.
+    assert resolver.register_if_absent("job-a", lambda h, v, s: second.append(v)) is False
+
+    resolver.resolve("job-a", "ok")
+    assert first == ["ok"]
+    assert second == []
+
+
+def test_cancel_clears_buffered_early_resolution():
+    resolver = DeferredResolver()
+    assert resolver.resolve("job-c", "v") is False
+    # Cancel must drop the buffered early value so a later register gets nothing.
+    assert resolver.cancel("job-c") is False
+    seen = []
+    resolver.register("job-c", lambda h, v, s: seen.append(v))
+    assert seen == []
+
+
 def test_resolver_exported_from_tools_package():
     from praisonaiagents.tools import (
         DeferredResolver as DR,
