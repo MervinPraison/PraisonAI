@@ -29,12 +29,15 @@ def code_main(
     checkpoints: bool = typer.Option(False, "--checkpoints/--no-checkpoints", help="Auto-checkpoint the workspace before each file-mutating turn (enables in-session /undo and /revert)"),
     revert: Optional[str] = typer.Option(None, "--revert", help="Restore the workspace to a prior checkpoint (id, short id, or 'last') and exit"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
+    resume: Optional[str] = typer.Option(None, "--resume", help="Resume a session by id in headless -p mode (alias of --session for scripted multi-turn)"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent profile (applies its tools and permission/mode scope)"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
+    print_mode: bool = typer.Option(False, "--print", "-p", help="Headless one-shot: emit a clean machine-readable result (no decorations/profiling) and exit with a status-reflecting code"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output format for -p/--print: json (default) or text"),
 ):
     """
     Start terminal-native code assistant mode.
@@ -50,6 +53,9 @@ def code_main(
         praisonai code --model gpt-4o --workspace ./src
         praisonai code "Fix the bug" --file main.py
         praisonai code "What is 2+2?" --profile
+        praisonai code -p "Write a parser" --output json  # headless, machine-readable
+        praisonai code -p "Write a parser" --output text   # headless, plain text
+        praisonai code --resume <id> -p "follow-up"        # scripted multi-turn
     """
     import os
     import argparse
@@ -61,6 +67,12 @@ def code_main(
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
 
+    # --resume is a headless-friendly alias for --session so scripted multi-turn
+    # composes as `code --resume <id> -p "follow-up"`. An explicit --session
+    # still wins; otherwise the resume id feeds the same continuity path.
+    if resume and not session_id:
+        session_id = resume
+
     # Validate --thinking up front so an unknown value fails closed before any
     # work is done (consistent with MODE_RULES validation on custom agents).
     from praisonai_code.cli.features.thinking import thinking_to_budget
@@ -69,6 +81,55 @@ def code_main(
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1)
+
+    # Headless output format. Default to json when -p/--print is set so the
+    # flagship command reaches parity with `run --output json`/`chat --json`.
+    # Validate up front so an unknown value fails closed before any work.
+    output_format = (output or ("json" if print_mode else None))
+    if output_format is not None and output_format not in ("json", "text"):
+        typer.echo(
+            f"Error: unknown --output '{output_format}' (expected: json, text)",
+            err=True,
+        )
+        raise typer.Exit(1)
+    # --output only shapes the headless -p path; a bare --output without -p is a
+    # no-op today, so require -p to keep the contract explicit and scriptable.
+    if output is not None and not print_mode:
+        typer.echo("Error: --output requires -p/--print", err=True)
+        raise typer.Exit(1)
+    if print_mode and not prompt:
+        typer.echo("Error: -p/--print requires a task prompt", err=True)
+        raise typer.Exit(1)
+
+    # Fail closed on options the headless -p path cannot honor. The full
+    # ACP/LSP tool wiring and named-profile permission scope live in the
+    # interactive path; silently dropping them (as a bare early-return would)
+    # is worse than an explicit error, since tool/profile-dependent tasks would
+    # run without the tools or scope the caller asked for. Reject rather than
+    # re-implement that heavy wiring here (keeps the command lightweight).
+    # Options that ARE honored in headless mode: --model, --thinking, --verbose,
+    # --workspace, --resume/--session/--continue.
+    if print_mode:
+        _unsupported = []
+        if tools:
+            _unsupported.append("--tools")
+        if agent:
+            _unsupported.append("--agent")
+        if plan:
+            _unsupported.append("--plan")
+        if no_acp:
+            _unsupported.append("--no-acp")
+        if no_lsp:
+            _unsupported.append("--no-lsp")
+        if _unsupported:
+            typer.echo(
+                "Error: -p/--print does not support "
+                + ", ".join(_unsupported)
+                + " (headless mode runs a minimal code agent; use interactive "
+                "mode for tool/profile configuration)",
+                err=True,
+            )
+            raise typer.Exit(1)
 
     # Resolve a named agent profile (tools + permission/mode scope). The profile
     # reuses the same custom-definitions loader as `praisonai run --agent`, so a
@@ -131,7 +192,39 @@ def code_main(
         # silently keep later safe-default agents unguarded.
         os.environ.pop("PRAISONAI_TOOL_SAFETY", None)
     
-    # Handle profiling for single prompt mode
+    # Headless one-shot: emit a clean, machine-readable envelope and exit with a
+    # status-reflecting code. Routes around the decorated interactive chat path
+    # (which prints `Chat mode:`/`Prompt:` diagnostics + a profiling block and
+    # always returns None) so stdout carries only the result envelope. Reuses
+    # the existing token collector + cost tracker for usage, so no new Agent
+    # params or wrapper wiring are introduced (parity with `run --output json`).
+    #
+    # NOTE: this must run BEFORE the profiling branch below. Profiling prints a
+    # human-oriented report and always exits 0, which would violate the -p
+    # machine-readable contract if it won the race; and the two are mutually
+    # exclusive intents (diagnostic vs scriptable). Reject the combination and
+    # honor -p when both are requested.
+    if print_mode and prompt:
+        if profile or profile_deep:
+            typer.echo(
+                "Error: -p/--print (headless machine-readable) cannot be "
+                "combined with --profile/--profile-deep",
+                err=True,
+            )
+            raise typer.Exit(1)
+        _run_print_code(
+            prompt=prompt,
+            model=model,
+            verbose=verbose,
+            output_format=output_format or "json",
+            thinking_budget=thinking_budget,
+            session_id=session_id,
+            continue_session=continue_session,
+        )
+        return
+
+    # Handle profiling for single prompt mode (non-headless). Runs after the
+    # -p branch above so headless output always wins the machine-readable path.
     if prompt and (profile or profile_deep):
         _run_profiled_code(
             prompt=prompt,
@@ -141,7 +234,7 @@ def code_main(
             thinking_budget=thinking_budget,
         )
         return
-    
+
     # Warn if profiling requested without prompt (REPL mode doesn't support profiling)
     if (profile or profile_deep) and not prompt:
         typer.echo("⚠️  Profiling is only supported for single prompt mode.", err=True)
@@ -212,6 +305,190 @@ def code_main(
     else:
         # Interactive REPL mode - use _start_interactive_mode
         praison._start_interactive_mode(args)
+
+
+def _print_result_succeeded(result) -> bool:
+    """Whether a headless code result represents a genuine success.
+
+    Mirrors ``run._run_succeeded``: ``Agent.start`` collapses failures (swallowed
+    LLM/auth error, guardrail block, tool failure, ``max_iter`` without
+    completion) to a falsy result, while a real answer is a non-empty string.
+    A falsy result is a failure so ``code -p`` exits non-zero.
+    """
+    if result is None:
+        return False
+    if isinstance(result, str):
+        return bool(result.strip())
+    return True
+
+
+def _collect_print_usage(model: Optional[str]) -> dict:
+    """Return this run's ``{in, out, cost}`` usage from the token collector.
+
+    Reuses the same collector + pricing path as ``run``'s session accounting so
+    the headless envelope reports real token/cost figures without any new
+    plumbing. Best-effort: any failure yields a zeroed usage block so the
+    envelope shape is stable for scripts.
+    """
+    usage = {"in": 0, "out": 0, "cost": 0.0}
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        summary = get_token_collector().get_session_summary()
+    except Exception:
+        return usage
+
+    totals = (summary or {}).get("total_metrics") or {}
+    usage["in"] = int(totals.get("input_tokens", 0) or 0)
+    usage["out"] = int(totals.get("output_tokens", 0) or 0)
+
+    try:
+        from ..features.cost_tracker import get_pricing
+
+        by_model = (summary or {}).get("by_model") or {}
+        if by_model:
+            cost = 0.0
+            for model_name, metrics in by_model.items():
+                pricing = get_pricing(model_name or model or "default")
+                cost += pricing.calculate_cost(
+                    int((metrics or {}).get("input_tokens", 0) or 0),
+                    int((metrics or {}).get("output_tokens", 0) or 0),
+                )
+            usage["cost"] = cost
+        else:
+            pricing = get_pricing(model or "default")
+            usage["cost"] = pricing.calculate_cost(usage["in"], usage["out"])
+    except Exception:
+        usage["cost"] = 0.0
+
+    return usage
+
+
+def _run_print_code(
+    prompt: str,
+    model: Optional[str] = None,
+    verbose: bool = False,
+    output_format: str = "json",
+    thinking_budget: Optional[int] = None,
+    session_id: Optional[str] = None,
+    continue_session: bool = False,
+):
+    """Headless one-shot code run with clean stdout and a status exit code.
+
+    Builds the code agent directly (bypassing the decorated interactive path),
+    runs the prompt once, and emits a machine-readable envelope
+    ``{result, session_id, usage:{in,out,cost}, status}`` to stdout. Exit code
+    is 0 on success and 1 on failure (empty result or raised error), giving
+    scripts/CI/benchmarks a reliable signal — parity with ``run --output json``.
+    """
+    import json
+
+    try:
+        from praisonaiagents import Agent
+    except ImportError:
+        typer.echo("Error: praisonaiagents not installed", err=True)
+        raise typer.Exit(1)
+
+    # Reset per-run token accounting so the emitted usage reflects only this
+    # invocation, not any accumulated state in a reused process (REPL/test).
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        get_token_collector().reset()
+    except Exception:
+        pass
+
+    # Resolve/continue a session id so --resume/--continue compose with -p for
+    # scripted multi-turn. Best-effort: continuity is layered via the shared
+    # CLI helpers, mirroring the run path, and never blocks a headless run.
+    resolved_session = session_id
+    if resolved_session is None and continue_session:
+        try:
+            from ..state.project_sessions import find_last_session
+
+            resolved_session = find_last_session()
+        except Exception:
+            resolved_session = None
+
+    agent_config = {
+        "name": "CodeAgent",
+        "role": "Code Assistant",
+        "goal": "Help with coding tasks",
+        "verbose": verbose,
+        # A minimal output preset keeps the agent from printing its own
+        # decorations so stdout carries only our envelope.
+        "output": "minimal",
+    }
+    if model:
+        agent_config["llm"] = model
+
+    memory_cfg = None
+    if resolved_session:
+        try:
+            from ..state.project_sessions import build_cli_memory_config
+
+            memory_cfg = build_cli_memory_config(
+                session_id=resolved_session, auto_save=resolved_session
+            )
+        except Exception:
+            memory_cfg = None
+    if memory_cfg is not None:
+        agent_config["memory"] = memory_cfg
+
+    status = "ok"
+    result = None
+    error_message = None
+    try:
+        agent = Agent(**agent_config)
+        if thinking_budget is not None:
+            agent.thinking_budget = thinking_budget
+        if resolved_session:
+            try:
+                from ..state.project_sessions import apply_cli_session_continuity
+
+                apply_cli_session_continuity(
+                    agent, resolved_session, auto_save=resolved_session
+                )
+            except Exception:
+                pass
+        result = agent.start(prompt)
+    except Exception as exc:  # noqa: BLE001 - surface any failure via exit code
+        status = "error"
+        error_message = str(exc)
+
+    if status != "error" and not _print_result_succeeded(result):
+        status = "failed"
+
+    usage = _collect_print_usage(model)
+
+    if resolved_session:
+        try:
+            from ..state.project_sessions import accumulate_session_usage
+
+            accumulate_session_usage(resolved_session, model=model)
+        except Exception:
+            pass
+
+    if output_format == "text":
+        # Clean text mode: the result on stdout, errors on stderr, status via
+        # exit code — nothing else — so it pipes cleanly.
+        if result:
+            print(result)
+        if error_message:
+            typer.echo(f"Error: {error_message}", err=True)
+    else:
+        envelope = {
+            "result": str(result) if result else None,
+            "session_id": resolved_session,
+            "usage": usage,
+            "status": status,
+        }
+        if error_message:
+            envelope["error"] = error_message
+        print(json.dumps(envelope))
+
+    if status != "ok":
+        raise typer.Exit(1)
 
 
 def _run_profiled_code(
