@@ -47,7 +47,8 @@ from ._commands import (
     handle_reasoning_command,
     get_last_user_message,
     build_command_access_policy,
-    get_command_registry
+    get_command_registry,
+    build_custom_command_resolver,
 )
 from . import _automations
 from ._session import BotSessionManager
@@ -262,6 +263,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         # Get the global command registry
         self._command_registry = get_command_registry()
+
+        # File-based custom slash commands bridged into chat (Issue #3729).
+        # Consumed by the shared ChatCommandMixin for /help + dispatch; safe
+        # defaults (shell off, project-scope only) unless the ``commands``
+        # config block opts in.
+        self._custom_command_resolver = build_custom_command_resolver(self.config)
     
     def _register_interactive_handlers(self):
         """Register handlers for interactive callbacks."""
@@ -921,6 +928,65 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             handler(message)
                     except Exception as e:
                         logger.error(f"Command handler error: {e}")
+                    return
+
+                # File-based custom slash commands (Issue #3729): resolve
+                # ``.praisonai/commands/{command}.md`` and submit the rendered
+                # body as a normal chat turn. Falls through to chat on a miss.
+                text = update.message.text or ""
+                parts = text.split(maxsplit=1)
+                arguments = parts[1] if len(parts) > 1 else ""
+                rendered = self.render_custom_command(command, arguments)
+                if rendered is not None:
+                    user_name = (
+                        update.message.from_user.username
+                        or update.message.from_user.first_name
+                        or ""
+                    ) if update.message.from_user else ""
+                    try:
+                        response = await self._session.chat(
+                            self._agent, user_id, rendered,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                            user_name=user_name,
+                            message_id=str(update.message.message_id),
+                            account=getattr(self.config, "account", "default"),
+                        )
+                        # Route through the same delivery pipeline as a normal
+                        # chat turn so presentation cleanup, outbound hooks and
+                        # media/long-response handling all apply (not a bare
+                        # reply_text). Pop any agent-attached presentation first.
+                        presentation = self._session.pop_last_presentation(user_id)
+                        send_result = self.fire_message_sending(
+                            str(update.message.chat_id), str(response),
+                            reply_to=str(update.message.message_id),
+                        )
+                        if send_result["cancel"]:
+                            return
+                        await self._send_response_with_media(
+                            update.message.chat_id,
+                            send_result["content"],
+                            reply_to=update.message.message_id,
+                        )
+                        try:
+                            if presentation is not None:
+                                await self.render_presentation(
+                                    str(update.message.chat_id), presentation
+                                )
+                        except Exception as e:  # pragma: no cover — defensive
+                            logger.debug("presentation render skipped: %s", e)
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
+                        )
+                    except Exception as e:  # noqa: BLE001 - surface a friendly message
+                        logger.warning(
+                            "custom command /%s failed: %s",
+                            command,
+                            safe_log_message(e),
+                        )
+                        user_error = extract_root_cause_from_error(str(e))
+                        await update.message.reply_text(
+                            f"❌ /{command} failed: {safe_error_message(user_error)}"
+                        )
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
@@ -1223,7 +1289,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
-        
+
+        # Catch-all for any other slash command (Issue #3729): file-based and
+        # entry-point custom commands are discovered at runtime by
+        # ``_custom_command_resolver`` and are NOT registered as explicit
+        # ``CommandHandler`` instances above. Because handlers in a group are
+        # evaluated in registration order and the first match wins, this
+        # ``MessageHandler(filters.COMMAND, …)`` only ever sees slash commands
+        # that none of the built-in/registered handlers above claimed, routing
+        # them into ``handle_command`` (which renders the custom command and
+        # falls through to normal chat on a miss).
+        self._application.add_handler(
+            MessageHandler(filters.COMMAND, handle_command)
+        )
+
         self._application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
         )
@@ -2039,7 +2118,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             elif cmd in self._command_handlers:
                 # Custom commands
                 lines.append(f"/{cmd} - Custom command")
-        
+
+        # File-based / entry-point custom commands (Issue #3729): merge them in
+        # via the shared resolver so they surface in /help just like builtins.
+        # Builtins and adapter-registered handlers keep precedence (skip names
+        # already listed). Best-effort — a resolver error never breaks /help.
+        resolver = getattr(self, "_custom_command_resolver", None)
+        if resolver is not None:
+            try:
+                for name, desc in sorted(resolver.descriptions().items()):
+                    if name in all_commands:
+                        continue
+                    lines.append(f"/{name} - {desc}")
+            except Exception:  # noqa: BLE001 — /help must never raise
+                pass
+
         lines.append(f"\nAgent: {agent_name}")
         lines.append(f"Model: {model}")
         

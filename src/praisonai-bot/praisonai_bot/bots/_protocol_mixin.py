@@ -88,7 +88,59 @@ class ChatCommandMixin:
                 info for name, info in custom_all.items()
                 if name not in builtin_names
             ]
-        return builtins + custom
+        file_custom = self._file_command_infos(
+            builtin_names | {info.name for info in custom}
+        )
+        return builtins + custom + file_custom
+
+    def _file_command_infos(self, taken_names: Optional[Set[str]] = None) -> list:
+        """Return ``ChatCommandInfo`` for exposed file-based custom commands.
+
+        Bridges ``.praisonai/commands/*.md`` (and plugin-bundle commands) into
+        the merged command list (Issue #3729) via the adapter's
+        ``_custom_command_resolver`` when present. Builtins and adapter-registered
+        commands keep precedence: a file command whose name is already ``taken``
+        is skipped (builtin/registered wins, matching the code registry policy).
+        Best-effort — never raises.
+        """
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is None:
+            return []
+        taken = taken_names or set()
+        infos: list = []
+        try:
+            for name, description in resolver.descriptions().items():
+                if name in taken:
+                    logger.debug(
+                        "Custom command /%s shadowed by a builtin/registered "
+                        "command; keeping precedence.", name
+                    )
+                    continue
+                infos.append(ChatCommandInfo(name=name, description=description))
+        except Exception:  # noqa: BLE001 — help/menu must never raise
+            return []
+        return infos
+
+    def render_custom_command(
+        self, name: str, arguments: str = "", working_dir: Optional[str] = None
+    ) -> Optional[str]:
+        """Resolve a file-based custom command into a chat-turn body.
+
+        Called by an adapter's catch-all ``/name`` handler on a miss against
+        builtins/registered handlers (Issue #3729): renders
+        ``.praisonai/commands/{name}.md`` (``$ARGUMENTS``/``@file``, shell off
+        unless opted in) so it can be submitted as the user turn via the normal
+        session ``chat`` path. Returns ``None`` when no resolver is configured
+        or the command is unknown/not exposed, so the caller falls through to
+        normal chat. Best-effort — never raises.
+        """
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is None:
+            return None
+        try:
+            return resolver.render(name, arguments=arguments, working_dir=working_dir)
+        except Exception:  # noqa: BLE001 — dispatch must never raise
+            return None
 
     def is_command_allowed(self, name: str, platform: Optional[str] = None) -> bool:
         """Check if a command is allowed on the given platform."""
@@ -137,6 +189,26 @@ class ChatCommandMixin:
                 continue
             info = info_map.get(name)
             extra[name] = getattr(info, 'description', '') or "Custom command"
+
+        # File-based / entry-point custom commands (Issue #3729): include them in
+        # the native command menu so typed-``/`` autocomplete lists them too.
+        # Builtins and adapter-registered handlers keep precedence: only add a
+        # file command whose name is not already a builtin (in the registry) or
+        # an adapter-registered handler (already in ``extra``). Best-effort — a
+        # resolver error never breaks native-menu building.
+        resolver = getattr(self, '_custom_command_resolver', None)
+        if resolver is not None:
+            try:
+                builtin_names = registry.get_command_names()
+            except Exception:  # noqa: BLE001
+                builtin_names = set()
+            try:
+                for name, description in resolver.descriptions().items():
+                    if name in extra or name in builtin_names:
+                        continue
+                    extra[name] = description or "Custom command"
+            except Exception:  # noqa: BLE001 — menu building must never raise
+                pass
 
         policy = getattr(self, '_command_policy', None)
         try:

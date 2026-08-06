@@ -366,6 +366,303 @@ class CommandRegistry:
         return "\n".join(lines)
 
 
+# Entry-point group third-party packages use to contribute bot slash commands
+# without forking or writing Python against a specific adapter (Issue #3729).
+# Each entry point resolves to a mapping ``{name: template}`` /
+# ``{name: {"template": ..., "description": ..., "allow_shell": ...}}`` or a
+# zero-argument callable returning one.
+BOT_COMMANDS_ENTRY_POINT_GROUP = "praisonai.bot_commands"
+
+
+def _discover_entry_point_commands() -> Dict[str, Any]:
+    """Load programmatic bot commands from the ``praisonai.bot_commands`` group.
+
+    Mirrors the code registry's entry-point loader but yields simple
+    ``CustomCommand``-shaped records so installed packages can add bot commands
+    without forking. A broken plugin is logged and skipped so it never takes
+    down command resolution. Returns a ``{name: record}`` map where each record
+    exposes ``name``/``description``/``template``/``allow_shell``/``source``.
+    """
+    commands: Dict[str, Any] = {}
+    try:
+        from importlib.metadata import entry_points
+    except Exception:  # pragma: no cover - very old Pythons
+        return commands
+    try:
+        eps = entry_points()
+        if hasattr(eps, "select"):
+            group = eps.select(group=BOT_COMMANDS_ENTRY_POINT_GROUP)
+        else:  # pragma: no cover - legacy mapping API
+            group = eps.get(BOT_COMMANDS_ENTRY_POINT_GROUP, [])
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Bot command entry-point discovery failed: %s", exc)
+        return commands
+
+    for ep in group:
+        try:
+            obj = ep.load()
+            mapping = obj() if callable(obj) else obj
+            if not isinstance(mapping, dict):
+                continue
+            for name, spec in mapping.items():
+                if isinstance(spec, str):
+                    template, description, allow_shell = spec, None, False
+                elif isinstance(spec, dict):
+                    template = spec.get("template", "")
+                    description = spec.get("description")
+                    allow_shell = bool(spec.get("allow_shell", False))
+                else:
+                    template = getattr(spec, "template", "")
+                    description = getattr(spec, "description", None)
+                    allow_shell = bool(getattr(spec, "allow_shell", False))
+                commands[name] = _EntryPointCommand(
+                    name=name,
+                    template=template or "",
+                    description=description,
+                    allow_shell=allow_shell,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load bot command source %r: %s", ep, exc)
+    return commands
+
+
+class _EntryPointCommand:
+    """Minimal ``CustomCommand``-shaped record for an entry-point command."""
+
+    __slots__ = ("name", "template", "description", "allow_shell", "source")
+
+    def __init__(
+        self,
+        name: str,
+        template: str = "",
+        description: Optional[str] = None,
+        allow_shell: bool = False,
+    ) -> None:
+        self.name = name
+        self.template = template
+        self.description = description
+        self.allow_shell = allow_shell
+        self.source = "entrypoint"
+
+
+class CustomCommandResolver:
+    """Bridges the file-based custom-command convention into bot chats.
+
+    A command authored once in ``.praisonai/commands/{name}.md`` (or shipped by
+    a plugin bundle) should be invokable from any bot chat, not just the code
+    REPL/TUI. This resolver *consumes* the existing loader/interpolator from
+    ``praisonai-code`` (``custom_definitions``) rather than reimplementing them,
+    so there is a single command source across every surface.
+
+    Safety posture is adjusted for the unattended chat surface:
+
+    * ``allow_shell`` — live ``!`cmd``` substitution is **disabled by default**
+      regardless of a command's frontmatter; a chat message must never trigger
+      server-side shell substitution silently. Set it True per deployment to
+      opt in. When off, any ``!`cmd``` in the template is left as literal text
+      (the command still runs) rather than executing.
+    * ``expose`` — an optional allow-list of command names; when set only those
+      commands are visible in chat. When ``None`` (default) all *project*-scope
+      commands are exposed.
+    * ``include_user_scope`` — user-home (``~/.praisonai``) commands are
+      **excluded by default**; the server operator's project defines the
+      surface, not the operator's home dir.
+
+    Discovery is cached and re-scanned when the resolver is asked to (the
+    underlying loader re-discovers on ``force``). All lookups fail open: any
+    error resolving a command returns ``None`` so the adapter falls through to
+    normal chat.
+    """
+
+    def __init__(
+        self,
+        allow_shell: bool = False,
+        expose: Optional[List[str]] = None,
+        include_user_scope: bool = False,
+    ) -> None:
+        self.allow_shell = allow_shell
+        self.expose = set(expose) if expose is not None else None
+        self.include_user_scope = include_user_scope
+        self._discovery: Any = None
+
+    def _get_discovery(self) -> Any:
+        """Lazily construct the shared ``CustomDefinitionsDiscovery``.
+
+        Uses the sanctioned ``_code_bridge`` seam so the bot package never
+        hard-depends on ``praisonai-code``. Returns ``None`` when the optional
+        code package is unavailable so every caller degrades gracefully.
+        """
+        if self._discovery is not None:
+            return self._discovery
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+
+            module = import_code_module(
+                "praisonai_code.cli.features.custom_definitions"
+            )
+            self._discovery = module.CustomDefinitionsDiscovery()
+        except Exception:  # noqa: BLE001 — resolver must never raise
+            return None
+        return self._discovery
+
+    def _is_exposed(self, command: Any) -> bool:
+        """Return whether *command* may be surfaced in chat under the policy."""
+        source = getattr(command, "source", "unknown")
+        if source == "user" and not self.include_user_scope:
+            return False
+        if self.expose is not None and getattr(command, "name", None) not in self.expose:
+            return False
+        return True
+
+    def list_commands(self) -> List[Any]:
+        """Return the exposed custom commands (file + entry-point; may be empty).
+
+        File/project commands take precedence over entry-point commands on a
+        name collision (the operator's project defines the surface).
+        """
+        by_name: Dict[str, Any] = {}
+        # Entry-point commands first (lowest precedence).
+        for name, command in _discover_entry_point_commands().items():
+            if self._is_exposed(command):
+                by_name[name] = command
+        # File-based commands override entry-point ones on collision.
+        discovery = self._get_discovery()
+        if discovery is not None:
+            try:
+                discovery.discover(force=True)
+                for command in discovery.list_commands():
+                    if self._is_exposed(command):
+                        by_name[getattr(command, "name", "")] = command
+            except Exception:  # noqa: BLE001 — never break help/menu building
+                pass
+        by_name.pop("", None)
+        return list(by_name.values())
+
+    def get_command(self, name: str) -> Optional[Any]:
+        """Return the exposed command for *name*, or ``None``.
+
+        File-based commands win over entry-point commands on collision.
+        """
+        discovery = self._get_discovery()
+        if discovery is not None:
+            try:
+                discovery.discover(force=True)
+                command = discovery.get_command(name)
+            except Exception:  # noqa: BLE001
+                command = None
+            if command is not None and self._is_exposed(command):
+                return command
+        ep_command = _discover_entry_point_commands().get(name)
+        if ep_command is not None and self._is_exposed(ep_command):
+            return ep_command
+        return None
+
+    def descriptions(self) -> Dict[str, str]:
+        """Return a ``{name: description}`` map of exposed custom commands."""
+        result: Dict[str, str] = {}
+        for command in self.list_commands():
+            name = getattr(command, "name", None)
+            if not name:
+                continue
+            result[name] = getattr(command, "description", None) or "Custom command"
+        return result
+
+    def render(
+        self,
+        name: str,
+        arguments: str = "",
+        working_dir: Optional[Any] = None,
+    ) -> Optional[str]:
+        """Resolve and interpolate a custom command into a chat turn body.
+
+        Interpolation reuses the code package's ``TemplateInterpolator`` with
+        ``$ARGUMENTS`` / ``@file`` support and shell substitution forced off
+        unless ``allow_shell`` was opted in. ``@file`` references resolve
+        against *working_dir* (the chat's workspace root) with the loader's
+        existing containment checks. Returns ``None`` when the command is
+        unknown/not exposed or when the code package is unavailable.
+        """
+        command = self.get_command(name)
+        if command is None:
+            return None
+        try:
+            from praisonai_bot._code_bridge import import_code_module
+
+            module = import_code_module(
+                "praisonai_code.cli.features.custom_definitions"
+            )
+            interpolator = module.TemplateInterpolator
+            shell_error = module.ShellSubstitutionError
+        except Exception:  # noqa: BLE001
+            return None
+
+        from pathlib import Path
+
+        wd = Path(working_dir) if working_dir else None
+        template = getattr(command, "template", "") or ""
+        # Require BOTH the deployment opt-in and the command's own frontmatter
+        # to enable live shell substitution: a deployment enabling
+        # ``bots.commands.allow_shell`` must not silently upgrade a command that
+        # declared ``allow_shell: false``.
+        effective_allow_shell = self.allow_shell and bool(
+            getattr(command, "allow_shell", False)
+        )
+        try:
+            return interpolator.interpolate(
+                template,
+                arguments=arguments,
+                working_dir=wd,
+                allow_shell=effective_allow_shell,
+            )
+        except shell_error:
+            # Safe-by-default: a command carrying live ``!`cmd``` shell
+            # substitution must NOT execute in the unattended chat surface when
+            # allow_shell is off. Rather than failing the whole command, drop the
+            # ``!`` marker so the segment becomes inert backticks (no longer
+            # matched by SHELL_PATTERN) and interpolate only the safe
+            # $ARGUMENTS/@file parts.
+            inert = interpolator.SHELL_PATTERN.sub(r"`\1`", template)
+            try:
+                return interpolator.interpolate(
+                    inert,
+                    arguments=arguments,
+                    working_dir=wd,
+                    allow_shell=False,
+                )
+            except Exception:  # noqa: BLE001
+                return inert
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def build_custom_command_resolver(config: Any) -> CustomCommandResolver:
+    """Build a :class:`CustomCommandResolver` from a channel/bot config.
+
+    Reads the optional ``commands`` block (``ChannelConfigSchema.commands``):
+
+    * ``allow_shell`` (default False) — opt in to live ``!`cmd``` substitution;
+    * ``expose`` (default None → all project commands) — allow-list of names;
+    * ``include_user_scope`` (default False) — include ``~/.praisonai`` commands.
+
+    Fails open to safe defaults when the config is missing or malformed.
+    """
+    commands_cfg = getattr(config, "commands", None) if config is not None else None
+    allow_shell = False
+    expose: Optional[List[str]] = None
+    include_user_scope = False
+    if commands_cfg is not None:
+        allow_shell = bool(getattr(commands_cfg, "allow_shell", False))
+        raw_expose = getattr(commands_cfg, "expose", None)
+        if raw_expose:
+            expose = [str(n).strip() for n in raw_expose if str(n).strip()]
+        include_user_scope = bool(getattr(commands_cfg, "include_user_scope", False))
+    return CustomCommandResolver(
+        allow_shell=allow_shell,
+        expose=expose,
+        include_user_scope=include_user_scope,
+    )
+
+
 # Global command registry instance
 _global_registry = CommandRegistry()
 

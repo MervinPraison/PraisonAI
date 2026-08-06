@@ -289,6 +289,26 @@ class TtsConfigSchema(BaseModel):
     max_chars: int = Field(default=4000, ge=0)  # Skip TTS above this length (0 = no cap)
 
 
+class BotCommandsConfigSchema(BaseModel):
+    """Schema for exposing file-based custom slash commands in bot chats.
+
+    Bridges the ``.praisonai/commands/{name}.md`` convention (and plugin-bundle
+    commands) into Telegram/Slack/Discord/etc. with a safe-by-default posture:
+
+    * ``allow_shell`` — live ``!`cmd``` substitution stays **off** by default
+      regardless of a command's frontmatter, so a chat message never triggers
+      server-side shell substitution silently. Opt in per deployment.
+    * ``expose`` — optional allow-list of command names; when empty, all
+      *project*-scope commands are exposed.
+    * ``include_user_scope`` — user-home (``~/.praisonai``) commands are
+      excluded by default; the operator's project defines the surface.
+    """
+
+    allow_shell: bool = False
+    expose: List[str] = Field(default_factory=list)
+    include_user_scope: bool = False
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration.
 
@@ -328,6 +348,10 @@ class ChannelConfigSchema(BaseModel):
     outbound_resilience: Optional[OutboundResilienceSchema] = None
     delivery: Optional[DeliveryConfigSchema] = None  # Durable inbound/outbound delivery
     session: Optional[SessionConfigSchema] = None
+    # File-based custom slash commands bridged into chat (Issue #3729). When
+    # omitted, project-scope ``.praisonai/commands/*.md`` are still exposed
+    # read-only with shell substitution off; this block tunes the exposure.
+    commands: Optional[BotCommandsConfigSchema] = None
     max_history: Optional[int] = None  # Backward compatibility
     # Inbound media (Issue #2350): when a user sends a photo/document/video,
     # adapters download and validate it (SSRF-safe, magic-byte checked) and
