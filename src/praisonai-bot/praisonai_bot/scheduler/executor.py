@@ -627,10 +627,23 @@ class ScheduledAgentExecutor:
             reader.start()
             remaining = deadline - time.monotonic()
             reader.join(timeout=max(remaining, 0.0))
-            if reader.is_alive() or proc.poll() is None:
-                # Still running past the deadline → timed out.
-                timed_out = proc.poll() is None
-                if timed_out:
+            # A process that has already exited (stdout at EOF) may not have its
+            # status reaped yet, so ``proc.poll()`` can transiently return None
+            # right after a fast exit. Never infer a timeout from process state
+            # alone — only the wall-clock deadline decides. Otherwise a command
+            # that exits quickly (e.g. ``sys.exit(3)``) races into a false
+            # ``124`` kill on a loaded runner.
+            if proc.poll() is None:
+                # Give the process a brief chance to be reaped before deciding.
+                grace = deadline - time.monotonic()
+                if grace > 0:
+                    try:
+                        proc.wait(timeout=grace)
+                    except subprocess.TimeoutExpired:
+                        pass
+                if proc.poll() is None and time.monotonic() >= deadline:
+                    # Genuinely past the deadline and still running → timed out.
+                    timed_out = True
                     try:
                         if _POSIX:
                             os.killpg(os.getpgid(proc.pid), 9)

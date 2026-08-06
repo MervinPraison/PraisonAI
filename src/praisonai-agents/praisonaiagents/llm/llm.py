@@ -1829,6 +1829,48 @@ Respond with ONLY a valid JSON tool call in this format:
                 
         return False, None, iteration_count
 
+    def _register_deferred_if_any(self, tool_result: Any) -> None:
+        """Register a deferred tool result so its eventual value is not lost.
+
+        Closes the deferred loop (Issue #3716): when a tool returns
+        ``defer(handle_id=...)`` the run loop already surfaces the note (carried
+        in ``tool_result.result``); here we also register the handle on the
+        global :class:`DeferredResolver` so a later ``resolve_deferred(handle_id,
+        value)`` (fired on background completion) re-injects the result into the
+        shared ``messages`` history as a follow-up tool message.
+
+        No-op for non-deferred results, preserving existing behaviour. A gateway
+        that wants to deliver the result to an external channel can register its
+        own resolver for the same handle first — this only registers when the
+        handle is not already pending, so it never overrides that.
+        """
+        deferred = getattr(tool_result, "deferred", None)
+        if deferred is None:
+            return
+        try:
+            from ..tools.call_executor import get_deferred_resolver
+            resolver = get_deferred_resolver()
+            tool_call_id = tool_result.tool_call_id
+            function_name = tool_result.function_name
+
+            def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
+                # Best-effort: this closure is invoked from a background worker
+                # thread; appending to the LLM's persistent ``chat_history``
+                # (the same list follow-up turns replay via _build_messages)
+                # makes the resolved value available on the next turn.
+                self.chat_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"[deferred:{function_name}] {value}",
+                })
+
+            # Atomic: only register when not already pending, so a gateway that
+            # registered its own resolver for this handle first is never
+            # overridden and concurrent turns cannot clobber each other.
+            resolver.register_if_absent(deferred.handle_id, _reinject)
+        except Exception as e:  # noqa: BLE001 — registration must never break the turn
+            logging.debug("Deferred registration skipped (non-fatal): %s", e)
+
     def _finalise_on_limit(self, messages: List[Dict], response_text: str,
                            temperature: float = 0.2, **kwargs) -> str:
         """
@@ -2668,6 +2710,9 @@ Respond with ONLY a valid JSON tool call in this format:
                             for tool_call_obj, tool_result_obj in zip(tool_calls_batch, tool_results_batch):
                                 if tool_result_obj.error is not None:
                                     raise tool_result_obj.error
+                                # Register any deferred handle so its eventual
+                                # background result is re-injected, not lost.
+                                self._register_deferred_if_any(tool_result_obj)
                                 tool_result = tool_result_obj.result
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
@@ -4157,6 +4202,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                         
                         for tool_result in tool_results:
+                            # Register any deferred handle so its eventual
+                            # background result is re-injected, not lost.
+                            self._register_deferred_if_any(tool_result)
                             if tool_result.error is None:
                                 # Successful execution
                                 tool_message = self._create_tool_message(
