@@ -37,6 +37,7 @@ def code_main(
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent profile (applies its tools and permission/mode scope)"),
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
+    append_system_prompt: Optional[str] = typer.Option(None, "--append-system-prompt", help="Append text (or @file) to the system prompt for this invocation only. Env fallback: PRAISONAI_APPEND_SYSTEM_PROMPT"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     print_mode: bool = typer.Option(False, "--print", "-p", help="Headless one-shot: emit a clean machine-readable result (no decorations/profiling) and exit with a status-reflecting code"),
@@ -81,6 +82,11 @@ def code_main(
     # still wins; otherwise the resume id feeds the same continuity path.
     if resume and not session_id:
         session_id = resume
+
+    # Resolve --append-system-prompt (literal text or @file) and export it so
+    # every downstream agent-construction path appends it to the system prompt.
+    from praisonai_code.cli.utils.append_prompt import apply_append_system_prompt
+    apply_append_system_prompt(append_system_prompt)
 
     # Validate --thinking up front so an unknown value fails closed before any
     # work is done (consistent with MODE_RULES validation on custom agents).

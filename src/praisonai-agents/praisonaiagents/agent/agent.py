@@ -1909,6 +1909,15 @@ Your Role: {self.role}\n
 Your Goal: {self.goal}
         """
 
+        # Per-invocation system-prompt append (never persisted). Sourced from the
+        # PRAISONAI_APPEND_SYSTEM_PROMPT env var so every construction path (CLI
+        # code/chat/run, YAML, Python) picks it up without a new constructor
+        # param. Appended at the END of the stable prompt to preserve the
+        # prompt-cache prefix (#2993). No-op when unset/empty.
+        _append_system_prompt = os.environ.get("PRAISONAI_APPEND_SYSTEM_PROMPT")
+        if _append_system_prompt and _append_system_prompt.strip():
+            self.system_prompt = f"{self.system_prompt}\n{_append_system_prompt.strip()}"
+
         # Lazy generate unique ID when needed
         self._agent_id = None
 

@@ -109,7 +109,9 @@ class ChatMixin:
                 # Path-scoped glob rules are per-turn (they depend on the files
                 # touched so far) so they are appended after the cache, never
                 # baked into the cached base prompt.
-                return self._append_glob_rules_context(cached_prompt)
+                return self._append_system_prompt_suffix(
+                    self._append_glob_rules_context(cached_prompt)
+                )
         else:
             cache_key = None  # Don't cache when memory is enabled
             
@@ -283,7 +285,26 @@ Your Goal: {self.goal}"""
         
         # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         # Append per-turn path-scoped (glob) rules last so they are never cached.
-        return self._append_glob_rules_context(system_prompt)
+        return self._append_system_prompt_suffix(
+            self._append_glob_rules_context(system_prompt)
+        )
+
+    def _append_system_prompt_suffix(self, system_prompt):
+        """Append a per-invocation instruction from the environment.
+
+        Sourced from ``PRAISONAI_APPEND_SYSTEM_PROMPT`` (set by the CLI
+        ``--append-system-prompt`` flag or directly for CI). Appended at the
+        very END of the assembled prompt so the stable, cacheable prefix is
+        preserved (#2993). Never baked into the base-prompt cache and a no-op
+        when the variable is unset/empty.
+        """
+        if not system_prompt:
+            return system_prompt
+        import os
+        extra = os.environ.get("PRAISONAI_APPEND_SYSTEM_PROMPT")
+        if extra and extra.strip():
+            return f"{system_prompt}\n\n{extra.strip()}"
+        return system_prompt
 
     def _append_glob_rules_context(self, system_prompt):
         """Append path-scoped (activation: glob) rules for files touched this run.
