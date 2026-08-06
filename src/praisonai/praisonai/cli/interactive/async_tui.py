@@ -1382,11 +1382,11 @@ Example: /handoff code "refactor the auth module" """
                 self._update_output()
                 return
             
-            # Expand @file mentions before queueing/executing so the help's
-            # advertised "@filename to include file contents" actually runs.
-            user_input = self._process_file_mentions(user_input)
-
-            # Queue or execute prompt
+            # NOTE: @file mentions are expanded once, canonically, inside
+            # _execute_in_background (which every queued/immediate prompt flows
+            # through). Do NOT expand here as well: _process_file_mentions is not
+            # idempotent, so a second pass would re-interpret @tokens embedded in
+            # already-attached file contents and append unrequested files.
             self._queue_or_execute(user_input)
         
         @kb.add("c-c")

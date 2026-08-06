@@ -21,7 +21,13 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_async_tui_expands_at_mentions():
-    """The Enter handler must run ``_process_file_mentions`` before dispatch."""
+    """``@file`` mentions must be expanded exactly once on the execution path.
+
+    The submit flow queues the *raw* prompt; expansion happens canonically in
+    ``_execute_in_background`` via ``_process_file_mentions``. This asserts both
+    that the advertised expansion runs and that it runs only once (a second pass
+    would re-interpret ``@tokens`` inside attached file contents).
+    """
     from praisonai.cli.interactive.async_tui import AsyncTUI
 
     tui = AsyncTUI()
@@ -36,19 +42,50 @@ def test_async_tui_expands_at_mentions():
         tui.config.workspace = os.path.dirname(temp_path)
         filename = os.path.basename(temp_path)
 
+        calls = {"count": 0}
+        real_process = tui._process_file_mentions
+
+        def _counting_process(prompt):
+            calls["count"] += 1
+            return real_process(prompt)
+
+        tui._process_file_mentions = _counting_process
+
+        # Capture the fully-processed prompt handed to the LLM without running
+        # a real agent/thread.
         captured = {}
 
-        def _fake_queue(prompt):
+        def _fake_execute(prompt):
             captured["prompt"] = prompt
+            return "ok"
 
-        tui._queue_or_execute = _fake_queue
+        tui._execute_prompt = _fake_execute
 
-        # Simulate what the Enter key binding does on submit.
-        user_input = f"Check @{filename}"
-        expanded = tui._process_file_mentions(user_input)
-        tui._queue_or_execute(expanded)
+        # Drive the real background execution path synchronously.
+        import threading
 
+        real_thread = threading.Thread
+
+        class _InlineThread:
+            def __init__(self, target=None, daemon=None):
+                self._target = target
+
+            def start(self):
+                if self._target:
+                    self._target()
+
+            def join(self):
+                pass
+
+        threading.Thread = _InlineThread
+        try:
+            tui._execute_in_background(f"Check @{filename}")
+        finally:
+            threading.Thread = real_thread
+
+        # Expansion happened, and exactly once.
         assert "SENTINEL_FILE_BODY" in captured["prompt"]
+        assert calls["count"] == 1
     finally:
         os.unlink(temp_path)
 
