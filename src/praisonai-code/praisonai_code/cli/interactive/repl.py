@@ -43,6 +43,7 @@ DEFAULT_COMMANDS: Dict[str, str] = {
     "export": "Export conversation to file",
     "compact": "Toggle compact output mode",
     "multiline": "Toggle multiline input mode",
+    "btw": "Ask a side question in a throwaway context (main task untouched)",
 }
 
 
@@ -211,6 +212,10 @@ class InteractiveREPL:
             self.io.info(f"Multiline mode {mode}")
             return True
         
+        elif cmd == "btw":
+            self._handle_btw(args)
+            return True
+        
         else:
             # Not a built-in: consult the unified command registry so custom
             # .praisonai/commands/*.md commands are first-class /name commands.
@@ -309,6 +314,106 @@ class InteractiveREPL:
             self.io.tool_error(f"Error: {e}")
             return None
     
+    def _handle_btw(self, args: str) -> None:
+        """Answer a side question in a throwaway, parallel context.
+
+        ``/btw <question>`` runs the question against a fresh, read-only agent
+        with a minimal context (just the question + cwd). The main
+        conversation's ``_conversation_history`` is **never** touched, so the
+        primary task's place and momentum stay intact — that is the whole point.
+
+        Flags:
+            ``--keep``: record a one-line note of the exchange in the main
+                history (opt-in; default is fully throwaway).
+        """
+        keep = False
+        question = args.strip()
+        # Parse the opt-in --keep flag only when it is the leading option, so a
+        # legitimate question like "/btw what does --keep mean?" is untouched.
+        tokens = question.split(maxsplit=1)
+        if tokens and tokens[0] == "--keep":
+            keep = True
+            question = tokens[1].strip() if len(tokens) > 1 else ""
+
+        if not question:
+            self.io.tool_warning("Usage: /btw [--keep] <question>")
+            return
+
+        answer = self._run_side_question(question)
+        if answer is None:
+            return
+
+        # Render in a visually distinct block so it reads as a side note,
+        # not part of the main assistant transcript.
+        if self.io.console and self.io.config.pretty:
+            from rich.markdown import Markdown
+            from rich.panel import Panel
+
+            try:
+                body = Markdown(answer)
+            except Exception:
+                body = answer
+            self.io.console.print(
+                Panel(body, title="btw", border_style="magenta", padding=(0, 1))
+            )
+        else:
+            print(f"\n[btw] {answer}")
+
+        # Deliberately do NOT append the side exchange to the main history.
+        # Only record a one-line note when the user opts in with --keep.
+        if keep:
+            self._conversation_history.append({
+                "role": "note",
+                "content": f"[btw] {question}",
+            })
+
+    def _build_side_agent(self):
+        """Build a throwaway, read-only agent for side questions.
+
+        Fresh minimal context, no tools (read-only), never shares the main
+        agent's history. Reuses the existing ``Agent`` class — no new params.
+        """
+        from praisonaiagents import Agent
+
+        agent_kwargs = {
+            "name": "SideQuestionAgent",
+            "role": "Assistant",
+            "goal": "Answer a quick side question without side effects",
+            "instructions": (
+                "You are a helpful assistant answering a quick side question. "
+                "Be concise. Do not modify any files or run commands."
+            ),
+            # Explicitly disabled so a side question can never trigger the
+            # autonomous tool-using loop, regardless of ambient config.
+            "autonomy": False,
+        }
+        if self.config.model:
+            agent_kwargs["llm"] = self.config.model
+        return Agent(**agent_kwargs)
+
+    def _run_side_question(self, question: str) -> Optional[str]:
+        """Run ``question`` against a throwaway agent and return its answer."""
+        try:
+            import os
+
+            agent = self._build_side_agent()
+            prompt = f"(cwd: {os.getcwd()})\n\n{question}"
+            # Force non-streaming: in a TTY ``start()`` auto-streams and returns
+            # a generator, which would otherwise be str()'d into a repr rather
+            # than the answer. Fall back for agents that take no kwargs.
+            try:
+                response = agent.start(prompt, stream=False)
+            except TypeError:
+                response = agent.start(prompt)
+            # Defensively materialize any generator that still slips through.
+            if hasattr(response, "__iter__") and not isinstance(response, (str, bytes)):
+                response = "".join(str(chunk) for chunk in response)
+            return str(response) if response else None
+        except Exception as exc:
+            logger.exception("Error answering side question")
+            self.io.tool_error(f"btw failed: {exc}")
+            return None
+
     def run(self) -> None:
         """
         Run the interactive REPL.
