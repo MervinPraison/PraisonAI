@@ -362,6 +362,24 @@ class BackgroundRunner:
         # Block briefly to get the BackgroundTask object (not the task result).
         return future.result(timeout=5)
 
+    def cancel_task_sync(self, task_id: str) -> bool:
+        """Cancel a task from synchronous code (or an unrelated event loop).
+
+        Schedules :meth:`cancel_task` on the shared background loop where the
+        task's future lives, so the underlying execution is actually stopped
+        (not merely marked cancelled). Safe to call from within a running
+        event loop because it hops threads via ``run_coroutine_threadsafe``.
+
+        Args:
+            task_id: ID of task to cancel
+
+        Returns:
+            True if cancelled, False if not found or already completed
+        """
+        loop = _get_bg_loop()
+        future = asyncio.run_coroutine_threadsafe(self.cancel_task(task_id), loop)
+        return future.result(timeout=5)
+
     def submit_agent_sync(
         self,
         agent: Any,
@@ -451,3 +469,25 @@ def _shutdown_bg_loop():
 # Register cleanup on process exit
 import atexit
 atexit.register(_shutdown_bg_loop)
+
+
+# ── Shared process-wide runner ──────────────────────────────────────────
+
+_shared_runner: Optional["BackgroundRunner"] = None
+_shared_runner_lock = _threading.Lock()
+
+
+def get_background_runner() -> "BackgroundRunner":
+    """Return the process-wide shared :class:`BackgroundRunner`.
+
+    Interactive surfaces (REPL/TUI) and bots submit and inspect background
+    tasks through this single instance so ``/tasks`` sees the same tasks
+    regardless of which surface submitted them. Created lazily on first use.
+    """
+    global _shared_runner
+    if _shared_runner is not None:
+        return _shared_runner
+    with _shared_runner_lock:
+        if _shared_runner is None:
+            _shared_runner = BackgroundRunner()
+    return _shared_runner

@@ -46,6 +46,7 @@ from ._commands import (
     handle_sessions_command,
     handle_resume_command,
     handle_reasoning_command,
+    handle_tasks_command,
     get_last_user_message,
     build_command_access_policy,
     get_command_registry,
@@ -1237,6 +1238,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             response = handle_reasoning_command(self._session, user_id, self._agent)
             await update.message.reply_text(response)
 
+        async def handle_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "tasks"):
+                await update.message.reply_text("⛔ You are not permitted to run /tasks")
+                return
+            parts = (update.message.text or "").split(maxsplit=1)
+            args = parts[1] if len(parts) > 1 else None
+            response = handle_tasks_command(user_id, args)
+            await update.message.reply_text(response)
+
         async def handle_automations(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
@@ -1294,6 +1310,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("resume", handle_resume))
         self._application.add_handler(CommandHandler("retry", handle_retry))
         self._application.add_handler(CommandHandler("reasoning", handle_reasoning))
+        self._application.add_handler(CommandHandler("tasks", handle_tasks))
         # ``automations`` / ``blueprint`` are generic names, so let an existing
         # custom @bot.on_command handler of the same name win instead of being
         # shadowed by these built-ins (the custom loop below registers it).

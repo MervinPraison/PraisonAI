@@ -482,6 +482,9 @@ def _start_interactive_mode(self, args):
                     elif cmd == "queue":
                         _handle_queue_command(self, console, cmd_args, session_state)
                         continue
+                    elif cmd == "tasks":
+                        _handle_tasks_command(self, console, cmd_args, session_state)
+                        continue
                     elif cmd == "session":
                         # Show session info
                         us = session_state.get('unified_session')
@@ -812,6 +815,9 @@ def _print_interactive_help(self, console):
     console.print("  /revert [n]    - Roll workspace back n turns (needs checkpoints.auto)")
     console.print("  /queue         - Show queued messages")
     console.print("  /queue clear   - Clear message queue")
+    console.print("  /tasks         - List background tasks (status/progress)")
+    console.print("  /tasks <id>    - Show background task detail")
+    console.print("  /tasks cancel <id> - Cancel a background task")
     console.print("\n[bold]Session Commands:[/bold]")
     console.print("  /session       - Show current session info")
     console.print("  /history       - Show conversation history")
@@ -1369,6 +1375,45 @@ def _handle_queue_command(self, console, args, session_state):
                 display_msg = msg[:60] + "..." if len(msg) > 60 else msg
                 console.print(f"  {i}. ↳ {display_msg}")
             console.print("\n[dim]Use /queue clear to clear, /queue remove N to remove[/dim]")
+
+def _handle_tasks_command(self, console, args, session_state):
+    """
+    Handle /tasks command - inspect background tasks without leaving the session.
+
+    Usage:
+    - /tasks             - List background tasks (id, name, status, progress)
+    - /tasks <id>        - Show detail for one task (incl. result/error)
+    - /tasks cancel <id> - Cancel a running background task
+
+    Reuses the CLI ``BackgroundHandler`` renderer over the shared
+    process-wide ``BackgroundRunner`` so it shows the same tasks as
+    ``praisonai background list``.
+    """
+    import asyncio
+
+    try:
+        from praisonai.cli.features.background import BackgroundHandler
+    except Exception as e:  # pragma: no cover - defensive import guard
+        console.print(f"[yellow]Background tasks unavailable: {e}[/yellow]")
+        return
+
+    handler = BackgroundHandler()
+    args = args.strip() if args else ""
+
+    try:
+        if not args:
+            asyncio.run(handler.list_tasks())
+        elif args.lower().startswith("cancel"):
+            parts = args.split(maxsplit=1)
+            task_id = parts[1].strip() if len(parts) > 1 else ""
+            if not task_id:
+                console.print("[yellow]Usage: /tasks cancel <id>[/yellow]")
+                return
+            asyncio.run(handler.cancel_task(task_id))
+        else:
+            asyncio.run(handler.get_status(args))
+    except Exception as e:
+        console.print(f"[yellow]Error handling /tasks: {e}[/yellow]")
 
 def _run_chat_mode(self, prompt, args):
     """
