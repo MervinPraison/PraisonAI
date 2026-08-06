@@ -13,6 +13,7 @@
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" /></a>
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 <a href="https://registry.modelcontextprotocol.io/servers/io.github.MervinPraison/praisonai"><img src="https://img.shields.io/badge/MCP-Registry-blue" alt="MCP Registry" /></a>
+<a href="https://mcptoplist.com/server/io.github.MervinPraison%2Fpraisonai"><img src="https://mcptoplist.com/badge/io.github.MervinPraison%2Fpraisonai.svg" alt="MCP Toplist" /></a>
 </p>
 
 <div align="center">
