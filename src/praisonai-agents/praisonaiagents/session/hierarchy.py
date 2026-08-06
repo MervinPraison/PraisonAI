@@ -159,7 +159,9 @@ class HierarchicalSessionStore(DefaultSessionStore):
         contract so the write-abort protection is honoured here too:
 
         * File does not exist → fresh empty session.
-        * Malformed JSON → treat as corrupted; start fresh (logged).
+        * Malformed JSON → quarantine the corrupt file aside and surface the
+          event before starting fresh, so its raw bytes are not silently
+          overwritten by the next write (Issue #3715).
         * Transient ``OSError`` on an existing file → re-raise so the write
           paths (``_modify_session_locked``) abort instead of overwriting real
           history with an empty session. Previously this override swallowed
@@ -172,10 +174,19 @@ class HierarchicalSessionStore(DefaultSessionStore):
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return ExtendedSessionData.from_dict(data)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Invalid UTF-8 (``UnicodeDecodeError``) is handled alongside
+            # malformed JSON so a corrupt binary file is quarantined here too
+            # rather than propagating and matching the base-store contract.
+            quarantine_path = self._quarantine_corrupt(filepath)
             logger.error(
-                f"Session file {filepath} contains invalid JSON; starting fresh: {e}"
+                "Session file %s contains invalid JSON; quarantined to %s and "
+                "starting fresh: %s",
+                filepath,
+                quarantine_path or "<quarantine failed>",
+                e,
             )
+            self._fire_corruption_hook(session_id, str(e), quarantine_path)
             return ExtendedSessionData(session_id=session_id)
         except OSError as e:
             logger.error(

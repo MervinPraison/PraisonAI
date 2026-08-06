@@ -248,6 +248,140 @@ class TestDefaultSessionStore:
         assert data["session_id"] == "test-session"
         assert len(data["messages"]) == 1
     
+    def test_corrupt_file_quarantined_not_silently_dropped(self, temp_store):
+        """A malformed session file is quarantined aside, not silently reset.
+
+        Regression for Issue #3715: previously a corrupt JSON file was read as
+        an empty session and then overwritten by the next write, permanently
+        destroying recoverable history with only a log line. Now the raw file
+        is renamed to ``<file>.corrupt-*`` before starting fresh so the bytes
+        survive for recovery and the reset is surfaced, not silent.
+        """
+        filepath = os.path.join(temp_store.session_dir, "corrupt-session.json")
+        corrupt_bytes = b'{"session_id": "corrupt-session", "messages": ['  # truncated
+        with open(filepath, "wb") as f:
+            f.write(corrupt_bytes)
+
+        # Reading returns a fresh (empty) session so callers keep working ...
+        history = temp_store.get_chat_history("corrupt-session")
+        assert history == []
+
+        # ... but the corrupt bytes are preserved *byte-for-byte* in a quarantine
+        # file and the original path no longer holds the unusable content that a
+        # subsequent write would otherwise clobber.
+        quarantined = [
+            name
+            for name in os.listdir(temp_store.session_dir)
+            if name.startswith("corrupt-session.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        with open(
+            os.path.join(temp_store.session_dir, quarantined[0]), "rb"
+        ) as f:
+            assert f.read() == corrupt_bytes
+
+    def test_corruption_fires_persist_failed_hook(self, temp_store):
+        """A corrupt-session read surfaces via SESSION_PERSIST_FAILED (#3715)."""
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["session_id"] = event_input.session_id
+            captured["spill_path"] = event_input.spill_path
+            captured["error"] = event_input.error
+            return HookResult.allow()
+
+        hook_id = registry.register_function(
+            HookEvent.SESSION_PERSIST_FAILED, _hook
+        )
+        try:
+            filepath = os.path.join(temp_store.session_dir, "bad.json")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("not json at all }}}")
+
+            temp_store.get_chat_history("bad")
+        finally:
+            registry.unregister(hook_id)
+
+        assert captured.get("session_id") == "bad"
+        assert captured.get("spill_path")
+        assert ".corrupt-" in captured["spill_path"]
+        assert "corrupt session file" in captured.get("error", "")
+
+    def test_invalid_utf8_file_quarantined(self, temp_store):
+        """Invalid-UTF-8 bytes are quarantined, not propagated (#3715).
+
+        ``json.load`` on a non-UTF-8 file raises ``UnicodeDecodeError`` (a
+        ``ValueError`` subclass, not ``JSONDecodeError``) *before* JSON parsing.
+        It must follow the same quarantine-and-recover path rather than crashing
+        the read.
+        """
+        filepath = os.path.join(temp_store.session_dir, "binary-session.json")
+        invalid_utf8 = b"\xff\xfe\x00\x01 not valid utf-8"
+        with open(filepath, "wb") as f:
+            f.write(invalid_utf8)
+
+        # Read recovers instead of raising UnicodeDecodeError.
+        assert temp_store.get_chat_history("binary-session") == []
+
+        quarantined = [
+            name
+            for name in os.listdir(temp_store.session_dir)
+            if name.startswith("binary-session.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        with open(
+            os.path.join(temp_store.session_dir, quarantined[0]), "rb"
+        ) as f:
+            assert f.read() == invalid_utf8
+
+    def test_hierarchical_store_quarantines_corrupt_file(self, temp_store):
+        """HierarchicalSessionStore inherits the quarantine-and-surface path (#3715).
+
+        The ``ExtendedSessionData`` override is exercised directly to confirm a
+        malformed hierarchical session file is quarantined and the corruption is
+        reported via ``SESSION_PERSIST_FAILED`` with the session id, quarantine
+        path, and error.
+        """
+        from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+        from praisonaiagents.hooks.registry import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent, HookResult
+
+        store = HierarchicalSessionStore(session_dir=temp_store.session_dir)
+        registry = get_default_registry()
+        captured = {}
+
+        def _hook(event_input):
+            captured["session_id"] = event_input.session_id
+            captured["spill_path"] = event_input.spill_path
+            captured["error"] = event_input.error
+            return HookResult.allow()
+
+        hook_id = registry.register_function(
+            HookEvent.SESSION_PERSIST_FAILED, _hook
+        )
+        try:
+            filepath = os.path.join(store.session_dir, "hier-bad.json")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write('{"session_id": "hier-bad", "messages":')  # truncated
+
+            assert store.get_chat_history("hier-bad") == []
+        finally:
+            registry.unregister(hook_id)
+
+        quarantined = [
+            name
+            for name in os.listdir(store.session_dir)
+            if name.startswith("hier-bad.json.corrupt-")
+        ]
+        assert len(quarantined) == 1
+        assert captured.get("session_id") == "hier-bad"
+        assert ".corrupt-" in (captured.get("spill_path") or "")
+        assert "corrupt session file" in captured.get("error", "")
+
     def test_max_messages_limit(self):
         """Test that messages are trimmed to max limit."""
         with tempfile.TemporaryDirectory() as tmpdir:
