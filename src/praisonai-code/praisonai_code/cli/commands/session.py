@@ -119,6 +119,15 @@ def session_list(
                 self.status = data.get("status")  # Use actual status from data if available
                 self.event_count = data.get("message_count", 0)
 
+                # Fork lineage: parent id may live at the top level or in
+                # metadata depending on the store that wrote the session.
+                metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+                self.parent_id = (
+                    data.get("parent_id")
+                    or (metadata or {}).get("parent_id")
+                    or (metadata or {}).get("parent_session_id")
+                )
+
                 # Cumulative usage totals persisted per session (Issue #2421).
                 usage = data.get("usage")
                 if isinstance(usage, dict):
@@ -144,6 +153,7 @@ def session_list(
                     "total_tokens": self.total_tokens,
                     "cost": self.cost,
                     "updated_at": self.updated_at.isoformat(),
+                    "parent_id": self.parent_id,
                 }
         
         sessions = [SessionInfo(data) for data in sessions_data]
@@ -208,11 +218,13 @@ def session_list(
         output.print_info("No sessions found")
         return
     
-    headers = ["ID", "Name", "Status", "Events", "Tokens", "Cost", "Updated"]
+    headers = ["ID", "Name", "Status", "Events", "Tokens", "Cost", "Parent", "Updated"]
     rows = []
     for s in sessions:
         total_tokens = getattr(s, "total_tokens", 0) or 0
         cost = getattr(s, "cost", 0.0) or 0.0
+        parent_id = getattr(s, "parent_id", None)
+        parent_cell = (parent_id[:8] if parent_id else "-")
         rows.append([
             s.session_id[:20] + "..." if len(s.session_id) > 20 else s.session_id,
             s.name or "-",
@@ -220,6 +232,7 @@ def session_list(
             str(s.event_count),
             f"{int(total_tokens):,}" if total_tokens else "-",
             f"${float(cost):.4f}" if cost else "-",
+            parent_cell,
             s.updated_at.strftime("%Y-%m-%d %H:%M"),
         ])
     
@@ -301,6 +314,102 @@ def session_resume(
         prompt=prompt,
         model=restored.model,
         session=session_id,
+    )
+
+
+@app.command("fork")
+def session_fork(
+    session_id: str = typer.Argument(..., help="Session ID to fork from"),
+    at_message: Optional[int] = typer.Option(
+        None,
+        "--at-message",
+        help="Fork from this 0-based message index (default: full history)",
+    ),
+    title: Optional[str] = typer.Option(
+        None,
+        "--title",
+        help="Optional title for the forked session",
+    ),
+):
+    """Fork a session into a new child session, keeping both timelines.
+
+    Mirrors ``praisonai run --fork`` mid-conversation: records parent/child
+    lineage via the same ``HierarchicalSessionStore.fork_session`` substrate so
+    both the original and the fork remain listable and resumable.
+    """
+    output = get_output_controller()
+
+    from ..state.project_sessions import session_exists_anywhere
+
+    if not session_exists_anywhere(session_id):
+        output.print_error(
+            f"Session not found: {session_id}",
+            remediation="Use 'praisonai session list' to see available sessions",
+        )
+        raise typer.Exit(1)
+
+    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+    from ..utils.project import get_project_sessions_dir
+    from ..state.project_sessions import canonical_cli_stores
+
+    # A session may live in the project-scoped store or the global default
+    # store (e.g. created by the gateway/TUI). Point the hierarchical store at
+    # the directory that actually holds the session so a global-only session
+    # forks its real history instead of producing an empty fork. Resolve the
+    # directory from the *same* canonical stores ``session_exists_anywhere``
+    # searched (project first, then global) so the fork source and the
+    # existence check stay consistent.
+    #
+    # The store persists each session under a *sanitized* filename
+    # (``DefaultSessionStore._get_session_path`` replaces any char that is not
+    # alphanumeric/``-``/``_`` with ``_``). Sanitize identically here so a
+    # global-only id containing e.g. ``.`` or ``:`` still matches its real file
+    # instead of falling through to an empty project-scoped fork.
+    safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+    store_dir = str(get_project_sessions_dir())
+    for candidate in canonical_cli_stores():
+        candidate_dir = getattr(candidate, "session_dir", None)
+        if not candidate_dir:
+            continue
+        if (Path(candidate_dir) / f"{safe_id}.json").exists():
+            store_dir = str(candidate_dir)
+            break
+
+    store = HierarchicalSessionStore(store_dir)
+
+    # Reject an out-of-range ``--at-message`` up front. Without this a negative
+    # index selects an unintended slice and an oversized one silently copies the
+    # whole history while still reporting success (Python slice semantics).
+    if at_message is not None:
+        parent = store._load_extended_session(session_id, force_reload=True)
+        message_count = len(getattr(parent, "messages", []) or [])
+        if at_message < 0 or at_message >= message_count:
+            output.print_error(
+                f"--at-message {at_message} is out of range "
+                f"(session has {message_count} messages, valid 0..{max(message_count - 1, 0)})",
+                remediation="Choose a 0-based index within the session's message range",
+            )
+            raise typer.Exit(1)
+
+    forked_id = store.fork_session(
+        session_id,
+        from_message_index=at_message,
+        title=title,
+    )
+
+    if output.is_json_mode:
+        output.print_json({
+            "forked": True,
+            "parent_id": session_id,
+            "session_id": forked_id,
+            "from_message_index": at_message,
+            "title": title,
+        })
+        return
+
+    output.print_success(f"Forked session: {session_id} -> {forked_id}")
+    output.print_info(
+        f"Resume the fork with: praisonai session resume {forked_id}"
     )
 
 

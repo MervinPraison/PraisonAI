@@ -311,6 +311,81 @@ class TestUnifiedSessionStore:
         assert final.message_count == 8
 
 
+class TestUnifiedSessionFork:
+    """Tests for mid-session forking via UnifiedSessionStore.fork_session."""
+
+    @pytest.fixture
+    def temp_session_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    def _seed_parent(self, store):
+        parent = store.get_or_create("parent")
+        parent.add_user_message("first")
+        parent.add_assistant_message("reply-1")
+        parent.add_user_message("second")
+        parent.add_assistant_message("reply-2")
+        store.save(parent)
+        return store.load("parent")
+
+    def test_branch_mid_session_creates_child_and_switches(self, temp_session_dir):
+        """Fork records lineage and both sessions stay listable/loadable."""
+        store = UnifiedSessionStore(session_dir=temp_session_dir)
+        self._seed_parent(store)
+
+        fork = store.fork_session("parent", title="alt approach")
+
+        assert fork is not None
+        assert fork.session_id != "parent"
+        assert fork.parent_id == "parent"
+        assert fork.metadata.get("title") == "alt approach"
+        # Full history copied by default.
+        assert fork.message_count == 4
+
+        # Lineage recorded on both sides.
+        store._cache.clear()
+        parent = store.load("parent")
+        assert fork.session_id in parent.children_ids
+
+        # Both sessions listable and resumable.
+        listed = {s["session_id"] for s in store.list_sessions()}
+        assert "parent" in listed
+        assert fork.session_id in listed
+        assert store.load(fork.session_id) is not None
+
+    def test_branch_at_n_truncates_to_index(self, temp_session_dir):
+        """--at index truncates the fork's copied history."""
+        store = UnifiedSessionStore(session_dir=temp_session_dir)
+        self._seed_parent(store)
+
+        # Fork keeping only messages [0..1] (first user + first reply).
+        fork = store.fork_session("parent", from_message_index=1)
+
+        assert fork is not None
+        assert fork.message_count == 2
+        assert fork.messages[0]["content"] == "first"
+        assert fork.messages[1]["content"] == "reply-1"
+
+        # Parent history is untouched.
+        assert store.load("parent").message_count == 4
+
+    def test_fork_missing_parent_returns_none(self, temp_session_dir):
+        store = UnifiedSessionStore(session_dir=temp_session_dir)
+        assert store.fork_session("does-not-exist") is None
+
+    def test_lineage_persists_across_reload(self, temp_session_dir):
+        """parent_id/children_ids survive a JSON round-trip."""
+        store = UnifiedSessionStore(session_dir=temp_session_dir)
+        self._seed_parent(store)
+        fork = store.fork_session("parent")
+
+        fresh = UnifiedSessionStore(session_dir=temp_session_dir)
+        reloaded_fork = fresh.load(fork.session_id)
+        reloaded_parent = fresh.load("parent")
+        assert reloaded_fork.parent_id == "parent"
+        assert fork.session_id in reloaded_parent.children_ids
+
+
 class TestGlobalSessionStore:
     """Tests for global session store."""
     

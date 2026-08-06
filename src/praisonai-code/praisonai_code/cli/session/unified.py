@@ -67,6 +67,11 @@ class UnifiedSession:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     messages: List[Dict[str, str]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Fork lineage: the session this one was forked from (None for roots) and
+    # the child sessions forked off it. Enables `/branch` and lineage display.
+    parent_id: Optional[str] = None
+    children_ids: List[str] = field(default_factory=list)
     
     # Token and cost tracking
     total_input_tokens: int = 0
@@ -294,6 +299,15 @@ class UnifiedSessionStore:
         if incoming.workspace:
             merged.workspace = incoming.workspace
 
+        # Preserve fork lineage across concurrent writes: keep the parent
+        # pointer once set and union child ids so a fork recorded on either
+        # copy is never dropped by a merge.
+        if incoming.parent_id and not merged.parent_id:
+            merged.parent_id = incoming.parent_id
+        for child_id in incoming.children_ids:
+            if child_id not in merged.children_ids:
+                merged.children_ids.append(child_id)
+
         return merged
     
     def _acquire_exclusive_lock(self, file_obj):
@@ -478,6 +492,64 @@ class UnifiedSessionStore:
         self.save(session)
         return session
     
+    def fork_session(
+        self,
+        session_id: str,
+        from_message_index: Optional[int] = None,
+        title: Optional[str] = None,
+    ) -> Optional[UnifiedSession]:
+        """
+        Fork a session into a new child session.
+
+        Copies the parent's messages (optionally truncated at
+        ``from_message_index``) into a brand-new session, records the
+        parent/child lineage on both sides, and returns the new session. The
+        parent is left untouched so both timelines remain resumable.
+
+        Args:
+            session_id: The session to fork from.
+            from_message_index: Copy messages up to and including this index
+                (0-based). ``None`` copies the full history.
+            title: Optional title stored in the fork's metadata.
+
+        Returns:
+            The new forked ``UnifiedSession`` or ``None`` if the parent is
+            not found.
+        """
+        parent = self.load(session_id)
+        if parent is None:
+            return None
+
+        if from_message_index is None:
+            messages = [dict(m) for m in parent.messages]
+        else:
+            messages = [dict(m) for m in parent.messages[: from_message_index + 1]]
+
+        new_id = str(uuid.uuid4())[:8]
+        metadata = dict(parent.metadata)
+        if title:
+            metadata["title"] = title
+
+        forked = UnifiedSession(
+            session_id=new_id,
+            workspace=parent.workspace,
+            messages=messages,
+            metadata=metadata,
+            parent_id=session_id,
+            current_model=parent.current_model,
+        )
+        forked.set_baseline_stats()
+        self.save(forked)
+
+        # Record the child on the parent without clobbering concurrent writes:
+        # re-load, append, and save through the same merge-aware path.
+        parent = self.load(session_id)
+        if parent is not None and new_id not in parent.children_ids:
+            parent.children_ids.append(new_id)
+            self.save(parent)
+
+        return forked
+
     def delete(self, session_id: str) -> bool:
         """
         Delete a session.
@@ -519,6 +591,8 @@ class UnifiedSessionStore:
                     "updated_at": data.get("updated_at"),
                     "message_count": len(data.get("messages", [])),
                     "workspace": data.get("workspace"),
+                    "parent_id": data.get("parent_id"),
+                    "children_ids": data.get("children_ids", []),
                 })
             except Exception as e:
                 logger.warning(f"Failed to read session {path}: {e}")
