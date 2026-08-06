@@ -2169,6 +2169,19 @@ class ToolExecutionMixin:
         except ImportError:
             pass  # MCP not available
         
+        # Normalize MCP failures (returned as bare "Error: ..." strings by
+        # MCPClient.call_tool) into the same {"error": ...} dict shape used by
+        # native tools, so they participate in retry, doom-loop detection and
+        # circuit-breaking instead of looking like a successful string result.
+        def _normalize_mcp_result(res):
+            if isinstance(res, str) and res.startswith("Error: "):
+                message = res[len("Error: "):]
+                error_dict = {"error": message}
+                if "timed out" in message:
+                    error_dict["timeout"] = True
+                return error_dict
+            return res
+
         # Helper function to execute MCP tool
         def _execute_mcp_tool(mcp_instance, func_name, args):
             """Execute a tool from an MCP instance."""
@@ -2206,7 +2219,7 @@ class ToolExecutionMixin:
             logging.debug(f"Looking for MCP tool {function_name}")
             found, result = _execute_mcp_tool(self.tools, function_name, arguments)
             if found:
-                return result
+                return _normalize_mcp_result(result)
         
         # Check if tools is a list that may contain MCP instances
         if isinstance(self.tools, (list, tuple)):
@@ -2215,7 +2228,7 @@ class ToolExecutionMixin:
                     logging.debug(f"Looking for MCP tool {function_name} in MCP instance")
                     found, result = _execute_mcp_tool(tool, function_name, arguments)
                     if found:
-                        return result
+                        return _normalize_mcp_result(result)
 
         # Try to find the function in the agent's tools list first
         func = None

@@ -928,12 +928,39 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             editor_output = False
             tool_output_limit = DEFAULT_TOOL_OUTPUT_LIMIT
         
+        # Output modes (editor/trace/status) register callbacks on the same
+        # process-wide, event-type-keyed registry in main.py, so they are
+        # mutually exclusive at the process level. If a *different* mode is
+        # already active (e.g. a prior Agent enabled it), we must not clobber
+        # its callbacks — that would silently route this agent's events through
+        # the other mode's sink (wrong formatting/redaction). First mode wins.
+        def _any_output_mode_enabled():
+            try:
+                from ..output.editor import is_editor_output_enabled
+                if is_editor_output_enabled():
+                    return True
+            except ImportError:
+                pass
+            try:
+                from ..output.trace import is_trace_output_enabled
+                if is_trace_output_enabled():
+                    return True
+            except ImportError:
+                pass
+            try:
+                from ..output.status import is_status_output_enabled
+                if is_status_output_enabled():
+                    return True
+            except ImportError:
+                pass
+            return False
+
         # Enable editor output mode if configured (beginner-friendly, takes priority)
         # Shows: Step 1: 📄 Creating file: path → ✓ Done
         if editor_output:
             try:
                 from ..output.editor import enable_editor_output, is_editor_output_enabled
-                if not is_editor_output_enabled():
+                if not is_editor_output_enabled() and not _any_output_mode_enabled():
                     enable_editor_output(use_color=True)
             except ImportError:
                 pass  # Editor module not available
@@ -942,7 +969,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif status_trace:
             try:
                 from ..output.trace import enable_trace_output, is_trace_output_enabled
-                if not is_trace_output_enabled():
+                if not is_trace_output_enabled() and not _any_output_mode_enabled():
                     enable_trace_output(use_color=True, show_timestamps=True)
             except ImportError:
                 pass  # Trace module not available
@@ -951,7 +978,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif actions_trace:
             try:
                 from ..output.status import enable_status_output, is_status_output_enabled
-                if not is_status_output_enabled():
+                if not is_status_output_enabled() and not _any_output_mode_enabled():
                     output_format = "jsonl" if json_output else "text"
                     # simple_output=True means status preset (no timestamps)
                     # metrics=True means debug preset (show token/cost info)

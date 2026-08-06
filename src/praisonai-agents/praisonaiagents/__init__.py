@@ -143,9 +143,9 @@ _LAZY_IMPORTS = {
     'has_toolset': ('praisonaiagents.toolsets', 'has_toolset'),
 
     # Model-family-aware harness (base prompt + edit-format selection)
-    'HarnessProfile': ('praisonaiagents.model_harness', 'HarnessProfile'),
-    'resolve_harness': ('praisonaiagents.model_harness', 'resolve_harness'),
-    'register_profile': ('praisonaiagents.model_harness', 'register_profile'),
+    'HarnessProfile': ('praisonaiagents.model_harness.profiles', 'HarnessProfile'),
+    'resolve_harness': ('praisonaiagents.model_harness.profiles', 'resolve_harness'),
+    'register_profile': ('praisonaiagents.model_harness.profiles', 'register_profile'),
 
     # Run outcomes - typed validation and agent execution results
     'AgentRunOutcome': ('praisonaiagents.run_outcome', 'AgentRunOutcome'),
