@@ -11,10 +11,19 @@ Format:
     Author: Your Name
     Hooks: before_tool, after_tool
     Dependencies: requests, aiohttp
+    Channels: telegram, slack
+    Provides: get_weather, send_email
+    Config: api_key, timeout
+    Auto Enable When Configured: TELEGRAM_TOKEN
     '''
 
 This is the SIMPLEST possible plugin format - just a Python file
 with a docstring header at the top.
+
+The optional ``Channels``/``Provides``/``Config``/``Auto Enable When
+Configured`` fields form a static capability manifest: they let discovery,
+config validation and capability gating read *what a plugin offers* WITHOUT
+importing its runtime (the header is parsed as plain text).
 """
 
 import re
@@ -38,6 +47,11 @@ class PluginMetadata:
     hooks: List[str] = field(default_factory=list)
     dependencies: List[str] = field(default_factory=list)
     path: Optional[str] = None
+    # Static capability manifest (read without importing the plugin's runtime):
+    channels: List[str] = field(default_factory=list)
+    provides: List[str] = field(default_factory=list)
+    config: List[str] = field(default_factory=list)
+    auto_enable_when_configured: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -49,6 +63,10 @@ class PluginMetadata:
             "hooks": self.hooks,
             "dependencies": self.dependencies,
             "path": self.path,
+            "channels": self.channels,
+            "provides": self.provides,
+            "config": self.config,
+            "auto_enable_when_configured": self.auto_enable_when_configured,
         }
 
 
@@ -107,7 +125,25 @@ def parse_plugin_header(content: str) -> Dict[str, Any]:
         "hooks": "hooks",
         "dependencies": "dependencies",
         "deps": "dependencies",
+        # Static capability manifest fields (no import required to read):
+        "channels": "channels",
+        "provides": "provides",
+        "provides_tools": "provides",
+        "tools": "provides",
+        "config": "config",
+        "config_schema": "config",
+        "auto enable when configured": "auto_enable_when_configured",
+        "auto_enable_when_configured": "auto_enable_when_configured",
     }
+
+    list_fields = (
+        "hooks",
+        "dependencies",
+        "channels",
+        "provides",
+        "config",
+        "auto_enable_when_configured",
+    )
     
     for line in docstring.strip().split('\n'):
         line = line.strip()
@@ -123,7 +159,7 @@ def parse_plugin_header(content: str) -> Dict[str, Any]:
         field_name = field_mapping.get(key)
         if field_name:
             # Handle list fields (comma-separated)
-            if field_name in ("hooks", "dependencies"):
+            if field_name in list_fields:
                 if value:
                     metadata[field_name] = [v.strip() for v in value.split(',') if v.strip()]
                 else:
@@ -193,4 +229,8 @@ def create_plugin_metadata(data: Dict[str, Any]) -> PluginMetadata:
         hooks=data.get("hooks", []),
         dependencies=data.get("dependencies", []),
         path=data.get("path"),
+        channels=data.get("channels", []),
+        provides=data.get("provides", []),
+        config=data.get("config", []),
+        auto_enable_when_configured=data.get("auto_enable_when_configured", []),
     )
