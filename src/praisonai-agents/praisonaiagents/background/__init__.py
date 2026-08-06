@@ -40,6 +40,8 @@ __all__ = [
     "TaskStatus",
     # Configuration
     "BackgroundConfig",
+    # Shared runner accessor
+    "get_background_runner",
 ]
 
 
@@ -60,5 +62,9 @@ def __getattr__(name: str):
     if name == "BackgroundConfig":
         from .config import BackgroundConfig
         return BackgroundConfig
+    
+    if name == "get_background_runner":
+        from .runner import get_background_runner
+        return get_background_runner
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

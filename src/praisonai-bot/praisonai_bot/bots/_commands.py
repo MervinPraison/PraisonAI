@@ -142,6 +142,8 @@ class CommandRegistry:
         self.register("resume", {"description": "Resume a saved session: /resume <id>", "builtin": True})
         self.register("retry", {"description": "Retry your last message", "builtin": True})
         self.register("reasoning", {"description": "Toggle whether extended-thinking output is shown", "builtin": True})
+        # Background task visibility from inside the chat session
+        self.register("tasks", {"description": "List background tasks and their status (/tasks <id> for detail)", "builtin": True})
         # Consent-first automation suggestions & blueprints (accept/dismiss in chat)
         self.register("automations", {"description": "List and accept/dismiss suggested automations", "builtin": True})
         self.register("blueprint", {"description": "Create an automation from a template: /blueprint <name> [slot=value ...]", "builtin": True})
@@ -1134,6 +1136,102 @@ def handle_learn_command(
         return str(result) if result else "✅ Skill authored."
     except Exception as e:  # noqa: BLE001 - surface a friendly message
         return f"❌ Could not learn skill: {e}"
+
+
+def handle_tasks_command(
+    user_id: str,
+    args: Optional[str] = None,
+    runner: Optional[Any] = None,
+) -> str:
+    """Handle /tasks to inspect background tasks from inside a chat session.
+
+    Surfaces the already-complete ``BackgroundRunner`` substrate with a
+    chat-friendly compact rendering. Tasks are scoped to the requesting user:
+    only tasks whose ``metadata["user_id"]`` matches (or that carry no owner)
+    are shown, so one user can never enumerate another's background work.
+
+    Usage:
+    - ``/tasks``            list this user's background tasks
+    - ``/tasks <id>``       show detail (incl. result/error tail) for one task
+    - ``/tasks cancel <id>`` cancel a running task
+
+    Args:
+        user_id: The requesting user's identifier (owner scope).
+        args: Optional argument string (an id, or ``cancel <id>``).
+        runner: Optional ``BackgroundRunner`` (defaults to the shared one).
+
+    Returns:
+        A compact, chat-friendly text response.
+    """
+    if runner is None:
+        try:
+            from praisonaiagents.background import get_background_runner
+
+            runner = get_background_runner()
+        except Exception as e:  # noqa: BLE001
+            return f"❌ Background tasks unavailable: {e}"
+
+    def _owned(task: Dict[str, Any]) -> bool:
+        owner = (task.get("metadata") or {}).get("user_id")
+        return owner is None or str(owner) == str(user_id)
+
+    arg = (args or "").strip()
+
+    # Cancel path.
+    if arg.lower().startswith("cancel"):
+        parts = arg.split(maxsplit=1)
+        task_id = parts[1].strip() if len(parts) > 1 else ""
+        if not task_id:
+            return "ℹ️ Usage: /tasks cancel <id>"
+        try:
+            task = runner.get_task(task_id)
+        except Exception:  # noqa: BLE001
+            task = None
+        if task is None or not _owned(task.to_dict()):
+            return f"❌ Task not found: {task_id}"
+        try:
+            task.cancel()
+        except Exception as e:  # noqa: BLE001
+            return f"❌ Could not cancel task {task_id}: {e}"
+        return f"✅ Cancelled task {task_id}."
+
+    # Detail path.
+    if arg:
+        try:
+            task = runner.get_task(arg)
+        except Exception:  # noqa: BLE001
+            task = None
+        if task is None or not _owned(task.to_dict()):
+            return f"❌ Task not found: {arg}"
+        t = task.to_dict()
+        lines = [
+            f"🧩 Task {t.get('id')} — {t.get('name') or 'unnamed'}",
+            f"Status: {t.get('status')}  |  Progress: {t.get('progress', 0) * 100:.0f}%",
+        ]
+        if t.get("error"):
+            lines.append(f"Error: {str(t.get('error'))[:200]}")
+        elif t.get("result") is not None:
+            lines.append(f"Result: {str(t.get('result'))[:200]}")
+        return "\n".join(lines)
+
+    # List path.
+    try:
+        tasks = [t for t in runner.list_tasks() if _owned(t)]
+    except Exception as e:  # noqa: BLE001
+        return f"❌ Could not list tasks: {e}"
+
+    if not tasks:
+        return "💤 No background tasks."
+
+    lines = ["🧩 Background tasks:"]
+    for t in tasks[:20]:
+        progress = f"{t.get('progress', 0) * 100:.0f}%"
+        lines.append(
+            f"• {t.get('id')} {t.get('name') or 'unnamed'} — "
+            f"{t.get('status')} ({progress})"
+        )
+    lines.append("\nUse /tasks <id> for detail or /tasks cancel <id>.")
+    return "\n".join(lines)
 
 
 def handle_undo_command(

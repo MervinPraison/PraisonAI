@@ -451,3 +451,25 @@ def _shutdown_bg_loop():
 # Register cleanup on process exit
 import atexit
 atexit.register(_shutdown_bg_loop)
+
+
+# ── Shared process-wide runner ──────────────────────────────────────────
+
+_shared_runner: Optional["BackgroundRunner"] = None
+_shared_runner_lock = _threading.Lock()
+
+
+def get_background_runner() -> "BackgroundRunner":
+    """Return the process-wide shared :class:`BackgroundRunner`.
+
+    Interactive surfaces (REPL/TUI) and bots submit and inspect background
+    tasks through this single instance so ``/tasks`` sees the same tasks
+    regardless of which surface submitted them. Created lazily on first use.
+    """
+    global _shared_runner
+    if _shared_runner is not None:
+        return _shared_runner
+    with _shared_runner_lock:
+        if _shared_runner is None:
+            _shared_runner = BackgroundRunner()
+    return _shared_runner
