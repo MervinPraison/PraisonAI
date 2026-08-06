@@ -70,6 +70,7 @@ class InteractiveREPL:
         self._total_tokens = 0
         self._total_cost = 0.0
         self._registry = None  # Unified command registry (lazy)
+        self._pending_context: List[str] = []  # `!!cmd` output for next turn
         
         # Setup commands
         self.io.add_commands(DEFAULT_COMMANDS)
@@ -233,11 +234,52 @@ class InteractiveREPL:
             self.io.info("Type /help for available commands")
             return True
     
+    def _handle_shell_escape(self, user_input: str) -> None:
+        """Handle a ``!cmd`` (or ``!!cmd``) shell escape.
+
+        Runs the command through the shared gated executor and renders its
+        output inline. ``!!cmd`` additionally stashes the output so it is
+        attached as context on the next model turn. This never consumes a model
+        turn.
+        """
+        attach = user_input.startswith("!!")
+        command = user_input[2:] if attach else user_input[1:]
+
+        try:
+            from ..features.custom_definitions import run_shell_escape
+        except Exception as exc:  # pragma: no cover - defensive
+            self.io.tool_error(f"Shell escape unavailable: {exc}")
+            return
+
+        result = run_shell_escape(command)
+
+        if not result.enabled:
+            self.io.info(result.output)
+            return
+
+        if result.output:
+            if result.error:
+                self.io.tool_error(result.output)
+            else:
+                self.io.info(result.output)
+
+        if attach and not result.error:
+            self._pending_context.append(
+                f"$ {result.command}\n{result.output}"
+            )
+            self.io.success("Output attached as context for the next message.")
+
     def _execute_prompt(self, prompt: str) -> Optional[str]:
         """Execute a prompt and return the response."""
         try:
             agent = self._get_agent()
-            
+
+            # Prepend any `!!cmd` shell output stashed for this turn.
+            if self._pending_context:
+                context = "\n\n".join(self._pending_context)
+                prompt = f"[shell output]\n{context}\n\n{prompt}"
+                self._pending_context = []
+
             # Add to history
             self._conversation_history.append({
                 "role": "user",
@@ -290,6 +332,11 @@ class InteractiveREPL:
                 user_input = self.io.get_input("You: ").strip()
                 
                 if not user_input:
+                    continue
+                
+                # Handle `!cmd` shell escape (does not consume a model turn)
+                if user_input.startswith("!"):
+                    self._handle_shell_escape(user_input)
                     continue
                 
                 # Handle slash commands
