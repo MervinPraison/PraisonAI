@@ -20,6 +20,32 @@ logger = logging.getLogger(__name__)
 # collect a fire-and-forget task before it runs. Entries drop out on completion.
 _BACKGROUND_TASKS: "weakref.WeakSet" = weakref.WeakSet()
 
+# Bound in-process state so an unauthenticated flood cannot exhaust memory.
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive-int limit from the environment.
+
+    ``asyncio.Queue(maxsize<=0)`` is *unbounded*, so a stray ``0``/``-1`` here
+    would silently defeat the memory bound. Fall back to ``default`` on any
+    non-positive or unparsable value rather than fail-open into an unbounded
+    queue.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s must be a positive integer (got %d); using default %d", name, value, default)
+        return default
+    return value
+
+
+_MAX_SUBS = _positive_int_env("PRAISONAI_A2U_MAX_SUBS", 1024)
+_QUEUE_MAX = _positive_int_env("PRAISONAI_A2U_QUEUE_MAX", 1000)
+
 
 @dataclass
 class A2UEvent:
@@ -86,6 +112,9 @@ class A2UEventBus:
         Returns:
             A2USubscription object
         """
+        if len(self._subscriptions) >= _MAX_SUBS:
+            raise RuntimeError("A2U subscription limit reached")
+
         subscription_id = f"sub-{uuid.uuid4().hex[:12]}"
         subscription = A2USubscription(
             subscription_id=subscription_id,
@@ -110,7 +139,7 @@ class A2UEventBus:
         Deferred creation for Python 3.9 compatibility.
         """
         if subscription_id not in self._queues:
-            self._queues[subscription_id] = asyncio.Queue()
+            self._queues[subscription_id] = asyncio.Queue(maxsize=_QUEUE_MAX)
         return self._queues[subscription_id]
     
     def unsubscribe(self, subscription_id: str) -> bool:
@@ -154,11 +183,21 @@ class A2UEventBus:
             return 0
         
         count = 0
-        for sub_id in self._streams[stream_name]:
+        for sub_id in list(self._streams[stream_name]):
             subscription = self._subscriptions.get(sub_id)
             if subscription and subscription.matches_event(event):
-                await self._get_queue(sub_id).put(event)
-                count += 1
+                queue = self._get_queue(sub_id)
+                try:
+                    # Non-blocking put with a bounded queue: a slow/stalled
+                    # consumer drops events instead of growing memory without
+                    # bound (which would let one hung socket OOM the process).
+                    queue.put_nowait(event)
+                    count += 1
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "A2U queue full for %s — dropping event %s",
+                        sub_id, event.event_type,
+                    )
         
         logger.debug(f"Published event {event.event_type} to {count} subscribers")
         return count
@@ -278,7 +317,24 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
         """
         auth_token = os.environ.get("A2U_AUTH_TOKEN")
         if not auth_token:
-            # No token configured — auth disabled (development mode)
+            # No token configured. Allow only loopback binds (development);
+            # refuse to serve unauthenticated traffic on any public bind so a
+            # forgotten env var cannot silently expose the live event stream.
+            #
+            # The unified server records its chosen bind address in
+            # ``PRAISONAI_CALL_BIND_HOST``; honour an explicit
+            # ``PRAISONAI_A2U_BIND_HOST`` override first. When neither is set the
+            # bind host is unknown — fail closed rather than assuming loopback.
+            bind_host = (
+                os.getenv("PRAISONAI_A2U_BIND_HOST")
+                or os.getenv("PRAISONAI_CALL_BIND_HOST")
+            )
+            if bind_host is None or bind_host not in {"127.0.0.1", "::1", "localhost"}:
+                return JSONResponse(
+                    {"error": "A2U_AUTH_TOKEN not configured; "
+                              "refusing non-loopback traffic"},
+                    status_code=503,
+                )
             return None
         
         auth_header = request.headers.get("authorization", "")
@@ -328,7 +384,10 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
         stream_name = body.get("stream", "events")
         filters = body.get("filters", [])
         
-        subscription = bus.subscribe(stream_name, filters)
+        try:
+            subscription = bus.subscribe(stream_name, filters)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=429)
         
         base_url = str(request.url).rsplit("/", 1)[0]
         
@@ -366,7 +425,10 @@ def create_a2u_routes(app: Any, event_bus: Optional[A2UEventBus] = None) -> None
         stream_name = request.path_params.get("stream_name", "events")
         
         # Create subscription for this stream
-        subscription = bus.subscribe(stream_name)
+        try:
+            subscription = bus.subscribe(stream_name)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=429)
         
         async def event_generator():
             try:

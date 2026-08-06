@@ -73,6 +73,16 @@ def multiedit(
         return result
     filepath = safe_path
 
+    # Refuse to overwrite protected files even when they sit inside the
+    # workspace root (.env, wallet.json, audit.jsonl, praisonaiagents/**, …).
+    from praisonai.security import is_protected, get_protection_reason
+
+    if is_protected(filepath):
+        result["error"] = (
+            f"Refusing to edit protected path: {get_protection_reason(filepath)}"
+        )
+        return result
+
     # Validate inputs
     if not os.path.exists(filepath):
         result["error"] = f"File not found: {filepath}"
