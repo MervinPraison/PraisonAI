@@ -1131,7 +1131,7 @@ def run_main(
     # Resolve --append-system-prompt (literal text or @file) and export it so
     # every downstream agent-construction path appends it to the system prompt.
     from ..utils.append_prompt import apply_append_system_prompt
-    apply_append_system_prompt(append_system_prompt)
+    resolved_append_prompt = apply_append_system_prompt(append_system_prompt)
 
     # Merge config-declared instruction sources (layered global→project) with
     # repeatable ``--instructions`` flags so both the prompt and profiled run
@@ -1408,6 +1408,7 @@ def run_main(
             thinking_budget=thinking_budget,
             allow_local_tools=allow_local_tools,
             instructions=merged_instructions,
+            append_system_prompt=resolved_append_prompt,
         )
         return
     
@@ -1591,6 +1592,7 @@ def run_main(
                 allow_local_tools=allow_local_tools,
                 isolated=worktree,
                 instructions=merged_instructions,
+                append_system_prompt=resolved_append_prompt,
             )
 
 
@@ -1757,6 +1759,7 @@ def _run_prompt(
     allow_local_tools: bool = False,
     isolated: bool = False,
     instructions: Optional[List[str]] = None,
+    append_system_prompt: Optional[str] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -1841,11 +1844,17 @@ def _run_prompt(
         # Isolated (--worktree) runs must stay in-process: the warm runtime is a
         # separate process whose cwd we can't redirect into the worktree, so
         # attaching would run the task outside the isolated branch.
+        # A per-invocation --append-system-prompt must also stay in-process: the
+        # warm runtime is a separate process that never received the CLI's
+        # PRAISONAI_APPEND_SYSTEM_PROMPT export, and it reuses a cached agent
+        # whose system prompt is already assembled — so attaching would silently
+        # drop the requested suffix. The in-process path applies it correctly.
         stateful_attach = bool(session_id) and not fork
         runtime_eligible = (
             (no_save or stateful_attach)
             and thinking_budget is None
             and not isolated
+            and not append_system_prompt
             and not any([
                 mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
                 memory, permissions_config, fork, instructions,
