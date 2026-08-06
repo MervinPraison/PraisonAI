@@ -104,6 +104,55 @@ def test_invalid_on_error():
         team.start_for_each(inputs=[{"name": "Ada"}], on_error="nope")
 
 
+def test_invalid_input_item_continue(monkeypatch):
+    team = _make_team()
+    monkeypatch.setattr(team, "start", lambda **k: "ok")
+
+    result = team.start_for_each(inputs=[123, {"name": "Ada"}], on_error="continue")
+
+    assert result["items"][0]["success"] is False
+    assert "must be a dict" in result["items"][0]["error"]
+    assert result["items"][1]["success"] is True
+
+
+def test_invalid_input_item_fail_fast():
+    team = _make_team()
+    with pytest.raises(ValueError):
+        team.start_for_each(inputs=[123], on_error="fail_fast")
+
+
+def test_two_item_lifecycle_reset(monkeypatch):
+    """Regression: without resetting task state, item 2 would reuse item 1's
+    completed result. Exercise the real task loop by stubbing execute_task."""
+    team = _make_team()
+    task = next(iter(team.tasks.values()))
+    original_status = task.status
+
+    calls = []
+
+    class _Output:
+        def __init__(self, raw):
+            self.raw = raw
+            self.description = task.description
+
+    def fake_execute_task(task_id):
+        name = team.tasks[task_id].variables.get("name")
+        calls.append(name)
+        return _Output(f"bio for {name}")
+
+    monkeypatch.setattr(team, "execute_task", fake_execute_task)
+    monkeypatch.setattr(team, "completion_checker", lambda t, r: True)
+
+    result = team.start_for_each(inputs=[{"name": "Ada"}, {"name": "Bob"}])
+
+    # Both items must actually execute (no skip due to stale "completed")
+    assert calls == ["Ada", "Bob"]
+    assert result["succeeded"] == 2
+    # Task run state restored after the batch
+    assert task.status == original_status
+    assert task.variables in (None, {})
+
+
 def test_astart_for_each_maps_inputs(monkeypatch):
     import asyncio
 
