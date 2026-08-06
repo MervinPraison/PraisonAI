@@ -12,6 +12,7 @@ il = pytest.importorskip(
     reason="interactive_legacy requires optional CLI dependencies",
 )
 
+import praisonaiagents.background.runner as _bg_runner
 from praisonaiagents.background import get_background_runner, TaskStatus
 from praisonaiagents.background.task import BackgroundTask
 
@@ -30,10 +31,16 @@ class _CapturingConsole:
 
 @pytest.fixture(autouse=True)
 def _clear_shared_runner():
+    # Fully reset the process-wide singleton so these tests are isolated from
+    # any background tasks other files scheduled on the shared daemon loop
+    # (xdist ``--dist loadfile`` keeps a worker's process alive across files).
+    # Rebuilding the runner guarantees ``_handle_tasks_command`` resolves the
+    # same empty instance we seed below, rather than a polluted one.
+    _bg_runner._shared_runner = None
     runner = get_background_runner()
     runner._tasks.clear()
     yield
-    runner._tasks.clear()
+    _bg_runner._shared_runner = None
 
 
 def test_tasks_lists_background_tasks_in_repl(capsys):
