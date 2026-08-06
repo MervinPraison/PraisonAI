@@ -13,17 +13,27 @@ app = typer.Typer(
 )
 
 
-def _resolve_installer():
+def _resolve_installer(global_env: bool = False):
     """Resolve the installer command, honouring how PraisonAI was installed.
 
     Prefers ``uv pip`` when the ``uv`` binary is available, otherwise falls
     back to ``<python> -m pip`` for the active interpreter.
+
+    The ``uv`` branch pins ``--python <sys.executable>`` so the package lands
+    in the interpreter running the CLI rather than an unrelated environment
+    ``uv`` might auto-discover (``VIRTUAL_ENV`` / ``CONDA_PREFIX`` / nearby
+    ``.venv``). When ``global_env`` is set the target is the ambient system
+    interpreter instead (``uv``'s ``--system`` / plain ``pip``).
     """
     import shutil
     import sys
 
     if shutil.which("uv"):
-        return ["uv", "pip", "install"]
+        if global_env:
+            return ["uv", "pip", "install", "--system"]
+        return ["uv", "pip", "install", "--python", sys.executable]
+    if global_env:
+        return ["pip", "install"]
     return [sys.executable, "-m", "pip", "install"]
 
 
@@ -271,6 +281,11 @@ def plugins_add(
     upgrade: bool = typer.Option(
         False, "--upgrade", "-U", help="Upgrade the package if already installed"
     ),
+    global_env: bool = typer.Option(
+        False,
+        "--global",
+        help="Install into the ambient/system environment instead of the CLI interpreter",
+    ),
 ):
     """Install a plugin package and verify it registers.
 
@@ -296,9 +311,10 @@ def plugins_add(
     before = _registered_entry_point_names()
 
     if not dry_run:
+        import importlib
         import subprocess
 
-        cmd = _resolve_installer()
+        cmd = _resolve_installer(global_env)
         if upgrade:
             cmd = cmd + ["--upgrade"]
         cmd = cmd + [package]
@@ -307,6 +323,10 @@ def plugins_add(
         if result.returncode != 0:
             typer.echo(f"Error: installation failed for '{package}'.", err=True)
             raise typer.Exit(1)
+        # A package installed into the running interpreter is only importable
+        # after the finder caches are refreshed; otherwise entry-point
+        # discovery below can miss the just-installed distribution.
+        importlib.invalidate_caches()
 
     manager = get_plugin_manager()
     manager.discover_entry_points()

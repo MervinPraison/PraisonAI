@@ -232,13 +232,24 @@ def tools_info(
         console.print(f"\n[blue]Source:[/blue] {labels.get(sources[name], labels['builtin'])}")
 
 
-def _resolve_installer():
-    """Resolve the installer command, honouring how PraisonAI was installed."""
+def _resolve_installer(global_env: bool = False):
+    """Resolve the installer command, honouring how PraisonAI was installed.
+
+    The ``uv`` branch pins ``--python <sys.executable>`` so the package lands
+    in the interpreter running the CLI rather than an unrelated environment
+    ``uv`` might auto-discover (``VIRTUAL_ENV`` / ``CONDA_PREFIX`` / nearby
+    ``.venv``). When ``global_env`` is set the target is the ambient system
+    interpreter instead (``uv``'s ``--system`` / plain ``pip``).
+    """
     import shutil
     import sys
 
     if shutil.which("uv"):
-        return ["uv", "pip", "install"]
+        if global_env:
+            return ["uv", "pip", "install", "--system"]
+        return ["uv", "pip", "install", "--python", sys.executable]
+    if global_env:
+        return ["pip", "install"]
     return [sys.executable, "-m", "pip", "install"]
 
 
@@ -250,6 +261,11 @@ def tools_add(
     ),
     upgrade: bool = typer.Option(
         False, "--upgrade", "-U", help="Upgrade the package if already installed"
+    ),
+    global_env: bool = typer.Option(
+        False,
+        "--global",
+        help="Install into the ambient/system environment instead of the CLI interpreter",
     ),
 ):
     """Install a tool package and verify its tools become available.
@@ -269,9 +285,10 @@ def tools_add(
     before = set(resolver.list_available().keys())
 
     if not dry_run:
+        import importlib
         import subprocess
 
-        cmd = _resolve_installer()
+        cmd = _resolve_installer(global_env)
         if upgrade:
             cmd = cmd + ["--upgrade"]
         cmd = cmd + [package]
@@ -280,8 +297,15 @@ def tools_add(
         if result.returncode != 0:
             console.print(f"[red]Error: installation failed for '{package}'.[/red]")
             raise typer.Exit(1)
+        # A package installed into the running interpreter is only importable
+        # after the finder caches are refreshed; otherwise discovery below can
+        # miss the just-installed distribution.
+        importlib.invalidate_caches()
 
-    resolver.invalidate()
+    # Use a fresh resolver so instance-level availability caches (e.g. whether
+    # ``praisonai_tools`` is importable) are re-evaluated against the now-updated
+    # environment; ``invalidate()`` only clears the per-name resolution cache.
+    resolver = ToolResolver()
     available = resolver.list_available()
     after = set(available.keys())
     new_names = sorted(after - before)
