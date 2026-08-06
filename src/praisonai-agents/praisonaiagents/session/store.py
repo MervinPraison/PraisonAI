@@ -811,7 +811,12 @@ class DefaultSessionStore:
         destroys real history on the next write:
 
         * File does not exist yet → return a fresh empty session.
-        * File is malformed JSON → treat as corrupted; start fresh (logged).
+        * File is malformed JSON → the durable copy is unusable, but its raw
+          bytes may still be recoverable, so it is *quarantined* (renamed
+          aside to ``<file>.corrupt-<ts>``) before starting fresh rather than
+          left in place to be silently overwritten by the next write. The
+          quarantine is surfaced via the ``SESSION_PERSIST_FAILED`` hook so a
+          corruption event is observable, not just a log line.
         * File exists but the read itself fails with an OS-level error
           (``PermissionError``, an NFS/network hiccup, an antivirus lock,
           disk-full-during-read, …) → re-raise ``OSError`` so the caller
@@ -826,11 +831,19 @@ class DefaultSessionStore:
                 data = json.load(f)
             return SessionData.from_dict(data)
         except json.JSONDecodeError as e:
-            # Malformed content — the durable data is unusable, so starting
-            # fresh does not lose recoverable history.
+            # Malformed content — the parsed data is unusable, but the raw file
+            # may still hold recoverable bytes. Quarantine it aside so the next
+            # write cannot silently overwrite (and permanently destroy) it, and
+            # surface the event instead of leaving only a log line.
+            quarantine_path = self._quarantine_corrupt(filepath)
             logger.error(
-                f"Session file {filepath} contains invalid JSON; starting fresh: {e}"
+                "Session file %s contains invalid JSON; quarantined to %s and "
+                "starting fresh: %s",
+                filepath,
+                quarantine_path or "<quarantine failed>",
+                e,
             )
+            self._fire_corruption_hook(session_id, str(e), quarantine_path)
             return SessionData(session_id=session_id)
         except OSError as e:
             # Transient I/O failure on a file that *does* exist — do NOT
@@ -860,6 +873,59 @@ class DefaultSessionStore:
         with self._lock:
             self._cache[session_id] = session
         return session
+
+    def _quarantine_corrupt(self, filepath: str) -> Optional[str]:
+        """Move a corrupt session file aside so it is never silently overwritten.
+
+        Renames ``<file>.json`` to ``<file>.json.corrupt-<epoch_ms>`` (best
+        effort) so the raw, possibly-recoverable bytes survive instead of being
+        clobbered by the next atomic write. Returns the quarantine path on
+        success, else ``None``. Caller must hold the session ``FileLock``.
+        """
+        try:
+            quarantine_path = f"{filepath}.corrupt-{int(time.time() * 1000)}"
+            os.replace(filepath, quarantine_path)
+            return quarantine_path
+        except OSError as e:  # pragma: no cover - defensive
+            logger.error("Failed to quarantine corrupt session %s: %s", filepath, e)
+            return None
+
+    def _fire_corruption_hook(
+        self, session_id: str, error: str, quarantine_path: Optional[str]
+    ) -> None:
+        """Surface a corrupt-session read via ``SESSION_PERSIST_FAILED``.
+
+        Reuses the existing persistence-failure observability seam so a silent
+        corruption reset becomes a recorded non-outcome. Fully guarded and a
+        no-op when no such hook is registered (zero overhead).
+        """
+        try:
+            from ..hooks.registry import get_default_registry
+            from ..hooks.types import HookEvent
+
+            registry = get_default_registry()
+            if not registry.has_hooks(HookEvent.SESSION_PERSIST_FAILED):
+                return
+
+            from ..hooks.events import SessionPersistFailedInput
+            from ..hooks.runner import HookRunner
+
+            event_input = SessionPersistFailedInput(
+                session_id=session_id,
+                cwd=os.getcwd(),
+                event_name=HookEvent.SESSION_PERSIST_FAILED.value,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                role="",
+                content="",
+                error=f"corrupt session file: {error}",
+                spilled=quarantine_path is not None,
+                spill_path=quarantine_path,
+            )
+            HookRunner(registry).execute_sync(
+                HookEvent.SESSION_PERSIST_FAILED, event_input
+            )
+        except Exception:  # pragma: no cover - observability must never break load
+            logger.debug("SESSION corruption hook failed", exc_info=True)
 
     def _atomic_write_json(self, filepath: str, data: Any) -> bool:
         """Atomically write JSON data to disk (temp file + os.replace)."""
