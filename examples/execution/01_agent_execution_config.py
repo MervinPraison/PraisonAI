@@ -36,6 +36,12 @@ if __name__ == "__main__":
     print(f"Custom agent max_rpm: {agent.max_rpm}")
     print(f"Custom agent max_execution_time: {agent.max_execution_time}")
     print(f"Custom agent max_retry_limit: {agent.max_retry_limit}")
+
+    # max_rpm auto-creates a live RateLimiter (not just a stored number)
+    assert agent_rate_limited.max_rpm == 10
+    assert agent_rate_limited._rate_limiter is not None
+    assert agent_rate_limited._rate_limiter.requests_per_minute == 10
+    print(f"Rate-limited agent limiter: {agent_rate_limited._rate_limiter}")
     
     # Test custom agent
     print("\n--- Custom Execution ---")

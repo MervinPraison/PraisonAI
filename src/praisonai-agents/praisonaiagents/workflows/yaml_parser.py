@@ -548,6 +548,15 @@ class YAMLWorkflowParser:
         
         # Store additional agents.yaml fields for feature parity
         agent._yaml_max_rpm = max_rpm
+        # Wire YAML max_rpm into a live RateLimiter when none is already set,
+        # so `max_rpm` in YAML actually throttles requests.
+        if max_rpm is not None:
+            if max_rpm <= 0:
+                raise ValueError(f"max_rpm must be a positive int, got {max_rpm!r}")
+            if getattr(agent, '_rate_limiter', None) is None:
+                from praisonaiagents.llm.rate_limiter import RateLimiter
+                agent.max_rpm = max_rpm
+                agent._rate_limiter = RateLimiter(requests_per_minute=max_rpm)
         agent._yaml_max_execution_time = max_execution_time
         agent._yaml_reflect_llm = reflect_llm
         agent._yaml_min_reflect = min_reflect

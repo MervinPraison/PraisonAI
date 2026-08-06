@@ -1655,7 +1655,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             else:
                 llm = model  # model= takes precedence
         
-        # Store rate limiter (optional, zero overhead when None)
+        # Store rate limiter (optional, zero overhead when None).
+        # Auto-build a RateLimiter from max_rpm when no explicit limiter is
+        # provided so ExecutionConfig(max_rpm=N) actually throttles requests.
+        if max_rpm is not None and max_rpm <= 0:
+            raise ValueError(f"max_rpm must be a positive int, got {max_rpm!r}")
+        if rate_limiter is None and max_rpm is not None:
+            from praisonaiagents.llm.rate_limiter import RateLimiter
+            rate_limiter = RateLimiter(requests_per_minute=max_rpm)
         self._rate_limiter = rate_limiter
         
         # Store OpenAI client parameters for lazy initialization (kept separate)

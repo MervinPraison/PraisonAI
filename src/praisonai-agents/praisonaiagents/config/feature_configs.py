@@ -778,6 +778,9 @@ class ExecutionConfig:
     max_steps: Optional[int] = None
     
     # Rate limiting
+    # When set (positive int) and ``rate_limiter`` is omitted, the Agent
+    # auto-creates ``RateLimiter(requests_per_minute=max_rpm)``. Provide
+    # ``rate_limiter`` explicitly for burst/TPM control (it takes precedence).
     max_rpm: Optional[int] = None
     
     # Time limits
