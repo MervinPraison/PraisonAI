@@ -1194,3 +1194,77 @@ def interpolate_command_template(
     return interpolator.interpolate(
         command.template, arguments, Path.cwd(), allow_shell=allow_shell
     )
+
+
+def shell_escape_enabled() -> bool:
+    """Return whether the interactive ``!cmd`` shell escape is enabled.
+
+    Reuses the exact gate posture of the command-template ``!`cmd``
+    substitution: enabled when the ``PRAISONAI_ALLOW_SHELL`` env var is truthy
+    or the ``commands.allow_shell`` config flag is set. Default-off, so an
+    unattended surface stays shell-free unless explicitly opted in.
+    """
+    return _env_flag(SHELL_SUBSTITUTION_ENV) or _config_allows_shell()
+
+
+@dataclass
+class ShellEscapeResult:
+    """Result of an interactive ``!cmd`` shell escape.
+
+    ``enabled`` is False when the gate is off (no command was run) and
+    ``output`` then carries the one-line enable hint. When ``enabled`` is True,
+    ``output`` holds the command's captured stdout (or the error text when
+    ``error`` is set).
+    """
+    enabled: bool
+    command: str
+    output: str = ""
+    error: bool = False
+
+
+SHELL_ESCAPE_DISABLED_HINT = (
+    "Shell escape is disabled. Enable it with "
+    f"{SHELL_SUBSTITUTION_ENV}=true or the `commands.allow_shell` config flag."
+)
+
+
+def run_shell_escape(
+    command: str,
+    working_dir: Optional[Path] = None,
+) -> ShellEscapeResult:
+    """Run an interactive ``!cmd`` shell escape through the gated executor.
+
+    Shares the command-template executor's env gate, 30s timeout and 100KB
+    output cap (:func:`TemplateInterpolator._run_shell_command`) so the
+    interactive ``!cmd`` affordance has an identical safety posture. Never runs
+    the command when the gate is off; instead returns a disabled result whose
+    ``output`` is a one-line enable hint.
+
+    Args:
+        command: The command string (already stripped of its leading ``!``).
+        working_dir: Directory to run in; defaults to the current directory.
+
+    Returns:
+        A :class:`ShellEscapeResult`. This function does not raise for command
+        failures — a non-zero exit / timeout / cap is captured as an
+        ``error`` result so callers can render it inline.
+    """
+    command = command.strip()
+    if not command:
+        return ShellEscapeResult(enabled=True, command=command, output="")
+
+    if not shell_escape_enabled():
+        return ShellEscapeResult(
+            enabled=False,
+            command=command,
+            output=SHELL_ESCAPE_DISABLED_HINT,
+        )
+
+    cwd = str(working_dir) if working_dir else str(Path.cwd())
+    try:
+        output = TemplateInterpolator._run_shell_command(command, cwd)
+        return ShellEscapeResult(enabled=True, command=command, output=output)
+    except ShellSubstitutionError as exc:
+        return ShellEscapeResult(
+            enabled=True, command=command, output=str(exc), error=True
+        )
