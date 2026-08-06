@@ -16,6 +16,7 @@ import concurrent.futures
 import contextvars
 import inspect
 import logging
+import threading
 import uuid
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Protocol
@@ -541,3 +542,121 @@ def defer(note: str = "started; will resolve later",
         handle_id=handle_id or uuid.uuid4().hex,
         note=note,
     )
+
+
+@dataclass
+class _DeferredRegistration:
+    """A pending deferred handle awaiting resolution."""
+    on_resolved: Callable[[str, Any, Optional[str]], None]
+    session_id: Optional[str] = None
+
+
+class DeferredResolver:
+    """Registry that resolves deferred tool handles when their work finishes.
+
+    Closes the loop the run loop cannot: a tool returns ``defer(handle_id=...)``
+    for long-running background work, the run loop surfaces the note immediately
+    (non-blocking) and registers the handle here; when the background job
+    completes, ``resolve()`` re-injects the final value via the registered
+    callback (into the same run if still open, or a new turn keyed by
+    ``session_id`` — the caller decides). The eventual result is no longer lost.
+
+    Kept intentionally tiny and dependency-free (a lock + dict) so the core stays
+    lightweight. Registrations are dropped once resolved, so the registry does
+    not grow unbounded. Thread-safe: ``resolve()`` is typically invoked from a
+    background worker thread (e.g. ``BackgroundJobManager``'s ``on_complete``).
+    """
+
+    def __init__(self) -> None:
+        self._pending: Dict[str, _DeferredRegistration] = {}
+        self._lock = threading.Lock()
+
+    def register(
+        self,
+        handle_id: str,
+        on_resolved: Callable[[str, Any, Optional[str]], None],
+        session_id: Optional[str] = None,
+    ) -> None:
+        """Register a resolution callback for a deferred ``handle_id``.
+
+        ``on_resolved`` is invoked as ``on_resolved(handle_id, value,
+        session_id)`` once :meth:`resolve` is called for the same handle.
+        """
+        with self._lock:
+            self._pending[handle_id] = _DeferredRegistration(
+                on_resolved=on_resolved, session_id=session_id
+            )
+
+    def resolve(self, handle_id: str, value: Any) -> bool:
+        """Deliver ``value`` for ``handle_id`` and drop the registration.
+
+        Returns ``True`` if a matching registration was found and its callback
+        fired, ``False`` if the handle was unknown (already resolved or never
+        registered). A callback exception is swallowed and logged so a delivery
+        failure never crashes the completing worker.
+        """
+        with self._lock:
+            reg = self._pending.pop(handle_id, None)
+        if reg is None:
+            return False
+        try:
+            reg.on_resolved(handle_id, value, reg.session_id)
+        except Exception as e:  # noqa: BLE001 — resolution must never crash worker
+            logger.warning(
+                "Deferred resolution callback for %s raised (non-fatal): %s",
+                handle_id, e,
+            )
+        return True
+
+    def is_pending(self, handle_id: str) -> bool:
+        """Whether ``handle_id`` is registered and not yet resolved."""
+        with self._lock:
+            return handle_id in self._pending
+
+    def cancel(self, handle_id: str) -> bool:
+        """Drop a pending registration without resolving it.
+
+        Returns ``True`` if a registration was removed.
+        """
+        with self._lock:
+            return self._pending.pop(handle_id, None) is not None
+
+
+_global_deferred_resolver: Optional[DeferredResolver] = None
+_global_deferred_lock = threading.Lock()
+
+
+def get_deferred_resolver() -> DeferredResolver:
+    """Return the process-wide :class:`DeferredResolver` (lazily created)."""
+    global _global_deferred_resolver
+    with _global_deferred_lock:
+        if _global_deferred_resolver is None:
+            _global_deferred_resolver = DeferredResolver()
+        return _global_deferred_resolver
+
+
+def register_deferred(
+    handle_id: str,
+    on_resolved: Callable[[str, Any, Optional[str]], None],
+    session_id: Optional[str] = None,
+) -> None:
+    """Register a resolver for a deferred handle on the global resolver.
+
+    Convenience wrapper the run loop calls when it observes a deferred tool
+    result, so the eventual background value is re-injected instead of lost::
+
+        for r in executor.execute_batch(calls):
+            if r.is_deferred:
+                register_deferred(r.deferred.handle_id, reinject, session_id)
+    """
+    get_deferred_resolver().register(handle_id, on_resolved, session_id)
+
+
+def resolve_deferred(handle_id: str, value: Any) -> bool:
+    """Resolve a deferred handle on the global resolver (background completion).
+
+    Wire this to a background job's completion signal, e.g.
+    ``BackgroundJobManager.start_job(..., on_complete=lambda info:
+    resolve_deferred(info.job_id, info.result))``.
+    """
+    return get_deferred_resolver().resolve(handle_id, value)

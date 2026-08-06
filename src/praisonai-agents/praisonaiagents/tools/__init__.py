@@ -13,6 +13,7 @@ from .decorator import tool, FunctionTool
 from .call_executor import (
     ToolProgress, DeferredToolResult, defer,
     ToolTimeoutError, ToolCancelledError,
+    DeferredResolver, get_deferred_resolver, register_deferred, resolve_deferred,
 )
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
 from .resolver import resolve_tool_name, resolve_tool_names, ToolResolutionError
@@ -425,6 +426,8 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     # Deferred/progress tool-execution protocol (Issue #2925)
     'ToolProgress', 'DeferredToolResult', 'defer',
     'ToolTimeoutError', 'ToolCancelledError',
+    # Deferred-result resolution (Issue #3716): re-inject long-running results
+    'DeferredResolver', 'get_deferred_resolver', 'register_deferred', 'resolve_deferred',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
