@@ -83,6 +83,67 @@ def test_tui_diff_undo_functional(monkeypatch):
             assert f.read() == "v0\n"
 
 
+def test_tui_baseline_captured_before_first_edit(monkeypatch):
+    """The session baseline must be taken at startup, not lazily on first /diff.
+
+    Mirrors the real lifecycle: on_mount() eagerly builds the manager (capturing
+    the session-start snapshot) *before* any turn edits files. A later /diff must
+    therefore surface edits that happened after startup — the bug was that a lazy
+    first-use init snapshotted an already-modified workspace and reported nothing.
+    """
+    monkeypatch.setenv("PRAISONAI_CHECKPOINTS", "on")
+    with tempfile.TemporaryDirectory() as workspace:
+        screen = _FakeScreen()
+        monkeypatch.setattr(tui_app, "MainScreen", _FakeScreen)
+
+        target = os.path.join(workspace, "mod.py")
+        _write(target, "v0\n")
+
+        app = _StubApp(workspace=workspace, screen=screen)
+
+        # Simulate on_mount(): eager baseline before any edit.
+        app._get_session_checkpoints()
+
+        # Agent edits the file during a turn, *after* the baseline.
+        _write(target, "v0\nv1\n")
+
+        _run(app._cmd_diff(""))
+        diff_msg = screen.messages[-1]
+        assert "mod.py" in diff_msg, "post-baseline edit must appear in /diff"
+
+        # /undo restores the true session-start content.
+        _run(app._cmd_undo(""))
+        with open(target) as f:
+            assert f.read() == "v0\n"
+
+
+def test_tui_per_turn_checkpoint_enables_individual_undo(monkeypatch):
+    """A pre-turn checkpoint lets /undo roll back only the last turn's edits."""
+    monkeypatch.setenv("PRAISONAI_CHECKPOINTS", "on")
+    with tempfile.TemporaryDirectory() as workspace:
+        screen = _FakeScreen()
+        monkeypatch.setattr(tui_app, "MainScreen", _FakeScreen)
+
+        target = os.path.join(workspace, "mod.py")
+        _write(target, "v0\n")
+
+        app = _StubApp(workspace=workspace, screen=screen)
+        ckpt = app._get_session_checkpoints()  # session-start baseline
+
+        # Turn 1: pre-turn checkpoint, then the turn edits the file.
+        ckpt.checkpoint_turn("turn 1")
+        _write(target, "v1\n")
+
+        # Turn 2: pre-turn checkpoint, then the turn edits again.
+        ckpt.checkpoint_turn("turn 2")
+        _write(target, "v2\n")
+
+        # /undo rolls back only turn 2's edits, leaving turn 1's in place.
+        _run(app._cmd_undo(""))
+        with open(target) as f:
+            assert f.read() == "v1\n"
+
+
 def test_tui_diff_disabled_reports_enable_hint(monkeypatch):
     """With checkpointing off, /diff explains how to enable, not a git stub."""
     monkeypatch.setenv("PRAISONAI_CHECKPOINTS", "off")

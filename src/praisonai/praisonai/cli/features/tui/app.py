@@ -204,7 +204,12 @@ if TEXTUAL_AVAILABLE:
             
             await self.queue_manager.start(recover=True)
             self.queue_manager.set_session(self.session_id)
-            
+
+            # Capture the session baseline *before* any turn edits the workspace
+            # so /diff and /undo compare against the true session-start state
+            # rather than an already-modified one (lazy init would snapshot late).
+            self._get_session_checkpoints()
+
             # Push main screen
             await self.push_screen("main")
             
@@ -251,7 +256,17 @@ if TEXTUAL_AVAILABLE:
             
             # Add user message to session store for history persistence
             self._session_store.add_user_message(self.session_id, content)
-            
+
+            # Record a pre-turn checkpoint so /undo can roll back this turn's
+            # file edits individually. Best-effort and default-safe: no-ops when
+            # checkpointing is disabled and never breaks the submission path.
+            try:
+                ckpt = self._get_session_checkpoints()
+                if ckpt is not None and getattr(ckpt, "enabled", False):
+                    ckpt.checkpoint_turn(content[:60])
+            except Exception:
+                pass
+
             # Get chat history for context continuity
             chat_history = self._session_store.get_chat_history(self.session_id, max_messages=50)
             
