@@ -450,52 +450,57 @@ class ToolRegistry:
         Returns:
             Number of tools discovered
         """
-        if self._discovered:
-            return 0
+        # Serialize the first scan under the registry lock (re-entrant, so the
+        # register() calls below re-acquire it safely). Concurrent callers that
+        # arrive while the first scan runs block here, then see _discovered set
+        # and return 0 without rescanning or double-loading entry points.
+        with self._lock:
+            if self._discovered:
+                return 0
 
-        count = 0
-        seen: set[str] = set()
-        for group in (CANONICAL_ENTRY_POINT_GROUP, *_ALIAS_ENTRY_POINT_GROUPS):
-            is_alias = group != CANONICAL_ENTRY_POINT_GROUP
-            for ep in self._entry_points_for_group(group):
-                # Canonical group wins: skip an alias entry whose name was
-                # already registered from the canonical (or an earlier) group.
-                if ep.name in seen:
-                    continue
-                try:
-                    tool_class_or_func = ep.load()
-
-                    # If it's a class, instantiate it
-                    if isinstance(tool_class_or_func, type) and issubclass(tool_class_or_func, BaseTool):
-                        tool_instance = tool_class_or_func()
-                        self.register(tool_instance, name=ep.name)
-                    # If it's already an instance or callable
-                    elif isinstance(tool_class_or_func, BaseTool):
-                        self.register(tool_class_or_func, name=ep.name)
-                    elif callable(tool_class_or_func):
-                        self.register(tool_class_or_func, name=ep.name)
-                    else:
-                        logging.warning(f"Entry point '{ep.name}' is not a valid tool")
+            count = 0
+            seen: set[str] = set()
+            for group in (CANONICAL_ENTRY_POINT_GROUP, *_ALIAS_ENTRY_POINT_GROUPS):
+                is_alias = group != CANONICAL_ENTRY_POINT_GROUP
+                for ep in self._entry_points_for_group(group):
+                    # Canonical group wins: skip an alias entry whose name was
+                    # already registered from the canonical (or an earlier) group.
+                    if ep.name in seen:
                         continue
+                    try:
+                        tool_class_or_func = ep.load()
 
-                    if is_alias:
-                        import warnings
-                        warnings.warn(
-                            f"Tool '{ep.name}' is registered under the deprecated "
-                            f"entry-point group '{group}'. Publish under the "
-                            f"canonical '{CANONICAL_ENTRY_POINT_GROUP}' group instead.",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
+                        # If it's a class, instantiate it
+                        if isinstance(tool_class_or_func, type) and issubclass(tool_class_or_func, BaseTool):
+                            tool_instance = tool_class_or_func()
+                            self.register(tool_instance, name=ep.name)
+                        # If it's already an instance or callable
+                        elif isinstance(tool_class_or_func, BaseTool):
+                            self.register(tool_class_or_func, name=ep.name)
+                        elif callable(tool_class_or_func):
+                            self.register(tool_class_or_func, name=ep.name)
+                        else:
+                            logging.warning(f"Entry point '{ep.name}' is not a valid tool")
+                            continue
 
-                    seen.add(ep.name)
-                    count += 1
-                    logging.info(f"Discovered plugin tool: {ep.name}")
-                except Exception as e:
-                    logging.warning(f"Failed to load plugin '{ep.name}': {e}")
+                        if is_alias:
+                            import warnings
+                            warnings.warn(
+                                f"Tool '{ep.name}' is registered under the deprecated "
+                                f"entry-point group '{group}'. Publish under the "
+                                f"canonical '{CANONICAL_ENTRY_POINT_GROUP}' group instead.",
+                                DeprecationWarning,
+                                stacklevel=2,
+                            )
 
-        self._discovered = True
-        return count
+                        seen.add(ep.name)
+                        count += 1
+                        logging.info(f"Discovered plugin tool: {ep.name}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load plugin '{ep.name}': {e}")
+
+            self._discovered = True
+            return count
     
     def discover_single_file_plugins(self) -> int:
         """Discover and load tools from single-file plugins.
