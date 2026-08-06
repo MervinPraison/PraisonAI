@@ -374,6 +374,57 @@ def _load_configured_skill_sources():
     return ordered
 
 
+@app.command("reload")
+def skills_reload(
+    skill_dirs: str = typer.Option(
+        None, "--dirs", "-d", help="Comma-separated skill directories"
+    ),
+):
+    """Re-scan skills and report what changed (+added/~changed/-removed).
+
+    Picks up newly installed or edited skills without restarting a session.
+    Run this after ``praisonai skills install <url>`` or after editing a
+    SKILL.md so the change is reflected on the next turn.
+
+    Examples:
+        praisonai skills reload
+        praisonai skills reload --dirs ./skills
+    """
+    try:
+        from praisonaiagents.skills import SkillManager
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    dirs = skill_dirs.split(",") if skill_dirs else None
+
+    manager = SkillManager()
+    # Establish a baseline, then reload so the diff reflects on-disk state.
+    manager.discover(dirs, include_defaults=dirs is None)
+    diff = manager.reload()
+
+    added = diff.get("added", [])
+    changed = diff.get("changed", [])
+    removed = diff.get("removed", [])
+
+    from rich.console import Console
+
+    console = Console()
+    for name in added:
+        console.print(f"[green]+ {name}[/green]")
+    for name in changed:
+        console.print(f"[yellow]~ {name}[/yellow]")
+    for name in removed:
+        console.print(f"[red]- {name}[/red]")
+
+    total = len(manager)
+    console.print(
+        f"Reloaded skills: [green]+{len(added)}[/green] "
+        f"[yellow]~{len(changed)}[/yellow] [red]-{len(removed)}[/red] "
+        f"({total} active)"
+    )
+
+
 @app.command("search")
 def skills_search(
     query: str = typer.Argument(..., help="Search query"),
