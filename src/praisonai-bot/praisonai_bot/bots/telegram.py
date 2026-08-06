@@ -47,7 +47,8 @@ from ._commands import (
     handle_reasoning_command,
     get_last_user_message,
     build_command_access_policy,
-    get_command_registry
+    get_command_registry,
+    build_custom_command_resolver,
 )
 from . import _automations
 from ._session import BotSessionManager
@@ -262,6 +263,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         # Get the global command registry
         self._command_registry = get_command_registry()
+
+        # File-based custom slash commands bridged into chat (Issue #3729).
+        # Consumed by the shared ChatCommandMixin for /help + dispatch; safe
+        # defaults (shell off, project-scope only) unless the ``commands``
+        # config block opts in.
+        self._custom_command_resolver = build_custom_command_resolver(self.config)
     
     def _register_interactive_handlers(self):
         """Register handlers for interactive callbacks."""
@@ -921,6 +928,33 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             handler(message)
                     except Exception as e:
                         logger.error(f"Command handler error: {e}")
+                    return
+
+                # File-based custom slash commands (Issue #3729): resolve
+                # ``.praisonai/commands/{command}.md`` and submit the rendered
+                # body as a normal chat turn. Falls through to chat on a miss.
+                text = update.message.text or ""
+                parts = text.split(maxsplit=1)
+                arguments = parts[1] if len(parts) > 1 else ""
+                rendered = self.render_custom_command(command, arguments)
+                if rendered is not None:
+                    user_name = (
+                        update.message.from_user.username
+                        or update.message.from_user.first_name
+                        or ""
+                    ) if update.message.from_user else ""
+                    try:
+                        response = await self._session.chat(
+                            self._agent, user_id, rendered,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                            user_name=user_name,
+                            message_id=str(update.message.message_id),
+                            account=getattr(self.config, "account", "default"),
+                        )
+                        await update.message.reply_text(response)
+                    except Exception as e:  # noqa: BLE001 - surface a friendly message
+                        logger.warning("custom command /%s failed: %s", command, e)
+                        await update.message.reply_text(f"❌ /{command} failed: {e}")
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:

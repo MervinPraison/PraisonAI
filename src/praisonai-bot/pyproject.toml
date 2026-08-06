@@ -45,6 +45,12 @@ all = [
     "praisonai-bot[gateway,bot]",
 ]
 
+# Third-party packages contribute bot slash commands via the
+# "praisonai.bot_commands" entry-point group (Issue #3729); each entry point
+# resolves to a {name: template} mapping (or a callable returning one) that the
+# CustomCommandResolver merges into every bot chat surface. The group is
+# discovered dynamically by name, so no declaration is needed here.
+
 [project.urls]
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
