@@ -80,9 +80,31 @@ def test_positional_substitution_basic():
     assert out == "PR 42 by alice"
 
 
-def test_positional_out_of_range_is_empty():
+def test_positional_out_of_range_is_left_literal():
+    # An out-of-range positional reference is preserved as literal text rather
+    # than erased, so legacy templates that contain dollar-number text such as
+    # ``$100`` are never silently blanked out.
     out = TemplateInterpolator.interpolate("a=$1 b=$2 c=$3", "one two")
-    assert out == "a=one b=two c="
+    assert out == "a=one b=two c=$3"
+
+
+def test_literal_dollar_amount_preserved():
+    # A template with no matching positional args keeps literal ``$`` amounts.
+    out = TemplateInterpolator.interpolate("Price: $100 for $2 items", "")
+    assert out == "Price: $100 for $2 items"
+
+
+def test_windows_path_not_corrupted():
+    # Unquoted Windows paths must survive tokenization (no backslash escaping).
+    out = TemplateInterpolator.interpolate("path=$1", r"C:\Users\alice file")
+    assert out == r"path=C:\Users\alice"
+
+
+def test_injected_arguments_token_not_rescanned():
+    # A positional token that is literally ``$ARGUMENTS`` must be inserted
+    # verbatim at $1, not expanded into the full argument string.
+    out = TemplateInterpolator.interpolate("first=$1", "$ARGUMENTS second")
+    assert out == "first=$ARGUMENTS"
 
 
 def test_positional_and_arguments_together():

@@ -617,17 +617,14 @@ class TemplateInterpolator:
         # Escape literal $(...) from the template.
         result = TemplateInterpolator._escape_shell_substitution(template)
 
-        # Inject positional $1..$n from the untrusted arguments. Done BEFORE
-        # $ARGUMENTS injection so it scans only the template author's text, never
-        # user-injected content; each token is escaped like $ARGUMENTS so it can
-        # never introduce shell substitution. Out-of-range positions collapse to
-        # empty, mirroring shell semantics.
-        result = TemplateInterpolator._interpolate_positional(result, arguments)
-
-        # Inject untrusted $ARGUMENTS, escaping $(...) it carries so it can never
-        # be executed downstream.
-        safe_arguments = TemplateInterpolator._escape_shell_substitution(arguments)
-        result = result.replace("$ARGUMENTS", safe_arguments)
+        # Inject $ARGUMENTS and positional $1..$n in a SINGLE pass over the
+        # template author's text. Doing both together (rather than sequentially)
+        # guarantees user-injected content is never re-scanned: a token that is
+        # itself literally ``$ARGUMENTS`` or ``$1`` is inserted verbatim and not
+        # reinterpreted. Each injected value is escaped like $ARGUMENTS so it can
+        # never introduce shell substitution. Out-of-range positions are left as
+        # literal text so legacy templates containing ``$100`` etc. survive.
+        result = TemplateInterpolator._interpolate_arguments(result, arguments)
 
         # Replace @file references.
         result = TemplateInterpolator._interpolate_files(result, working_dir)
@@ -638,34 +635,70 @@ class TemplateInterpolator:
 
         return result
 
-    # Positional argument reference: $1, $2, ... ($0 is not a position).
-    POSITIONAL_PATTERN = re.compile(r'\$([1-9][0-9]*)')
+    # Argument references: ``$ARGUMENTS`` (whole string) or ``$1``, ``$2``, ...
+    # ($0 is not a position). Both are matched in one pass so an injected value
+    # that itself looks like ``$1``/``$ARGUMENTS`` is never re-scanned.
+    ARGUMENT_PATTERN = re.compile(r'\$(ARGUMENTS|[1-9][0-9]*)')
 
     @staticmethod
-    def _interpolate_positional(text: str, arguments: str) -> str:
-        """Replace ``$1``..``$n`` with shell-style positional tokens.
+    def _split_positional(arguments: str) -> List[str]:
+        """Split ``arguments`` into positional tokens, quote-aware but
+        platform-safe.
 
-        Arguments are split on whitespace (respecting simple quoting) into
-        positional tokens; ``$1`` is the first token. Each substituted token is
-        escaped exactly like ``$ARGUMENTS`` so untrusted input can never
-        introduce ``$(...)`` shell substitution. Out-of-range positions become
-        empty strings.
+        ``shlex.split`` defaults to POSIX mode, which treats backslashes as
+        escape characters and would corrupt unquoted Windows paths such as
+        ``C:\\Users\\alice`` into ``C:Usersalice``. Parsing with
+        ``posix=False`` keeps backslashes literal while still honouring simple
+        quoting; we then strip a single layer of matching surrounding quotes so
+        ``"hello world"`` yields the token ``hello world``. On any parse error
+        we fall back to a plain whitespace split.
+        """
+        try:
+            import shlex
+
+            lexer = shlex.shlex(arguments, posix=False)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            raw = list(lexer)
+        except ValueError:
+            return arguments.split()
+
+        tokens: List[str] = []
+        for tok in raw:
+            if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+                tok = tok[1:-1]
+            tokens.append(tok)
+        return tokens
+
+    @staticmethod
+    def _interpolate_arguments(text: str, arguments: str) -> str:
+        """Replace ``$ARGUMENTS`` and positional ``$1``..``$n`` in one pass.
+
+        ``$ARGUMENTS`` expands to the full (escaped) argument string; ``$1`` is
+        the first quote-aware token, and so on. Each injected value is escaped
+        exactly like ``$ARGUMENTS`` so untrusted input can never introduce
+        ``$(...)`` shell substitution. Out-of-range positional references (e.g.
+        a legacy template's literal ``$100``) are left untouched so existing
+        command content is preserved.
         """
         if "$" not in text:
             return text
-        try:
-            import shlex
-            tokens = shlex.split(arguments)
-        except ValueError:
-            tokens = arguments.split()
 
-        def replace_positional(match: "re.Match") -> str:
-            index = int(match.group(1))
+        tokens = TemplateInterpolator._split_positional(arguments)
+        escape = TemplateInterpolator._escape_shell_substitution
+        safe_arguments = escape(arguments)
+
+        def replace(match: "re.Match") -> str:
+            ref = match.group(1)
+            if ref == "ARGUMENTS":
+                return safe_arguments
+            index = int(ref)
             if 1 <= index <= len(tokens):
-                return TemplateInterpolator._escape_shell_substitution(tokens[index - 1])
-            return ""
+                return escape(tokens[index - 1])
+            # Out-of-range positional: preserve the literal text (e.g. "$100").
+            return match.group(0)
 
-        return TemplateInterpolator.POSITIONAL_PATTERN.sub(replace_positional, text)
+        return TemplateInterpolator.ARGUMENT_PATTERN.sub(replace, text)
 
     @staticmethod
     def _interpolate_files(text: str, working_dir: Optional[Path] = None) -> str:
