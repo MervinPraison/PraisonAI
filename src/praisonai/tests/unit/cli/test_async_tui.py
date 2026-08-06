@@ -804,6 +804,97 @@ class TestHandoffSubagents:
         assert "Unknown agent type" in tui.messages[0].content
 
 
+class TestReviewCommands:
+    """Tests for /code-review and /security-review commands."""
+
+    def _make_tui(self):
+        from praisonai.cli.interactive.async_tui import AsyncTUI
+
+        return AsyncTUI()
+
+    def test_code_review_reads_uncommitted_diff(self, monkeypatch):
+        """/code-review builds a prompt containing the uncommitted diff lines."""
+        tui = self._make_tui()
+        executed = []
+        tui._queue_or_execute = lambda p: executed.append(p)
+
+        fake_diff = (
+            "diff --git a/foo.py b/foo.py\n"
+            "@@ -1 +1 @@\n"
+            "-x = 1\n"
+            "+x = compute_total(1)\n"
+        )
+        monkeypatch.setattr(
+            tui, "_build_review_prompt",
+            lambda **kw: "REVIEW\n```diff\n" + fake_diff + "\n```",
+        )
+
+        result = tui._handle_command("/code-review")
+
+        assert result is True
+        assert len(executed) == 1
+        assert "compute_total(1)" in executed[0]
+        assert "code review" in tui.messages[0].content.lower()
+
+    def test_security_review_rubric_applied(self):
+        """/security-review builds a prompt with security-specific categories."""
+        tui = self._make_tui()
+
+        # Exercise the real builder with a stubbed diff source.
+        import praisonai_code.cli.features.git_integration as gi
+
+        class _FakeGit:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_diff_content(self, staged=False, file_path=None):
+                return "diff --git a/x b/x\n+password = 'abc'\n"
+
+        orig = gi.GitManager
+        gi.GitManager = _FakeGit
+        try:
+            built = tui._build_review_prompt(security=True)
+        finally:
+            gi.GitManager = orig
+
+        assert built is not None
+        assert "security" in built.lower()
+        assert "injection" in built.lower()
+        assert "```diff" in built
+
+    def test_clean_tree_message(self, monkeypatch):
+        """Empty diff yields a friendly 'working tree clean' message."""
+        tui = self._make_tui()
+        monkeypatch.setattr(tui, "_build_review_prompt", lambda **kw: None)
+
+        result = tui._handle_command("/code-review")
+
+        assert result is True
+        assert "clean" in tui.messages[0].content.lower()
+
+    def test_review_prompt_is_read_only_instruction(self):
+        """The review rubric instructs the agent not to modify files."""
+        tui = self._make_tui()
+        import praisonai_code.cli.features.git_integration as gi
+
+        class _FakeGit:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_diff_content(self, staged=False, file_path=None):
+                return "diff --git a/x b/x\n+y = 2\n"
+
+        orig = gi.GitManager
+        gi.GitManager = _FakeGit
+        try:
+            built = tui._build_review_prompt(security=False)
+        finally:
+            gi.GitManager = orig
+
+        assert built is not None
+        assert "do not modify" in built.lower()
+
+
 class TestInteractiveRuntimeReadOnly:
     """Tests for InteractiveRuntime read_only property."""
     

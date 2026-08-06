@@ -587,6 +587,8 @@ class AsyncTUI:
         "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
         "debug": "Toggle debug logging",
         "plan": "Toggle read-only plan mode (/plan off to exit; /plan <task> to plan)",
+        "code-review": "Review the uncommitted diff for bugs (read-only)",
+        "security-review": "Audit the uncommitted diff for security issues (read-only)",
         "handoff": "Delegate to specialized agent (code/research/review/docs)",
         "compact": "Toggle compact output mode",
         "multiline": "Toggle multiline input mode",
@@ -647,6 +649,8 @@ class AsyncTUI:
   /auto            Toggle autonomy mode (auto-delegate complex tasks)
   /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
   /plan [task|off] Toggle read-only plan mode (/plan <task> plans; /plan off exits)
+  /code-review [file|--staged]   Review the uncommitted diff for bugs (read-only)
+  /security-review [file|--staged]  Audit the uncommitted diff for security issues (read-only)
   /handoff <type> <task>  Delegate to specialized agent (code/research/review/docs)
   /compact         Toggle compact output mode
   /multiline       Toggle multiline input mode
@@ -939,7 +943,41 @@ Provide:
 
                 self._queue_or_execute(planning_prompt)
             return True
-        
+
+        elif cmd in ("code-review", "security-review"):
+            # Review the uncommitted (or staged/per-file) diff using the shipped
+            # read-only "review" agent preset. `security` swaps in a security
+            # rubric; both attach the fenced diff so the reviewer sees the exact
+            # changed lines. No writes are possible during review.
+            security = cmd == "security-review"
+            staged = False
+            file_path = None
+            for token in args.split():
+                if token == "--staged":
+                    staged = True
+                elif token == "--security":
+                    security = True
+                elif not token.startswith("-"):
+                    file_path = token
+
+            prompt = self._build_review_prompt(
+                security=security, staged=staged, file_path=file_path
+            )
+            if prompt is None:
+                self.messages.append(ChatMessage(
+                    role="system",
+                    content="Working tree clean — no uncommitted changes to review.",
+                ))
+                return True
+
+            label = "security review" if security else "code review"
+            self.messages.append(ChatMessage(
+                role="system", content=f"🔍 Running {label} on the uncommitted diff..."
+            ))
+            self._update_output()
+            self._queue_or_execute(prompt)
+            return True
+
         elif cmd == "handoff":
             # Handoff to a specialized sub-agent
             if not args:
@@ -1294,6 +1332,58 @@ Example: /handoff code "refactor the auth module" """
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
     
+    def _build_review_prompt(
+        self,
+        security: bool = False,
+        staged: bool = False,
+        file_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Build a review prompt from the uncommitted diff.
+
+        Collects the working-tree (or staged/per-file) diff via the shipped
+        ``GitManager`` and wraps it in a review rubric fenced as ``diff`` so the
+        read-only ``review`` agent preset can cite exact file:line locations.
+        Returns ``None`` when there is no diff to review so the caller can
+        report a clean working tree.
+        """
+        try:
+            from praisonai_code.cli.features.git_integration import GitManager
+
+            git = GitManager(repo_path=self.config.workspace or None)
+            diff = git.get_diff_content(staged=staged, file_path=file_path)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Diff collection failed: %s", exc)
+            diff = ""
+
+        if not diff or not diff.strip():
+            return None
+
+        if security:
+            rubric = (
+                "You are a security reviewer. Audit ONLY the diff below for "
+                "security vulnerabilities. Cover these categories: injection "
+                "(SQL/command/template), authentication & authorization flaws, "
+                "secrets or credentials committed, unsafe deserialization, path "
+                "traversal, SSRF, insecure crypto, and unvalidated input. "
+                "Do NOT modify any files."
+            )
+        else:
+            rubric = (
+                "You are a code reviewer. Review ONLY the diff below for bugs, "
+                "logic errors, edge cases, error handling gaps, and "
+                "maintainability issues. Do NOT modify any files."
+            )
+
+        return (
+            f"{rubric}\n\n"
+            "For each finding report: severity (high/medium/low), the "
+            "file:line it applies to, and a short rationale. If you find no "
+            "issues, say so explicitly.\n\n"
+            "```diff\n"
+            f"{diff}\n"
+            "```"
+        )
+
     def _queue_or_execute(self, prompt: str):
         """Queue prompt if processing, otherwise execute immediately."""
         if self._processing:
