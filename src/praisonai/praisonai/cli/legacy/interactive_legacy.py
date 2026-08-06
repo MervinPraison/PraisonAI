@@ -531,6 +531,57 @@ def _start_interactive_mode(self, args):
                         if not current and queue_size == 0:
                             console.print("[dim]Idle - no messages processing[/dim]")
                         continue
+                    elif cmd == "plan":
+                        # Real read-only plan mode: flip the live approval
+                        # backend into PermissionMode.PLAN so writes/edits/shell
+                        # are denied until /plan off. Reuses the shipped
+                        # enforcement layer instead of a prompt template.
+                        sub = (cmd_args or "").strip().lower()
+                        # Default toggle (used if the enforcement backend is
+                        # unavailable). Refined below after syncing with a live
+                        # backend that may already be in PLAN mode.
+                        enable = False if sub == "off" else not session_state.get('plan_mode', False)
+                        try:
+                            from praisonaiagents.approval import get_approval_registry
+                            from praisonaiagents.permissions import PermissionMode
+                            backend = get_approval_registry().get_backend()
+                            setter = getattr(backend, 'set_permission_mode', None)
+                            enforced = callable(setter)
+                            # Sync session state with the live backend so a
+                            # session launched with --approval plan reports the
+                            # correct toggle: without this the first no-arg
+                            # /plan would re-enable an already-active PLAN mode
+                            # instead of exiting it (Greptile P1: legacy startup
+                            # unsynchronized).
+                            if 'plan_mode' not in session_state:
+                                current = getattr(backend, 'permission_mode', None)
+                                if current is not None:
+                                    session_state['plan_mode'] = (current == PermissionMode.PLAN)
+                                    enable = False if sub == "off" else not session_state['plan_mode']
+                            if enforced:
+                                if enable:
+                                    # Remember the launch-time policy (e.g.
+                                    # accept-edits/bypass) so exiting PLAN
+                                    # restores it instead of forcing DEFAULT.
+                                    current = getattr(backend, 'permission_mode', None)
+                                    if current is not None and current != PermissionMode.PLAN:
+                                        session_state['prev_permission_mode'] = current
+                                    setter(PermissionMode.PLAN)
+                                else:
+                                    restore = session_state.pop(
+                                        'prev_permission_mode', None
+                                    ) or PermissionMode.DEFAULT
+                                    setter(restore)
+                        except Exception:
+                            enforced = False
+                        session_state['plan_mode'] = enable
+                        if enable:
+                            console.print("[cyan][PLAN] Plan mode enabled — read-only. Writes/edits/commands denied until /plan off.[/cyan]")
+                            if not enforced:
+                                console.print("[dim](No interactive approval backend active; enforcement is advisory.)[/dim]")
+                        else:
+                            console.print("[cyan]Plan mode disabled. Writes/edits/commands allowed again.[/cyan]")
+                        continue
                     else:
                         console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
                         continue

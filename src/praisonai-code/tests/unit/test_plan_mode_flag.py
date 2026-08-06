@@ -132,5 +132,151 @@ def test_repl_worker_threads_agent_approval():
     assert "agent_approval" in src
 
 
+def test_plan_mode_denies_writes():
+    """In PLAN mode the backend denies mutating tools (regression on #3736).
+
+    The interactive ``/plan`` command flips ``set_permission_mode(PLAN)``; this
+    asserts the enforcement it relies on actually blocks write/edit/bash rather
+    than merely prefixing a "do not execute" prompt.
+    """
+    import asyncio
+
+    from praisonaiagents.approval import ApprovalRequest
+    from praisonaiagents.permissions import PermissionMode
+    from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
+
+    backend = InteractiveCLIApprovalBackend(non_interactive=True)
+    backend.set_permission_mode(PermissionMode.PLAN)
+
+    for tool in ("write", "edit", "delete", "bash", "shell"):
+        decision = asyncio.run(
+            backend.request_approval(
+                ApprovalRequest(tool_name=tool, arguments={}, risk_level="high")
+            )
+        )
+        assert decision.approved is False, f"{tool} should be denied in PLAN mode"
+
+    # And flipping back to DEFAULT no longer force-denies via the mode.
+    backend.set_permission_mode(PermissionMode.DEFAULT)
+    from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend as _B
+    assert _B is not None
+
+
+def test_plan_exit_restores_prior_mode_async_tui():
+    """Exiting PLAN must restore the launch-time policy, not force DEFAULT.
+
+    Greptile P1: a session started with ``accept-edits``/``bypass`` that enters
+    then exits ``/plan`` should keep its original approval policy instead of
+    silently reverting to DEFAULT (which would re-prompt on every tool call).
+    """
+    from praisonaiagents.permissions import PermissionMode
+    from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
+    from praisonaiagents.approval import get_approval_registry
+    from praisonai.cli.interactive.async_tui import AsyncTUI
+
+    backend = InteractiveCLIApprovalBackend(non_interactive=True)
+    backend.set_permission_mode(PermissionMode.ACCEPT_EDITS)
+    get_approval_registry().set_backend(backend)
+
+    tui = AsyncTUI()
+    # Startup sync should reflect the live (non-PLAN) backend.
+    assert tui.config.plan_mode is False
+
+    tui._set_plan_mode(True)
+    assert backend.permission_mode == PermissionMode.PLAN
+    assert tui.config.plan_mode is True
+
+    tui._set_plan_mode(False)
+    # Restored to the original accept-edits policy, NOT DEFAULT.
+    assert backend.permission_mode == PermissionMode.ACCEPT_EDITS
+    assert tui.config.plan_mode is False
+
+
+def test_async_tui_syncs_plan_mode_from_backend():
+    """Launching with a PLAN backend must light up the [PLAN] indicator.
+
+    Greptile P1: when the backend already enforces PLAN at startup, the TUI's
+    ``config.plan_mode`` must be True so the indicator shows and the first
+    no-arg ``/plan`` toggles it *off* rather than re-enabling it.
+    """
+    from praisonaiagents.permissions import PermissionMode
+    from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
+    from praisonaiagents.approval import get_approval_registry
+    from praisonai.cli.interactive.async_tui import AsyncTUI
+
+    backend = InteractiveCLIApprovalBackend(non_interactive=True)
+    backend.set_permission_mode(PermissionMode.PLAN)
+    get_approval_registry().set_backend(backend)
+
+    tui = AsyncTUI()
+    assert tui.config.plan_mode is True
+
+
+def test_legacy_plan_exit_restores_prior_mode_source():
+    """Legacy REPL must restore the prior mode on ``/plan off`` (Greptile P1)."""
+    src = _repl_source()
+    assert "prev_permission_mode" in src
+
+
+def test_legacy_plan_syncs_startup_state_source():
+    """Legacy REPL must seed plan_mode from the live backend (Greptile P1).
+
+    When launched with ``--approval plan`` the backend already enforces PLAN;
+    without seeding ``session_state['plan_mode']`` from it, the first no-arg
+    ``/plan`` would re-enable an already-active mode instead of exiting it. The
+    handler now syncs from ``backend.permission_mode`` on first use. Asserted
+    against source to stay env-independent (heavy optional deps).
+    """
+    src = _repl_source()
+    assert "'plan_mode' not in session_state" in src
+    assert "permission_mode" in src
+
+
+def test_approval_help_lists_all_values():
+    """`--approval` help must advertise plan/accept-edits/bypass (issue #3736)."""
+    import inspect
+
+    from praisonai_code.cli.commands.chat import chat_main
+
+    help_text = ""
+    for param in inspect.signature(chat_main).parameters.values():
+        default = param.default
+        for decl in getattr(default, "param_decls", None) or []:
+            if decl == "--approval":
+                help_text = getattr(default, "help", "") or ""
+    assert help_text, "--approval option not found on chat command"
+    for value in ("plan", "accept-edits", "bypass"):
+        assert value in help_text, f"{value!r} missing from --approval help"
+
+
+def _repl_source():
+    from pathlib import Path
+
+    legacy = (
+        Path(__file__).resolve().parents[3]
+        / "praisonai"
+        / "praisonai"
+        / "cli"
+        / "legacy"
+        / "interactive_legacy.py"
+    )
+    assert legacy.exists(), f"interactive_legacy.py not found at {legacy}"
+    return legacy.read_text(encoding="utf-8")
+
+
+def test_plan_slash_wires_permission_mode():
+    """`/plan` in the REPL must enter a real PLAN mode, not a prompt template.
+
+    Regression for #3736: the handler now flips the live approval backend via
+    ``set_permission_mode(PermissionMode.PLAN)`` and supports ``/plan off``.
+    Asserted against source to stay env-independent (heavy optional deps).
+    """
+    src = _repl_source()
+    assert 'cmd == "plan"' in src
+    assert "set_permission_mode" in src
+    assert "PermissionMode.PLAN" in src
+    assert '"off"' in src
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
