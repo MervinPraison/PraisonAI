@@ -895,16 +895,14 @@ def _handle_branch_command(
     # save the parent's in-flight turn onto the freshly-switched fork,
     # contaminating the fork and losing the parent's completed turn. Ask the
     # user to wait until the current work settles.
-    busy = False
-    if worker_state is not None and worker_state.get('current_task'):
-        busy = True
-    if execution_queue is not None:
-        try:
-            if execution_queue.qsize() > 0:
-                busy = True
-        except Exception:
-            pass
-    if busy:
+    #
+    # Use the shared ``_worker_busy`` helper, which reads ``current_task`` and
+    # the queue size under the worker's ``processing_lock``. Reimplementing the
+    # check inline (unlocked) races the worker's dequeue/publish window
+    # (``with processing_lock: get_nowait(); current_task = task``): between the
+    # item leaving the queue and ``current_task`` being set, both an empty queue
+    # and no active task are observed, so an in-flight turn would slip past.
+    if _worker_busy(self, session_state):
         console.print(
             "[yellow]A response is still processing. Wait for it to finish "
             "before branching (see /status).[/yellow]"

@@ -357,12 +357,19 @@ def session_fork(
     # directory from the *same* canonical stores ``session_exists_anywhere``
     # searched (project first, then global) so the fork source and the
     # existence check stay consistent.
+    #
+    # The store persists each session under a *sanitized* filename
+    # (``DefaultSessionStore._get_session_path`` replaces any char that is not
+    # alphanumeric/``-``/``_`` with ``_``). Sanitize identically here so a
+    # global-only id containing e.g. ``.`` or ``:`` still matches its real file
+    # instead of falling through to an empty project-scoped fork.
+    safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
     store_dir = str(get_project_sessions_dir())
     for candidate in canonical_cli_stores():
         candidate_dir = getattr(candidate, "session_dir", None)
         if not candidate_dir:
             continue
-        if (Path(candidate_dir) / f"{session_id}.json").exists():
+        if (Path(candidate_dir) / f"{safe_id}.json").exists():
             store_dir = str(candidate_dir)
             break
 

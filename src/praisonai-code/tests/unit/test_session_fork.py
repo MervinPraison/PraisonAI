@@ -134,3 +134,32 @@ def test_cli_session_fork_copies_global_only_session_history(project):
     forked = store._load_extended_session(new_id, force_reload=True)
     # The fork carries the parent's real history, not an empty transcript.
     assert len(forked.messages) == 2
+
+
+def test_cli_session_fork_resolves_sanitized_global_id(project):
+    # The store persists sessions under a *sanitized* filename (any char that is
+    # not alphanumeric/``-``/``_`` becomes ``_``). A global-only id containing
+    # e.g. ``.`` is found by ``session_exists_anywhere`` via that sanitized file,
+    # so the fork command must sanitize identically when resolving the store dir
+    # — otherwise a literal ``{id}.json`` check misses the real file and forks an
+    # empty history from the project store.
+    from praisonai_code.cli.state.project_sessions import canonical_cli_stores
+
+    special_id = "sess.global:v2"
+    global_store = canonical_cli_stores()[-1]
+    global_dir = global_store.session_dir
+    global_store.add_message(special_id, "user", "g-first")
+    global_store.add_message(special_id, "assistant", "g-reply")
+
+    session_fork(special_id, at_message=None, title=None)
+
+    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+
+    store = HierarchicalSessionStore(global_dir)
+    new_id = _forked_id(store, special_id)
+
+    assert new_id is not None
+    forked = store._load_extended_session(new_id, force_reload=True)
+    # Real history copied, proving the fork resolved the global store (not an
+    # empty project-scoped fallback) despite the special characters in the id.
+    assert len(forked.messages) == 2

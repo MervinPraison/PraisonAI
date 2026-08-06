@@ -96,7 +96,8 @@ def test_branch_at_too_far_back_is_rejected(temp_session_dir):
 def test_branch_refused_while_worker_busy(temp_session_dir):
     # Branching while a turn is still executing would let the async worker save
     # the parent's in-flight turn onto the freshly-switched fork. Refuse and
-    # keep the REPL on the parent.
+    # keep the REPL on the parent. The busy check runs through the shared
+    # ``_worker_busy`` helper, so the worker signals live via ``session_state``.
     store = UnifiedSessionStore(session_dir=temp_session_dir)
     state = _seeded_state(store)
     console = _RecordingConsole()
@@ -105,11 +106,10 @@ def test_branch_refused_while_worker_busy(temp_session_dir):
         def qsize(self):
             return 0
 
-    _handle_branch_command(
-        None, console, "alt approach", state,
-        worker_state={"current_task": {"prompt": "still running"}},
-        execution_queue=_Queue(),
-    )
+    state["worker_state"] = {"current_task": {"prompt": "still running"}}
+    state["execution_queue"] = _Queue()
+
+    _handle_branch_command(None, console, "alt approach", state)
 
     # Still on parent; no fork created.
     assert state["unified_session"].session_id == "parent"
@@ -126,11 +126,49 @@ def test_branch_refused_while_queue_pending(temp_session_dir):
         def qsize(self):
             return 2
 
-    _handle_branch_command(
-        None, console, "alt approach", state,
-        worker_state={"current_task": None},
-        execution_queue=_Queue(),
-    )
+    state["worker_state"] = {"current_task": None}
+    state["execution_queue"] = _Queue()
+
+    _handle_branch_command(None, console, "alt approach", state)
 
     assert state["unified_session"].session_id == "parent"
     assert store.load("parent").children_ids == []
+    assert any("still processing" in line for line in console.lines)
+
+
+def test_branch_reads_busy_state_under_lock(temp_session_dir):
+    # The worker dequeues and publishes ``current_task`` atomically under
+    # ``processing_lock`` (``with lock: get_nowait(); current_task = task``).
+    # ``/branch`` must observe that state through the *same* lock so it can
+    # never slip through the dequeue/publish gap where both the queue looks
+    # empty and no task is yet published. Model that transient window as a
+    # queue whose size flips to 0 the first time it is read *without* the lock;
+    # if ``/branch`` observed it unlocked it would fork. Holding the lock the
+    # whole time keeps the size at its true (busy) value.
+    import threading
+
+    store = UnifiedSessionStore(session_dir=temp_session_dir)
+    state = _seeded_state(store)
+    console = _RecordingConsole()
+
+    lock = threading.Lock()
+
+    class _RacyQueue:
+        def qsize(self):
+            # If the caller holds the lock, report the true pending item.
+            # If it does not, simulate the mid-dequeue window (looks empty).
+            if lock.locked():
+                return 1
+            return 0
+
+    state["processing_lock"] = lock
+    state["worker_state"] = {"current_task": None}
+    state["execution_queue"] = _RacyQueue()
+
+    _handle_branch_command(None, console, "alt approach", state)
+
+    # Because the helper reads qsize() while holding the lock, the pending item
+    # is visible and the branch is refused — no fork created, still on parent.
+    assert state["unified_session"].session_id == "parent"
+    assert store.load("parent").children_ids == []
+    assert any("still processing" in line for line in console.lines)
