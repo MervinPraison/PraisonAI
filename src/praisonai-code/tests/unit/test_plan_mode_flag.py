@@ -218,6 +218,20 @@ def test_legacy_plan_exit_restores_prior_mode_source():
     assert "prev_permission_mode" in src
 
 
+def test_legacy_plan_syncs_startup_state_source():
+    """Legacy REPL must seed plan_mode from the live backend (Greptile P1).
+
+    When launched with ``--approval plan`` the backend already enforces PLAN;
+    without seeding ``session_state['plan_mode']`` from it, the first no-arg
+    ``/plan`` would re-enable an already-active mode instead of exiting it. The
+    handler now syncs from ``backend.permission_mode`` on first use. Asserted
+    against source to stay env-independent (heavy optional deps).
+    """
+    src = _repl_source()
+    assert "'plan_mode' not in session_state" in src
+    assert "permission_mode" in src
+
+
 def test_approval_help_lists_all_values():
     """`--approval` help must advertise plan/accept-edits/bypass (issue #3736)."""
     import inspect

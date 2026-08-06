@@ -537,6 +537,9 @@ def _start_interactive_mode(self, args):
                         # are denied until /plan off. Reuses the shipped
                         # enforcement layer instead of a prompt template.
                         sub = (cmd_args or "").strip().lower()
+                        # Default toggle (used if the enforcement backend is
+                        # unavailable). Refined below after syncing with a live
+                        # backend that may already be in PLAN mode.
                         enable = False if sub == "off" else not session_state.get('plan_mode', False)
                         try:
                             from praisonaiagents.approval import get_approval_registry
@@ -544,6 +547,17 @@ def _start_interactive_mode(self, args):
                             backend = get_approval_registry().get_backend()
                             setter = getattr(backend, 'set_permission_mode', None)
                             enforced = callable(setter)
+                            # Sync session state with the live backend so a
+                            # session launched with --approval plan reports the
+                            # correct toggle: without this the first no-arg
+                            # /plan would re-enable an already-active PLAN mode
+                            # instead of exiting it (Greptile P1: legacy startup
+                            # unsynchronized).
+                            if 'plan_mode' not in session_state:
+                                current = getattr(backend, 'permission_mode', None)
+                                if current is not None:
+                                    session_state['plan_mode'] = (current == PermissionMode.PLAN)
+                                    enable = False if sub == "off" else not session_state['plan_mode']
                             if enforced:
                                 if enable:
                                     # Remember the launch-time policy (e.g.
