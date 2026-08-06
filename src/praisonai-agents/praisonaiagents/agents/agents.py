@@ -1912,6 +1912,110 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Always run silently - no verbose output
         return self.start(content=content, return_dict=return_dict, output="silent", **kwargs)
 
+    def _reset_task_variables(self):
+        """Clear per-task ``variables`` so the next batch item's global
+        ``variables`` re-propagate (see ``_run_task_start_hook``)."""
+        for task in self.tasks.values():
+            if getattr(task, "variables", None):
+                task.variables = {}
+
+    def _build_batch_result(self, batch_id, items):
+        """Aggregate per-item results into a batch summary dict."""
+        succeeded = sum(1 for item in items if item["success"])
+        return {
+            "batch_id": batch_id,
+            "items": items,
+            "outputs": [item["output"] for item in items],
+            "succeeded": succeeded,
+            "failed": len(items) - succeeded,
+            "total": len(items),
+            "token_usage_total": self.get_token_usage_summary(),
+        }
+
+    def start_for_each(
+        self,
+        inputs,
+        *,
+        on_error="continue",
+        output="silent",
+        **kwargs,
+    ):
+        """Run this team once per input dict, interpolating ``{{key}}`` placeholders.
+
+        Each input dict is applied as per-run ``variables`` (existing
+        ``{{placeholder}}`` interpolation in task descriptions), so the original
+        task templates are never permanently mutated.
+
+        Args:
+            inputs: List of dicts; each runs the team once with those variables.
+            on_error: "continue" (default) collects errors per item and keeps
+                going; "fail_fast" re-raises on the first failing item.
+            output: Output preset forwarded to ``start`` (default "silent").
+            **kwargs: Additional arguments forwarded to ``start``.
+
+        Returns:
+            dict with ``batch_id``, ``items`` (per-item ``index``/``input``/
+            ``success``/``output``/``error``), ``outputs``, ``succeeded``,
+            ``failed``, ``total`` and ``token_usage_total``.
+        """
+        if on_error not in ("continue", "fail_fast"):
+            raise ValueError("on_error must be 'continue' or 'fail_fast'")
+
+        batch_id = f"batch_{uuid.uuid4().hex[:12]}"
+        saved_variables = self.variables
+        items = []
+        try:
+            for index, item_input in enumerate(inputs):
+                self.variables = {**saved_variables, **(item_input or {})}
+                self._reset_task_variables()
+                result = {"index": index, "input": item_input, "success": False,
+                          "output": None, "error": None}
+                try:
+                    result["output"] = self.start(output=output, **kwargs)
+                    result["success"] = True
+                except Exception as exc:  # noqa: BLE001
+                    if on_error == "fail_fast":
+                        raise
+                    result["error"] = str(exc)
+                items.append(result)
+        finally:
+            self.variables = saved_variables
+
+        return self._build_batch_result(batch_id, items)
+
+    async def astart_for_each(
+        self,
+        inputs,
+        *,
+        on_error="continue",
+        **kwargs,
+    ):
+        """Async twin of :meth:`start_for_each` (sequential per-item execution)."""
+        if on_error not in ("continue", "fail_fast"):
+            raise ValueError("on_error must be 'continue' or 'fail_fast'")
+
+        batch_id = f"batch_{uuid.uuid4().hex[:12]}"
+        saved_variables = self.variables
+        items = []
+        try:
+            for index, item_input in enumerate(inputs):
+                self.variables = {**saved_variables, **(item_input or {})}
+                self._reset_task_variables()
+                result = {"index": index, "input": item_input, "success": False,
+                          "output": None, "error": None}
+                try:
+                    result["output"] = await self.astart(**kwargs)
+                    result["success"] = True
+                except Exception as exc:  # noqa: BLE001
+                    if on_error == "fail_fast":
+                        raise
+                    result["error"] = str(exc)
+                items.append(result)
+        finally:
+            self.variables = saved_variables
+
+        return self._build_batch_result(batch_id, items)
+
     def set_state(self, key: str, value: Any) -> None:
         """Set a state value"""
         with self._state_lock:
