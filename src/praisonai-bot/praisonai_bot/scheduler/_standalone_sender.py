@@ -25,6 +25,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,16 +50,49 @@ def _env(*names: str) -> str:
     return ""
 
 
-def _resolve_chat_id(target: "DeliveryTarget", *home_env: str) -> str:
+def _home_channel_from_registry(platform: str) -> str:
+    """Read a home channel id for ``platform`` from the gateway's state file.
+
+    The gateway persists home channels to ``~/.praisonai/state/home_channels.json``
+    (see :class:`praisonai_bot.gateway.home_channels.HomeChannelRegistry`). Out of
+    process there is no live registry, but the file is plain JSON, so a bare
+    ``deliver: telegram`` target set through the gateway still resolves without a
+    ``{PLATFORM}_HOME_CHANNEL`` env var. Read lazily and defensively — any error
+    (missing file, bad JSON) simply yields no id, never raising into delivery.
+    """
+    try:
+        path = Path.home() / ".praisonai" / "state" / "home_channels.json"
+        if not path.exists():
+            return ""
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        entry = data.get(platform)
+        if isinstance(entry, dict):
+            return str(entry.get("chat_id", "") or "")
+    except Exception:  # pragma: no cover - defensive: never break delivery
+        return ""
+    return ""
+
+
+def _resolve_chat_id(
+    target: "DeliveryTarget", platform: str, *home_env: str,
+) -> str:
     """Resolve the concrete chat id for ``target``.
 
-    Prefers the explicit ``channel_id`` on the target (``telegram:123456``) and
-    falls back to a ``{PLATFORM}_HOME_CHANNEL`` env var for a bare-platform
-    token (``deliver: telegram``) so home-channel delivery works out of process.
+    Resolution order, matching the live gateway as closely as an out-of-process
+    sender can:
+    1. explicit ``channel_id`` on the target (``telegram:123456``)
+    2. a ``{PLATFORM}_HOME_CHANNEL`` env var (env-first so a deployment can
+       override without touching the gateway's state file)
+    3. the gateway's persisted ``HomeChannelRegistry`` state file, so a home
+       channel registered via the live gateway also works out of process.
     """
     if target.channel_id:
         return target.channel_id
-    return _env(*home_env)
+    from_env = _env(*home_env)
+    if from_env:
+        return from_env
+    return _home_channel_from_registry(platform)
 
 
 def _post_json(url: str, payload: dict, *, headers: Optional[dict] = None) -> None:
@@ -90,36 +124,58 @@ async def _run_sync(fn: Callable[[], None]) -> None:
     await asyncio.to_thread(fn)
 
 
+def _chunk(text: str, max_length: int) -> list:
+    """Split ``text`` into platform-sized chunks.
+
+    Reuses the same markdown-aware :func:`praisonai_bot.bots._chunk.chunk_message`
+    the live adapters use so a long scheduled result is delivered as multiple
+    messages instead of being rejected by the platform's size limit. Falls back
+    to a plain character split if that helper is unavailable (defensive; it ships
+    in the same package).
+    """
+    if len(text) <= max_length:
+        return [text]
+    try:
+        from ..bots._chunk import chunk_message
+
+        return chunk_message(text, max_length=max_length)
+    except Exception:  # pragma: no cover - defensive
+        return [text[i:i + max_length] for i in range(0, len(text), max_length)]
+
+
 # ── per-platform senders ─────────────────────────────────────────────
+
+
+_TELEGRAM_LIMIT = 4096
+_SLACK_LIMIT = 39000
+_DISCORD_LIMIT = 2000
 
 
 async def _telegram_send(target: "DeliveryTarget", text: str) -> None:
     token = _env("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set for standalone delivery")
-    chat_id = _resolve_chat_id(target, "TELEGRAM_HOME_CHANNEL")
+    chat_id = _resolve_chat_id(target, "telegram", "TELEGRAM_HOME_CHANNEL")
     if not chat_id:
         raise RuntimeError("no chat id for telegram standalone delivery")
-    payload: dict = {"chat_id": chat_id, "text": text}
-    if target.thread_id:
-        payload["message_thread_id"] = target.thread_id
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    await _run_sync(lambda: _post_json(url, payload))
+    for part in _chunk(text, _TELEGRAM_LIMIT):
+        payload: dict = {"chat_id": chat_id, "text": part}
+        if target.thread_id:
+            payload["message_thread_id"] = target.thread_id
+        await _run_sync(lambda p=payload: _post_json(url, p))
 
 
 async def _slack_send(target: "DeliveryTarget", text: str) -> None:
     token = _env("SLACK_BOT_TOKEN")
     if not token:
         raise RuntimeError("SLACK_BOT_TOKEN not set for standalone delivery")
-    channel = _resolve_chat_id(target, "SLACK_HOME_CHANNEL")
+    channel = _resolve_chat_id(target, "slack", "SLACK_HOME_CHANNEL")
     if not channel:
         raise RuntimeError("no channel for slack standalone delivery")
-    payload = {"channel": channel, "text": text}
-    if target.thread_id:
-        payload["thread_ts"] = target.thread_id
     headers = {"Authorization": f"Bearer {token}"}
 
-    def _send() -> None:
+    def _send(payload: dict) -> None:
         # Slack returns HTTP 200 with ``{"ok": false, "error": ...}`` on a
         # logical failure, so inspect the body rather than only the status.
         data = json.dumps(payload).encode("utf-8")
@@ -138,19 +194,40 @@ async def _slack_send(target: "DeliveryTarget", text: str) -> None:
         if not parsed.get("ok", False):
             raise RuntimeError(f"slack error: {parsed.get('error', 'unknown')}")
 
-    await _run_sync(_send)
+    for part in _chunk(text, _SLACK_LIMIT):
+        payload = {"channel": channel, "text": part}
+        if target.thread_id:
+            payload["thread_ts"] = target.thread_id
+        await _run_sync(lambda p=payload: _send(p))
 
 
 async def _discord_send(target: "DeliveryTarget", text: str) -> None:
     token = _env("DISCORD_BOT_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_BOT_TOKEN not set for standalone delivery")
-    channel_id = _resolve_chat_id(target, "DISCORD_HOME_CHANNEL")
+    channel_id = _resolve_chat_id(target, "discord", "DISCORD_HOME_CHANNEL")
     if not channel_id:
         raise RuntimeError("no channel id for discord standalone delivery")
     url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
     headers = {"Authorization": f"Bot {token}"}
-    await _run_sync(lambda: _post_json(url, {"content": text}, headers=headers))
+    # Preserve threaded context: when the target carries a thread_id, reply to
+    # that message via ``message_reference`` so the scheduled result stays in
+    # the same conversation instead of landing bare in the parent channel —
+    # matching how Telegram/Slack standalone senders preserve ``thread_id``.
+    # ``fail_if_not_exists=false`` degrades gracefully to a normal message if
+    # the referenced message is gone rather than dropping delivery.
+    reference: Optional[dict] = None
+    if target.thread_id:
+        reference = {
+            "message_id": str(target.thread_id),
+            "channel_id": str(channel_id),
+            "fail_if_not_exists": False,
+        }
+    for part in _chunk(text, _DISCORD_LIMIT):
+        payload: dict = {"content": part}
+        if reference is not None:
+            payload["message_reference"] = reference
+        await _run_sync(lambda p=payload: _post_json(url, p, headers=headers))
 
 
 # Platform → standalone sender. Keyed by the same lowercase platform names the

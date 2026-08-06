@@ -789,19 +789,17 @@ class ScheduledAgentExecutor:
             logger.warning("Failed to write run audit for job '%s': %s", job.id, e)
 
     def _can_deliver(self, delivery: "DeliveryTarget") -> bool:
-        """Whether ``delivery`` can be dispatched at all.
+        """Whether a configured ``delivery`` target should be dispatched.
 
-        True when a live ``delivery_handler`` is wired, or (out of process, no
-        live gateway) when a stateless standalone sender exists for the target
-        platform. Preserves the prior "no live bot → skip" behaviour only when
-        neither path is available, so a delivery target is not marked delivered
-        when nothing could send it.
+        A configured target is *always* dispatched so that a target with no
+        delivery mechanism (no live handler and no standalone sender for its
+        platform) surfaces an actionable ``delivery_error`` via
+        :meth:`_dispatch_delivery` instead of being silently dropped. Only a
+        missing target (``None``) short-circuits — there is nothing to deliver.
+        The capability decision (live handler vs. standalone sender vs. neither)
+        is made in :meth:`_dispatch_delivery`, which raises when neither exists.
         """
-        if self._deliver is not None:
-            return True
-        from ._standalone_sender import resolve_standalone_sender
-
-        return resolve_standalone_sender(getattr(delivery, "channel", "")) is not None
+        return delivery is not None
 
     async def _dispatch_delivery(
         self, delivery: "DeliveryTarget", text: str,

@@ -128,14 +128,97 @@ def test_missing_token_records_delivery_error(monkeypatch):
     assert "TELEGRAM_BOT_TOKEN" in result.delivery_error
 
 
-def test_unsupported_platform_not_marked_delivered():
+def test_unsupported_platform_records_delivery_error():
     ex = _agent_executor(delivery_handler=None)
     result = _run(ex._execute_one(_job(deliver="irc:chan")))
 
+    # The run itself is intact, but an unsupported target must never be silently
+    # dropped: with no live handler and no standalone sender, delivery raises and
+    # the error is recorded so a misconfigured target is auditable.
     assert result.status == "succeeded"
     assert result.delivered is False
-    # No sender and no live handler → nothing sent, but the run is intact.
-    assert result.delivery_error is None
+    assert result.delivery_error is not None
+    assert "irc" in result.delivery_error
+
+
+def test_long_message_is_chunked(monkeypatch):
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append(payload)
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T0KEN")
+
+    long_agent = "x" * 9000
+
+    class _BigAgent:
+        def chat(self, message, **kwargs):
+            return long_agent
+
+    ex = ScheduledAgentExecutor(
+        runner=FakeRunner(),
+        agent_resolver=lambda aid: _BigAgent(),
+        delivery_handler=None,
+    )
+    result = _run(ex._execute_one(_job(deliver="telegram:123")))
+
+    assert result.delivered is True
+    # 9000 chars over the 4096 Telegram limit → more than one send.
+    assert len(captured) > 1
+    assert all(len(p["text"]) <= 4096 for p in captured)
+    assert "".join(p["text"] for p in captured) == long_agent
+
+
+def test_discord_thread_id_sets_message_reference(monkeypatch):
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append((url, payload))
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "D0KEN")
+
+    ex = _agent_executor(delivery_handler=None)
+    # discord:<channel>:<thread/message id> → message_reference reply.
+    result = _run(ex._execute_one(_job(deliver="discord:999:777")))
+
+    assert result.delivered is True
+    assert captured, "expected a discord send"
+    url, payload = captured[0]
+    assert "/channels/999/messages" in url
+    assert payload["content"] == "echo:hello"
+    ref = payload.get("message_reference")
+    assert ref is not None
+    assert ref["message_id"] == "777"
+    assert ref["channel_id"] == "999"
+
+
+def test_home_channel_registry_fallback(monkeypatch, tmp_path):
+    captured: list = []
+
+    def fake_post(url, payload, headers=None):
+        captured.append(payload)
+
+    monkeypatch.setattr(ss, "_post_json", fake_post)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T0KEN")
+    monkeypatch.delenv("TELEGRAM_HOME_CHANNEL", raising=False)
+
+    # Simulate a home channel registered via the live gateway (no env var).
+    import json as _json
+
+    state_dir = tmp_path / ".praisonai" / "state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "home_channels.json").write_text(
+        _json.dumps({"telegram": {"chat_id": "-100999", "thread_id": None}})
+    )
+    monkeypatch.setattr(ss.Path, "home", classmethod(lambda cls: tmp_path))
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="telegram")))
+
+    assert result.delivered is True
+    assert captured and captured[0]["chat_id"] == "-100999"
 
 
 def test_live_handler_still_wins(monkeypatch):
