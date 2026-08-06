@@ -489,13 +489,17 @@ def _process_task_result(agents_instance, context, agent_output):
             except Exception as e:
                 logger.warning(f"Warning: Could not clean output of task {task_id}: {e}")
 
+        json_parse_error = None
+        pydantic_parse_error = None
+
         if task.output_json:
             try:
                 parsed = json.loads(cleaned)
                 task_output.json_dict = parsed
                 task_output.output_format = "JSON"
-            except Exception:
-                logger.warning(f"Warning: Could not parse output of task {task_id} as JSON")
+            except Exception as e:
+                json_parse_error = e
+                logger.warning(f"Warning: Could not parse output of task {task_id} as JSON: {e}")
                 logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
         if task.output_pydantic:
@@ -508,6 +512,7 @@ def _process_task_result(agents_instance, context, agent_output):
                 task_output.pydantic = pyd_obj
                 task_output.output_format = "Pydantic"
             except Exception as e:
+                pydantic_parse_error = e
                 schema_name = getattr(task.output_pydantic, "__name__", str(task.output_pydantic))
                 logger.warning(
                     f"Warning: Could not parse output of task {task_id} as Pydantic Model "
@@ -523,16 +528,18 @@ def _process_task_result(agents_instance, context, agent_output):
         # completion_checker) do not treat freeform prose as a success.
         if task.output_pydantic and task_output.pydantic is None:
             schema_name = getattr(task.output_pydantic, "__name__", str(task.output_pydantic))
+            detail = f" ({pydantic_parse_error})" if pydantic_parse_error is not None else ""
             return TaskResult(
                 task_output=task_output,
                 success=False,
-                error=f"Structured output validation failed for {schema_name}: could not parse agent output as the requested Pydantic model.",
+                error=f"Structured output validation failed for {schema_name}: could not parse agent output as the requested Pydantic model.{detail}",
             )
         if task.output_json and task_output.json_dict is None:
+            detail = f" ({json_parse_error})" if json_parse_error is not None else ""
             return TaskResult(
                 task_output=task_output,
                 success=False,
-                error="Structured output validation failed: could not parse agent output as JSON.",
+                error=f"Structured output validation failed: could not parse agent output as JSON.{detail}",
             )
 
         return TaskResult(task_output=task_output, success=True)
@@ -1167,9 +1174,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         # the existing retry loop and, once retries are exhausted, leaves the task
         # in a "failed" state instead of silently succeeding with freeform prose.
         if task.output_json:
-            return bool(task.result and task.result.json_dict)
+            return task.result is not None and task.result.json_dict is not None
         if task.output_pydantic:
-            return bool(task.result and task.result.pydantic)
+            return task.result is not None and task.result.pydantic is not None
         return len(agent_output.strip()) > 0
 
     async def aexecute_task(self, task_id):

@@ -93,6 +93,31 @@ def test_output_json_prose_is_not_success():
     assert result.task_output.json_dict is None
 
 
+def test_empty_json_object_is_success():
+    task = _make_task(output_json=True)
+    ctx = _make_context(task)
+    result = _process_task_result(_StubAgentsInstance(), ctx, "{}")
+
+    assert result.success is True
+    assert result.task_output.json_dict == {}
+
+
+def test_failed_results_preserve_parse_error_detail():
+    # Pydantic path surfaces the underlying validation error.
+    task = _make_task(output_pydantic=Fact)
+    ctx = _make_context(task)
+    result = _process_task_result(_StubAgentsInstance(), ctx, '{"title": "only title"}')
+    assert result.success is False
+    assert "detail" in (result.error or "").lower()
+
+    # JSON path surfaces the underlying decode error.
+    task_json = _make_task(output_json=True)
+    ctx_json = _make_context(task_json)
+    result_json = _process_task_result(_StubAgentsInstance(), ctx_json, "not json")
+    assert result_json.success is False
+    assert "(" in (result_json.error or "")
+
+
 def test_freeform_prose_success_when_no_structured_output():
     task = _make_task()
     ctx = _make_context(task)
@@ -118,3 +143,19 @@ def test_completion_checker_fails_closed_for_unparsed_pydantic():
     task_plain = _make_task()
     assert checker(None, task_plain, "prose") is True
     assert checker(None, task_plain, "   ") is False
+
+
+def test_completion_checker_accepts_falsey_json():
+    checker = PraisonAIAgents.default_completion_checker
+    for value in ({}, [], False, 0):
+        task = _make_task(
+            output_json=True,
+            result=SimpleNamespace(pydantic=None, json_dict=value),
+        )
+        assert checker(None, task, "irrelevant") is True
+
+    # Missing structured output (json_dict is None) -> not complete.
+    task_missing = _make_task(
+        output_json=True, result=SimpleNamespace(pydantic=None, json_dict=None)
+    )
+    assert checker(None, task_missing, "prose") is False
