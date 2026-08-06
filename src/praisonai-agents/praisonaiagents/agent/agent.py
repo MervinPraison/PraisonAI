@@ -44,6 +44,12 @@ from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 # Lazy-loaded modules (populated on first use, protected by _lazy_import_lock)
 _lazy_import_lock = threading.Lock()
+
+# Serializes the check-and-enable of the mutually-exclusive process-global
+# output modes (editor/trace/status) so concurrently-constructed Agents cannot
+# both observe "no mode enabled" and clobber each other's callbacks. First
+# mode wins.
+_output_mode_lock = threading.Lock()
 _llm_module = None
 _hooks_module = None
 _stream_emitter_class = None
@@ -955,42 +961,48 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 pass
             return False
 
-        # Enable editor output mode if configured (beginner-friendly, takes priority)
-        # Shows: Step 1: 📄 Creating file: path → ✓ Done
-        if editor_output:
-            try:
-                from ..output.editor import enable_editor_output, is_editor_output_enabled
-                if not is_editor_output_enabled() and not _any_output_mode_enabled():
-                    enable_editor_output(use_color=True)
-            except ImportError:
-                pass  # Editor module not available
-        # Enable trace output mode if configured
-        # This provides timestamped inline status with duration
-        elif status_trace:
-            try:
-                from ..output.trace import enable_trace_output, is_trace_output_enabled
-                if not is_trace_output_enabled() and not _any_output_mode_enabled():
-                    enable_trace_output(use_color=True, show_timestamps=True)
-            except ImportError:
-                pass  # Trace module not available
-        # Enable status output mode if configured (simple progress, no timestamps)
-        # This registers callbacks to capture tool calls and final output
-        elif actions_trace:
-            try:
-                from ..output.status import enable_status_output, is_status_output_enabled
-                if not is_status_output_enabled() and not _any_output_mode_enabled():
-                    output_format = "jsonl" if json_output else "text"
-                    # simple_output=True means status preset (no timestamps)
-                    # metrics=True means debug preset (show token/cost info)
-                    enable_status_output(
-                        redact=True,
-                        use_color=True,
-                        format=output_format,
-                        show_timestamps=not simple_output,
-                        show_metrics=metrics
-                    )
-            except ImportError:
-                pass  # Status module not available
+        # The check-and-enable below must be atomic across threads: two Agents
+        # constructed concurrently could otherwise both see "no mode enabled"
+        # and clobber each other's callbacks. Only take the lock when a mode is
+        # actually requested (the common silent path stays lock-free).
+        if editor_output or status_trace or actions_trace:
+            with _output_mode_lock:
+                # Enable editor output mode if configured (beginner-friendly, takes priority)
+                # Shows: Step 1: 📄 Creating file: path → ✓ Done
+                if editor_output:
+                    try:
+                        from ..output.editor import enable_editor_output, is_editor_output_enabled
+                        if not is_editor_output_enabled() and not _any_output_mode_enabled():
+                            enable_editor_output(use_color=True)
+                    except ImportError:
+                        pass  # Editor module not available
+                # Enable trace output mode if configured
+                # This provides timestamped inline status with duration
+                elif status_trace:
+                    try:
+                        from ..output.trace import enable_trace_output, is_trace_output_enabled
+                        if not is_trace_output_enabled() and not _any_output_mode_enabled():
+                            enable_trace_output(use_color=True, show_timestamps=True)
+                    except ImportError:
+                        pass  # Trace module not available
+                # Enable status output mode if configured (simple progress, no timestamps)
+                # This registers callbacks to capture tool calls and final output
+                elif actions_trace:
+                    try:
+                        from ..output.status import enable_status_output, is_status_output_enabled
+                        if not is_status_output_enabled() and not _any_output_mode_enabled():
+                            output_format = "jsonl" if json_output else "text"
+                            # simple_output=True means status preset (no timestamps)
+                            # metrics=True means debug preset (show token/cost info)
+                            enable_status_output(
+                                redact=True,
+                                use_color=True,
+                                format=output_format,
+                                show_timestamps=not simple_output,
+                                show_metrics=metrics
+                            )
+                    except ImportError:
+                        pass  # Status module not available
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param - FAST PATH for common cases

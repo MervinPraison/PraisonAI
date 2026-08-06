@@ -2169,17 +2169,29 @@ class ToolExecutionMixin:
         except ImportError:
             pass  # MCP not available
         
-        # Normalize MCP failures (returned as bare "Error: ..." strings by
-        # MCPClient.call_tool) into the same {"error": ...} dict shape used by
-        # native tools, so they participate in retry, doom-loop detection and
-        # circuit-breaking instead of looking like a successful string result.
+        # Normalize MCP transport/timeout failures (returned as bare "Error: ..."
+        # strings by MCPClient.call_tool) into the same {"error": ...} dict shape
+        # used by native tools, so they participate in retry, doom-loop detection
+        # and circuit-breaking instead of looking like a successful string result.
+        #
+        # IMPORTANT: a successful MCP tool may legitimately return text that
+        # begins with "Error: " (e.g. a linter/grep/echo tool). To avoid
+        # misclassifying valid output as a failure, we only convert MCP's own
+        # unambiguous internally-generated failure signatures, not any string
+        # that merely starts with the "Error: " prefix.
         def _normalize_mcp_result(res):
-            if isinstance(res, str) and res.startswith("Error: "):
-                message = res[len("Error: "):]
-                error_dict = {"error": message}
-                if "timed out" in message:
-                    error_dict["timeout"] = True
-                return error_dict
+            if not isinstance(res, str) or not res.startswith("Error: "):
+                return res
+            message = res[len("Error: "):]
+            # MCP-internal timeout messages are unambiguous:
+            #   "MCP tool call timed out after Ns"
+            #   "MCP initialization timed out after Ns"
+            is_mcp_timeout = (
+                message.startswith("MCP tool call timed out after")
+                or message.startswith("MCP initialization timed out after")
+            )
+            if is_mcp_timeout:
+                return {"error": message, "timeout": True}
             return res
 
         # Helper function to execute MCP tool
