@@ -101,6 +101,36 @@ def code_main(
         typer.echo("Error: -p/--print requires a task prompt", err=True)
         raise typer.Exit(1)
 
+    # Fail closed on options the headless -p path cannot honor. The full
+    # ACP/LSP tool wiring and named-profile permission scope live in the
+    # interactive path; silently dropping them (as a bare early-return would)
+    # is worse than an explicit error, since tool/profile-dependent tasks would
+    # run without the tools or scope the caller asked for. Reject rather than
+    # re-implement that heavy wiring here (keeps the command lightweight).
+    # Options that ARE honored in headless mode: --model, --thinking, --verbose,
+    # --workspace, --resume/--session/--continue.
+    if print_mode:
+        _unsupported = []
+        if tools:
+            _unsupported.append("--tools")
+        if agent:
+            _unsupported.append("--agent")
+        if plan:
+            _unsupported.append("--plan")
+        if no_acp:
+            _unsupported.append("--no-acp")
+        if no_lsp:
+            _unsupported.append("--no-lsp")
+        if _unsupported:
+            typer.echo(
+                "Error: -p/--print does not support "
+                + ", ".join(_unsupported)
+                + " (headless mode runs a minimal code agent; use interactive "
+                "mode for tool/profile configuration)",
+                err=True,
+            )
+            raise typer.Exit(1)
+
     # Resolve a named agent profile (tools + permission/mode scope). The profile
     # reuses the same custom-definitions loader as `praisonai run --agent`, so a
     # profile defined once in .praisonai/agents/<name>.md behaves identically
@@ -162,24 +192,26 @@ def code_main(
         # silently keep later safe-default agents unguarded.
         os.environ.pop("PRAISONAI_TOOL_SAFETY", None)
     
-    # Handle profiling for single prompt mode
-    if prompt and (profile or profile_deep):
-        _run_profiled_code(
-            prompt=prompt,
-            model=model,
-            verbose=verbose,
-            profile_deep=profile_deep,
-            thinking_budget=thinking_budget,
-        )
-        return
-    
     # Headless one-shot: emit a clean, machine-readable envelope and exit with a
     # status-reflecting code. Routes around the decorated interactive chat path
     # (which prints `Chat mode:`/`Prompt:` diagnostics + a profiling block and
     # always returns None) so stdout carries only the result envelope. Reuses
     # the existing token collector + cost tracker for usage, so no new Agent
     # params or wrapper wiring are introduced (parity with `run --output json`).
+    #
+    # NOTE: this must run BEFORE the profiling branch below. Profiling prints a
+    # human-oriented report and always exits 0, which would violate the -p
+    # machine-readable contract if it won the race; and the two are mutually
+    # exclusive intents (diagnostic vs scriptable). Reject the combination and
+    # honor -p when both are requested.
     if print_mode and prompt:
+        if profile or profile_deep:
+            typer.echo(
+                "Error: -p/--print (headless machine-readable) cannot be "
+                "combined with --profile/--profile-deep",
+                err=True,
+            )
+            raise typer.Exit(1)
         _run_print_code(
             prompt=prompt,
             model=model,
@@ -188,6 +220,18 @@ def code_main(
             thinking_budget=thinking_budget,
             session_id=session_id,
             continue_session=continue_session,
+        )
+        return
+
+    # Handle profiling for single prompt mode (non-headless). Runs after the
+    # -p branch above so headless output always wins the machine-readable path.
+    if prompt and (profile or profile_deep):
+        _run_profiled_code(
+            prompt=prompt,
+            model=model,
+            verbose=verbose,
+            profile_deep=profile_deep,
+            thinking_budget=thinking_budget,
         )
         return
 

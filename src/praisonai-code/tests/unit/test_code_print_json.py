@@ -203,5 +203,44 @@ def test_unknown_output_format_fails_closed():
     assert "unknown --output" in result.output
 
 
+def test_print_rejects_profile_combination():
+    """`-p` + `--profile` fails closed rather than emitting a human report.
+
+    Profiling prints a human-oriented report and always exits 0, which would
+    silently break the machine-readable -p contract. The two intents are
+    mutually exclusive, so the combination must be rejected up front.
+    """
+    runner = CliRunner()
+    result = runner.invoke(app, ["-p", "--profile", "do a thing"])
+
+    assert result.exit_code == 1
+    assert "cannot be combined with --profile" in result.output
+    assert "Chat mode:" not in result.output
+
+
+@pytest.mark.parametrize(
+    "opt",
+    [
+        ["--tools", "web_search"],
+        ["--agent", "planner"],
+        ["--plan"],
+        ["--no-acp"],
+        ["--no-lsp"],
+    ],
+)
+def test_print_rejects_unsupported_options(opt):
+    """`-p` fails closed on options the headless path cannot honor.
+
+    Silently dropping tool/profile/scope configuration would run a
+    tool-dependent task without the requested tools; an explicit error is
+    safer and points users to interactive mode.
+    """
+    runner = CliRunner()
+    result = runner.invoke(app, ["-p", *opt, "do a thing"])
+
+    assert result.exit_code == 1
+    assert "does not support" in result.output
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
