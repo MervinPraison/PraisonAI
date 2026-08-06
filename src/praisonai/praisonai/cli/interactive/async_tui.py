@@ -633,6 +633,7 @@ class AsyncTUI:
         "export": "Export conversation to file",
         "import": "Import conversation from file",
         "cost": "Show token usage and cost",
+        "stats": "Show session statistics (model, tokens, cost)",
         "status": "Show ACP/LSP runtime status",
         "auto": "Toggle autonomy mode (auto-delegate complex tasks)",
         "debug": "Toggle debug logging",
@@ -695,6 +696,7 @@ class AsyncTUI:
   /export [file]   Export conversation to file
   /import <file>   Import conversation from file
   /cost            Show token usage and cost
+  /stats           Show session statistics (model, tokens, cost)
   /status          Show ACP/LSP runtime status
   /auto            Toggle autonomy mode (auto-delegate complex tasks)
   /debug           Toggle debug logging to ~/.praisonai/async_tui_debug.log
@@ -788,9 +790,13 @@ Tips:
                 self.messages.append(ChatMessage(role="system", content=f"Export failed: {e}"))
             return True
         
-        elif cmd == "cost":
-            cost_info = f"Total tokens: {self._total_tokens}\nEstimated cost: ${self._total_cost:.4f}"
-            self.messages.append(ChatMessage(role="system", content=cost_info))
+        elif cmd in ("cost", "stats"):
+            stats_info = (
+                f"Model:          {self.config.model}\n"
+                f"Total tokens:   {self._total_tokens}\n"
+                f"Estimated cost: ${self._total_cost:.4f}"
+            )
+            self.messages.append(ChatMessage(role="system", content=stats_info))
             return True
         
         elif cmd == "compact":
@@ -1682,7 +1688,11 @@ Example: /handoff code "refactor the auth module" """
                 self._update_output()
                 return
             
-            # Queue or execute prompt
+            # NOTE: @file mentions are expanded once, canonically, inside
+            # _execute_in_background (which every queued/immediate prompt flows
+            # through). Do NOT expand here as well: _process_file_mentions is not
+            # idempotent, so a second pass would re-interpret @tokens embedded in
+            # already-attached file contents and append unrequested files.
             self._queue_or_execute(user_input)
         
         @kb.add("c-c")

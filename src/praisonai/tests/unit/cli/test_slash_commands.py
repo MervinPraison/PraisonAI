@@ -18,7 +18,7 @@ from praisonai.cli.features.slash_commands import (
     SlashCommandRegistry,
     SlashCommandParser,
     SlashCommandHandler,
-    create_default_registry,
+    create_slash_command_registry,
     cmd_help,
     cmd_cost,
     cmd_clear,
@@ -336,7 +336,7 @@ class TestBuiltinCommands:
             prompt_count=5,
             session_start_time=time.time() - 120  # 2 minutes ago
         )
-        ctx.config["command_registry"] = create_default_registry()
+        ctx.config["command_registry"] = create_slash_command_registry()
         return ctx
     
     def test_cmd_help_general(self, context):
@@ -537,7 +537,7 @@ class TestDefaultRegistry:
     
     def test_default_registry_has_core_commands(self):
         """Test that default registry has core commands."""
-        registry = create_default_registry()
+        registry = create_slash_command_registry()
         
         # Core commands should exist
         assert registry.get("help") is not None
@@ -550,7 +550,7 @@ class TestDefaultRegistry:
     
     def test_default_registry_aliases(self):
         """Test that default registry has aliases."""
-        registry = create_default_registry()
+        registry = create_slash_command_registry()
         
         # Help aliases
         assert registry.get("h") is not None

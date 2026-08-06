@@ -526,6 +526,9 @@ def _start_interactive_mode(self, args):
                         else:
                             console.print("[dim]No conversation history[/dim]")
                         continue
+                    elif cmd == "export":
+                        _handle_export_command(self, console, cmd_args, session_state)
+                        continue
                     elif cmd == "new":
                         # Start a new session
                         store = session_state.get('session_store')
@@ -838,6 +841,7 @@ def _print_interactive_help(self, console):
     console.print("\n[bold]Session Commands:[/bold]")
     console.print("  /session       - Show current session info (incl. fork lineage)")
     console.print("  /history       - Show conversation history")
+    console.print("  /export [file] - Export conversation to file")
     console.print("  /new           - Start a new session")
     console.print("  /branch [title]  - Fork the conversation here; switch to the fork")
     console.print("  /branch --at N   - Fork from N user turns back")
@@ -1075,6 +1079,44 @@ def _handle_stats_command(self, console, session_state):
     history_len = len(session_state['conversation_history'])
     console.print(f"  History turns:  {history_len}")
     console.print("")
+
+def _handle_export_command(self, console, args, session_state):
+    """Handle /export [file] command - export the current conversation.
+
+    Delegates to the canonical session-export path (``praisonai session
+    export``) when a resolvable session id is available, so the surface
+    ``praisonai code`` actually runs stays in parity with the other REPLs.
+    Falls back to writing the in-memory conversation history when no session
+    id is resolvable or the export path is unavailable.
+    """
+    filename = args.strip() if args else "conversation.md"
+
+    us = session_state.get('unified_session')
+    session_id = getattr(us, 'session_id', None) if us else None
+
+    if session_id:
+        try:
+            from praisonai_code.cli.state.session_resolver import export_session
+            fmt = "json" if filename.endswith(".json") else "md"
+            content = export_session(session_id, format=fmt)
+            if content is not None:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(content)
+                console.print(f"[green]✓ Exported session to {filename}[/green]")
+                return
+        except Exception as e:
+            console.print(f"[dim]Session export unavailable ({e}); writing history[/dim]")
+
+    # Fallback: write the in-memory conversation history.
+    history = session_state.get('conversation_history') or []
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            for msg in history:
+                f.write(f"[{msg.get('role', 'unknown')}]\n")
+                f.write(f"{msg.get('content', '')}\n\n")
+        console.print(f"[green]✓ Exported to {filename}[/green]")
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]")
 
 def _handle_compact_command(self, console, session_state):
     """
