@@ -13,6 +13,40 @@ app = typer.Typer(
 )
 
 
+def _resolve_installer(global_env: bool = False):
+    """Resolve the installer command, honouring how PraisonAI was installed.
+
+    Prefers ``uv pip`` when the ``uv`` binary is available, otherwise falls
+    back to ``<python> -m pip`` for the active interpreter.
+
+    The ``uv`` branch pins ``--python <sys.executable>`` so the package lands
+    in the interpreter running the CLI rather than an unrelated environment
+    ``uv`` might auto-discover (``VIRTUAL_ENV`` / ``CONDA_PREFIX`` / nearby
+    ``.venv``). When ``global_env`` is set the target is the ambient system
+    interpreter instead (``uv``'s ``--system`` / plain ``pip``).
+    """
+    import shutil
+    import sys
+
+    if shutil.which("uv"):
+        if global_env:
+            return ["uv", "pip", "install", "--system"]
+        return ["uv", "pip", "install", "--python", sys.executable]
+    if global_env:
+        return ["pip", "install"]
+    return [sys.executable, "-m", "pip", "install"]
+
+
+def _registered_entry_point_names():
+    """Return the set of currently registered entry-point plugin names."""
+    try:
+        from praisonaiagents.plugins.manager import get_plugin_manager
+    except ImportError:
+        return set()
+    manager = get_plugin_manager()
+    return {info.name for info in manager.list_plugins()}
+
+
 @app.command("list")
 def plugins_list(
     enabled_only: bool = typer.Option(False, "--enabled", help="Show only enabled plugins"),
@@ -236,6 +270,97 @@ def plugins_doctor():
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command("add")
+def plugins_add(
+    package: str = typer.Argument(..., help="Plugin package to install (pip requirement spec)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Only run discovery/verification, do not install"
+    ),
+    upgrade: bool = typer.Option(
+        False, "--upgrade", "-U", help="Upgrade the package if already installed"
+    ),
+    global_env: bool = typer.Option(
+        False,
+        "--global",
+        help="Install into the ambient/system environment instead of the CLI interpreter",
+    ),
+):
+    """Install a plugin package and verify it registers.
+
+    Installs the package into the active environment, triggers entry-point
+    discovery for the ``praisonai.plugins`` group, and reports exactly which
+    plugins were registered (name, type, hooks) — or a clear error if nothing
+    was discovered.
+
+    Examples:
+        praisonai plugins add praisonai-my-plugin
+        praisonai plugins add praisonai-my-plugin --upgrade
+        praisonai plugins add praisonai-my-plugin --dry-run
+    """
+    try:
+        from praisonaiagents.plugins.manager import get_plugin_manager
+    except ImportError:
+        typer.echo(
+            "Error: praisonaiagents package not found. Install with: pip install praisonaiagents",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    before = _registered_entry_point_names()
+
+    if not dry_run:
+        import importlib
+        import subprocess
+
+        cmd = _resolve_installer(global_env)
+        if upgrade:
+            cmd = cmd + ["--upgrade"]
+        cmd = cmd + [package]
+        typer.echo(f"Installing {package} ...")
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            typer.echo(f"Error: installation failed for '{package}'.", err=True)
+            raise typer.Exit(1)
+        # A package installed into the running interpreter is only importable
+        # after the finder caches are refreshed; otherwise entry-point
+        # discovery below can miss the just-installed distribution.
+        importlib.invalidate_caches()
+
+    manager = get_plugin_manager()
+    manager.discover_entry_points()
+    after = _registered_entry_point_names()
+
+    new_names = sorted(after - before)
+
+    if not new_names:
+        typer.echo(
+            f"[yellow]No new plugins were registered by '{package}'.[/yellow]\n"
+            "The package installed but exposed no 'praisonai.plugins' entry points, "
+            "or an entry point failed to load. Run 'praisonai plugins list' to inspect.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    verb = "Discovered" if dry_run else "Registered"
+    table = Table(title=f"{verb} {len(new_names)} plugin(s) from {package}")
+    table.add_column("Plugin", style="cyan")
+    table.add_column("Type")
+    table.add_column("Hooks", style="green")
+
+    for name in new_names:
+        plugin = manager.get_plugin(name)
+        info = plugin.info if plugin is not None else None
+        ptype = type(plugin).__name__ if plugin is not None else "-"
+        hooks = ", ".join(h.value for h in info.hooks) if info and info.hooks else "-"
+        table.add_row(name, ptype, hooks)
+
+    console.print(table)
 
 
 # ============ Single-File Plugin Commands ============
@@ -589,6 +714,7 @@ Manage plugins with: praisonai plugins <command>
 
 [bold]Commands:[/bold]
   [green]list[/green]        List available plugins
+  [green]add[/green]         Install a plugin package and verify it registers
   [green]info[/green]        Show plugin details
   [green]enable[/green]      Enable a plugin
   [green]disable[/green]     Disable a plugin
@@ -596,6 +722,7 @@ Manage plugins with: praisonai plugins <command>
 
 [bold]Examples:[/bold]
   praisonai plugins list
+  praisonai plugins add praisonai-my-plugin
   praisonai plugins info memory-core
   praisonai plugins enable browser-tool
   praisonai plugins doctor

@@ -232,6 +232,108 @@ def tools_info(
         console.print(f"\n[blue]Source:[/blue] {labels.get(sources[name], labels['builtin'])}")
 
 
+def _resolve_installer(global_env: bool = False):
+    """Resolve the installer command, honouring how PraisonAI was installed.
+
+    The ``uv`` branch pins ``--python <sys.executable>`` so the package lands
+    in the interpreter running the CLI rather than an unrelated environment
+    ``uv`` might auto-discover (``VIRTUAL_ENV`` / ``CONDA_PREFIX`` / nearby
+    ``.venv``). When ``global_env`` is set the target is the ambient system
+    interpreter instead (``uv``'s ``--system`` / plain ``pip``).
+    """
+    import shutil
+    import sys
+
+    if shutil.which("uv"):
+        if global_env:
+            return ["uv", "pip", "install", "--system"]
+        return ["uv", "pip", "install", "--python", sys.executable]
+    if global_env:
+        return ["pip", "install"]
+    return [sys.executable, "-m", "pip", "install"]
+
+
+@app.command("add")
+def tools_add(
+    package: str = typer.Argument(..., help="Tool package to install (pip requirement spec)"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Only run discovery/verification, do not install"
+    ),
+    upgrade: bool = typer.Option(
+        False, "--upgrade", "-U", help="Upgrade the package if already installed"
+    ),
+    global_env: bool = typer.Option(
+        False,
+        "--global",
+        help="Install into the ambient/system environment instead of the CLI interpreter",
+    ),
+):
+    """Install a tool package and verify its tools become available.
+
+    Installs the package into the active environment, refreshes tool
+    discovery, and reports exactly which tools became available — or a clear
+    error if nothing new was discovered.
+
+    Examples:
+        praisonai tools add praisonai-my-tools
+        praisonai tools add praisonai-my-tools --upgrade
+        praisonai tools add praisonai-my-tools --dry-run
+    """
+    from praisonai_code.tool_resolver import ToolResolver
+
+    resolver = ToolResolver()
+    before = set(resolver.list_available().keys())
+
+    if not dry_run:
+        import importlib
+        import subprocess
+
+        cmd = _resolve_installer(global_env)
+        if upgrade:
+            cmd = cmd + ["--upgrade"]
+        cmd = cmd + [package]
+        console.print(f"Installing {package} ...")
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            console.print(f"[red]Error: installation failed for '{package}'.[/red]")
+            raise typer.Exit(1)
+        # A package installed into the running interpreter is only importable
+        # after the finder caches are refreshed; otherwise discovery below can
+        # miss the just-installed distribution.
+        importlib.invalidate_caches()
+
+    # Use a fresh resolver so instance-level availability caches (e.g. whether
+    # ``praisonai_tools`` is importable) are re-evaluated against the now-updated
+    # environment; ``invalidate()`` only clears the per-name resolution cache.
+    resolver = ToolResolver()
+    available = resolver.list_available()
+    after = set(available.keys())
+    new_names = sorted(after - before)
+
+    if not new_names:
+        console.print(
+            f"[yellow]No new tools were registered by '{escape(package)}'.[/yellow]\n"
+            "[dim]The package installed but exposed no discoverable tools, "
+            "or an entry point failed to load. Run 'praisonai tools list' to inspect.[/dim]"
+        )
+        raise typer.Exit(1)
+
+    sources = resolver.list_available_sources()
+    verb = "Discovered" if dry_run else "Registered"
+    table = Table(
+        title=f"{verb} {len(new_names)} tool(s) from {escape(package)}",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Tool Name", style="green")
+    table.add_column("Source", style="blue")
+
+    for name in new_names:
+        table.add_row(name, sources.get(name, "builtin"))
+
+    console.print(table)
+
+
 @app.command("test")
 def tools_test(
     name: str = typer.Argument(..., help="Tool name to test"),
