@@ -449,6 +449,14 @@ def session_export(
 @app.command("show")
 def session_show(
     session_id: str = typer.Argument(..., help="Session ID to show"),
+    recap: bool = typer.Option(
+        False,
+        "--recap",
+        help=(
+            "Render a read-only 'where were we' summary of the session instead "
+            "of raw details (does not mutate the session or trigger compaction)."
+        ),
+    ),
 ):
     """Show session details."""
     output = get_output_controller()
@@ -462,7 +470,18 @@ def session_show(
     if not session.found:
         output.print_error(f"Session not found: {session_id}")
         raise typer.Exit(1)
-    
+
+    # Read-only recap: reuse the shared summariser purely to inform the user.
+    if recap:
+        from praisonaiagents.compaction import build_recap
+
+        recap_text = build_recap(session.chat_history or [])
+        if output.is_json_mode:
+            output.print_json({"session_id": session.session_id, "recap": recap_text})
+            return
+        output.print_panel(recap_text, title="Session Recap")
+        return
+
     if output.is_json_mode:
         output.print_json(session.to_dict())
         return

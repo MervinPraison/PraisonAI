@@ -37,6 +37,8 @@ __all__ = [
     "ToolResultPrunerProtocol",
     "MessageFormatterProtocol", 
     "SummaryBuilderProtocol",
+    # Read-only recap
+    "build_recap",
 ]
 
 
@@ -69,5 +71,9 @@ def __getattr__(name: str):
     if name == "SummaryBuilderProtocol":
         from .protocols import SummaryBuilderProtocol
         return SummaryBuilderProtocol
+    
+    if name == "build_recap":
+        from .recap import build_recap
+        return build_recap
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
