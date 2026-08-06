@@ -335,6 +335,31 @@ _THREAD_SCOPED_NOT_FOUND: Set[str] = {
 }
 
 
+def classify_send_failure(err: BaseException, platform: str = "") -> Optional[str]:
+    """Classify a send failure into the core :class:`SendErrorKind` value.
+
+    Delegates to the shared, status-code-aware core classifier
+    (:func:`praisonaiagents.bots.classify_send_error`) so the whole gateway —
+    core retry loop, delivery router, dead-target registry — shares one
+    taxonomy instead of divergent English substring sets. Returns the
+    ``SendErrorKind`` *value* (a plain string such as ``"forbidden"`` or
+    ``"target_not_found"``) so the dead-target registry can record the failure
+    by kind rather than by an opaque, English-only ``str(exc)`` reason.
+
+    Returns None only when core is too old to provide the classifier, letting
+    callers fall back to :func:`is_permanent_target_failure`.
+    """
+    try:
+        from praisonaiagents.bots import classify_send_error
+    except Exception:  # pragma: no cover - core predates the taxonomy
+        return None
+    result = classify_send_error(err)
+    kind = getattr(result, "error_kind", None)
+    if kind is None:
+        return None
+    return getattr(kind, "value", str(kind))
+
+
 def is_permanent_target_failure(err: BaseException, platform: str = "") -> bool:
     """Check if an error means a whole delivery target is permanently dead.
 
