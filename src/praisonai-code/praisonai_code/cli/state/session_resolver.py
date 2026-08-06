@@ -161,6 +161,29 @@ def delete_session(session_id: str, project_path: Optional[str] = None) -> bool:
     return deleted or legacy_deleted
 
 
+def rename_session(
+    session_id: str,
+    title: str,
+    project_path: Optional[str] = None,
+) -> bool:
+    """Give a session a human-readable title (Issue #3737).
+
+    Renames in the *first* canonical store carrying the id — the same store
+    :func:`resolve_session` selects — so a title is set on the exact record the
+    CLI lists/resumes. Returns ``True`` only when the store confirms the write.
+    """
+    store = _store_for(session_id, project_path)
+    if store is None:
+        return False
+    renamer = getattr(store, "rename_session", None)
+    if renamer is None:
+        return False
+    try:
+        return bool(renamer(session_id, title))
+    except Exception:
+        return False
+
+
 def export_session(
     session_id: str,
     format: str = "md",

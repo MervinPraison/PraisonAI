@@ -1513,3 +1513,59 @@ class TestSpillOnWriteFailure:
         history = store2.get_chat_history("s1")
         contents = [m["content"] for m in history]
         assert "good" in contents
+
+
+class TestRenameSession:
+    """Tests for human-readable session titles (Issue #3737)."""
+
+    def test_rename_persists_and_lists(self):
+        """A renamed session persists its title and surfaces it in listings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-1", "how do I fix auth?")
+
+            assert store.rename_session("sess-1", "fix-auth-bug") is True
+
+            # Persists in metadata across a fresh store instance.
+            reloaded = DefaultSessionStore(session_dir=tmpdir)
+            assert reloaded.get_session("sess-1").metadata["title"] == "fix-auth-bug"
+
+            # Surfaces in the listing rows.
+            rows = {r["session_id"]: r for r in reloaded.list_sessions()}
+            assert rows["sess-1"]["title"] == "fix-auth-bug"
+
+    def test_resume_by_unrenamed_still_works(self):
+        """Sessions without a title keep resolving by id (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-2", "hello there")
+
+            row = {r["session_id"]: r for r in store.list_sessions()}["sess-2"]
+            assert row["title"] is None
+            # Full history still resumable by the opaque id.
+            history = store.get_chat_history("sess-2")
+            assert history[0]["content"] == "hello there"
+
+    def test_rename_empty_clears_title(self):
+        """An empty title clears a previously set one, falling back to snippet."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            store.add_user_message("sess-3", "first user message here")
+            store.rename_session("sess-3", "temp-name")
+            assert store.get_session("sess-3").metadata.get("title") == "temp-name"
+
+            assert store.rename_session("sess-3", "   ") is True
+            assert "title" not in store.get_session("sess-3").metadata
+            # _session_title falls back to the first user message snippet.
+            data = store.get_session("sess-3").to_dict()
+            assert store._session_title(data) == "first user message here"
+
+    def test_session_title_prefers_explicit_title(self):
+        """_session_title prefers an explicit title over agent name / snippet."""
+        data = {
+            "session_id": "s",
+            "agent_name": "Assistant",
+            "metadata": {"title": "my-conversation"},
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        assert DefaultSessionStore._session_title(data) == "my-conversation"

@@ -113,7 +113,9 @@ def session_list(
                 from datetime import datetime
                 
                 self.session_id = data.get("session_id", data.get("id", ""))
-                self.name = data.get("agent_name", "")
+                # Prefer a human-readable title set via `session rename` /
+                # `/rename` (Issue #3737); fall back to the agent name.
+                self.name = data.get("title") or data.get("agent_name", "")
                 self.status = data.get("status")  # Use actual status from data if available
                 self.event_count = data.get("message_count", 0)
 
@@ -380,6 +382,44 @@ def session_delete(
         else:
             output.print_error(f"Failed to delete session: {session_id}")
             raise typer.Exit(1)
+
+
+@app.command("rename")
+def session_rename(
+    session_id: str = typer.Argument(..., help="Session ID to rename"),
+    title: str = typer.Argument(..., help="New human-readable title"),
+):
+    """Give a session a human-readable title (Issue #3737).
+
+    Sessions are otherwise addressable only by opaque id; a title makes
+    ``praisonai session list`` and ``/sessions`` readable at a glance.
+    """
+    output = get_output_controller()
+
+    from ..state.session_resolver import rename_session as _rename_session
+    from ..state.session_resolver import resolve_session
+
+    session = resolve_session(session_id)
+    if not session.found:
+        output.print_error(
+            f"Session not found: {session_id}",
+            remediation="Use 'praisonai session list' to see available sessions",
+        )
+        raise typer.Exit(1)
+
+    renamed = _rename_session(session_id, title)
+
+    if output.is_json_mode:
+        output.print_json(
+            {"renamed": renamed, "session_id": session_id, "title": title}
+        )
+        return
+
+    if renamed:
+        output.print_success(f"Renamed session {session_id} to: {title}")
+    else:
+        output.print_error(f"Failed to rename session: {session_id}")
+        raise typer.Exit(1)
 
 
 @app.command("export")

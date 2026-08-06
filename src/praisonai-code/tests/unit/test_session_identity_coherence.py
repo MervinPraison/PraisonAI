@@ -234,6 +234,64 @@ def test_delete_sweeps_legacy_duplicate(project, monkeypatch):
     assert resolve_session("dup-id").found is False
 
 
+def test_rename_persists_and_lists(project):
+    """`session rename` sets a title that surfaces in `list` (Issue #3737)."""
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+    from praisonai_code.cli.state.session_resolver import rename_session
+
+    _create_project_session("sess-rename")
+
+    assert rename_session("sess-rename", "fix-auth-bug") is True
+
+    listed = {s.get("session_id"): s for s in list_project_sessions()}
+    assert listed["sess-rename"].get("title") == "fix-auth-bug"
+
+
+def test_resume_by_unrenamed_still_works(project):
+    """An un-renamed session stays resolvable/resumable by id (no title)."""
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+    from praisonai_code.cli.state.session_resolver import resolve_session
+
+    _create_project_session("sess-plain")
+
+    listed = {s.get("session_id"): s for s in list_project_sessions()}
+    assert listed["sess-plain"].get("title") is None
+    assert resolve_session("sess-plain").found is True
+
+
+def test_cli_rename_then_list_shows_title(project):
+    """End-to-end: `session rename` sets a title that `list` renders as Name."""
+    from typer.testing import CliRunner
+
+    from praisonai_code.cli.commands.session import app
+    from praisonai_code.cli.state.project_sessions import list_project_sessions
+
+    _create_project_session("sess-cli-rename")
+    runner = CliRunner()
+
+    renamed = runner.invoke(app, ["rename", "sess-cli-rename", "my-title"])
+    assert renamed.exit_code == 0, renamed.output
+
+    # The listing row carries the title; the list renderer prefers it for Name.
+    row = {s.get("session_id"): s for s in list_project_sessions()}["sess-cli-rename"]
+    assert row.get("title") == "my-title"
+
+    listed = runner.invoke(app, ["list"])
+    assert listed.exit_code == 0, listed.output
+    assert "my-title" in listed.output
+
+
+def test_cli_rename_missing_session_errors(project):
+    """Renaming an unknown id exits non-zero (Issue #3737)."""
+    from typer.testing import CliRunner
+
+    from praisonai_code.cli.commands.session import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["rename", "nope", "whatever"])
+    assert result.exit_code == 1
+
+
 def test_list_and_resolver_enumerate_identical_stores(project):
     """list/continue and show/delete/export enumerate the *same* stores.
 

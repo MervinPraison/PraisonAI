@@ -1560,6 +1560,27 @@ class DefaultSessionStore:
             session_id, _apply, error_label="update session metadata"
         )
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """Give a session a human-readable title (Issue #3737).
+
+        Stores the title in ``metadata["title"]`` via the locked read-modify-write
+        path so ``session list`` / ``/sessions`` can display a friendly name
+        instead of an opaque id. Passing an empty/whitespace-only title clears
+        any existing title (falling back to the derived snippet on display).
+        Backward compatible: sessions without a title keep resolving by id.
+        """
+        title = (title or "").strip()
+
+        def _apply(session: SessionData) -> None:
+            if title:
+                session.metadata["title"] = title
+            else:
+                session.metadata.pop("title", None)
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="rename session"
+        )
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
         filepath = self._get_session_path(session_id)
@@ -1591,6 +1612,9 @@ class DefaultSessionStore:
                             "session_id": data.get("session_id", filename[:-5]),
                             "id": data.get("session_id", filename[:-5]),
                             "agent_name": data.get("agent_name"),
+                            # Human-readable title set via `session rename` /
+                            # `/rename` (Issue #3737); None when never renamed.
+                            "title": (data.get("metadata") or {}).get("title"),
                             "agent_id": data.get("agent_id") or (data.get("metadata") or {}).get("agent_id"),
                             "source": data.get("source") or (data.get("metadata") or {}).get("source"),
                             # Surface parentage so callers can distinguish root
@@ -1798,7 +1822,14 @@ class DefaultSessionStore:
 
     @staticmethod
     def _session_title(data: Dict[str, Any]) -> str:
-        """Derive a short human-friendly title for a session."""
+        """Derive a short human-friendly title for a session.
+
+        An explicit title set via ``rename_session`` (Issue #3737) wins; then the
+        agent name; then the first user message snippet; finally the id.
+        """
+        explicit = (data.get("metadata") or {}).get("title")
+        if explicit:
+            return str(explicit)
         agent_name = data.get("agent_name")
         if agent_name:
             return str(agent_name)
