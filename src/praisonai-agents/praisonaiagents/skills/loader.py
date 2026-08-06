@@ -24,6 +24,7 @@ class LoadedSkill:
     _scripts: dict = field(default_factory=dict)
     _references: dict = field(default_factory=dict)
     _assets: dict = field(default_factory=dict)
+    _source_mtime: Optional[float] = field(default=None, compare=False, repr=False)
 
     @property
     def metadata(self) -> SkillMetadata:

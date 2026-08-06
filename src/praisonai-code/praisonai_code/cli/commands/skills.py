@@ -374,6 +374,46 @@ def _load_configured_skill_sources():
     return ordered
 
 
+@app.command("reload")
+def skills_reload(
+    skill_dirs: str = typer.Option(
+        None, "--dirs", "-d", help="Comma-separated skill directories"
+    ),
+):
+    """Re-scan skill directories and report the skills now available.
+
+    ``SkillManager.reload()`` is the live-session primitive: a running session
+    calls it to pick up newly installed or edited skills on the *next* turn
+    without a restart. This standalone CLI command is a convenience scan that
+    lists the skills currently discoverable on disk (there is no live session
+    to refresh from a separate process), so run it to confirm a
+    ``praisonai skills install <url>`` or a SKILL.md edit landed on disk.
+
+    Examples:
+        praisonai skills reload
+        praisonai skills reload --dirs ./skills
+    """
+    try:
+        from praisonaiagents.skills import SkillManager
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    dirs = skill_dirs.split(",") if skill_dirs else None
+
+    manager = SkillManager()
+    manager.discover(dirs, include_defaults=dirs is None)
+
+    from rich.console import Console
+
+    console = Console()
+    names = sorted(manager.skill_names)
+    for name in names:
+        console.print(f"[green]• {name}[/green]")
+
+    console.print(f"Skills available: [green]{len(names)}[/green]")
+
+
 @app.command("search")
 def skills_search(
     query: str = typer.Argument(..., help="Search query"),
