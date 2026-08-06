@@ -322,7 +322,45 @@ def run_sync_or_offload(
         name=thread_name,
     )
     thread.start()
-    thread.join()
+    # Bound the join so a stuck coroutine cannot pin the caller — which, when
+    # the caller *is* the event-loop thread, means it cannot pin the loop past
+    # ``timeout``. The worker itself already enforces ``timeout`` on the coro via
+    # ``run_sync``; the small grace margin covers thread hand-off/teardown so we
+    # do not spuriously time out before the worker records its own error.
+    if timeout is not None:
+        thread.join(timeout + 1.0)
+        if thread.is_alive():
+            raise TimeoutError(
+                f"run_sync_or_offload() worker did not complete within {timeout}s"
+            )
+    else:
+        thread.join()
     if error:
         raise error[0]
     return result[0]
+
+
+async def arun_sync_or_offload(
+    coro: Awaitable[T],
+    *,
+    timeout: float | None = _DEFAULT_TIMEOUT,
+) -> T:
+    """Awaitable sibling of :func:`run_sync_or_offload` for async callers.
+
+    Submits ``coro`` to the active :class:`AsyncBridge` and awaits the result
+    without blocking the running event loop. Async callers (FastAPI/Starlette
+    handlers, Jupyter cells, async tests) should ``await`` this instead of
+    calling the sync helper, which would otherwise park the loop thread until
+    the coroutine completes.
+
+    The coroutine runs on the shared background bridge loop (never a fresh
+    ``asyncio.new_event_loop()``), so a caller-installed :func:`scoped_bridge`
+    binding still wins and per-loop connection pools are preserved.
+    """
+    fut = _default_bridge().submit(coro)
+    wrapped = asyncio.wrap_future(fut)
+    try:
+        return await asyncio.wait_for(wrapped, timeout=timeout)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        fut.cancel()
+        raise
