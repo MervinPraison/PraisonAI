@@ -198,16 +198,21 @@ async def arun_background(
         options={'timeout_sec': timeout_sec or DEFAULT_TIMEOUT_SEC},
     )
 
-    # Import BackgroundRunner lazily
+    # Resolve the process-wide shared runner lazily so tasks submitted here are
+    # visible to every inspection surface (CLI ``background list``, REPL/bot
+    # ``/tasks``). Falls back to a locally constructed runner if the shared
+    # accessor is unavailable (older SDK).
     try:
-        from praisonaiagents.background import BackgroundRunner
+        from praisonaiagents.background import get_background_runner
+        runner = get_background_runner()
     except ImportError:
         raise RuntimeError(
             "Background tasks require praisonaiagents. "
             "Install with: pip install praisonaiagents"
         )
-
-    runner = BackgroundRunner(max_concurrent_tasks=max_concurrent)
+    except Exception:
+        from praisonaiagents.background import BackgroundRunner
+        runner = BackgroundRunner()
 
     def recipe_task():
         return execute_resolved_recipe(resolved)

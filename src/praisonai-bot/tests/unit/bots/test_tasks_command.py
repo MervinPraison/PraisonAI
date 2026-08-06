@@ -28,8 +28,14 @@ def test_tasks_command_registered():
 
 
 def test_tasks_lists_background_tasks():
-    t1 = BackgroundTask(id="aaa", name="research", status=TaskStatus.RUNNING)
-    t2 = BackgroundTask(id="bbb", name="summary", status=TaskStatus.COMPLETED)
+    t1 = BackgroundTask(
+        id="aaa", name="research", status=TaskStatus.RUNNING,
+        metadata={"user_id": "u1"},
+    )
+    t2 = BackgroundTask(
+        id="bbb", name="summary", status=TaskStatus.COMPLETED,
+        metadata={"user_id": "u1"},
+    )
     runner = _make_runner(t1, t2)
 
     out = handle_tasks_command("u1", None, runner=runner)
@@ -45,7 +51,10 @@ def test_tasks_empty():
 
 
 def test_tasks_detail_shows_result():
-    task = BackgroundTask(id="ccc", name="job", status=TaskStatus.COMPLETED)
+    task = BackgroundTask(
+        id="ccc", name="job", status=TaskStatus.COMPLETED,
+        metadata={"user_id": "u1"},
+    )
     task.result = "done-value"
     out = handle_tasks_command("u1", "ccc", runner=_make_runner(task))
     assert "ccc" in out
@@ -58,7 +67,10 @@ def test_tasks_detail_not_found():
 
 
 def test_tasks_cancel_running_task():
-    task = BackgroundTask(id="ddd", name="job", status=TaskStatus.RUNNING)
+    task = BackgroundTask(
+        id="ddd", name="job", status=TaskStatus.RUNNING,
+        metadata={"user_id": "u1"},
+    )
     runner = _make_runner(task)
     out = handle_tasks_command("u1", "cancel ddd", runner=runner)
     assert "Cancelled" in out
@@ -92,3 +104,21 @@ def test_bot_tasks_command_scoped_to_user():
     cancel = handle_tasks_command("u1", "cancel theirs", runner=runner)
     assert "not found" in cancel.lower()
     assert runner.get_task("theirs").status == TaskStatus.RUNNING
+
+
+def test_bot_tasks_ownerless_not_exposed():
+    # Fail closed: tasks without an owner (e.g. submitted from CLI/REPL) must
+    # NOT be enumerable/inspectable/cancelable by arbitrary bot users.
+    orphan = BackgroundTask(id="orphan", name="cli-task", status=TaskStatus.RUNNING)
+    runner = _make_runner(orphan)
+
+    listing = handle_tasks_command("u1", None, runner=runner)
+    assert "orphan" not in listing
+    assert "No background tasks" in listing
+
+    detail = handle_tasks_command("u1", "orphan", runner=runner)
+    assert "not found" in detail.lower()
+
+    cancel = handle_tasks_command("u1", "cancel orphan", runner=runner)
+    assert "not found" in cancel.lower()
+    assert runner.get_task("orphan").status == TaskStatus.RUNNING

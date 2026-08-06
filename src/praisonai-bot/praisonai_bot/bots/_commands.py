@@ -1172,8 +1172,12 @@ def handle_tasks_command(
             return f"❌ Background tasks unavailable: {e}"
 
     def _owned(task: Dict[str, Any]) -> bool:
+        # Fail closed: a task is only visible/actionable to the requesting user
+        # when its owner id matches exactly. Ownerless tasks (e.g. submitted
+        # from the CLI/REPL without a user scope) are NOT exposed to arbitrary
+        # bot users, so one user can never enumerate or cancel another's work.
         owner = (task.get("metadata") or {}).get("user_id")
-        return owner is None or str(owner) == str(user_id)
+        return owner is not None and str(owner) == str(user_id)
 
     arg = (args or "").strip()
 
@@ -1190,9 +1194,19 @@ def handle_tasks_command(
         if task is None or not _owned(task.to_dict()):
             return f"❌ Task not found: {task_id}"
         try:
-            task.cancel()
+            # Cancel through the runner so the underlying future is actually
+            # stopped (not just the record marked cancelled). cancel_task_sync
+            # hops to the background loop where the future lives.
+            cancel = getattr(runner, "cancel_task_sync", None)
+            if callable(cancel):
+                cancelled = cancel(task_id)
+            else:
+                # Fallback for injected runners without the sync helper.
+                cancelled = asyncio.run(runner.cancel_task(task_id))
         except Exception as e:  # noqa: BLE001
             return f"❌ Could not cancel task {task_id}: {e}"
+        if not cancelled:
+            return f"❌ Could not cancel task {task_id} (already finished?)."
         return f"✅ Cancelled task {task_id}."
 
     # Detail path.

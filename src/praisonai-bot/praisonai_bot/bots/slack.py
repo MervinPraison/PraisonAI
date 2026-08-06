@@ -65,6 +65,7 @@ from ._commands import (
     handle_sessions_command,
     handle_resume_command,
     handle_reasoning_command,
+    handle_tasks_command,
     get_last_user_message,
     build_command_access_policy,
 )
@@ -522,6 +523,13 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             elif text == "/reasoning":
                 user_id = event.get("user", "unknown")
                 response = handle_reasoning_command(self._session, user_id, self._agent)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text.split(maxsplit=1)[:1] == ["/tasks"]:
+                user_id = event.get("user", "unknown")
+                parts = text.split(maxsplit=1)
+                args = parts[1] if len(parts) > 1 else None
+                response = handle_tasks_command(user_id, args)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
             
