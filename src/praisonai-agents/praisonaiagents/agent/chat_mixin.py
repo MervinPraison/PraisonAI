@@ -2585,6 +2585,9 @@ Your Goal: {self.goal}"""
                     prompt = f"{prompt}\n\n{formatted_context}"
 
         if self._using_custom_llm:
+            # Track messages THIS turn appends so a failure rolls back only our
+            # own messages, never a concurrent turn's (see memory_mixin).
+            _turn_token = self._begin_turn_tracking()
             try:
                 # Special handling for MCP tools when using provider/model format
                 # Security fix: Distinguish None (inherit) vs [] (explicit deny)
@@ -2760,6 +2763,8 @@ Your Goal: {self.goal}"""
             except Exception as e:
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                 return None
+            finally:
+                self._end_turn_tracking(_turn_token)
         else:
             # Determine if we should use native structured output
             schema_model = output_pydantic or output_json
@@ -3065,6 +3070,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
+        # Clear any stale per-turn ownership list from a prior turn on this task
+        # so this turn's rollback attribution starts clean (see memory_mixin).
+        self._clear_turn_tracking()
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
@@ -3150,6 +3158,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._using_custom_llm:
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
+                # Track messages THIS turn appends so a failure rolls back only our
+                # own messages, never a concurrent turn's (see memory_mixin). Each
+                # achat() turn runs in its own task/context; _begin_turn_tracking()
+                # sets a fresh list, so sequential turns cannot leak into each other.
+                self._begin_turn_tracking()
                 
                 # Normalize prompt content for consistent chat history storage
                 normalized_content = prompt

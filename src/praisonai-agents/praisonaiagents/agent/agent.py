@@ -1156,7 +1156,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Persist the resolved memory config so clone_for_channel() can forward
         # (and isolate) it per channel. Without this, clones would receive no
         # memory config at all (getattr returned None).
-        self._memory_config = _memory_config
+        #
+        # A live Memory/db() backend passed by the user is NOT reconstructable
+        # configuration - it is a single shared store. If we persisted it here,
+        # _isolated_memory_for_clone() would forward the same object by reference
+        # to every per-channel clone, leaking one user's memory into another.
+        # Leave _memory_config unset for live backends so the clone falls back to
+        # _memory_instance and rebuilds an isolated backend.
+        _is_live_backend = (
+            _memory_config is not None
+            and not isinstance(_memory_config, MemoryConfig)
+            and (
+                (hasattr(_memory_config, 'search') and hasattr(_memory_config, 'add'))
+                or hasattr(_memory_config, 'database_url')
+            )
+        )
+        self._memory_config = None if _is_live_backend else _memory_config
 
         # Extract values from resolved memory config
         if _memory_config is not None:
