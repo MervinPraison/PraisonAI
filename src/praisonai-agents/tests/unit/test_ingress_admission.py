@@ -81,8 +81,18 @@ def test_group_respond_all_admits_everything():
     assert d.gate == GATE_GROUP_POLICY
 
 
-def test_group_unset_policy_defaults_to_respond_all():
+def test_group_unset_policy_defaults_to_mention_only():
+    # Matches the live BotConfig.group_policy default: an unset policy fails
+    # safe (mention-gated) rather than replying to all group traffic.
     d = resolve_ingress_admission(chat_type="group", sender_id="u1")
+    assert d.admit is False
+    assert d.reason_code == REASON_GROUP_MENTION_ONLY
+
+
+def test_group_unset_policy_admits_mention():
+    d = resolve_ingress_admission(
+        chat_type="group", sender_id="u1", is_mention=True
+    )
     assert d.admit is True
 
 

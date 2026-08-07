@@ -114,7 +114,10 @@ def resolve_ingress_admission(
            (``group_mention_only``);
          - ``observe``: admit mentions/commands, else *observe* (recorded, no
            run) with reason ``observe``;
-         - ``respond_all`` (or unset): admit everything.
+         - ``respond_all``: admit everything;
+         - unset/unknown: treated as ``mention_only`` (the live
+           ``BotConfig.group_policy`` default), so an adapter forwarding an
+           unset policy does not silently reply to all group traffic.
 
     Direct (DM/private) chats skip the group-policy gate entirely.
 
@@ -126,12 +129,17 @@ def resolve_ingress_admission(
         is_mention: Whether the bot was mentioned/@-addressed in the message.
         is_command: Whether the message is a bot command (always allowed under
             ``mention_only`` / ``command_only`` / ``observe``).
-        allowlist: Optional collection of allowed sender ids. Empty/``None``
-            disables the allowlist gate.
+        allowlist: Optional collection of allowed sender ids to *enforce*.
+            Empty/``None`` disables the allowlist gate (no restriction). This is
+            the already-resolved list — an adapter that wants an empty allowlist
+            to mean "deny unknown" (``BotConfig.is_explicitly_allowed`` +
+            ``unknown_user_policy``) resolves that upstream into the ``paired``
+            flag rather than passing an empty ``allowlist`` here.
         blocklist: Optional collection of blocked sender ids.
         group_policy: One of ``respond_all`` / ``mention_only`` /
             ``command_only`` / ``observe``. ``None`` or unknown values behave as
-            ``respond_all`` (admit) for backward compatibility.
+            ``mention_only`` — the live ``BotConfig.group_policy`` default — so
+            an unset policy fails safe (mention-gated) rather than open.
         paired: Whether the sender is already paired/known. ``True`` (the
             default) means pairing is not required.
 
@@ -169,8 +177,11 @@ def resolve_ingress_admission(
             admit=True, reason_code=REASON_ALLOWED, gate=GATE_DIRECT
         )
 
-    # 4. Group policy for group/channel chats. Unknown/None => respond_all.
-    policy = (group_policy or "respond_all").lower()
+    # 4. Group policy for group/channel chats. Unknown/None => mention_only,
+    #    matching the live ``BotConfig.group_policy`` default so an adapter that
+    #    forwards an unset policy does not silently start replying to all group
+    #    traffic (a security-relevant regression).
+    policy = (group_policy or "mention_only").lower()
 
     if policy == "command_only":
         if is_command:
