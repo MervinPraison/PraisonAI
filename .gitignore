@@ -12,6 +12,7 @@ assets
 .DS_Store
 .pytest_cache
 praisonAI.egg-info
+src/*/build/
 flagged
 test.yaml
 db
@@ -24,6 +25,8 @@ output
 !src/praisonai-agents/praisonaiagents/output/
 !src/praisonai-code/praisonai_code/cli/output/
 !src/praisonai-bot/praisonai_bot/cli/output/
+!src/praisonai-ts/src/db/
+!src/praisonai-ts/src/cli/output/
 
 .files
 threads.db

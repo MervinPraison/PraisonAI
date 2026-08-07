@@ -1,6 +1,6 @@
 {
   "name": "praisonai",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -61,7 +61,11 @@
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@jest/types": "^29.6.3",
+    "@jest/globals": "^29.7.0",
+    "@ai-sdk/provider-utils": "^2.2.8",
+    "@opentelemetry/api": "^1.9.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -107,7 +111,7 @@
     "node-fetch": "^2.6.9"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18"
   },
   "files": [
     "dist",

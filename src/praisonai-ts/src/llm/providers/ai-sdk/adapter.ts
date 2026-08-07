@@ -115,16 +115,27 @@ export function toAISDKPrompt(messages: Message[]): AISDKMessage[] {
 export async function toAISDKTools(tools: ToolDefinition[]): Promise<Record<string, any>> {
   const result: Record<string, any> = {};
   
-  // Import the tool helper from @ai-sdk/provider-utils
+  // The tool()/jsonSchema() helpers live in the `ai` package (they were never
+  // exported by @ai-sdk/provider-utils v2). Try `ai` first, then fall back to
+  // provider-utils for older setups, tolerating neither being present.
   let toolHelper: any;
   let jsonSchemaHelper: any;
   try {
-    const providerUtils = await import('@ai-sdk/provider-utils');
-    toolHelper = providerUtils.tool;
-    jsonSchemaHelper = providerUtils.jsonSchema;
+    const aiPkg: any = await import('ai' as string);
+    toolHelper = aiPkg.tool ?? null;
+    jsonSchemaHelper = aiPkg.jsonSchema ?? null;
   } catch {
     toolHelper = null;
     jsonSchemaHelper = null;
+  }
+  if (!toolHelper || !jsonSchemaHelper) {
+    try {
+      const providerUtils: any = await import('@ai-sdk/provider-utils');
+      toolHelper = toolHelper ?? providerUtils.tool ?? null;
+      jsonSchemaHelper = jsonSchemaHelper ?? providerUtils.jsonSchema ?? null;
+    } catch {
+      /* keep nulls — loop below falls back to plain schema objects */
+    }
   }
   
   for (const toolDef of tools) {
