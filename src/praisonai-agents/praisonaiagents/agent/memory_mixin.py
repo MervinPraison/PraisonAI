@@ -96,6 +96,23 @@ class MemoryMixin:
         with self._history_lock:
             self.chat_history = self.chat_history[:length]
 
+    def _rollback_chat_history_to(self, rollback_length):
+        """Thread-safe rollback that never clobbers a concurrent turn's messages.
+
+        A turn snapshots ``len(self.chat_history)`` before a multi-second LLM
+        call, then rolls back to that length on failure. If another concurrent
+        turn appended messages after the snapshot, a plain slice-to-length would
+        also delete those. This only removes the slice from ``rollback_length``
+        onward, and only if the history actually grew that far, so a failing
+        turn cannot silently drop an in-flight turn's messages.
+
+        Args:
+            rollback_length: History length to roll back to (this turn's snapshot).
+        """
+        with self._history_lock:
+            if len(self.chat_history) > rollback_length:
+                del self.chat_history[rollback_length:]
+
     def _cache_get(self, cache_dict, key):
         """Thread-safe LRU cache get operation.
         

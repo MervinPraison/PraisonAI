@@ -1153,6 +1153,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 default=None,
             )
         
+        # Persist the resolved memory config so clone_for_channel() can forward
+        # (and isolate) it per channel. Without this, clones would receive no
+        # memory config at all (getattr returned None).
+        self._memory_config = _memory_config
+
         # Extract values from resolved memory config
         if _memory_config is not None:
             if hasattr(_memory_config, 'database_url'):
@@ -1674,6 +1679,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.base_url = base_url
         self.api_key = api_key
 
+        # Resolve Agent(retry=...) into LLM init kwargs so the custom-LLM path
+        # (any "provider/model", dict, or base_url config) honours it, instead of
+        # falling back to LLM's hardcoded max_retries=3. self._retry_config is
+        # normalized later (after these branches), so derive the values here from
+        # the raw `retry` argument to forward them into _llm_init_params.
+        _retry_init_params = {}
+        if isinstance(retry, RetryBackoffConfig):
+            _retry_init_params = {'max_retries': retry.max_retries}
+        elif isinstance(retry, dict):
+            _rc = RetryBackoffConfig(**retry)
+            _retry_init_params = {'max_retries': _rc.max_retries}
+        elif retry is False:
+            _retry_init_params = {'max_retries': 0}
+
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
         # Detected inline (no heavy import) to keep Agent() construction lazy.
@@ -1715,6 +1734,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     llm_config['auth'] = auth
                 llm_config['metrics'] = metrics
                 llm_config['max_iter'] = max_iter
+                if _retry_init_params and 'max_retries' not in llm_config:
+                    llm_config.update(_retry_init_params)
                 self._llm_init_params = llm_config
                 self.llm = llm.get('model', Agent._get_default_model())
             else:
@@ -1730,6 +1751,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     'web_fetch': web_fetch,
                     'prompt_caching': prompt_caching,
                     'claude_memory': claude_memory,
+                    **_retry_init_params,
                 }
                 self.llm = model_name
             self._using_custom_llm = True
@@ -1742,6 +1764,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 llm_config['auth'] = auth
             llm_config['metrics'] = metrics
             llm_config['max_iter'] = max_iter
+            if _retry_init_params and 'max_retries' not in llm_config:
+                llm_config.update(_retry_init_params)
             self._llm_init_params = llm_config
             self._using_custom_llm = True
             self.llm = llm_config.get('model', Agent._get_default_model())
@@ -1758,6 +1782,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             llm_params['prompt_caching'] = prompt_caching
             llm_params['claude_memory'] = claude_memory
             llm_params['max_iter'] = max_iter
+            if _retry_init_params:
+                llm_params.update(_retry_init_params)
             self._llm_init_params = llm_params
             self._using_custom_llm = True
             self.llm = llm
@@ -2361,6 +2387,47 @@ Your Goal: {self.goal}
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         return result
 
+    def _isolated_memory_for_clone(self):
+        """Resolve a memory backend for a channel clone without sharing one store.
+
+        MemoryConfig/db()/dict configs are re-resolved into a fresh backend per
+        Agent, so they are safe to forward as-is. A live Memory/FileMemory
+        instance, however, is stored by reference on ``_memory_instance``;
+        forwarding it would make every per-channel/per-user clone read and write
+        the same long-term store (leaking one user's history into another). Try
+        to re-instantiate a fresh backend from the instance's own config; if that
+        isn't possible, fall back to sharing (with a warning) so cloning never
+        hard-fails.
+        """
+        mem_cfg = getattr(self, '_memory_config', None)
+        # A stored MemoryConfig/db()/dict config is re-resolved per Agent - safe.
+        if mem_cfg is not None:
+            return mem_cfg
+
+        # No config object: the user passed a live memory backend instance, which
+        # was stored directly on _memory_instance. Rebuild a fresh, isolated one.
+        mem_inst = getattr(self, '_memory_instance', None)
+        if mem_inst is None:
+            return None
+        try:
+            import copy
+            return copy.deepcopy(mem_inst)
+        except Exception:
+            pass
+        # deepcopy failed (e.g. thread-locals/connections). Re-instantiate the same
+        # backend type from its stored config so each clone gets its own store.
+        try:
+            cfg = getattr(mem_inst, 'cfg', None)
+            if cfg is not None:
+                return type(mem_inst)(cfg)
+        except Exception:
+            pass
+        logging.warning(
+            "clone_for_channel: could not isolate the live memory backend; clones "
+            "will share it. Pass memory via MemoryConfig/db() for per-channel isolation."
+        )
+        return mem_inst
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
@@ -2399,7 +2466,9 @@ Your Goal: {self.goal}
             'handoffs': None,
             
             # Feature configurations - check for actual stored config objects
-            'memory': getattr(self, '_memory_config', None),
+            # Isolate a live Memory/FileMemory backend so per-channel clones
+            # don't share one store (would leak one user's history into another).
+            'memory': self._isolated_memory_for_clone(),
             'knowledge': getattr(self, '_knowledge_config', None), 
             'planning': getattr(self, '_planning_config', None),
             'reflection': getattr(self, '_reflection_config', None),
