@@ -642,14 +642,32 @@ class ToolExecutionMixin:
                     )
                     if _verdict.get("stuck"):
                         if _verdict.get("level") == "critical":
-                            # Block via the shared blocked_result path so trace
-                            # spans, stream events, AFTER_TOOL hooks, doom-loop
-                            # and loop-guard teardown still run (matches the
-                            # loop_guard BLOCK behaviour at line ~524).
-                            blocked_result = {
-                                "error": _verdict.get("message", "loop detected"),
-                                "loop_blocked": True,
-                            }
+                            # Route the detected loop through the unified approval
+                            # pipeline as a synthetic ``doom_loop`` target instead
+                            # of unconditionally blocking. This gives a human
+                            # override and per-project policy control while
+                            # preserving the historical hard-stop default:
+                            #   • allow -> proceed (reset the streak so a
+                            #     legitimate repeat, e.g. polling a build status,
+                            #     is not re-flagged next call);
+                            #   • deny/no-decision -> the existing block path.
+                            # Interactive backends surface the prompt (and emit
+                            # ON_PERMISSION_ASK); non-interactive sessions fall
+                            # back to the configured default (deny -> stop).
+                            if self._doom_loop_approved(function_name, arguments, _verdict):
+                                # Approved: drop the just-recorded call so the
+                                # streak resets and this call is not re-flagged.
+                                if _ld_history:
+                                    _ld_history.pop()
+                            else:
+                                # Block via the shared blocked_result path so trace
+                                # spans, stream events, AFTER_TOOL hooks, doom-loop
+                                # and loop-guard teardown still run (matches the
+                                # loop_guard BLOCK behaviour at line ~524).
+                                blocked_result = {
+                                    "error": _verdict.get("message", "loop detected"),
+                                    "loop_blocked": True,
+                                }
                         elif not getattr(self, '_loop_warned_this_turn', False):
                             self._loop_warned_this_turn = True
                             self._pending_self_correction = (
@@ -1586,6 +1604,40 @@ class ToolExecutionMixin:
                     getattr(self, 'name', None), tool_name, tool_args,
                     force=manager_forces_approval,
                 )
+
+    def _doom_loop_approved(self, function_name, arguments, verdict) -> bool:
+        """Resolve a critical loop verdict through the unified approval pipeline.
+
+        Routes the detected loop as a synthetic ``doom_loop`` permission target
+        so the existing ask/allow/deny machinery (backends, ``ON_PERMISSION_ASK``,
+        env/YAML/PermissionManager rules) decides whether to continue. Returns
+        ``True`` only on an explicit *allow* (human continue, ``doom_loop=allow``,
+        env/YAML auto-approve); every other outcome — deny, timeout, no backend,
+        or any error — returns ``False`` so the caller falls back to the historical
+        hard-stop. ``force=True`` gates this call even though ``doom_loop`` is a
+        synthetic (never-executed) target.
+        """
+        try:
+            from ..approval import get_approval_registry
+            registry = get_approval_registry()
+            request_args = {
+                "tool": function_name,
+                "detector": verdict.get("detector"),
+                "count": verdict.get("count"),
+            }
+            decision = registry.approve_sync(
+                getattr(self, "name", None),
+                "doom_loop",
+                request_args,
+                force=True,
+            )
+            return bool(getattr(decision, "approved", False))
+        except Exception as e:  # noqa: BLE001 — fail closed to the block path
+            logging.debug(
+                "doom_loop approval routing failed for %s (%s); blocking",
+                function_name, e,
+            )
+            return False
 
     def _permission_manager_requires_approval(self, function_name) -> bool:
         """Return ``True`` when an explicit ``ask`` rule gates *function_name*.

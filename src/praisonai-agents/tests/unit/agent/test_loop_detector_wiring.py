@@ -180,6 +180,90 @@ class TestBackwardCompat:
         )
 
 
+class TestDoomLoopApprovalGate:
+    """Critical loop verdicts route through the unified approval pipeline."""
+
+    def test_default_still_stops(self):
+        """No approval override -> critical loop still blocks (backward-compat)."""
+        agent = _make_agent()
+        _, config = agent._ensure_loop_detector()
+        config.warn_threshold = 3
+        config.critical_threshold = 5
+
+        with patch.object(
+            agent, "_execute_tool_with_circuit_breaker", return_value="constant"
+        ):
+            results = [_run_tool(agent, "check_status", {"id": 1}) for _ in range(8)]
+
+        assert any(
+            isinstance(r, dict) and r.get("loop_blocked") for r in results
+        ), "default doom_loop posture must still stop"
+
+    def test_allow_continues_past_threshold(self):
+        """An allow decision lets the agent continue past the critical threshold."""
+        from praisonaiagents.approval import (
+            get_approval_registry,
+            AutoApproveBackend,
+        )
+
+        agent = _make_agent()
+        _, config = agent._ensure_loop_detector()
+        config.warn_threshold = 3
+        config.critical_threshold = 5
+
+        registry = get_approval_registry()
+        agent_name = agent.name
+        registry.set_backend(AutoApproveBackend(), agent_name=agent_name)
+        try:
+            with patch.object(
+                agent, "_execute_tool_with_circuit_breaker", return_value="constant"
+            ):
+                results = [
+                    _run_tool(agent, "check_status", {"id": 1}) for _ in range(8)
+                ]
+        finally:
+            registry.remove_backend(agent_name=agent_name)
+            registry.clear_approved()
+
+        assert all(
+            not (isinstance(r, dict) and r.get("loop_blocked")) for r in results
+        ), "doom_loop=allow must let the agent continue"
+
+    def test_interactive_callback_is_asked(self):
+        """An interactive backend is consulted when a critical loop is detected."""
+        from praisonaiagents.approval import get_approval_registry
+        from praisonaiagents.approval.protocols import ApprovalDecision
+
+        asked = {"n": 0}
+
+        class _Backend:
+            def request_approval_sync(self, request):
+                asked["n"] += 1
+                return ApprovalDecision(approved=False, reason="human stop")
+
+            async def request_approval(self, request):
+                return self.request_approval_sync(request)
+
+        agent = _make_agent()
+        _, config = agent._ensure_loop_detector()
+        config.warn_threshold = 3
+        config.critical_threshold = 5
+
+        registry = get_approval_registry()
+        agent_name = agent.name
+        registry.set_backend(_Backend(), agent_name=agent_name)
+        try:
+            with patch.object(
+                agent, "_execute_tool_with_circuit_breaker", return_value="constant"
+            ):
+                [_run_tool(agent, "check_status", {"id": 1}) for _ in range(8)]
+        finally:
+            registry.remove_backend(agent_name=agent_name)
+            registry.clear_approved()
+
+        assert asked["n"] >= 1, "human backend must be asked on a doom loop"
+
+
 class TestDoomLoopFeedFixed:
     def test_response_failure_signal_used(self):
         """_response_indicates_failure derives a real success bool (not True)."""

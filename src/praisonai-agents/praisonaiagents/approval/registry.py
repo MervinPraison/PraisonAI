@@ -45,6 +45,12 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "evaluate": "medium",
     "crawl": "medium",
     "scrape_page": "medium",
+    # Runaway-safety gate: a detected doom/repeat loop routes through the
+    # approval pipeline as a synthetic ``doom_loop`` target. Registered as
+    # ``critical`` so the default (no explicit allow) stops — preserving the
+    # historical hard-block posture — while ``doom_loop=allow`` lets a
+    # legitimate repeat (e.g. polling a build status) proceed.
+    "doom_loop": "critical",
 }
 
 # Permission presets — resolved to deny frozensets at Agent.__init__ time.
