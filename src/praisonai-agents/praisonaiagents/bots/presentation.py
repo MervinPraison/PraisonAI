@@ -15,7 +15,17 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    Union,
+    runtime_checkable,
+)
 
 if TYPE_CHECKING:
     from .protocols import CallbackPayloadStoreProtocol
@@ -1064,5 +1074,63 @@ def adapt_presentation(
         ephemeral=presentation.ephemeral,
         replace_message_id=presentation.replace_message_id,
     )
+
+
+@runtime_checkable
+class PresentationRendererProtocol(Protocol):
+    """Contract a channel presentation renderer implements.
+
+    A renderer converts a portable :class:`MessagePresentation` into a native,
+    platform-specific payload (Telegram inline keyboard, Slack blocks, …). It
+    should run :func:`adapt_presentation` against its own :meth:`get_limits`
+    first so capability-driven degradation is applied uniformly.
+
+    This protocol is the core seam that lets *any* channel — built-in or a
+    pip-installed plugin — register a native renderer via
+    :func:`register_presentation_renderer`, mirroring how a channel already
+    contributes config via :class:`ChannelDescriptor`. Heavy renderer
+    implementations still live in ``praisonai-bot``; only the contract and the
+    registry live here.
+    """
+
+    @staticmethod
+    def get_limits() -> "PresentationLimits":
+        """Return this channel's capability limits."""
+        ...
+
+    @staticmethod
+    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+        """Render *presentation* into a native, platform-specific payload."""
+        ...
+
+
+# Registry keyed by platform id. Both built-in (registered by the wrapper at
+# import time) and plugin renderers register here identically, so no channel is
+# second-class for interactive UX. Consumers resolve with
+# ``get_presentation_renderer`` and fall back to plain text only when genuinely
+# no renderer exists for a platform.
+_PRESENTATION_RENDERERS: Dict[str, type] = {}
+
+
+def register_presentation_renderer(platform: str, renderer: type) -> None:
+    """Register *renderer* as the presentation renderer for *platform*.
+
+    Any channel — built-in or a pip-installed plugin — calls this (e.g. from its
+    ``setup`` hook or entry point) so its interactive presentations render
+    natively instead of degrading to plain text. Re-registering a platform
+    overrides the previous renderer, letting a plugin intentionally supersede a
+    built-in.
+
+    Args:
+        platform: The channel/platform id (e.g. ``"telegram"``, ``"matrix"``).
+        renderer: A class satisfying :class:`PresentationRendererProtocol`
+            (exposing ``get_limits`` and ``render``).
+    """
+    _PRESENTATION_RENDERERS[platform] = renderer
+
+
+def get_presentation_renderer(platform: str) -> Optional[type]:
+    """Return the registered renderer class for *platform*, or ``None``."""
+    return _PRESENTATION_RENDERERS.get(platform)
 
 
