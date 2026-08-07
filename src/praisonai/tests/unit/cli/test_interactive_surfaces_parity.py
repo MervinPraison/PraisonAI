@@ -55,7 +55,7 @@ def test_async_tui_expands_at_mentions():
         # a real agent/thread.
         captured = {}
 
-        def _fake_execute(prompt):
+        def _fake_execute(prompt, read_only=False):
             captured["prompt"] = prompt
             return "ok"
 
