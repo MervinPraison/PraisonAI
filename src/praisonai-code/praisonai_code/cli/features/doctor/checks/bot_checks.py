@@ -158,7 +158,11 @@ def check_bot_security(config: DoctorConfig) -> CheckResult:
         # Check for missing gateway pairing settings 
         gateway_secret = os.environ.get("PRAISONAI_GATEWAY_SECRET")
         if not gateway_secret:
-            global_warnings.append("PRAISONAI_GATEWAY_SECRET not set - pairing codes will not persist across restarts")
+            global_warnings.append(
+                "PRAISONAI_GATEWAY_SECRET not set - using auto-provisioned "
+                "persisted secret (~/.praisonai/gateway/.gateway_secret); set "
+                "the env-var to share one secret across hosts"
+            )
         
         # Determine status
         all_warnings = channel_warnings + global_warnings

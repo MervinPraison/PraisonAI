@@ -34,10 +34,11 @@ _DEFAULT_STORE_FILE = "pairing.json"
 def _get_secret() -> str:
     """Return the HMAC signing secret.
 
-    Uses ``PRAISONAI_GATEWAY_SECRET`` env-var when set; otherwise generates
-    a per-process random secret (codes will NOT survive restarts).
+    An explicit ``PRAISONAI_GATEWAY_SECRET`` override wins; otherwise the
+    persisted, auto-provisioned secret is loaded (and created 0600 on first
+    use) so pairing codes survive process restarts with zero operator action.
     """
-    return os.environ.get("PRAISONAI_GATEWAY_SECRET", "") or secrets.token_hex(32)
+    return _load_or_create_secret(_DEFAULT_STORE_DIR).decode()
 
 
 def _secure_secret_permissions(secret_path: str) -> None:
