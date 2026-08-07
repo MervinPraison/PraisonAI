@@ -13,7 +13,7 @@ Usage:
 
 import os
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ._litellm_loader import get_litellm
 
@@ -104,75 +104,6 @@ def calculate_cost(
     except Exception as e:
         logging.debug(f"Cost calculation failed: {e}")
         return None
-
-
-def calculate_cost_from_tokens(
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    force: bool = False,
-) -> Optional[float]:
-    """
-    Calculate cost from token counts.
-    
-    Args:
-        model: Model name
-        prompt_tokens: Number of input tokens
-        completion_tokens: Number of output tokens
-        force: Force cost calculation even if tracking is disabled
-        
-    Returns:
-        Cost in USD if calculable, None otherwise
-    """
-    # Skip if cost tracking not enabled and not forced
-    if not force and not is_cost_tracking_enabled():
-        return None
-    
-    # Lazy import litellm
-    litellm = _get_litellm()
-    if litellm is None:
-        return None
-    
-    try:
-        cost = litellm.cost_per_token(
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        )
-        # cost_per_token returns (prompt_cost, completion_cost)
-        if isinstance(cost, tuple):
-            return sum(cost)
-        return cost
-    except Exception as e:
-        logging.debug(f"Token cost calculation failed: {e}")
-        return None
-
-
-def get_model_cost_info(model: str) -> Optional[Dict[str, float]]:
-    """
-    Get cost information for a model.
-    
-    Args:
-        model: Model name
-        
-    Returns:
-        Dict with 'input_cost_per_token' and 'output_cost_per_token' if available
-    """
-    litellm = _get_litellm()
-    if litellm is None:
-        return None
-    
-    try:
-        model_info = litellm.get_model_info(model=model)
-        if model_info:
-            return {
-                'input_cost_per_token': model_info.get('input_cost_per_token', 0),
-                'output_cost_per_token': model_info.get('output_cost_per_token', 0),
-            }
-    except Exception:
-        pass
-    
-    return None
 
 
 def enable_cost_tracking():
