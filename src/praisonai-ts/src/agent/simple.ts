@@ -262,9 +262,16 @@ export class Agent {
    */
   private extractParamNames(func: Function): string[] {
     const funcStr = func.toString();
-    const paramMatch = funcStr.match(/\(([^)]*)\)/);
-    const params = paramMatch
-      ? paramMatch[1].split(',').map(p => p.trim()).filter(p => p)
+    // Match the parenthesized param list first; fall back to the
+    // unparenthesized single-parameter arrow form (`city => ...`), which the
+    // parenthesis-only regex previously missed — leaving the raw args object
+    // in the first positional slot ("[object Object]").
+    const paramSource =
+      funcStr.match(/^[^(]*\(([^)]*)\)/)?.[1] ??
+      funcStr.match(/^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/)?.[1] ??
+      '';
+    const params = paramSource
+      ? paramSource.split(',').map(p => p.trim()).filter(p => p)
       : [];
     if (params.some(p => p.includes('{') || p.includes('[') || p.includes('...'))) {
       return [];
@@ -485,10 +492,14 @@ export class Agent {
         const result = await this.toolFunctions[name](args);
 
         // Serialize faithfully: .toString() rendered objects as
-        // "[object Object]" and threw on null/undefined results.
+        // "[object Object]" and threw on null/undefined results. Preserve a
+        // real null result as JSON "null" (result ?? '' collapsed it to "");
+        // only undefined becomes empty content.
         const content = typeof result === 'string'
           ? result
-          : JSON.stringify(result ?? '');
+          : result === undefined
+            ? ''
+            : JSON.stringify(result);
 
         // Add result to messages
         results.push({
@@ -629,6 +640,20 @@ export class Agent {
         if (iterations >= maxIterations) {
           await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
         }
+      } else if (this.outputSchema) {
+        // Structured output (no tools): go through generateChat so the full
+        // `messages` history (system + prior turns + current prompt) is sent.
+        // generateText only takes a single prompt + system prompt, so on a
+        // follow-up it dropped every earlier turn and produced contextually
+        // wrong structured responses.
+        const response = await this.llmService.generateChat(
+          messages,
+          0.7,
+          undefined,
+          undefined,
+          this.getResponseFormat()
+        );
+        finalResponse = response.content || '';
       } else {
         // Use regular text generation without streaming
         const response = await this.llmService.generateText(

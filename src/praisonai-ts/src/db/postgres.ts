@@ -39,8 +39,12 @@ export class NeonPostgresAdapter implements PostgresAdapter {
   }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    // Use Neon serverless driver pattern
-    const response = await fetch(this.connectionString.replace('postgres://', 'https://').split('/')[0] + '/sql', {
+    // Neon's serverless driver posts to `https://${host}/sql`. Derive the host
+    // via the URL API — the previous replace/split produced `https:/sql` for
+    // any connection string with a database path, so every request failed.
+    const hostname = new URL(this.connectionString).hostname;
+    const endpoint = `https://${hostname}/sql`;
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

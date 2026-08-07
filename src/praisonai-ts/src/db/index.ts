@@ -30,9 +30,9 @@ function parseDbUrl(url: string): DbConfig {
     return { type: 'memory' };
   }
 
-  // Handle sqlite: prefix
+  // Handle sqlite: prefix (supports both sqlite:./x.db and sqlite://./x.db)
   if (url.startsWith('sqlite:')) {
-    const path = url.slice(7); // Remove 'sqlite:'
+    const path = url.slice(7).replace(/^\/\//, ''); // Remove 'sqlite:' and optional '//'
     return { type: 'sqlite', path: path || ':memory:' };
   }
 
@@ -82,21 +82,31 @@ export function createDbAdapter(config: DbConfig): DbAdapter {
   switch (config.type) {
     case 'memory':
       return new MemoryDbAdapter();
-    case 'sqlite': {
-      // Lazy load SQLite adapter
-      const { SQLiteAdapter } = require('./sqlite');
-      return new SQLiteAdapter({ filename: config.path || ':memory:' });
-    }
-    case 'postgres': {
-      // Lazy load Postgres adapter
-      const { PostgresDbAdapter } = require('./postgres');
-      return new PostgresDbAdapter(config.connectionString || '');
-    }
-    case 'redis': {
-      // Lazy load Redis adapter
-      const { RedisDbAdapter } = require('./redis');
-      return new RedisDbAdapter(config.connectionString || '');
-    }
+    case 'sqlite':
+      // The SQLite/Postgres/Redis modules ship low-level transports
+      // (SQLiteAdapter, NeonPostgresAdapter, UpstashRedisAdapter) that do NOT
+      // yet implement the full DbAdapter session/message/run contract used by
+      // the Agent. Returning one here would satisfy the type at the untyped
+      // require() boundary but crash at runtime ("... is not a function") on
+      // first use. Fail loudly with a clear path forward instead of handing
+      // back a non-conforming object.
+      throw new Error(
+        'db("sqlite:...") is not yet wired to the DbAdapter contract. ' +
+        'Use db("memory:") for now, or import { createSQLiteAdapter } from ' +
+        '"praisonai/db/sqlite" for the low-level SQLite transport.'
+      );
+    case 'postgres':
+      throw new Error(
+        'db("postgres://...") is not yet wired to the DbAdapter contract. ' +
+        'Use db("memory:") for now, or import { createNeonPostgres } from ' +
+        '"praisonai/db/postgres" for the low-level Postgres transport.'
+      );
+    case 'redis':
+      throw new Error(
+        'db("redis://...") is not yet wired to the DbAdapter contract. ' +
+        'Use db("memory:") for now, or import { createUpstashRedis } from ' +
+        '"praisonai/db/redis" for the low-level Redis transport.'
+      );
     default:
       throw new Error(`Unknown database type: ${(config as any).type}`);
   }

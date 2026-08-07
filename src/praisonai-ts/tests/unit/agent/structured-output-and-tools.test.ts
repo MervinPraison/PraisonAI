@@ -57,7 +57,7 @@ describe('OpenAIService response_format and temperature', () => {
 });
 
 describe('Agent outputSchema pass-through', () => {
-  it('start() forwards the json_schema response_format to the LLM service', async () => {
+  it('start() forwards json_schema response_format via generateChat with full history', async () => {
     const schema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] };
     const agent = new Agent({
       instructions: 'extract',
@@ -67,18 +67,49 @@ describe('Agent outputSchema pass-through', () => {
       outputSchema: schema,
       outputSchemaName: 'answer_schema',
     });
+    // Structured output (no tools) routes through generateChat so the full
+    // message history is preserved — generateText would drop earlier turns.
     const spy = jest
-      .spyOn(OpenAIService.prototype, 'generateText')
-      .mockResolvedValue('{"answer":"42"}');
+      .spyOn(OpenAIService.prototype, 'generateChat')
+      .mockResolvedValue({ content: '{"answer":"42"}', role: 'assistant' } as any);
 
     const result = await agent.start('what is the answer?');
 
     expect(result).toBe('{"answer":"42"}');
-    const responseFormat = spy.mock.calls[0][5];
+
+    const [messages, , , , responseFormat] = spy.mock.calls[0];
     expect(responseFormat).toEqual({
       type: 'json_schema',
       json_schema: { name: 'answer_schema', schema },
     });
+    // History must include the system prompt and the current user prompt.
+    expect(messages.some((m: any) => m.role === 'system')).toBe(true);
+    expect(messages.some((m: any) => m.role === 'user' && m.content === 'what is the answer?')).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('preserves prior conversation turns on a structured-output follow-up', async () => {
+    const schema = { type: 'object', properties: { answer: { type: 'string' } } };
+    const agent = new Agent({
+      instructions: 'extract',
+      llm: 'gpt-4o-mini',
+      stream: false,
+      verbose: false,
+      outputSchema: schema,
+    });
+    (agent as any).messages = [
+      { role: 'user', content: 'first question' },
+      { role: 'assistant', content: '{"answer":"one"}' },
+    ];
+    const spy = jest
+      .spyOn(OpenAIService.prototype, 'generateChat')
+      .mockResolvedValue({ content: '{"answer":"two"}', role: 'assistant' } as any);
+
+    await agent.start('second question');
+
+    const [messages] = spy.mock.calls[0];
+    expect(messages.some((m: any) => m.content === 'first question')).toBe(true);
+    expect(messages.some((m: any) => m.content === 'second question')).toBe(true);
     spy.mockRestore();
   });
 });
@@ -122,6 +153,25 @@ describe('Agent constructor tool processing', () => {
       { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
     ]);
     expect(results[0].content).toBe('{"id":"x","ok":true}');
+  });
+
+  it('preserves a null tool result as JSON null, not empty string', async () => {
+    const nullTool = function lookup(id: string) {
+      return null;
+    };
+    const agent = new Agent({ instructions: 't', tools: [nullTool], verbose: false });
+    const results = await (agent as any).processToolCalls([
+      { id: 'call_1', function: { name: 'lookup', arguments: '{"id":"x"}' } },
+    ]);
+    expect(results[0].content).toBe('null');
+  });
+
+  it('maps named args positionally for unparenthesized arrow tools', async () => {
+    const getWeatherArrow = (city: string) => `Weather in ${city}: 20C`;
+    const agent = new Agent({ instructions: 'weather', tools: [getWeatherArrow], verbose: false });
+    const registered = (agent as any).toolFunctions['getWeatherArrow'];
+    const out = await registered({ city: 'Paris' });
+    expect(out).toBe('Weather in Paris: 20C');
   });
 });
 
