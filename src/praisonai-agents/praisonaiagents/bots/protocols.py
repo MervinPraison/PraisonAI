@@ -1185,6 +1185,34 @@ class SupportsPresentation(Protocol):
         ...
 
 
+@runtime_checkable
+class PresentationRendererProtocol(Protocol):
+    """Contract a channel presentation renderer implements.
+
+    A renderer converts a portable :class:`MessagePresentation` into a native,
+    platform-specific payload (Telegram inline keyboard, Slack blocks, …). It
+    should run ``adapt_presentation`` against its own :meth:`get_limits` first
+    so capability-driven degradation is applied uniformly.
+
+    This protocol is the core seam that lets *any* channel — built-in or a
+    pip-installed plugin — register a native renderer via
+    ``register_presentation_renderer``, mirroring how a channel already
+    contributes config via :class:`ChannelDescriptor`. Heavy renderer
+    implementations still live in ``praisonai-bot``; only the contract and the
+    registry live in core.
+    """
+
+    @staticmethod
+    def get_limits() -> "PresentationLimits":
+        """Return this channel's capability limits."""
+        ...
+
+    @staticmethod
+    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
+        """Render *presentation* into a native, platform-specific payload."""
+        ...
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # EmailProtocol — email-specific bot capabilities
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

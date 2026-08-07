@@ -27,6 +27,7 @@ from .protocols import (
     EmailProtocol,
     EmailInbox,
     SupportsPresentation,
+    PresentationRendererProtocol,
     PlatformCapabilities,
     ChannelField,
     ChannelDescriptor,
@@ -54,7 +55,6 @@ from .presentation import (
     adapt_presentation,
     table_to_markdown,
     chart_to_text,
-    PresentationRendererProtocol,
     register_presentation_renderer,
     get_presentation_renderer,
 )

@@ -22,9 +22,7 @@ from typing import (
     List,
     Literal,
     Optional,
-    Protocol,
     Union,
-    runtime_checkable,
 )
 
 if TYPE_CHECKING:
@@ -1076,40 +1074,29 @@ def adapt_presentation(
     )
 
 
-@runtime_checkable
-class PresentationRendererProtocol(Protocol):
-    """Contract a channel presentation renderer implements.
-
-    A renderer converts a portable :class:`MessagePresentation` into a native,
-    platform-specific payload (Telegram inline keyboard, Slack blocks, …). It
-    should run :func:`adapt_presentation` against its own :meth:`get_limits`
-    first so capability-driven degradation is applied uniformly.
-
-    This protocol is the core seam that lets *any* channel — built-in or a
-    pip-installed plugin — register a native renderer via
-    :func:`register_presentation_renderer`, mirroring how a channel already
-    contributes config via :class:`ChannelDescriptor`. Heavy renderer
-    implementations still live in ``praisonai-bot``; only the contract and the
-    registry live here.
-    """
-
-    @staticmethod
-    def get_limits() -> "PresentationLimits":
-        """Return this channel's capability limits."""
-        ...
-
-    @staticmethod
-    def render(presentation: "MessagePresentation") -> Dict[str, Any]:
-        """Render *presentation* into a native, platform-specific payload."""
-        ...
+# The renderer contract lives in ``protocols.py`` (alongside the other bot
+# extension-point protocols). Re-exported here for backward-compatible imports
+# (``from praisonaiagents.bots.presentation import PresentationRendererProtocol``).
+from .protocols import PresentationRendererProtocol  # noqa: E402,F401
 
 
-# Registry keyed by platform id. Both built-in (registered by the wrapper at
-# import time) and plugin renderers register here identically, so no channel is
-# second-class for interactive UX. Consumers resolve with
-# ``get_presentation_renderer`` and fall back to plain text only when genuinely
-# no renderer exists for a platform.
+# Registry keyed by a normalized (lowercased, stripped) platform id. Both
+# built-in (registered by the wrapper at import time) and plugin renderers
+# register here identically, so no channel is second-class for interactive UX.
+# Consumers resolve with ``get_presentation_renderer`` and fall back to plain
+# text only when genuinely no renderer exists for a platform.
 _PRESENTATION_RENDERERS: Dict[str, type] = {}
+
+
+def _normalize_platform(platform: str) -> str:
+    """Normalize a platform id the same way the channel registry does.
+
+    Channel identifiers are matched case-insensitively elsewhere, so a
+    mixed-case plugin id (``"Matrix"``) must resolve to the same renderer slot
+    as ``"matrix"``. Without this, a channel could register/resolve as a channel
+    but silently miss its renderer and degrade to plain text.
+    """
+    return platform.strip().lower()
 
 
 def register_presentation_renderer(platform: str, renderer: type) -> None:
@@ -1122,15 +1109,40 @@ def register_presentation_renderer(platform: str, renderer: type) -> None:
     built-in.
 
     Args:
-        platform: The channel/platform id (e.g. ``"telegram"``, ``"matrix"``).
+        platform: The channel/platform id (e.g. ``"telegram"``, ``"matrix"``);
+            matched case-insensitively.
         renderer: A class satisfying :class:`PresentationRendererProtocol`
             (exposing ``get_limits`` and ``render``).
+
+    Raises:
+        ValueError: If *platform* is empty/blank.
+        TypeError: If *renderer* does not expose callable ``get_limits`` and
+            ``render`` — so a misconfigured renderer fails loudly at
+            registration rather than later inside :func:`render_for`.
     """
-    _PRESENTATION_RENDERERS[platform] = renderer
+    key = _normalize_platform(platform) if isinstance(platform, str) else ""
+    if not key:
+        raise ValueError(
+            "register_presentation_renderer: platform id must be a non-empty "
+            "string (e.g. 'telegram', 'matrix')."
+        )
+    if not (callable(getattr(renderer, "get_limits", None))
+            and callable(getattr(renderer, "render", None))):
+        raise TypeError(
+            "register_presentation_renderer: renderer for "
+            f"'{platform}' must satisfy PresentationRendererProtocol — expose "
+            "static/callable 'get_limits()' and 'render(presentation)'."
+        )
+    _PRESENTATION_RENDERERS[key] = renderer
 
 
 def get_presentation_renderer(platform: str) -> Optional[type]:
-    """Return the registered renderer class for *platform*, or ``None``."""
-    return _PRESENTATION_RENDERERS.get(platform)
+    """Return the registered renderer class for *platform*, or ``None``.
+
+    Lookup is case-insensitive to mirror registration.
+    """
+    if not isinstance(platform, str):
+        return None
+    return _PRESENTATION_RENDERERS.get(_normalize_platform(platform))
 
 

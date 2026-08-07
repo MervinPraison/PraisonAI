@@ -654,11 +654,32 @@ _BUILTIN_RENDERERS: Dict[str, type] = {
 
 
 def _register_builtin_renderers() -> None:
-    """Register the built-in renderers through the core seam (idempotent)."""
-    from praisonaiagents.bots.presentation import register_presentation_renderer
+    """Register the built-in renderers through the core seam.
+
+    Two safeguards keep this non-destructive and backward compatible:
+
+    - **Older cores**: if the installed ``praisonaiagents`` predates the
+      registration seam, the import below fails; we swallow it and return so
+      module import still succeeds. ``get_renderer`` then falls back to the
+      local ``_BUILTIN_RENDERERS`` map, so Telegram/Slack/Discord/WhatsApp
+      presentations keep rendering natively.
+    - **Plugin overrides win**: a channel plugin may register a custom renderer
+      for a built-in platform before this module is first imported. We only fill
+      an *empty* registry slot, so a prior plugin registration is never
+      clobbered by the built-in — honouring the "plugins can supersede
+      built-ins" contract.
+    """
+    try:
+        from praisonaiagents.bots.presentation import (
+            get_presentation_renderer,
+            register_presentation_renderer,
+        )
+    except ImportError:
+        return
 
     for platform, renderer in _BUILTIN_RENDERERS.items():
-        register_presentation_renderer(platform, renderer)
+        if get_presentation_renderer(platform) is None:
+            register_presentation_renderer(platform, renderer)
 
 
 _register_builtin_renderers()
@@ -679,7 +700,10 @@ def get_renderer(platform: str) -> Optional[type]:
             return renderer
     except ImportError:
         pass
-    return _BUILTIN_RENDERERS.get(platform)
+    # Older-core fallback: match the registry's case-insensitive lookup so a
+    # mixed-case built-in id ("Telegram") still resolves natively.
+    key = platform.strip().lower() if isinstance(platform, str) else ""
+    return _BUILTIN_RENDERERS.get(key)
 
 
 def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
