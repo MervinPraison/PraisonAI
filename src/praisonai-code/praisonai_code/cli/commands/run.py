@@ -929,6 +929,7 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
     instructions: Optional[List[str]] = typer.Option(None, "--instructions", help="Extra instruction/context source (file path, glob, or http(s):// URL) to load alongside AGENTS.md/CLAUDE.md. Repeatable; merges on top of config-declared 'instructions'."),
     # Permission flags for CI-safe declarative policies
     allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
@@ -969,6 +970,13 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+
+    # --pure / --no-plugins: suppress external plugin discovery for this run
+    # only. Set the env var the core PluginManager reads so downstream lazy
+    # discovery short-circuits; persisted enable/disable state is untouched.
+    if pure:
+        import os as _os_pure
+        _os_pure.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
     # --allow-local-tools is a discoverable equivalent to the env-var opt-in.
     # It is a per-invocation grant: the actual gate is applied (and restored)

@@ -38,6 +38,7 @@ def code_main(
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     print_mode: bool = typer.Option(False, "--print", "-p", help="Headless one-shot: emit a clean machine-readable result (no decorations/profiling) and exit with a status-reflecting code"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output format for -p/--print: json (default) or text"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
 ):
     """
     Start terminal-native code assistant mode.
@@ -66,6 +67,12 @@ def code_main(
     # so an interactive REPL is never stalled.
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
+
+    # --pure / --no-plugins: suppress external plugin discovery for this run
+    # only (the core PluginManager reads PRAISONAI_NO_PLUGINS); persisted
+    # enable/disable state is untouched.
+    if pure:
+        os.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
     # --resume is a headless-friendly alias for --session so scripted multi-turn
     # composes as `code --resume <id> -p "follow-up"`. An explicit --session

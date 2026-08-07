@@ -138,6 +138,7 @@ def chat_main(
     theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
     compact: bool = typer.Option(False, "--compact", help="Compact output mode"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -163,6 +164,12 @@ def chat_main(
     # so the interactive TUI is never stalled.
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
+
+    # --pure / --no-plugins: suppress external plugin discovery for this run
+    # only (the core PluginManager reads PRAISONAI_NO_PLUGINS); persisted
+    # enable/disable state is untouched.
+    if pure:
+        os.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
     # Set workspace if provided
     if workspace:
