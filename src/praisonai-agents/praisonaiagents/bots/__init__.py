@@ -95,6 +95,10 @@ from .silence import (
     BotLoopPolicy,
     BotLoopGuard,
 )
+from .admission import (
+    IngressDecision,
+    resolve_ingress_admission,
+)
 from .run_status import (
     RunPhase,
     RunStatusController,
@@ -175,6 +179,8 @@ __all__ = [
     "classify_final",
     "BotLoopPolicy",
     "BotLoopGuard",
+    "IngressDecision",
+    "resolve_ingress_admission",
     "RunPhase",
     "RunStatusController",
     "StallState",
