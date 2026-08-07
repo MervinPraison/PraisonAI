@@ -216,3 +216,84 @@ class TestScheduleJobPrincipal:
             store = FileScheduleStore(store_dir=d)
             store.add(self._job("j", principal="alice"))
             assert store.remove_by_name("j") is True
+
+
+class TestScheduleToolsDefaultPrincipal:
+    """The agent-callable tools default ``principal`` from the session context.
+
+    This is the surface-level fix for issue #3785: ``schedule_add`` /
+    ``schedule_list`` / ``schedule_remove`` must isolate per gateway user by
+    reading ``SessionContext.unified_user_id`` when no explicit principal is
+    passed, while staying globally-scoped for CLI / single-user (no identity).
+    """
+
+    def _fresh_store(self, tmp_dir):
+        from praisonaiagents.scheduler.store import FileScheduleStore
+        from praisonaiagents.tools import schedule_tools
+
+        store = FileScheduleStore(store_dir=tmp_dir)
+        schedule_tools.set_store(store)
+        return store
+
+    def test_tools_isolate_by_session_context(self):
+        from praisonaiagents.session.context import (
+            set_session_context,
+            clear_session_context,
+        )
+        from praisonaiagents.tools.schedule_tools import (
+            schedule_add,
+            schedule_list,
+            schedule_remove,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            store = self._fresh_store(d)
+
+            tok = set_session_context(unified_user_id="alice")
+            try:
+                schedule_add("brief", "daily", message="Alice brief")
+            finally:
+                clear_session_context(tok)
+
+            tok = set_session_context(unified_user_id="bob")
+            try:
+                # Bob only sees his own (empty) list …
+                assert "No schedules found" in schedule_list()
+                # … cannot remove Alice's job by name …
+                assert "not found" in schedule_remove("brief")
+                # … and can add his own under the same name (isolated).
+                assert "added" in schedule_add("brief", "daily", message="Bob brief")
+                listed = schedule_list()
+                assert "Bob brief" in listed and "Alice brief" not in listed
+            finally:
+                clear_session_context(tok)
+
+            # The underlying store still holds both, tagged per owner.
+            assert {j.principal for j in store.list()} == {"alice", "bob"}
+
+    def test_tools_global_without_identity(self):
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_list
+
+        with tempfile.TemporaryDirectory() as d:
+            self._fresh_store(d)
+            # No session context → no identity → global pool (CLI behaviour).
+            schedule_add("cli-job", "daily", message="cli")
+            listed = schedule_list()
+            assert "cli-job" in listed
+
+    def test_explicit_principal_overrides_context(self):
+        from praisonaiagents.session.context import (
+            set_session_context,
+            clear_session_context,
+        )
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_list
+
+        with tempfile.TemporaryDirectory() as d:
+            store = self._fresh_store(d)
+            tok = set_session_context(unified_user_id="alice")
+            try:
+                schedule_add("j", "daily", principal="carol")
+            finally:
+                clear_session_context(tok)
+            assert store.get_by_name("j").principal == "carol"
+            assert "j" in schedule_list(principal="carol")

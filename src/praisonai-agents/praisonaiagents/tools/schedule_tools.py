@@ -17,9 +17,28 @@ Usage:
 """
 
 import threading
+from typing import Optional
 from praisonaiagents._logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _caller_principal(explicit: str = "") -> Optional[str]:
+    """Resolve the calling end-user's canonical identity.
+
+    Prefers an ``explicit`` override, then the per-turn
+    ``SessionContext.unified_user_id`` set by the bot session manager on a
+    multi-user gateway. Returns ``None`` when no identity is resolved so the
+    scheduler stores fall back to their global, single-tenant behaviour
+    (CLI / single-user deployments are unchanged).
+    """
+    if explicit:
+        return explicit
+    try:
+        from ..session.context import get_session_context
+        return get_session_context().unified_user_id or None
+    except Exception:
+        return None
 
 # ── lazy singleton store ─────────────────────────────────────────────────────
 
@@ -76,6 +95,7 @@ def schedule_add(
     session_id: str = "",
     accept_suggestion: str = "",
     continuable: bool = True,
+    principal: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -104,6 +124,11 @@ def schedule_add(
                     session so the user's reply in the same chat resumes the
                     job's conversation with full context. Set False for pure
                     fire-and-forget notifications.
+        principal: Resolved canonical identity of the owning end-user. When
+                    omitted it defaults from the per-turn session context
+                    (``SessionContext.unified_user_id``) so a multi-user
+                    gateway isolates each user's jobs. Empty ⇒ no identity ⇒
+                    global (single-tenant) behaviour, unchanged for CLI.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -161,6 +186,8 @@ def schedule_add(
                 continuable=continuable,
             )
 
+        owner = _caller_principal(principal)
+
         job = ScheduleJob(
             name=name,
             schedule=sched,
@@ -168,12 +195,13 @@ def schedule_add(
             agent_id=agent_id or None,
             delivery=delivery,
             origin=origin,  # Set origin for "origin" token resolution
+            principal=owner,
         )
 
         store = _get_store()
 
-        # Prevent duplicate names
-        existing = store.get_by_name(name)
+        # Prevent duplicate names (scoped to the caller on a multi-user gateway)
+        existing = store.get_by_name(name, principal=owner)
         if existing:
             return f"A schedule named '{name}' already exists (id: {existing.id}). Remove it first or choose a different name."
 
@@ -194,7 +222,7 @@ def schedule_add(
                 store_obj = SuggestionStore()
                 sug = store_obj.get(accept_suggestion)
                 if sug is not None and not sug.accepted and not sug.dismissed:
-                    store_obj.accept(accept_suggestion)
+                    store_obj.accept(accept_suggestion, principal=owner)
             except Exception as e:
                 logger.warning(
                     "Failed to accept suggestion %s: %s",
@@ -208,16 +236,22 @@ def schedule_add(
         logger.error("schedule_add failed: %s", e, exc_info=True)
         return f"Error adding schedule: {e}"
 
-def schedule_list() -> str:
-    """List all scheduled jobs.
+def schedule_list(principal: str = "") -> str:
+    """List scheduled jobs.
+
+    Args:
+        principal: Resolved canonical identity of the caller. When omitted it
+            defaults from the per-turn session context so a multi-user gateway
+            lists only the caller's jobs. Empty ⇒ no identity ⇒ every job
+            (single-tenant / CLI behaviour, unchanged).
 
     Returns:
-        A formatted string listing every job with its id, name, schedule,
+        A formatted string listing each job with its id, name, schedule,
         status, and message.  Returns a friendly message when empty.
     """
     try:
         store = _get_store()
-        jobs = store.list()
+        jobs = store.list(principal=_caller_principal(principal))
         if not jobs:
             return "No schedules found. Use schedule_add to create one."
 
@@ -250,18 +284,22 @@ def schedule_list() -> str:
         logger.error("schedule_list failed: %s", e, exc_info=True)
         return f"Error listing schedules: {e}"
 
-def schedule_remove(name: str) -> str:
+def schedule_remove(name: str, principal: str = "") -> str:
     """Remove a scheduled job by name.
 
     Args:
         name: The name of the schedule to remove.
+        principal: Resolved canonical identity of the caller. When omitted it
+            defaults from the per-turn session context so a multi-user gateway
+            only removes the caller's job. Empty ⇒ no identity ⇒ removes by
+            name across all jobs (single-tenant / CLI behaviour, unchanged).
 
     Returns:
         Confirmation or not-found message.
     """
     try:
         store = _get_store()
-        removed = store.remove_by_name(name)
+        removed = store.remove_by_name(name, principal=_caller_principal(principal))
         if removed:
             return f"Schedule '{name}' removed."
         return f"Schedule '{name}' not found."

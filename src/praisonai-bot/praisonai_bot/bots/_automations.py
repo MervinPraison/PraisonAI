@@ -13,15 +13,15 @@ Nothing is ever auto-created here — the engine only materialises a scheduled
 job on an explicit ``accept``. ``MAX_PENDING_CAP`` and dedup are enforced by the
 underlying store, so the chat layer inherits safe-by-default behaviour.
 
-Scope note: the underlying ``SuggestionStore`` is a single, global,
-single-tenant store (``~/.praisonai/suggestions.json``) with no per-user field
-on :class:`~praisonaiagents.scheduler.suggestion_store.Suggestion`. Suggestions
-are therefore shared across everyone who can reach the gateway — exactly like
-the ``praisonai schedule`` CLI. Access is gated by ``CommandAccessPolicy`` (the
-``automations`` permission is re-checked on every accept/dismiss tap); restrict
-that policy to admins for multi-user bots. Per-user scoping would require a core
-data-model change to ``Suggestion``/``SuggestionStore`` and is intentionally out
-of scope for this wrapper wiring.
+Scope note: suggestions are isolated per resolved end-user. Each turn's
+``SessionContext.unified_user_id`` (set by the bot session manager) is threaded
+through as the ``principal`` on every ``pending``/``accept``/``dismiss`` call, so
+one gateway user never sees, accepts, or dismisses another's suggestions. When
+no identity is resolved (CLI / single-user deployments) ``principal`` is ``None``
+and the underlying store falls back to its global pool — byte-for-byte the prior
+behaviour. Access is additionally gated by ``CommandAccessPolicy`` (the
+``automations`` permission is re-checked on every accept/dismiss tap), which is
+orthogonal: it gates *whether* a user may use automations, not *whose* they see.
 
 Callback contract (reused by every platform's inline-keyboard path):
     ``sug:accept:<id>``   → accept a suggestion (materialises exactly one job)
@@ -39,6 +39,21 @@ logger = logging.getLogger(__name__)
 # registry decodes ``sug:accept:<id>`` as namespace ``sug`` with the remainder
 # as the payload value (see praisonaiagents.bots.interactive.decode_callback).
 CALLBACK_NAMESPACE = "sug"
+
+
+def _principal() -> Optional[str]:
+    """Resolve the current turn's end-user identity, or ``None``.
+
+    Reads ``SessionContext.unified_user_id`` set by the bot session manager so
+    suggestions are isolated per gateway user. ``None`` (no identity resolved)
+    keeps the global, single-tenant pool used by CLI / single-user deployments.
+    """
+    try:
+        from praisonaiagents.session.context import get_session_context
+        return get_session_context().unified_user_id or None
+    except Exception as e:  # noqa: BLE001 - core session context may be absent
+        logger.debug("Could not resolve session principal: %s", e)
+        return None
 
 
 def _engine():
@@ -128,7 +143,7 @@ def list_suggestions() -> List[Dict[str, Any]]:
     if engine is None:
         return []
     try:
-        pending = engine.pending()
+        pending = engine.pending(principal=_principal())
     except Exception as e:  # noqa: BLE001
         logger.debug("Failed to list pending suggestions: %s", e)
         return []
@@ -165,10 +180,17 @@ def accept_suggestion(suggestion_id: str, deliver: str = "") -> str:
     if engine is None:
         return "❌ Automations are not available (scheduler not installed)."
 
+    principal = _principal()
     try:
         sug = engine.get_suggestion(suggestion_id)
     except Exception as e:  # noqa: BLE001
         return f"❌ Could not read suggestion: {e}"
+
+    # Refuse cross-owner access: a suggestion owned by a different gateway user
+    # is treated as not found so its details never leak across identities.
+    if sug is not None and principal is not None \
+            and getattr(sug, "principal", None) not in (None, principal):
+        sug = None
 
     if sug is None or getattr(sug, "dismissed", False) or getattr(sug, "accepted", False):
         return "ℹ️ That suggestion was not found or has already been handled."
@@ -202,6 +224,7 @@ def accept_suggestion(suggestion_id: str, deliver: str = "") -> str:
             message=prompt,
             deliver=final_deliver,
             accept_suggestion=suggestion_id,
+            principal=principal or "",
         )
     except Exception as e:  # noqa: BLE001
         return f"❌ Could not create automation: {e}"
@@ -224,7 +247,7 @@ def dismiss_suggestion(suggestion_id: str) -> str:
     if engine is None:
         return "❌ Automations are not available (scheduler not installed)."
     try:
-        ok = engine.dismiss(suggestion_id)
+        ok = engine.dismiss(suggestion_id, principal=_principal())
     except Exception as e:  # noqa: BLE001
         return f"❌ Could not dismiss suggestion: {e}"
     return "✕ Dismissed. I won't suggest that again." if ok else \
@@ -327,6 +350,7 @@ def create_from_blueprint(
             message=prompt,
             deliver=final_deliver,
             agent_id=bp.default_agent,
+            principal=_principal() or "",
         )
     except ValueError as e:
         # Slot validation failed (bad choice / missing required slot).
