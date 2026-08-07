@@ -7,10 +7,66 @@ and loading .env files.
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
+
+# Env var the core PluginManager reads to skip external-plugin discovery for a
+# single process (set by the CLI ``--pure`` / ``--no-plugins`` flag).
+NO_PLUGINS_ENV = "PRAISONAI_NO_PLUGINS"
+
+
+@contextlib.contextmanager
+def scoped_no_plugins(pure: bool) -> Iterator[None]:
+    """Scope ``PRAISONAI_NO_PLUGINS`` to the enclosed block.
+
+    The core ``PluginManager`` reads ``PRAISONAI_NO_PLUGINS`` lazily at discovery
+    time, so the ``--pure`` / ``--no-plugins`` flag only needs the var set for
+    the duration of the run. Setting it globally with no restore would leak the
+    suppression into a *later* in-process invocation (embedded/notebook/test
+    reuse) that did not ask for it — breaking the per-run contract. This restores
+    the prior value (or removes the var) on exit so suppression never persists.
+
+    A transparent no-op when ``pure`` is falsey, so callers can wrap
+    unconditionally.
+    """
+    if not pure:
+        yield
+        return
+
+    _prev = os.environ.get(NO_PLUGINS_ENV)
+    os.environ[NO_PLUGINS_ENV] = "1"
+    try:
+        yield
+    finally:
+        if _prev is None:
+            os.environ.pop(NO_PLUGINS_ENV, None)
+        else:
+            os.environ[NO_PLUGINS_ENV] = _prev
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def scopes_no_plugins(func: _F) -> _F:
+    """Decorate a Typer callback so a truthy ``pure`` kwarg scopes suppression.
+
+    Reads the ``pure`` parameter the wrapped command receives and runs the whole
+    invocation under :func:`scoped_no_plugins`, so ``PRAISONAI_NO_PLUGINS`` is
+    always restored on return and never leaks into a later in-process command.
+    ``functools.wraps`` preserves the original signature so Typer still sees the
+    real option set.
+    """
+
+    @functools.wraps(func)
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        with scoped_no_plugins(bool(kwargs.get("pure"))):
+            return func(*args, **kwargs)
+
+    return _wrapper  # type: ignore[return-value]
 
 
 def substitute_env_vars(value: Any) -> Any:

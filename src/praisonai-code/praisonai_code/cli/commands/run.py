@@ -12,6 +12,7 @@ import typer
 from ..output.console import get_output_controller
 from ..state.identifiers import get_current_context
 from ..configuration.resolver import resolve_config
+from ..utils.env_utils import scopes_no_plugins
 
 app = typer.Typer(help="Run agents")
 
@@ -908,6 +909,7 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
 
 
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def run_main(
     ctx: typer.Context,
     target: Optional[str] = typer.Argument(None, help="Agent file or prompt"),
@@ -971,12 +973,11 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
-    # --pure / --no-plugins: suppress external plugin discovery for this run
-    # only. Set the env var the core PluginManager reads so downstream lazy
-    # discovery short-circuits; persisted enable/disable state is untouched.
-    if pure:
-        import os as _os_pure
-        _os_pure.environ["PRAISONAI_NO_PLUGINS"] = "1"
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS (read by the core PluginManager)
+    # for the duration of this call and always restores the prior value on
+    # return, so it never leaks into a later in-process run_main() call.
+    # Persisted enable/disable state is untouched.
 
     # --allow-local-tools is a discoverable equivalent to the env-var opt-in.
     # It is a per-invocation grant: the actual gate is applied (and restored)

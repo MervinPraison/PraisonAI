@@ -74,7 +74,7 @@ def test_execution_failed_flag_set_on_exception(monkeypatch):
         def start(self, prompt):
             raise RuntimeError("Error code: 401 - invalid_api_key")
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _BoomAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _BoomAgent())
 
     result = tui.run_single("Hello")
 
@@ -96,7 +96,7 @@ def test_execution_failed_flag_set_on_logged_auth_error(monkeypatch):
             )
             return None
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _SilentAuthAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _SilentAuthAgent())
 
     tui.run_single("Hello")
 
@@ -113,7 +113,7 @@ def test_execution_not_failed_on_success(monkeypatch):
         def start(self, prompt):
             return "The answer is 4"
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _OkAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _OkAgent())
 
     result = tui.run_single("What is 2+2?")
 
@@ -156,7 +156,7 @@ def test_execution_failed_on_truthy_result_with_auth_log(monkeypatch):
             )
             return _AutonomyResult(success=True, output="")
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _AutonomyAuthAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _AutonomyAuthAgent())
 
     result = tui.run_single("Hello")
 
@@ -175,7 +175,7 @@ def test_execution_not_failed_on_truthy_result_with_output(monkeypatch):
         async def astart(self, prompt):
             return _AutonomyResult(success=True, output="The answer is 4")
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _AutonomyOkAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _AutonomyOkAgent())
 
     result = tui.run_single("What is 2+2?")
 
@@ -194,7 +194,7 @@ def test_execution_failed_on_result_error(monkeypatch):
         async def astart(self, prompt):
             return _AutonomyResult(success=False, output="", error="boom")
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _FailAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _FailAgent())
 
     result = tui.run_single("Hello")
 
@@ -213,7 +213,7 @@ def test_execution_failed_on_result_success_false_without_error(monkeypatch):
         async def astart(self, prompt):
             return _AutonomyResult(success=False, output="", error=None)
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _FailAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _FailAgent())
 
     result = tui.run_single("Hello")
 
@@ -232,7 +232,7 @@ def test_failed_result_preserves_partial_output(monkeypatch):
         async def astart(self, prompt):
             return _AutonomyResult(success=False, output="partial diagnostics", error=None)
 
-    monkeypatch.setattr(tui, "_get_agent", lambda: _PartialAgent())
+    monkeypatch.setattr(tui, "_get_agent", lambda *a, **k: _PartialAgent())
 
     result = tui.run_single("Hello")
 

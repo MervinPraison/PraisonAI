@@ -9,10 +9,13 @@ from typing import List, Optional
 
 import typer
 
+from praisonai_code.cli.utils.env_utils import scopes_no_plugins
+
 app = typer.Typer(help="Terminal-native code assistant mode")
 
 
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def code_main(
     ctx: typer.Context,
     prompt: Optional[str] = typer.Argument(None, help="Code task or question"),
@@ -68,11 +71,10 @@ def code_main(
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
 
-    # --pure / --no-plugins: suppress external plugin discovery for this run
-    # only (the core PluginManager reads PRAISONAI_NO_PLUGINS); persisted
-    # enable/disable state is untouched.
-    if pure:
-        os.environ["PRAISONAI_NO_PLUGINS"] = "1"
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS for the duration of this call
+    # and always restores the prior value on return, so it never leaks into a
+    # later in-process invocation. Persisted enable/disable state is untouched.
 
     # --resume is a headless-friendly alias for --session so scripted multi-turn
     # composes as `code --resume <id> -p "follow-up"`. An explicit --session
