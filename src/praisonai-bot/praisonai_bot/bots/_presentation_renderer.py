@@ -640,9 +640,12 @@ class WhatsAppPresentationRenderer:
         return {"text": body}
 
 
-# Registry keyed by platform id so adapters resolve their renderer uniformly.
-# New channels plug in by adding an entry here; adapters call ``render_for``.
-_RENDERERS: Dict[str, type] = {
+# The four built-in renderers, registered through the core registration seam
+# (``praisonaiagents.bots.presentation.register_presentation_renderer``) so a
+# pip-installed channel plugin plugs in a native renderer *the same way* — no
+# framework-source edit required. Resolution goes through the core registry, so
+# built-in and plugin renderers are indistinguishable to ``render_for``.
+_BUILTIN_RENDERERS: Dict[str, type] = {
     "telegram": TelegramPresentationRenderer,
     "slack": SlackPresentationRenderer,
     "discord": DiscordPresentationRenderer,
@@ -650,9 +653,57 @@ _RENDERERS: Dict[str, type] = {
 }
 
 
+def _register_builtin_renderers() -> None:
+    """Register the built-in renderers through the core seam.
+
+    Two safeguards keep this non-destructive and backward compatible:
+
+    - **Older cores**: if the installed ``praisonaiagents`` predates the
+      registration seam, the import below fails; we swallow it and return so
+      module import still succeeds. ``get_renderer`` then falls back to the
+      local ``_BUILTIN_RENDERERS`` map, so Telegram/Slack/Discord/WhatsApp
+      presentations keep rendering natively.
+    - **Plugin overrides win**: a channel plugin may register a custom renderer
+      for a built-in platform before this module is first imported. We only fill
+      an *empty* registry slot, so a prior plugin registration is never
+      clobbered by the built-in — honouring the "plugins can supersede
+      built-ins" contract.
+    """
+    try:
+        from praisonaiagents.bots.presentation import (
+            get_presentation_renderer,
+            register_presentation_renderer,
+        )
+    except ImportError:
+        return
+
+    for platform, renderer in _BUILTIN_RENDERERS.items():
+        if get_presentation_renderer(platform) is None:
+            register_presentation_renderer(platform, renderer)
+
+
+_register_builtin_renderers()
+
+
 def get_renderer(platform: str) -> Optional[type]:
-    """Return the registered renderer class for *platform*, or ``None``."""
-    return _RENDERERS.get(platform)
+    """Return the registered renderer class for *platform*, or ``None``.
+
+    Resolves through the core registry so plugin-registered renderers are
+    visible here too, then falls back to the built-in map for resilience if the
+    installed core predates the registration seam.
+    """
+    try:
+        from praisonaiagents.bots.presentation import get_presentation_renderer
+
+        renderer = get_presentation_renderer(platform)
+        if renderer is not None:
+            return renderer
+    except ImportError:
+        pass
+    # Older-core fallback: match the registry's case-insensitive lookup so a
+    # mixed-case built-in id ("Telegram") still resolves natively.
+    key = platform.strip().lower() if isinstance(platform, str) else ""
+    return _BUILTIN_RENDERERS.get(key)
 
 
 def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
@@ -735,12 +786,13 @@ def fallback_text(presentation: "MessagePresentation") -> Dict[str, Any]:
 def render_for(platform: str, presentation: "MessagePresentation") -> Dict[str, Any]:
     """Render *presentation* for *platform* through the renderer registry.
 
-    Resolves the platform's registered :class:`PresentationRenderer` and
-    returns its native payload. Channels with no registered renderer fall back
-    to :func:`fallback_text` so interactive content still degrades gracefully
-    to readable plain text rather than being dropped.
+    Resolves the platform's registered :class:`PresentationRenderer` through the
+    core registry (so plugin-registered renderers resolve identically to
+    built-ins) and returns its native payload. Channels with no registered
+    renderer fall back to :func:`fallback_text` so interactive content still
+    degrades gracefully to readable plain text rather than being dropped.
     """
-    renderer = _RENDERERS.get(platform)
+    renderer = get_renderer(platform)
     if renderer is not None:
         return renderer.render(presentation)
     return fallback_text(presentation)

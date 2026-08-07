@@ -15,7 +15,15 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 if TYPE_CHECKING:
     from .protocols import CallbackPayloadStoreProtocol
@@ -1064,5 +1072,77 @@ def adapt_presentation(
         ephemeral=presentation.ephemeral,
         replace_message_id=presentation.replace_message_id,
     )
+
+
+# The renderer contract lives in ``protocols.py`` (alongside the other bot
+# extension-point protocols). Re-exported here for backward-compatible imports
+# (``from praisonaiagents.bots.presentation import PresentationRendererProtocol``).
+from .protocols import PresentationRendererProtocol  # noqa: E402,F401
+
+
+# Registry keyed by a normalized (lowercased, stripped) platform id. Both
+# built-in (registered by the wrapper at import time) and plugin renderers
+# register here identically, so no channel is second-class for interactive UX.
+# Consumers resolve with ``get_presentation_renderer`` and fall back to plain
+# text only when genuinely no renderer exists for a platform.
+_PRESENTATION_RENDERERS: Dict[str, type] = {}
+
+
+def _normalize_platform(platform: str) -> str:
+    """Normalize a platform id the same way the channel registry does.
+
+    Channel identifiers are matched case-insensitively elsewhere, so a
+    mixed-case plugin id (``"Matrix"``) must resolve to the same renderer slot
+    as ``"matrix"``. Without this, a channel could register/resolve as a channel
+    but silently miss its renderer and degrade to plain text.
+    """
+    return platform.strip().lower()
+
+
+def register_presentation_renderer(platform: str, renderer: type) -> None:
+    """Register *renderer* as the presentation renderer for *platform*.
+
+    Any channel — built-in or a pip-installed plugin — calls this (e.g. from its
+    ``setup`` hook or entry point) so its interactive presentations render
+    natively instead of degrading to plain text. Re-registering a platform
+    overrides the previous renderer, letting a plugin intentionally supersede a
+    built-in.
+
+    Args:
+        platform: The channel/platform id (e.g. ``"telegram"``, ``"matrix"``);
+            matched case-insensitively.
+        renderer: A class satisfying :class:`PresentationRendererProtocol`
+            (exposing ``get_limits`` and ``render``).
+
+    Raises:
+        ValueError: If *platform* is empty/blank.
+        TypeError: If *renderer* does not expose callable ``get_limits`` and
+            ``render`` — so a misconfigured renderer fails loudly at
+            registration rather than later inside :func:`render_for`.
+    """
+    key = _normalize_platform(platform) if isinstance(platform, str) else ""
+    if not key:
+        raise ValueError(
+            "register_presentation_renderer: platform id must be a non-empty "
+            "string (e.g. 'telegram', 'matrix')."
+        )
+    if not (callable(getattr(renderer, "get_limits", None))
+            and callable(getattr(renderer, "render", None))):
+        raise TypeError(
+            "register_presentation_renderer: renderer for "
+            f"'{platform}' must satisfy PresentationRendererProtocol — expose "
+            "static/callable 'get_limits()' and 'render(presentation)'."
+        )
+    _PRESENTATION_RENDERERS[key] = renderer
+
+
+def get_presentation_renderer(platform: str) -> Optional[type]:
+    """Return the registered renderer class for *platform*, or ``None``.
+
+    Lookup is case-insensitive to mirror registration.
+    """
+    if not isinstance(platform, str):
+        return None
+    return _PRESENTATION_RENDERERS.get(_normalize_platform(platform))
 
 
