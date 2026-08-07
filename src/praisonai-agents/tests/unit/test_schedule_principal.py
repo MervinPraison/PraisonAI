@@ -227,6 +227,28 @@ class TestScheduleToolsDefaultPrincipal:
     passed, while staying globally-scoped for CLI / single-user (no identity).
     """
 
+    def setup_method(self):
+        """Snapshot the global schedule stores so each test is isolated."""
+        from praisonaiagents.tools import schedule_tools
+        from praisonaiagents import scheduler as _scheduler
+
+        self._saved_tool_store = schedule_tools._store_instance
+        try:
+            self._saved_default_store = _scheduler.get_default_store()
+        except Exception:
+            self._saved_default_store = None
+
+    def teardown_method(self):
+        """Restore both global stores so later tests never see a temp-dir store."""
+        from praisonaiagents.tools import schedule_tools
+        from praisonaiagents import scheduler as _scheduler
+
+        schedule_tools._store_instance = self._saved_tool_store
+        try:
+            _scheduler.set_default_store(self._saved_default_store)
+        except Exception:
+            pass
+
     def _fresh_store(self, tmp_dir):
         from praisonaiagents.scheduler.store import FileScheduleStore
         from praisonaiagents.tools import schedule_tools
@@ -281,7 +303,14 @@ class TestScheduleToolsDefaultPrincipal:
             listed = schedule_list()
             assert "cli-job" in listed
 
-    def test_explicit_principal_overrides_context(self):
+    def test_session_identity_cannot_be_impersonated(self):
+        """A tool ``principal`` argument must NOT override an authenticated
+        session identity (issue #3785 security review).
+
+        An agent (or prompt-injected content) that passes ``principal=<victim>``
+        while a session identity is installed must be pinned to the session
+        owner — never the caller-selected value.
+        """
         from praisonaiagents.session.context import (
             set_session_context,
             clear_session_context,
@@ -292,8 +321,30 @@ class TestScheduleToolsDefaultPrincipal:
             store = self._fresh_store(d)
             tok = set_session_context(unified_user_id="alice")
             try:
+                # Alice's turn attempts to impersonate Carol via the tool arg.
                 schedule_add("j", "daily", principal="carol")
+                # Alice (the authenticated session) sees the job she created …
+                assert "j" in schedule_list()
+                # … and the explicit principal arg cannot re-scope the read to
+                # another tenant while a session is installed.
+                assert "j" in schedule_list(principal="carol")
             finally:
                 clear_session_context(tok)
+            # The job is owned by the authenticated session (alice), NOT carol.
+            assert store.get_by_name("j").principal == "alice"
+            # Carol's own store view is empty — she was never impersonated.
+            assert store.list(principal="carol") == []
+
+    def test_explicit_principal_used_without_session(self):
+        """With no session installed, an explicit principal is honoured.
+
+        This is the trusted path (CLI / gateway bridge) — no ambient identity
+        exists to protect, so the caller-provided value scopes ownership.
+        """
+        from praisonaiagents.tools.schedule_tools import schedule_add, schedule_list
+
+        with tempfile.TemporaryDirectory() as d:
+            store = self._fresh_store(d)
+            schedule_add("j", "daily", principal="carol")
             assert store.get_by_name("j").principal == "carol"
             assert "j" in schedule_list(principal="carol")

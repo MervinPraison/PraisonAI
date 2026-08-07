@@ -26,19 +26,29 @@ logger = get_logger(__name__)
 def _caller_principal(explicit: str = "") -> Optional[str]:
     """Resolve the calling end-user's canonical identity.
 
-    Prefers an ``explicit`` override, then the per-turn
-    ``SessionContext.unified_user_id`` set by the bot session manager on a
-    multi-user gateway. Returns ``None`` when no identity is resolved so the
-    scheduler stores fall back to their global, single-tenant behaviour
-    (CLI / single-user deployments are unchanged).
+    Security: on a multi-user gateway the authenticated per-turn
+    ``SessionContext.unified_user_id`` is **authoritative** and always wins.
+    This prevents a prompt-injected agent from passing ``principal=<victim>``
+    through an agent-callable tool to read or mutate another tenant's jobs —
+    the ``explicit`` argument is a trusted default, never an override of a
+    resolved session identity.
+
+    Resolution order:
+    1. Session identity, when present (authenticated caller — cannot be
+       overridden by tool arguments).
+    2. Otherwise the ``explicit`` value (trusted CLI / gateway-bridge path
+       where no session context is installed).
+    3. Otherwise ``None`` ⇒ global, single-tenant behaviour (CLI /
+       single-user deployments are unchanged).
     """
-    if explicit:
-        return explicit
     try:
         from ..session.context import get_session_context
-        return get_session_context().unified_user_id or None
+        session_principal = get_session_context().unified_user_id or None
     except Exception:
-        return None
+        session_principal = None
+    if session_principal:
+        return session_principal
+    return explicit or None
 
 # ── lazy singleton store ─────────────────────────────────────────────────────
 
