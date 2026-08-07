@@ -568,10 +568,23 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         source = args[0]
         result = {"source": source, "success": False, "tools": []}
         
+        import os
         from pathlib import Path
         
         # Check if it's a local file
         if source.startswith("./") or source.startswith("/") or source.endswith(".py"):
+            # Honour the same opt-in the runtime loader requires. Adding a local
+            # tools file persists it into the auto-discovery directory, so it must
+            # not bypass the PRAISONAI_ALLOW_LOCAL_TOOLS gate every other loader
+            # enforces (see api/call.py, templates/tool_override.py).
+            if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+                self.print_status(
+                    "Refusing to add local tools: set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+                    "to enable (same opt-in the runtime loader requires).",
+                    "error",
+                )
+                return {"success": False, "error": "PRAISONAI_ALLOW_LOCAL_TOOLS not set"}
+
             path = Path(source).resolve()
             if path.exists():
                 # Copy to ~/.praison/tools/
@@ -585,16 +598,24 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 self.print_status(f"\n✅ Added tools file: {path.name}", "success")
                 self.print_status(f"   Copied to: {dest}", "info")
                 
-                # Discover tools in the file
+                # Discover tools by static analysis only. We must NOT exec the
+                # file here: exec runs every top-level statement. The runtime
+                # loader still executes it at actual use time, but only under the
+                # opt-in gate. ast.parse inspects without execution.
                 try:
-                    import importlib.util
-                    spec = importlib.util.spec_from_file_location("tools_module", dest)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    
-                    tools = [n for n in dir(module) if not n.startswith('_') and callable(getattr(module, n, None))]
+                    import ast
+                    with open(dest, "r", encoding="utf-8") as f:
+                        tree = ast.parse(f.read(), filename=str(dest))
+                    tools = [
+                        node.name
+                        for node in tree.body
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and not node.name.startswith("_")
+                    ]
                     result["tools"] = tools
                     self.print_status(f"   Found {len(tools)} tools: {', '.join(tools[:5])}", "info")
+                except SyntaxError as e:
+                    self.print_status(f"   Warning: file has a syntax error: {e}", "warning")
                 except Exception as e:
                     self.print_status(f"   Warning: Could not inspect tools: {e}", "warning")
                 
@@ -612,6 +633,17 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 self.print_status("Invalid GitHub format. Use: github:user/repo/path", "error")
                 return result
             
+            # Downloading remote tool code persists it into the auto-discovery
+            # directory, so it must honour the same opt-in the runtime loader
+            # requires and never bypass PRAISONAI_ALLOW_LOCAL_TOOLS.
+            if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
+                self.print_status(
+                    "Refusing to add remote tools: set PRAISONAI_ALLOW_LOCAL_TOOLS=true "
+                    "to enable (same opt-in the runtime loader requires).",
+                    "error",
+                )
+                return {"success": False, "error": "PRAISONAI_ALLOW_LOCAL_TOOLS not set"}
+
             user, repo = parts[0], parts[1]
             path = "/".join(parts[2:]) if len(parts) > 2 else ""
             
@@ -624,6 +656,12 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                     raw_url += "/tools.py"
             else:
                 raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/main/tools.py"
+
+            # Only ever fetch from GitHub raw over HTTPS; refuse anything else so
+            # a crafted source cannot redirect the fetch elsewhere.
+            if not raw_url.startswith("https://raw.githubusercontent.com/"):
+                self.print_status("Refusing non-GitHub raw URL.", "error")
+                return result
             
             try:
                 self.print_status(f"Downloading from: {raw_url}", "info")
@@ -631,10 +669,21 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 tools_dir = Path.home() / ".praison" / "tools"
                 tools_dir.mkdir(parents=True, exist_ok=True)
                 
-                filename = f"{user}_{repo}_{path.replace('/', '_')}.py" if path else f"{user}_{repo}_tools.py"
+                # Derive a safe single-basename filename from user input.
+                stem = f"{user}_{repo}_{Path(path).name}" if path else f"{user}_{repo}_tools"
+                filename = Path(stem).name
+                if not filename.endswith(".py"):
+                    filename += ".py"
                 dest = tools_dir / filename
-                
-                urllib.request.urlretrieve(raw_url, dest)
+
+                # Read with an explicit HTTPS request and a 1 MiB cap instead of
+                # urlretrieve (which follows redirects and writes unbounded output).
+                req = urllib.request.Request(
+                    raw_url, headers={"User-Agent": "praisonai-tools-add"}
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 - scheme checked above
+                    data = resp.read(1024 * 1024)
+                dest.write_bytes(data)
                 
                 self.print_status(f"\n✅ Added tools from GitHub: {user}/{repo}", "success")
                 self.print_status(f"   Saved to: {dest}", "info")

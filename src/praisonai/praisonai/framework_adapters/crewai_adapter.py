@@ -6,7 +6,7 @@ Provides lazy-loaded, scoped integration with CrewAI framework.
 
 import logging
 from typing import Dict, List, Any, Optional
-from .base import BaseFrameworkAdapter, scoped_telemetry_disable
+from .base import BaseFrameworkAdapter, scoped_telemetry_disable, warn_unsupported_fields
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,9 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 # Create agents from the normalized specs
                 for spec in specs:
                     details = spec.extras
+
+                    # Surface any extended YAML fields this backend silently drops
+                    warn_unsupported_fields(self.name, details)
 
                     # Configure LLM using shared resolver
                     llm = self._resolve_llm(details.get('llm'), llm_config)
