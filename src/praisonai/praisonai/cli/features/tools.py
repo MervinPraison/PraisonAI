@@ -678,11 +678,20 @@ Built-in tools include: internet_search, calculator, file operations, etc.
 
                 # Read with an explicit HTTPS request and a 1 MiB cap instead of
                 # urlretrieve (which follows redirects and writes unbounded output).
+                max_bytes = 1024 * 1024
                 req = urllib.request.Request(
                     raw_url, headers={"User-Agent": "praisonai-tools-add"}
                 )
                 with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 - scheme checked above
-                    data = resp.read(1024 * 1024)
+                    # Read one byte past the cap so an oversized file is rejected
+                    # rather than silently truncated into partial (broken) source.
+                    data = resp.read(max_bytes + 1)
+                if len(data) > max_bytes:
+                    self.print_status(
+                        f"Refusing to add tool: file exceeds {max_bytes} byte cap.",
+                        "error",
+                    )
+                    return result
                 dest.write_bytes(data)
                 
                 self.print_status(f"\n✅ Added tools from GitHub: {user}/{repo}", "success")
