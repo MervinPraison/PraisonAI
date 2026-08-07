@@ -2,15 +2,19 @@
 LLM Gateway Providers for PraisonAI
 
 This module provides pre-configured gateway providers for popular AI gateways
-like LiteLLM.ai, OpenRouter.ai, and others. These gateways provide unified
-access to 100+ LLM providers through OpenAI-compatible endpoints.
+like LiteLLM.ai, OpenRouter.ai, OrcaRouter.ai, and others. These gateways
+provide unified access to 100+ LLM providers through OpenAI-compatible
+endpoints.
 
 Example usage:
     from praisonai.llm import create_llm_provider
     
     # Use OpenRouter gateway
     provider = create_llm_provider("openrouter/meta-llama/llama-3.2-3b-instruct")
-    
+
+    # Use OrcaRouter gateway
+    provider = create_llm_provider("orcarouter/openai/gpt-5.5")
+
     # Use LiteLLM gateway
     provider = create_llm_provider("litellm-proxy/gpt-4")
     
@@ -119,6 +123,37 @@ class OpenRouterProvider(GatewayProvider):
             self.model_id = f"openrouter/{self.model_id}"
 
 
+class OrcaRouterProvider(GatewayProvider):
+    """OrcaRouter.ai gateway provider.
+
+    OrcaRouter provides access to 100+ models from various providers through a
+    single OpenAI-compatible endpoint, with adaptive routing that can pick the
+    upstream per request.
+
+    Environment variable: ORCAROUTER_API_KEY
+
+    Reference: https://docs.orcarouter.ai
+    """
+    DEFAULT_BASE_URL = "https://api.orcarouter.ai/v1"
+
+    def _setup_config(self):
+        """Setup OrcaRouter-specific configuration."""
+        super()._setup_config()
+
+        # LiteLLM has no native "orcarouter/" route, so requests go out over its
+        # OpenAI-compatible path against DEFAULT_BASE_URL. LiteLLM strips the
+        # leading "openai/" and forwards the remainder as the model name, which
+        # is what preserves OrcaRouter's own namespace.
+        #
+        # OrcaRouter model ids are themselves namespaced ("openai/gpt-5.5",
+        # "anthropic/claude-sonnet-5", "orcarouter/auto") and the gateway
+        # rejects bare names, so the prefix is added unconditionally -- an id
+        # that already starts with "openai/" still needs one, otherwise LiteLLM
+        # consumes the id's own namespace and the gateway 503s with
+        # "No available channel".
+        self.model_id = f"openai/{self.model_id}"
+
+
 class LiteLLMProxyProvider(GatewayProvider):
     """LiteLLM Proxy gateway provider.
     
@@ -190,6 +225,14 @@ def register_gateway_providers():
         override=True
     )
     
+    # Register OrcaRouter
+    register_llm_provider(
+        "orcarouter",
+        OrcaRouterProvider,
+        aliases=["orca"],
+        override=True
+    )
+
     # Register LiteLLM Proxy (different from built-in litellm)
     register_llm_provider(
         "litellm-proxy",

@@ -67,6 +67,7 @@ def inject_credentials_into_env() -> bool:
             "groq": "GROQ_API_KEY",
             "cohere": "COHERE_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
+            "orcarouter": "ORCAROUTER_API_KEY",
         }
 
         for provider in providers:
@@ -128,6 +129,8 @@ def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
         return ("COHERE_API_KEY",)
     if m.startswith("openrouter/"):
         return ("OPENROUTER_API_KEY",)
+    if m.startswith("orcarouter/"):
+        return ("ORCAROUTER_API_KEY",)
     if m.startswith("ollama/"):
         return ("OLLAMA_HOST",)
     if (
@@ -149,6 +152,7 @@ _VAR_TO_STORED_PROVIDERS = {
     "GROQ_API_KEY": ("groq",),
     "COHERE_API_KEY": ("cohere",),
     "OPENROUTER_API_KEY": ("openrouter",),
+    "ORCAROUTER_API_KEY": ("orcarouter",),
     "OLLAMA_HOST": ("ollama",),
 }
 
@@ -168,7 +172,7 @@ def is_configured(model: Optional[str] = None) -> bool:
     known_keys = (
         "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
         "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-        "OPENROUTER_API_KEY", "OLLAMA_HOST",
+        "OPENROUTER_API_KEY", "ORCAROUTER_API_KEY", "OLLAMA_HOST",
     )
 
     explicit_model = model is not None

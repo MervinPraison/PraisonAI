@@ -15,7 +15,10 @@ LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 # Any prefix NOT in this set is delegated to praisonai.llm.registry so that
 # user-registered providers (register_llm_provider(...)) take effect here.
 _BUILTIN_MODEL_PREFIXES = frozenset(
-    {"openai", "groq", "cohere", "ollama", "anthropic", "google", "openrouter"}
+    {
+        "openai", "groq", "cohere", "ollama", "anthropic", "google",
+        "openrouter", "orcarouter",
+    }
 )
 
 def _is_module_available(module_name: str) -> bool:
@@ -98,6 +101,10 @@ class PraisonAIModel:
             self.api_key_var = "OPENROUTER_API_KEY"
             self.base_url = base_url or "https://openrouter.ai/api/v1"
             self.model_name = self.model.replace("openrouter/", "")
+        elif self.model.startswith("orcarouter/"):
+            self.api_key_var = "ORCAROUTER_API_KEY"
+            self.base_url = base_url or "https://api.orcarouter.ai/v1"
+            self.model_name = self.model[len("orcarouter/"):]
         else: 
             self.api_key_var = api_key_var or "OPENAI_API_KEY" 
             self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
