@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 22 | 49 | 15427 |
+| ✅ Agent | 22 | 49 | 15432 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2965 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 684 |
 | ✅ Approval | 1 | 5 | 2500 |
@@ -27,10 +27,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2736 |
 | ✅ Bots | 7 | 31 | 13154 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35632 |
+| ✅ CLI | 5 | 121 | 35637 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4543 |
+| ✅ Code Execution | 2 | 14 | 4548 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3045 |
 | ✅ Context Management | 16 | 34 | 13335 |
@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1044 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2806 |
-| ✅ Security | 1 | 3 | 2991 |
+| ✅ Security | 1 | 3 | 3025 |
 | ✅ Sessions | 4 | 17 | 6960 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
