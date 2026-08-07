@@ -85,6 +85,27 @@ def test_env_blob_non_object_raises(monkeypatch):
         CredentialStore()
 
 
+def test_env_blob_empty_raises(tmp_path, monkeypatch):
+    # A present-but-empty value must be rejected, not silently fall back to
+    # disk, so the zero-disk contract cannot be broken by an empty CI secret.
+    disk = tmp_path / "credentials.json"
+    monkeypatch.setenv(AUTH_CONTENT_ENV, "")
+    with pytest.raises(ValueError):
+        CredentialStore(credentials_path=disk)
+
+    monkeypatch.setenv(AUTH_CONTENT_ENV, "   ")
+    with pytest.raises(ValueError):
+        CredentialStore(credentials_path=disk)
+
+
+def test_env_blob_malformed_provider_entry_raises(monkeypatch):
+    # A non-object provider entry (e.g. null) would crash credential lookup
+    # later; reject it up-front with a clear error.
+    monkeypatch.setenv(AUTH_CONTENT_ENV, json.dumps({"openai": None}))
+    with pytest.raises(ValueError):
+        CredentialStore()
+
+
 def test_no_env_blob_uses_disk(tmp_path, monkeypatch):
     monkeypatch.delenv(AUTH_CONTENT_ENV, raising=False)
     disk = tmp_path / "credentials.json"

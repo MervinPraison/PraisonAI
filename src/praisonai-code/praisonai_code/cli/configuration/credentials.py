@@ -93,7 +93,15 @@ class CredentialStore:
         """
         self._memory_store: Optional[Dict[str, Dict[str, Any]]] = None
         env_blob = os.environ.get(AUTH_CONTENT_ENV)
-        if env_blob:
+        # Distinguish "unset" (fall back to disk) from "set but empty/invalid".
+        # A present-but-empty value is a misconfiguration in zero-disk mode and
+        # must be rejected rather than silently re-enabling disk persistence.
+        if env_blob is not None:
+            if not env_blob.strip():
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} is set but empty; expected a JSON "
+                    "object mapping provider -> credential"
+                )
             try:
                 parsed = json.loads(env_blob)
             except json.JSONDecodeError as exc:
@@ -104,6 +112,16 @@ class CredentialStore:
                 raise ValueError(
                     f"{AUTH_CONTENT_ENV} must be a JSON object mapping "
                     "provider -> credential"
+                )
+            invalid_providers = [
+                provider
+                for provider, credential in parsed.items()
+                if not isinstance(credential, dict)
+            ]
+            if invalid_providers:
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} credentials must be JSON objects; "
+                    f"invalid providers: {', '.join(map(str, invalid_providers))}"
                 )
             self._memory_store = parsed
 
