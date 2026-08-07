@@ -23,15 +23,27 @@ def _persisted_callback_secret() -> str:
 
     Resolves through the same auto-provisioned, owner-only secret store used
     by the pairing code path so approve/deny buttons survive process restarts.
-    Falls back to a per-process random secret only if the store is unwritable.
+
+    If the store is genuinely unwritable/unreadable, a single per-process
+    random secret is cached (via ``lru_cache``) and an explicit warning is
+    emitted. This keeps *this* process internally consistent (buttons it
+    issues verify against the same key) while making the degraded mode
+    visible instead of silently rotating keys on every call.
     """
     try:
         from praisonai_bot.gateway.pairing import _DEFAULT_STORE_DIR, _load_or_create_secret
 
         return _load_or_create_secret(_DEFAULT_STORE_DIR).decode()
-    except Exception:  # pragma: no cover - defensive fallback
+    except (OSError, IOError) as exc:  # pragma: no cover - defensive fallback
         import secrets
 
+        logger.warning(
+            "Gateway secret store unavailable (%s); falling back to a "
+            "per-process callback secret. Interactive approve/deny buttons "
+            "issued before a restart will not verify afterwards. Set "
+            "PRAISONAI_GATEWAY_SECRET to persist a shared secret.",
+            exc,
+        )
         return secrets.token_hex(32)
 
 
