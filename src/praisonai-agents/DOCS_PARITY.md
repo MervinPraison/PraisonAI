@@ -25,12 +25,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 3005 |
 | ✅ Autonomy | 3 | 7 | 2736 |
-| ✅ Bots | 7 | 31 | 13108 |
+| ✅ Bots | 7 | 31 | 13154 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35500 |
+| ✅ CLI | 5 | 121 | 35632 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 4424 |
+| ✅ Code Execution | 2 | 14 | 4543 |
 | ✅ Conditions | 1 | 3 | 1179 |
 | ✅ Configuration | 3 | 8 | 3045 |
 | ✅ Context Management | 16 | 34 | 13335 |
@@ -59,7 +59,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Output | 3 | 5 | 1158 |
 | ✅ Parallel Execution | 3 | 2 | 497 |
 | ✅ Planning | 6 | 6 | 1549 |
-| ✅ Plugins | 8 | 4 | 2494 |
+| ✅ Plugins | 8 | 4 | 2570 |
 | ✅ Prompts | 2 | 9 | 1965 |
 | ✅ Providers | 1 | 56 | 7723 |
 | ✅ Query | 1 | 2 | 736 |
@@ -70,7 +70,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 6 | 2806 |
 | ✅ Security | 1 | 3 | 2991 |
-| ✅ Sessions | 4 | 16 | 6543 |
+| ✅ Sessions | 4 | 17 | 6960 |
 | ✅ Skills | 6 | 15 | 5638 |
 | ✅ Tasks | 2 | 6 | 2819 |
 | ✅ Telemetry | 1 | 2 | 604 |
