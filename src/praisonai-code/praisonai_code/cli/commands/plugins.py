@@ -246,6 +246,23 @@ def plugins_doctor():
         enabled_plugins = [p for p in plugins if p.get("enabled")]
         
         console.print("[bold]Plugin Health Check[/bold]\n")
+
+        # Show whether external plugins are suppressed for the current process,
+        # and how to reproduce a clean, plugin-free baseline for debugging/CI.
+        import os as _os_doctor
+        if _os_doctor.environ.get("PRAISONAI_NO_PLUGINS", "").strip().lower() in (
+            "true", "1", "yes",
+        ):
+            console.print(
+                "[yellow]External plugins are suppressed for this run "
+                "(--pure / PRAISONAI_NO_PLUGINS).[/yellow]\n"
+            )
+        else:
+            console.print(
+                "[dim]Tip: run any command with --pure / --no-plugins "
+                "(or PRAISONAI_NO_PLUGINS=1) for a clean, plugin-free "
+                "baseline.[/dim]\n"
+            )
         
         if not enabled_plugins:
             console.print("[yellow]No plugins enabled[/yellow]")

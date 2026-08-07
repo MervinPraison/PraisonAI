@@ -10,6 +10,8 @@ from typing import List, Optional, Union
 
 import typer
 
+from praisonai_code.cli.utils.env_utils import scopes_no_plugins
+
 app = typer.Typer(help="Terminal-native interactive chat mode")
 
 
@@ -48,6 +50,7 @@ def _parse_memory_flag(memory: Optional[str], no_memory: bool) -> Union[bool, st
 
 
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def chat_main(
     ctx: typer.Context,
     prompt: Optional[str] = typer.Argument(None, help="Initial prompt for chat"),
@@ -138,6 +141,7 @@ def chat_main(
     theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
     compact: bool = typer.Option(False, "--compact", help="Compact output mode"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -163,6 +167,11 @@ def chat_main(
     # so the interactive TUI is never stalled.
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
+
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS for the duration of this call
+    # and always restores the prior value on return, so it never leaks into a
+    # later in-process invocation. Persisted enable/disable state is untouched.
 
     # Set workspace if provided
     if workspace:

@@ -9,10 +9,13 @@ from typing import List, Optional
 
 import typer
 
+from praisonai_code.cli.utils.env_utils import scopes_no_plugins
+
 app = typer.Typer(help="Terminal-native code assistant mode")
 
 
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def code_main(
     ctx: typer.Context,
     prompt: Optional[str] = typer.Argument(None, help="Code task or question"),
@@ -38,6 +41,7 @@ def code_main(
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
     print_mode: bool = typer.Option(False, "--print", "-p", help="Headless one-shot: emit a clean machine-readable result (no decorations/profiling) and exit with a status-reflecting code"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output format for -p/--print: json (default) or text"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
 ):
     """
     Start terminal-native code assistant mode.
@@ -66,6 +70,11 @@ def code_main(
     # so an interactive REPL is never stalled.
     from praisonai_code.cli.utils.stdin import resolve_cli_input
     prompt = resolve_cli_input(prompt)
+
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS for the duration of this call
+    # and always restores the prior value on return, so it never leaks into a
+    # later in-process invocation. Persisted enable/disable state is untouched.
 
     # --resume is a headless-friendly alias for --session so scripted multi-turn
     # composes as `code --resume <id> -p "follow-up"`. An explicit --session

@@ -21,6 +21,21 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+def _env_plugins_suppressed() -> bool:
+    """Return True when external plugins are suppressed via env for this run.
+
+    Honours ``PRAISONAI_NO_PLUGINS`` (set by the CLI ``--pure`` / ``--no-plugins``
+    flag) so a single invocation can skip discovery of external plugins without
+    mutating any persisted enable/disable state.
+    """
+    import os
+
+    return os.environ.get("PRAISONAI_NO_PLUGINS", "").strip().lower() in (
+        "true", "1", "yes",
+    )
+
+
 class PluginManager:
     """
     Manages plugin discovery, loading, and execution.
@@ -44,7 +59,7 @@ class PluginManager:
         args = await manager.async_execute_hook(PluginHook.BEFORE_TOOL, "bash", {"cmd": "ls"})
     """
     
-    def __init__(self):
+    def __init__(self, disabled: Optional[bool] = None):
         self._plugins: Dict[str, Plugin] = {}
         self._enabled: Dict[str, bool] = {}
         self._single_file_plugins: Dict[str, Dict[str, Any]] = {}  # WordPress-style plugins
@@ -52,6 +67,30 @@ class PluginManager:
         # delivered to each plugin's on_config hook. {plugin_name: options}.
         self._plugin_options: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()  # Thread safety for multi-agent environments
+        # Ephemeral, per-process suppression of external plugin discovery.
+        # ``None`` (default) defers to the ``PRAISONAI_NO_PLUGINS`` env var so
+        # the CLI ``--pure`` / ``--no-plugins`` flag works; passing ``True``
+        # (e.g. Python ``plugins=False`` parity) forces suppression regardless.
+        self._disabled = disabled
+        self._suppression_notified = False
+
+    def is_discovery_disabled(self) -> bool:
+        """Return True when external plugin discovery is suppressed this run.
+
+        A constructor ``disabled=True`` wins; otherwise defers to the
+        ``PRAISONAI_NO_PLUGINS`` env var. Never mutates persisted state.
+        """
+        if self._disabled is not None:
+            return bool(self._disabled)
+        return _env_plugins_suppressed()
+
+    def _notify_suppressed_once(self) -> None:
+        """Emit a single 'running without external plugins' notice per manager."""
+        if not self._suppression_notified:
+            self._suppression_notified = True
+            logger.info(
+                "Running without external plugins (--pure / PRAISONAI_NO_PLUGINS)"
+            )
 
     def set_plugin_options(
         self,
@@ -488,6 +527,10 @@ class PluginManager:
         """
         import os
 
+        if self.is_discovery_disabled():
+            self._notify_suppressed_once()
+            return 0
+
         if os.environ.get("PRAISONAI_ALLOW_PLUGIN_DISCOVERY", "").strip().lower() not in (
             "true", "1", "yes",
         ):
@@ -525,6 +568,10 @@ class PluginManager:
         Returns:
             Number of plugins loaded successfully.
         """
+        if self.is_discovery_disabled():
+            self._notify_suppressed_once()
+            return 0
+
         try:
             import importlib.metadata as _md
         except ImportError:

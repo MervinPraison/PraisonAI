@@ -12,6 +12,7 @@ import typer
 from ..output.console import get_output_controller
 from ..state.identifiers import get_current_context
 from ..configuration.resolver import resolve_config
+from ..utils.env_utils import scopes_no_plugins
 
 app = typer.Typer(help="Run agents")
 
@@ -908,6 +909,7 @@ def _worktree_isolation(enabled: bool, name: str, *, keep: bool = False):
 
 
 @app.callback(invoke_without_command=True)
+@scopes_no_plugins
 def run_main(
     ctx: typer.Context,
     target: Optional[str] = typer.Argument(None, help="Agent file or prompt"),
@@ -929,6 +931,7 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    pure: bool = typer.Option(False, "--pure", "--no-plugins", help="Skip discovery/loading of external plugins for this run only (equivalent to PRAISONAI_NO_PLUGINS=1); persisted enable/disable state is unchanged"),
     instructions: Optional[List[str]] = typer.Option(None, "--instructions", help="Extra instruction/context source (file path, glob, or http(s):// URL) to load alongside AGENTS.md/CLAUDE.md. Repeatable; merges on top of config-declared 'instructions'."),
     # Permission flags for CI-safe declarative policies
     allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
@@ -969,6 +972,12 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+
+    # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
+    # decorator, which sets PRAISONAI_NO_PLUGINS (read by the core PluginManager)
+    # for the duration of this call and always restores the prior value on
+    # return, so it never leaks into a later in-process run_main() call.
+    # Persisted enable/disable state is untouched.
 
     # --allow-local-tools is a discoverable equivalent to the env-var opt-in.
     # It is a per-invocation grant: the actual gate is applied (and restored)
