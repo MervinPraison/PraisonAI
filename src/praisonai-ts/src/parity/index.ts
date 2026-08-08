@@ -852,24 +852,39 @@ export interface GuardrailResult {
 /**
  * MCP - Model Context Protocol client.
  * Python parity: praisonaiagents/mcp/mcp.py
+ *
+ * Delegates to the real MCPClient (stdio/HTTP/SSE transports in src/mcp) —
+ * this class previously stored configs and returned null from callTool,
+ * silently no-op'ing every MCP interaction.
  */
 export class MCP {
-  private servers: Map<string, any>;
+  private servers: Map<string, import('../mcp').MCPClient>;
 
   constructor() {
     this.servers = new Map();
   }
 
   async connect(name: string, config: any): Promise<void> {
-    this.servers.set(name, config);
+    const { MCPClient } = await import('../mcp');
+    const client = new MCPClient(config ?? {});
+    await client.connect();
+    this.servers.set(name, client);
   }
 
   async disconnect(name: string): Promise<void> {
+    const client = this.servers.get(name);
+    if (client) {
+      await client.disconnect();
+    }
     this.servers.delete(name);
   }
 
   async callTool(server: string, tool: string, args: any): Promise<any> {
-    return null; // Placeholder
+    const client = this.servers.get(server);
+    if (!client) {
+      throw new Error(`MCP server '${server}' is not connected — call connect('${server}', config) first`);
+    }
+    return client.callTool(tool, args);
   }
 
   listServers(): string[] {

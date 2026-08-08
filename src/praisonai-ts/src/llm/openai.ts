@@ -6,9 +6,9 @@ import type { ChatCompletionTool, ChatCompletionToolChoiceOption, ChatCompletion
 // Load environment variables once at the application level
 dotenv.config();
 
-if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY not found in environment variables');
-}
+// The API-key check lives in getOpenAIClient(), where the client is actually
+// created — importing the package must not throw for users of non-OpenAI
+// providers (anthropic/..., google/...) who never touch the OpenAI path.
 
 export interface LLMResponse {
     content: string;
@@ -101,6 +101,9 @@ let openAIInstance: OpenAI | null = null;
 // Get cached OpenAI client instance
 async function getOpenAIClient(): Promise<OpenAI> {
     if (!openAIInstance) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OPENAI_API_KEY not found in environment variables');
+        }
         openAIInstance = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY
         });
@@ -108,6 +111,11 @@ async function getOpenAIClient(): Promise<OpenAI> {
     }
     return openAIInstance;
 }
+
+/** response_format payload for Chat Completions (json_schema / json_object). */
+export type ResponseFormat =
+    | { type: 'json_object' }
+    | { type: 'json_schema'; json_schema: { name: string; schema: Record<string, any>; strict?: boolean } };
 
 export class OpenAIService {
     private model: string;
@@ -126,12 +134,24 @@ export class OpenAIService {
         return this.client;
     }
 
+    // Reasoning-family models (gpt-5*, o1*, o3*, o4*) reject non-default
+    // temperature with a 400; omit the param for them unless caller-set
+    // temperature differs from the legacy 0.7 default.
+    private temperatureParam(temperature: number): { temperature?: number } {
+        const reasoningFamily = /^(gpt-5|o1|o3|o4)/.test(this.model);
+        if (reasoningFamily && temperature === 0.7) {
+            return {};
+        }
+        return { temperature };
+    }
+
     async generateText(
         prompt: string,
         systemPrompt: string = '',
         temperature: number = 0.7,
         tools?: ChatCompletionTool[],
-        tool_choice?: ChatCompletionToolChoiceOption
+        tool_choice?: ChatCompletionToolChoiceOption,
+        responseFormat?: ResponseFormat
     ): Promise<string> {
         await Logger.startSpinner('Generating text with OpenAI...');
         
@@ -148,13 +168,14 @@ export class OpenAIService {
             // Convert tools to OpenAI format if provided
             const openAITools = tools ? tools.map(convertToOpenAITool) : undefined;
             
-            const completion = await this.getClient().then(client => 
+            const completion = await this.getClient().then(client =>
                 client.chat.completions.create({
                     model: this.model,
-                    temperature,
+                    ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     tools: openAITools,
-                    tool_choice
+                    tool_choice,
+                    ...(responseFormat ? { response_format: responseFormat } : {})
                 })
             );
 
@@ -189,7 +210,8 @@ export class OpenAIService {
         messages: ChatMessage[],
         temperature: number = 0.7,
         tools?: ChatCompletionTool[],
-        tool_choice?: ChatCompletionToolChoiceOption
+        tool_choice?: ChatCompletionToolChoiceOption,
+        responseFormat?: ResponseFormat
     ): Promise<LLMResponse> {
         await Logger.startSpinner('Generating chat response...');
 
@@ -203,10 +225,11 @@ export class OpenAIService {
             const completion = await this.getClient().then(client =>
                 client.chat.completions.create({
                     model: this.model,
-                    temperature,
+                    ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     tools: openAITools,
-                    tool_choice
+                    tool_choice,
+                    ...(responseFormat ? { response_format: responseFormat } : {})
                 })
             );
 
@@ -265,7 +288,7 @@ export class OpenAIService {
             const stream = await this.getClient().then(client =>
                 client.chat.completions.create({
                     model: this.model,
-                    temperature,
+                    ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     stream: true,
                     tools: openAITools,
@@ -338,7 +361,7 @@ export class OpenAIService {
             const stream = await this.getClient().then(client =>
                 client.chat.completions.create({
                     model: this.model,
-                    temperature,
+                    ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     stream: true
                 })
@@ -381,7 +404,7 @@ export class OpenAIService {
             const completion = await this.getClient().then(client =>
                 client.chat.completions.create({
                     model: this.model,
-                    temperature,
+                    ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     tools: openAITools,
                     tool_choice
