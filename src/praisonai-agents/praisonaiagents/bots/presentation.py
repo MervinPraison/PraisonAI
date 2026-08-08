@@ -1074,6 +1074,152 @@ def adapt_presentation(
     )
 
 
+# Machine-readable degradation reason codes, mirroring the ``REASON_*`` style in
+# ``admission.py``/``failure.py`` so a dropped control is recorded, not silent.
+DEGRADE_SELECT_UNSUPPORTED = "select_unsupported"
+DEGRADE_WEB_APP_UNAVAILABLE = "web_app_unavailable"
+DEGRADE_BUTTONS_TRUNCATED = "buttons_truncated"
+DEGRADE_OPTIONS_TRUNCATED = "options_truncated"
+DEGRADE_TABLE_AS_TEXT = "table_rendered_as_text"
+DEGRADE_CHART_AS_TEXT = "chart_rendered_as_text"
+DEGRADE_CALLBACK_DATA_TOO_LONG = "callback_data_too_long"
+
+
+@dataclass(frozen=True)
+class DegradedDelivery:
+    """A record of controls a channel could not render natively.
+
+    ``adapt_presentation`` already downgrades charts/tables/buttons/selects to
+    deterministic text/callbacks, but returns *no record* of what it dropped, so
+    the downgrade is silent — the user (and the model) never learns a button
+    vanished or a chart became text. This is the typed report of that
+    degradation, the presentation-path counterpart of
+    :class:`~praisonaiagents.bots.failure.FailureReply`: an adapter appends
+    :attr:`fallback_text` so the loss is *visible*, and records
+    :attr:`reasons` so it is *machine-readable*.
+
+    Attributes:
+        dropped: Human-readable descriptions of each degraded/dropped control
+            (e.g. ``"1 button rendered as text"``).
+        reasons: Machine-readable reason codes (the ``DEGRADE_*`` constants),
+            aligned by intent with ``dropped``.
+        fallback_text: A short, user-facing note the adapter can append so the
+            degradation is never silent (e.g. ``"(Delivered 1 button as text -
+            Telegram callback data exceeded 64 bytes.)"``). Empty when nothing
+            degraded.
+    """
+
+    dropped: List[str]
+    reasons: List[str]
+    fallback_text: str
+
+
+def _presentation_degradation(
+    presentation: MessagePresentation,
+    limits: PresentationLimits,
+) -> Optional[DegradedDelivery]:
+    """Compute the :class:`DegradedDelivery` report for adapting to ``limits``.
+
+    Pure comparison of the *input* presentation against the channel limits — it
+    mirrors the decisions :func:`adapt_presentation` makes (select->buttons,
+    web_app->url, button/option truncation, table/chart->text) so the two never
+    disagree. Returns ``None`` when nothing degrades.
+    """
+    dropped: List[str] = []
+    reasons: List[str] = []
+
+    for block in presentation.blocks:
+        block_type = block.type.value if isinstance(block.type, BlockType) else block.type
+
+        if block_type == BlockType.SELECT.value and not limits.supports_select:
+            n = len(block.options or [])
+            dropped.append(f"select menu ({n} options) rendered as buttons")
+            reasons.append(DEGRADE_SELECT_UNSUPPORTED)
+            # The converted buttons then face the same truncation as a buttons
+            # block; account for that below by treating options as buttons.
+            block_type = BlockType.BUTTONS.value
+            button_count = n
+        elif block_type == BlockType.BUTTONS.value:
+            button_count = len(block.buttons or [])
+        else:
+            button_count = 0
+
+        if block_type == BlockType.BUTTONS.value and button_count:
+            rows = limits.max_button_rows if limits.max_button_rows else 1
+            total_cap = limits.max_buttons * rows if limits.max_buttons else button_count
+            if total_cap <= 0:
+                total_cap = button_count
+            if button_count > total_cap:
+                n = button_count - total_cap
+                dropped.append(f"{n} button(s) dropped (over channel cap)")
+                reasons.append(DEGRADE_BUTTONS_TRUNCATED)
+            for btn in (block.buttons or []):
+                if btn.action is None:
+                    continue
+                a_type = (
+                    btn.action.type.value
+                    if isinstance(btn.action.type, ActionType)
+                    else btn.action.type
+                )
+                if (
+                    not limits.supports_web_apps
+                    and a_type == ActionType.WEB_APP.value
+                    and btn.action.web_app_url
+                ):
+                    dropped.append("web-app button rendered as URL")
+                    reasons.append(DEGRADE_WEB_APP_UNAVAILABLE)
+                elif (
+                    a_type in (ActionType.REPLY.value, ActionType.CALLBACK.value)
+                    and btn.action.value is not None
+                    and len(f"{REPLY_CALLBACK_PREFIX}{btn.action.value}".encode("utf-8"))
+                    > _MAX_CALLBACK_LEN
+                ):
+                    dropped.append("button callback shortened (data exceeded byte cap)")
+                    reasons.append(DEGRADE_CALLBACK_DATA_TOO_LONG)
+
+        elif block_type == BlockType.SELECT.value and block.options:
+            if limits.max_options and len(block.options) > limits.max_options:
+                n = len(block.options) - limits.max_options
+                dropped.append(f"{n} select option(s) dropped (over channel cap)")
+                reasons.append(DEGRADE_OPTIONS_TRUNCATED)
+
+        elif block_type == BlockType.TABLE.value and not limits.supports_tables:
+            dropped.append("table rendered as text")
+            reasons.append(DEGRADE_TABLE_AS_TEXT)
+
+        elif block_type == BlockType.CHART.value and not limits.supports_charts:
+            dropped.append("chart rendered as text")
+            reasons.append(DEGRADE_CHART_AS_TEXT)
+
+    if not dropped:
+        return None
+
+    fallback_text = "(" + "; ".join(dropped) + ".)"
+    return DegradedDelivery(dropped=dropped, reasons=reasons, fallback_text=fallback_text)
+
+
+def adapt_presentation_with_report(
+    presentation: MessagePresentation,
+    limits: PresentationLimits,
+    *,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
+) -> "tuple[MessagePresentation, Optional[DegradedDelivery]]":
+    """Adapt a presentation *and* report what degraded.
+
+    Identical to :func:`adapt_presentation` for the returned presentation, but
+    additionally returns a typed :class:`DegradedDelivery` (or ``None``) so the
+    adapter can append a readable text fallback and record machine-readable
+    reasons instead of downgrading silently. ``adapt_presentation`` is retained
+    unchanged for callers that do not need the report.
+
+    Returns:
+        ``(adapted_presentation, degraded_or_none)``.
+    """
+    adapted = adapt_presentation(presentation, limits, callback_store=callback_store)
+    report = _presentation_degradation(presentation, limits)
+    return adapted, report
+
+
 # The renderer contract lives in ``protocols.py`` (alongside the other bot
 # extension-point protocols). Re-exported here for backward-compatible imports
 # (``from praisonaiagents.bots.presentation import PresentationRendererProtocol``).
