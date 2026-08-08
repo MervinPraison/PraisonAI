@@ -1485,16 +1485,32 @@ Write the complete compiled report:"""
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
                 # directly callable — dispatch to their .run() method like the sync path.
                 call_target = func.run if isinstance(func, BaseTool) else func
-                if inspect.iscoroutinefunction(call_target):
-                    logging.debug(f"Executing async function: {function_name}")
-                    result = await call_target(**arguments)
-                else:
+
+                async def _invoke():
+                    if inspect.iscoroutinefunction(call_target):
+                        logging.debug(f"Executing async function: {function_name}")
+                        return await call_target(**arguments)
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
-                    result = await loop.run_in_executor(
+                    return await loop.run_in_executor(
                         None, copy_context_to_callable(lambda: call_target(**arguments))
                     )
+
+                # Apply the per-agent tool timeout (ToolConfig.timeout) so the async
+                # path matches the sync path in tool_execution.py. asyncio.wait_for
+                # cannot kill a stuck sync tool running in the executor (same caveat
+                # the sync path has with future.cancel()), but it stops the awaiting
+                # coroutine from hanging forever, which is the actual defect.
+                tool_timeout = getattr(self, '_tool_timeout', None)
+                if tool_timeout and tool_timeout > 0:
+                    try:
+                        result = await asyncio.wait_for(_invoke(), timeout=tool_timeout)
+                    except asyncio.TimeoutError:
+                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                        return {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                else:
+                    result = await _invoke()
                 
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")
