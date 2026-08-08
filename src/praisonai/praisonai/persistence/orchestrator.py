@@ -86,7 +86,12 @@ class PersistenceOrchestrator:
         # Bounded LRU cache: prevents unbounded memory growth in long-running
         # servers/bots where each request may carry a fresh session_id.
         self._session_cache: "OrderedDict[str, ConversationSession]" = OrderedDict()
-        self._cache_maxsize = max(1, int(os.environ.get("PRAISONAI_SESSION_CACHE_MAX", "1024")))
+        try:
+            self._cache_maxsize = max(1, int(os.environ.get("PRAISONAI_SESSION_CACHE_MAX", "1024")))
+        except (TypeError, ValueError):
+            # Empty/non-numeric override must not abort persistence init;
+            # fall back to the documented default.
+            self._cache_maxsize = 1024
         self._cache_lock = threading.RLock()  # RLock allows re-entrant access
 
     def _sync(self, value: Any) -> Any:
