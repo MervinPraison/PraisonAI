@@ -767,19 +767,31 @@ class DeliveryRouter:
                 # surfaces an undelivered notice. Transient errors and
                 # message-scoped 404s stay on the existing retry path.
                 permanent = False
+                error_kind: Optional[str] = None
                 try:
-                    from ._resilience import is_permanent_target_failure
+                    from ._resilience import (
+                        classify_send_failure,
+                        is_permanent_target_failure,
+                    )
 
                     permanent = is_permanent_target_failure(send_err, platform)
+                    # Structured kind from the shared core taxonomy so the dead
+                    # target is recorded by *kind* (e.g. "forbidden") rather than
+                    # an opaque, English-only str(exc). Best-effort: None when
+                    # core predates the taxonomy, leaving the legacy reason.
+                    error_kind = classify_send_failure(send_err, platform)
                 except Exception:
                     logger.debug(
                         "DeliveryRouter: permanent-failure classification failed",
                         exc_info=True,
                     )
                 if permanent and self._dead_targets is not None:
+                    reason = (
+                        f"{error_kind}: {send_err}" if error_kind else str(send_err)
+                    )
                     try:
                         self._dead_targets.mark_dead(
-                            platform, channel_id, reason=str(send_err)
+                            platform, channel_id, reason=reason
                         )
                     except Exception:
                         logger.debug(

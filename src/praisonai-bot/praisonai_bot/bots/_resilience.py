@@ -335,6 +335,44 @@ _THREAD_SCOPED_NOT_FOUND: Set[str] = {
 }
 
 
+def classify_send_failure(err: BaseException, platform: str = "") -> Optional[str]:
+    """Classify a send failure into the core :class:`SendErrorKind` value.
+
+    Delegates to the shared, status-code-aware core classifier
+    (:func:`praisonaiagents.bots.classify_send_error`) so the whole gateway —
+    core retry loop, delivery router, dead-target registry — shares one
+    taxonomy instead of divergent English substring sets. Returns the
+    ``SendErrorKind`` *value* (a plain string such as ``"forbidden"`` or
+    ``"target_not_found"``) so the dead-target registry can record the failure
+    by kind rather than by an opaque, English-only ``str(exc)`` reason.
+
+    When core returns ``"unknown"`` (its deliberately narrow, cross-platform
+    text set) but this layer's broader :func:`is_permanent_target_failure`
+    predicate recognises the error as a confirmed whole-target death (e.g.
+    "bot is not a member", "need administrator rights", "channel_archived"),
+    the kind is upgraded to ``"forbidden"`` so persisted dead-target diagnostics
+    read as ``forbidden: …`` instead of the misleading ``unknown: …``.
+
+    Returns None only when core is too old to provide the classifier, letting
+    callers fall back to :func:`is_permanent_target_failure`.
+    """
+    try:
+        from praisonaiagents.bots import classify_send_error
+    except Exception:  # pragma: no cover - core predates the taxonomy
+        return None
+    result = classify_send_error(err)
+    kind = getattr(result, "error_kind", None)
+    if kind is None:
+        return None
+    value = getattr(kind, "value", str(kind))
+    # Reconcile with this layer's broader permanent-target knowledge: core's
+    # generic text set is narrower by design, so a confirmed permanent failure
+    # it could not name would otherwise be persisted as an unhelpful "unknown".
+    if value == "unknown" and is_permanent_target_failure(err, platform):
+        return "forbidden"
+    return value
+
+
 def is_permanent_target_failure(err: BaseException, platform: str = "") -> bool:
     """Check if an error means a whole delivery target is permanently dead.
 
