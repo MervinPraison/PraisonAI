@@ -30,6 +30,16 @@ _typer_commands_lock = threading.Lock()
 _run_option_names_cache = None
 _run_option_names_lock = threading.Lock()
 
+# Short options whose meaning DIFFERS between the legacy argparse surface and the
+# modern ``run`` command. Routing an existing YAML/prompt invocation that carries
+# one of these to the modern engine would silently change its semantics:
+#   -s : legacy ``--save`` (bool) vs modern ``--session`` (takes a value)
+#   -f : legacy ``--file`` (input file) vs modern ``--framework``
+# To guarantee zero backward-incompatible reinterpretation, their presence keeps
+# the invocation on legacy (which owns them). Long forms are unambiguous and are
+# unaffected — ``--session``/``--framework`` still reach the modern engine.
+_LEGACY_COLLIDING_SHORT_OPTS = frozenset({"-s", "-f"})
+
 
 def _get_run_option_names():
     """Return the option names accepted by the Typer ``run`` command.
@@ -229,6 +239,10 @@ def _looks_like_bare_prompt(argv, first_cmd):
     # Classify flags value-aware so a value-taking option's dash-prefixed value
     # (``--session -abc``, ``--output -json``) is not mistaken for a flag.
     flags = _flag_names(argv, value_opts)
+    # A short option whose meaning differs between legacy and modern (``-s``,
+    # ``-f``) keeps the invocation on legacy to avoid silent reinterpretation.
+    if any(flag in _LEGACY_COLLIDING_SHORT_OPTS for flag in flags):
+        return False
     # All flags must be run-supported; a single unrecognised flag → legacy.
     return all(flag in supported for flag in flags)
 
@@ -268,6 +282,11 @@ def _looks_like_yaml_run_target(argv, first_cmd):
         return False
     supported, value_opts = run_opts
     flags = _flag_names(argv, value_opts)
+    # A short option whose meaning differs between legacy and modern (``-s``,
+    # ``-f``) keeps the YAML invocation on legacy to avoid silent
+    # reinterpretation of a previously-valid legacy flag.
+    if any(flag in _LEGACY_COLLIDING_SHORT_OPTS for flag in flags):
+        return False
     # All flags must be run-supported; a single unrecognised flag → legacy.
     return all(flag in supported for flag in flags)
 
@@ -402,8 +421,20 @@ def main():
         _run_typer(argv)
         return
 
-    # 4. Find first non-flag argument and check if it's a Typer command
-    first_cmd = _find_first_command(argv)
+    # 4. Find first non-flag argument and check if it's a Typer command.
+    #    Classify value-aware when flags are present: a leading value-taking
+    #    ``run`` option (e.g. ``--session abc123 agents.yaml``) must consume its
+    #    following token as a *value* rather than mistake it for the first
+    #    positional — otherwise the YAML/prompt target after it would be
+    #    misidentified. Discovery is skipped (and the conservative static set
+    #    used) when there are no dash-prefixed tokens or when introspection
+    #    fails, so the fast/flagless path stays light and mis-routing is avoided.
+    value_opts = None
+    if any(arg.startswith("-") for arg in argv):
+        run_opts = _get_run_option_names()
+        if run_opts is not None:
+            value_opts = run_opts[1]
+    first_cmd = _find_first_command(argv, value_opts)
 
     if first_cmd is None:
         # Only flags, no command → Typer handles global flags
@@ -424,9 +455,9 @@ def main():
         # run-supported flags; ``_build_run_argv`` joins the positionals into
         # one ``target`` and appends the flags so the whole invocation reaches
         # ``run`` intact instead of Typer rejecting the extra positionals.
-        run_opts = _get_run_option_names()
-        value_opts = run_opts[1] if run_opts is not None else set()
-        _run_typer(_build_run_argv(argv, value_opts))
+        # ``value_opts`` was already derived above (value-aware first-token
+        # classification), so reuse it rather than re-introspecting ``run``.
+        _run_typer(_build_run_argv(argv, value_opts or set()))
     elif _looks_like_yaml_run_target(argv, first_cmd):
         # Workflow YAML file → modern Typer `run <file>` engine (same as
         # `praisonai run agents.yaml`), inheriting session continuity,
