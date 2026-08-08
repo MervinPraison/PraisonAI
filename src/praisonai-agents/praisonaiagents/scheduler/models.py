@@ -259,6 +259,23 @@ class ScheduleJob:
                  killed (with its process group on POSIX) and the tick is
                  recorded as ``failed``. Bounds the action so a hung command
                  cannot stall the ticker. Defaults to 60s.
+        provider: Optional model *provider* snapshotted when the job was
+                 created (e.g. ``"openai"``). Advisory metadata paired with
+                 ``model`` so a drift check can report both. ``None`` means no
+                 snapshot was taken — the job keeps today's follow-the-default
+                 behaviour and no drift is enforced.
+        model: Optional model identifier snapshotted when the job was created
+                 (e.g. ``"gpt-4o-mini"``). Because unattended runs fire with no
+                 human present, a job created against a cheap/local default
+                 must not silently inherit a later, pricier default. When set
+                 and ``pin_model`` is ``True`` the wrapper executor pins the run
+                 to this model and *fails closed* if the resolved agent has
+                 drifted. ``None`` preserves the pre-snapshot behaviour, so
+                 existing jobs are fully backward-compatible.
+        pin_model: When ``True`` (default) a ``model`` snapshot is enforced —
+                 the run is pinned and drift fails closed. Set ``False`` to opt
+                 into following whatever the default becomes. Only meaningful
+                 when ``model`` is set; a job with no snapshot never enforces.
     """
 
     name: str = ""
@@ -278,6 +295,9 @@ class ScheduleJob:
     principal: Optional[str] = None
     command: Optional[str] = None
     command_timeout: float = 60.0
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    pin_model: bool = True
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -310,6 +330,15 @@ class ScheduleJob:
             # differs from the default, keeping agent-only jobs unchanged.
             if self.command_timeout != 60.0:
                 d["command_timeout"] = self.command_timeout
+        # Model pin snapshot. Only persist when a snapshot exists so agent-only
+        # jobs stay byte-for-byte unchanged; ``pin_model`` is likewise persisted
+        # only when opting out of the default (True), keeping the payload minimal.
+        if self.provider is not None:
+            d["provider"] = self.provider
+        if self.model is not None:
+            d["model"] = self.model
+            if not self.pin_model:
+                d["pin_model"] = False
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and
         # survives a restart; omitted when no lease is held.
@@ -342,6 +371,9 @@ class ScheduleJob:
             principal=d.get("principal"),
             command=d.get("command"),
             command_timeout=d.get("command_timeout", 60.0),
+            provider=d.get("provider"),
+            model=d.get("model"),
+            pin_model=d.get("pin_model", True),
         )
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0

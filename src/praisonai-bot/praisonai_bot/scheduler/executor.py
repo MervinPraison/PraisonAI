@@ -301,6 +301,30 @@ class ScheduledAgentExecutor:
                 job=job, status="failed", error=err, duration=duration,
             )
 
+        # Model pin / drift guard: an unattended job created against one model
+        # must not silently start running on whatever the default later becomes
+        # (a switch to a pricier frontier model would inflate cost and change
+        # behaviour with nobody watching). When the job carries a ``model``
+        # snapshot and ``pin_model`` is set, compare it with the resolved
+        # agent's current model; on drift, fail closed (recorded as an error
+        # and, where configured, delivered) rather than running on the new one.
+        # Jobs with no snapshot skip this entirely, preserving prior behaviour.
+        drift = self._check_model_drift(job, agent)
+        if drift is not None:
+            logger.warning("Job '%s' blocked by model drift: %s", job.id, drift)
+            duration = time.time() - started
+            self._runner.mark_run(
+                job, status="failed", error=drift, duration=duration,
+            )
+            if self._on_failure:
+                self._on_failure(job, drift)
+            failed = JobResult(
+                job=job, status="failed", error=drift, duration=duration,
+            )
+            await asyncio.to_thread(self._audit_output, job, failed)
+            await self._maybe_deliver_failure(job, failed)
+            return failed
+
         # Pre-run condition gate (cost/efficiency): a cheap, deterministic
         # check that decides whether the (expensive) model turn is warranted.
         # When it reports "nothing to do" the tick is recorded as ``skipped`` —
@@ -705,6 +729,67 @@ class ScheduledAgentExecutor:
             return None
         from .condition_gate import ShellConditionGate
         return ShellConditionGate()
+
+    # ── model pin / drift helpers ────────────────────────────────────
+
+    @staticmethod
+    def _agent_model(agent: Any) -> Tuple[Optional[str], Optional[str]]:
+        """Best-effort ``(provider, model)`` for a resolved agent.
+
+        The core ``Agent`` carries its model as ``agent.llm`` (a string that may
+        embed the provider, e.g. ``"openai/gpt-4o"``); an explicit ``provider``
+        attribute is honoured when present. Returns ``(None, None)`` when the
+        agent exposes nothing recognisable so an unreadable agent never *causes*
+        a false drift — the snapshot comparison simply cannot fire.
+        """
+        provider = getattr(agent, "provider", None)
+        model = getattr(agent, "model", None)
+        if not isinstance(model, str) or not model:
+            llm = getattr(agent, "llm", None)
+            model = llm if isinstance(llm, str) and llm else None
+        if not isinstance(provider, str) or not provider:
+            provider = None
+        return provider, model
+
+    def _check_model_drift(self, job: "ScheduleJob", agent: Any) -> Optional[str]:
+        """Return a drift reason string when a pinned job has drifted, else None.
+
+        No-op (returns ``None``) unless the job carries a ``model`` snapshot and
+        ``pin_model`` is truthy — an unpinned or unsnapshotted job follows the
+        default exactly as before. When enforcing, the run is **pinned**: the
+        agent's ``llm`` is set to the snapshot so the turn runs on the pinned
+        model even if the resolver's default has changed underneath it, and a
+        reason is returned only when the resolved model genuinely differs.
+        """
+        pinned_model = getattr(job, "model", None)
+        if not pinned_model or not getattr(job, "pin_model", True):
+            return None
+        provider, model = self._agent_model(agent)
+        pinned_provider = getattr(job, "provider", None)
+        # Compare provider only when both sides carry one — a snapshot without a
+        # provider (model-only pin) must not fail closed just because the agent
+        # happens to expose a provider attribute, and vice versa.
+        provider_drift = (
+            pinned_provider is not None
+            and provider is not None
+            and provider != pinned_provider
+        )
+        model_drift = model is not None and model != pinned_model
+        if provider_drift or model_drift:
+            return (
+                f"model drift: pinned {pinned_provider or '?'}/{pinned_model}, "
+                f"resolver now {provider or '?'}/{model or '?'}"
+            )
+        # No drift → pin the run to the snapshot so the turn is stable even if
+        # the resolver's default later changes between this check and the call.
+        try:
+            agent.llm = pinned_model
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(
+                "Could not pin job '%s' to model %r: %s",
+                job.id, pinned_model, e,
+            )
+        return None
 
     # ── run-policy helpers ───────────────────────────────────────────
 
