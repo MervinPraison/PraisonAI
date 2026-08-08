@@ -30,6 +30,16 @@ _typer_commands_lock = threading.Lock()
 _run_option_names_cache = None
 _run_option_names_lock = threading.Lock()
 
+# Short options whose meaning DIFFERS between the legacy argparse surface and the
+# modern ``run`` command. Routing an existing YAML/prompt invocation that carries
+# one of these to the modern engine would silently change its semantics:
+#   -s : legacy ``--save`` (bool) vs modern ``--session`` (takes a value)
+#   -f : legacy ``--file`` (input file) vs modern ``--framework``
+# To guarantee zero backward-incompatible reinterpretation, their presence keeps
+# the invocation on legacy (which owns them). Long forms are unambiguous and are
+# unaffected — ``--session``/``--framework`` still reach the modern engine.
+_LEGACY_COLLIDING_SHORT_OPTS = frozenset({"-s", "-f"})
+
 
 def _get_run_option_names():
     """Return the option names accepted by the Typer ``run`` command.
@@ -209,7 +219,9 @@ def _looks_like_bare_prompt(argv, first_cmd):
     """
     if not first_cmd:
         return False
-    # YAML workflow files stay on the legacy multi-framework path.
+    # YAML workflow files are handled by :func:`_looks_like_yaml_run_target`,
+    # which forwards them to the same modern ``run`` engine; keep them out of
+    # the bare-prompt classifier so they aren't joined/quoted as free text.
     if first_cmd.lower().endswith((".yaml", ".yml")):
         return False
 
@@ -227,6 +239,54 @@ def _looks_like_bare_prompt(argv, first_cmd):
     # Classify flags value-aware so a value-taking option's dash-prefixed value
     # (``--session -abc``, ``--output -json``) is not mistaken for a flag.
     flags = _flag_names(argv, value_opts)
+    # A short option whose meaning differs between legacy and modern (``-s``,
+    # ``-f``) keeps the invocation on legacy to avoid silent reinterpretation.
+    if any(flag in _LEGACY_COLLIDING_SHORT_OPTS for flag in flags):
+        return False
+    # All flags must be run-supported; a single unrecognised flag → legacy.
+    return all(flag in supported for flag in flags)
+
+
+def _looks_like_yaml_run_target(argv, first_cmd):
+    """Return True when argv is a workflow-YAML invocation for the modern engine.
+
+    A workflow file (``praisonai agents.yaml``) expresses the same intent as
+    ``praisonai run agents.yaml`` and must reach the modern Typer ``run`` engine
+    so YAML is behaviourally identical to the ``run`` surface: session
+    continuity (``--continue`` / ``--session`` / ``--fork``), ``--output`` modes,
+    the first-run credential gate and the permission flags all apply.
+
+    True iff ``first_cmd`` is a ``.yaml``/``.yml`` token and every flag present
+    is one the modern ``run`` command accepts (derived from ``run``'s own
+    parameter definitions via :func:`_get_run_option_names`). ``run`` accepts
+    ``--framework``, so multi-framework YAML (``--framework crewai``) is carried
+    into the modern envelope too and dispatched via the existing YAML executors.
+
+    A single genuinely legacy-only flag keeps the whole invocation on the legacy
+    argparse dispatcher, which owns that deprecated flag surface. If ``run``
+    option discovery fails, the rule falls back to the conservative behaviour:
+    any flag present routes to legacy.
+    """
+    if not first_cmd:
+        return False
+    if not first_cmd.lower().endswith((".yaml", ".yml")):
+        return False
+
+    # A flagless YAML target is unambiguously a modern ``run`` file target.
+    if not any(arg.startswith("-") for arg in argv):
+        return True
+
+    run_opts = _get_run_option_names()
+    if run_opts is None:
+        # Discovery failed → conservative: any flag means legacy owns it.
+        return False
+    supported, value_opts = run_opts
+    flags = _flag_names(argv, value_opts)
+    # A short option whose meaning differs between legacy and modern (``-s``,
+    # ``-f``) keeps the YAML invocation on legacy to avoid silent
+    # reinterpretation of a previously-valid legacy flag.
+    if any(flag in _LEGACY_COLLIDING_SHORT_OPTS for flag in flags):
+        return False
     # All flags must be run-supported; a single unrecognised flag → legacy.
     return all(flag in supported for flag in flags)
 
@@ -335,8 +395,13 @@ def main():
       5. Bare free-text prompt   → Typer `run` (modern engine), including when
                                    accompanied only by ``run``-supported flags
                                    (``--model``, ``--continue``, ``--output`` …)
-      6. Everything else         → Legacy (.yaml, legacy-only flags), with a
-                                   one-line notice on legacy-only-flag fallback
+      6. Workflow YAML file      → Typer `run <file>` (modern engine), when
+                                   accompanied only by ``run``-supported flags,
+                                   so ``.yaml``/``.yml`` runs gain the same
+                                   session continuity, ``--output`` modes,
+                                   credential gate and permissions as prompts
+      7. Everything else         → Legacy (legacy-only flags), with a one-line
+                                   notice on legacy-only-flag fallback
     """
     argv = sys.argv[1:]
 
@@ -356,8 +421,20 @@ def main():
         _run_typer(argv)
         return
 
-    # 4. Find first non-flag argument and check if it's a Typer command
-    first_cmd = _find_first_command(argv)
+    # 4. Find first non-flag argument and check if it's a Typer command.
+    #    Classify value-aware when flags are present: a leading value-taking
+    #    ``run`` option (e.g. ``--session abc123 agents.yaml``) must consume its
+    #    following token as a *value* rather than mistake it for the first
+    #    positional — otherwise the YAML/prompt target after it would be
+    #    misidentified. Discovery is skipped (and the conservative static set
+    #    used) when there are no dash-prefixed tokens or when introspection
+    #    fails, so the fast/flagless path stays light and mis-routing is avoided.
+    value_opts = None
+    if any(arg.startswith("-") for arg in argv):
+        run_opts = _get_run_option_names()
+        if run_opts is not None:
+            value_opts = run_opts[1]
+    first_cmd = _find_first_command(argv, value_opts)
 
     if first_cmd is None:
         # Only flags, no command → Typer handles global flags
@@ -378,16 +455,24 @@ def main():
         # run-supported flags; ``_build_run_argv`` joins the positionals into
         # one ``target`` and appends the flags so the whole invocation reaches
         # ``run`` intact instead of Typer rejecting the extra positionals.
-        run_opts = _get_run_option_names()
-        value_opts = run_opts[1] if run_opts is not None else set()
-        _run_typer(_build_run_argv(argv, value_opts))
+        # ``value_opts`` was already derived above (value-aware first-token
+        # classification), so reuse it rather than re-introspecting ``run``.
+        _run_typer(_build_run_argv(argv, value_opts or set()))
+    elif _looks_like_yaml_run_target(argv, first_cmd):
+        # Workflow YAML file → modern Typer `run <file>` engine (same as
+        # `praisonai run agents.yaml`), inheriting session continuity,
+        # --output modes, the credential gate and permissions. The YAML target
+        # is already a single positional token, so the argv is forwarded intact
+        # after the `run` command — the existing YAML executors run *inside* the
+        # modern session/output/credential/permission envelope.
+        _run_typer(["run", *argv])
     else:
-        # YAML workflow or legacy/deprecated-flag invocation → legacy.
-        # When a prompt is diverted here *solely* because of an unrecognised
-        # flag, surface a one-line notice so the fallback is never silent —
+        # Legacy/deprecated-flag invocation → legacy. This is reached only when
+        # a YAML workflow or prompt carries a flag the modern engine does not
+        # implement. Surface a one-line notice so the fallback is never silent —
         # the modern `praisonai run` owns session continuity, --output modes,
         # the credential gate and permissions that legacy lacks.
-        if not first_cmd.lower().endswith((".yaml", ".yml")) and _flag_names(argv):
+        if _flag_names(argv):
             print(
                 "Note: '{}' contains a flag not supported by the modern engine; "
                 "using the legacy engine. For session continuity, --output modes "
