@@ -194,10 +194,32 @@ def _known_credential_vars() -> tuple[str, ...]:
 
 
 def _stored_providers_for_vars(vars_: tuple[str, ...]) -> tuple[str, ...]:
-    """Return stored-credential provider names matching the given env-vars."""
+    """Return stored-credential provider names matching the given env-vars.
+
+    Catalogue-driven: any catalogued provider (Mistral, DeepSeek, xAI,
+    Together, Perplexity, Fireworks, …) whose credential env-var appears in
+    ``vars_`` is recognised, so a stored key for an explicit provider-prefixed
+    model satisfies ``is_configured()``. The historical
+    ``_VAR_TO_STORED_PROVIDERS`` aliases (e.g. GOOGLE/GEMINI) are layered on top
+    to preserve the prior cross-mapping behaviour.
+    """
     out: list[str] = []
+
+    try:
+        from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+        for provider, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items():
+            if any(v in vars_ for v in env_vars):
+                if provider not in out:
+                    out.append(provider)
+    except Exception:
+        pass
+
     for v in vars_:
-        out.extend(_VAR_TO_STORED_PROVIDERS.get(v, ()))
+        for provider in _VAR_TO_STORED_PROVIDERS.get(v, ()):
+            if provider not in out:
+                out.append(provider)
+
     return tuple(out)
 
 

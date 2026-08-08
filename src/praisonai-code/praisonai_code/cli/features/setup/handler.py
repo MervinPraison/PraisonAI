@@ -367,10 +367,35 @@ class SetupHandler(CommandHandler):
         if provider_id in defaults:
             name, env_key, model = defaults[provider_id]
             return env_key, model, name
-        env_key = self._PROVIDER_ENV_KEY_OVERRIDES.get(
-            provider_id, f"{provider_id.upper()}_API_KEY"
-        )
-        default_model = self._catalogue_default_model(provider_id)
+        # Catalogue-only provider. Prefer the catalogue's credential env-var(s),
+        # honouring whichever alias is actually set (e.g. TOGETHERAI_API_KEY vs
+        # TOGETHER_API_KEY, FIREWORKS_AI_API_KEY vs FIREWORKS_API_KEY) so the
+        # detected key is written back under the name the user provided.
+        env_key = None
+        cat_model = None
+        try:
+            from praisonai_code.llm.catalogue import (
+                env_vars_for_provider,
+                PROVIDER_ENV_CATALOGUE,
+            )
+
+            vars_ = env_vars_for_provider(provider_id)
+            if vars_:
+                env_key = next(
+                    (v for v in vars_ if os.environ.get(v)), vars_[0]
+                )
+            row = PROVIDER_ENV_CATALOGUE.get(provider_id.lower())
+            if row:
+                cat_model = row[1]
+        except Exception:
+            pass
+        if not env_key:
+            env_key = self._PROVIDER_ENV_KEY_OVERRIDES.get(
+                provider_id, f"{provider_id.upper()}_API_KEY"
+            )
+        # Prefer the catalogue's representative model; fall back to the first
+        # model the ModelCatalogue lists for the provider.
+        default_model = cat_model or self._catalogue_default_model(provider_id)
         return env_key, default_model, provider_id.capitalize()
 
     def _catalogue_default_model(self, provider_id: str) -> Optional[str]:

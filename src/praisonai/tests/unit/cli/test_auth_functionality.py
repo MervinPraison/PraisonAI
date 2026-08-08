@@ -98,17 +98,34 @@ def test_credential_store_legacy_fallback():
     print("✅ Credential store legacy fallback tests passed")
 
 
+def _all_provider_credential_vars():
+    """Every provider credential env-var known to the catalogue.
+
+    Derived from ``PROVIDER_ENV_CATALOGUE`` so this stays comprehensive as
+    providers are added; falls back to the historical set if the catalogue is
+    unavailable. Ensures default-model assertions are deterministic even when
+    the CI host happens to export a catalogued key (e.g. OPENROUTER_API_KEY).
+    """
+    try:
+        from praisonai.llm.catalogue import provider_env_vars
+
+        vars_ = provider_env_vars()
+        if vars_:
+            return tuple(vars_)
+    except Exception:
+        pass
+    return (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+        "OPENROUTER_API_KEY", "OLLAMA_HOST",
+    )
+
+
 _LLM_ENV_KEYS = (
-    "OPENAI_API_KEY",
     "OPENAI_MODEL_NAME",
     "MODEL_NAME",
     "PRAISONAI_MODEL",
-    "ANTHROPIC_API_KEY",
-    "GOOGLE_API_KEY",
-    "GEMINI_API_KEY",
-    "GROQ_API_KEY",
-    "COHERE_API_KEY",
-)
+) + _all_provider_credential_vars()
 
 
 def _clear_llm_env_for_defaults():

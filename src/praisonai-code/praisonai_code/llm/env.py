@@ -176,7 +176,14 @@ def _provider_from_model(model: str) -> tuple[str, str | None]:
         if provider:
             vars_ = env_vars_for_provider(provider)
             if vars_:
-                return vars_[0], None
+                # Prefer whichever alias the user actually set so providers with
+                # multiple env-var spellings (e.g. TOGETHER_API_KEY /
+                # TOGETHERAI_API_KEY, FIREWORKS_API_KEY / FIREWORKS_AI_API_KEY)
+                # still resolve a key; otherwise the canonical first var.
+                key_var = next(
+                    (var for var in vars_ if os.environ.get(var)), vars_[0]
+                )
+                return key_var, None
     except Exception:
         pass
     return _DEFAULT_KEY_VAR, None
