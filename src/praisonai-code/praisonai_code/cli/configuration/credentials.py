@@ -15,6 +15,14 @@ from dataclasses import dataclass, asdict, field
 import tempfile
 
 
+#: Environment variable that, when set, supplies the entire credential store as
+#: JSON. When present the store loads it in memory and never reads or writes the
+#: on-disk file, so a single CI/container secret provides all provider auth with
+#: nothing persisted to disk. Per-provider env vars still work; precedence is
+#: env blob > disk file.
+AUTH_CONTENT_ENV = "PRAISONAI_AUTH_CONTENT"
+
+
 @dataclass
 class ProviderCredential:
     """A single provider's credential information.
@@ -66,6 +74,13 @@ class CredentialStore:
     but the legacy one does, the legacy file is read so existing users keep
     working during the deprecation window. Writes always target the canonical
     location so credentials converge on a single source of truth.
+
+    Zero-disk mode: when the ``PRAISONAI_AUTH_CONTENT`` environment variable is
+    set, its JSON value is loaded as the whole credential store in memory and no
+    file is ever read or written (writes become no-ops). This lets a single CI
+    secret inject all provider auth — including OAuth/refresh tokens — with
+    nothing persisted to disk. Env-blob content takes precedence over any
+    on-disk file.
     """
 
     def __init__(self, credentials_path: Optional[Path] = None):
@@ -76,6 +91,40 @@ class CredentialStore:
             credentials_path: Optional custom path for credentials file.
                              Defaults to ~/.praisonai/credentials.json
         """
+        self._memory_store: Optional[Dict[str, Dict[str, Any]]] = None
+        env_blob = os.environ.get(AUTH_CONTENT_ENV)
+        # Distinguish "unset" (fall back to disk) from "set but empty/invalid".
+        # A present-but-empty value is a misconfiguration in zero-disk mode and
+        # must be rejected rather than silently re-enabling disk persistence.
+        if env_blob is not None:
+            if not env_blob.strip():
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} is set but empty; expected a JSON "
+                    "object mapping provider -> credential"
+                )
+            try:
+                parsed = json.loads(env_blob)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} is set but is not valid JSON: {exc}"
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} must be a JSON object mapping "
+                    "provider -> credential"
+                )
+            invalid_providers = [
+                provider
+                for provider, credential in parsed.items()
+                if not isinstance(credential, dict)
+            ]
+            if invalid_providers:
+                raise ValueError(
+                    f"{AUTH_CONTENT_ENV} credentials must be JSON objects; "
+                    f"invalid providers: {', '.join(map(str, invalid_providers))}"
+                )
+            self._memory_store = parsed
+
         if credentials_path:
             self.credentials_path = credentials_path
             self.legacy_credentials_path: Optional[Path] = None
@@ -83,6 +132,14 @@ class CredentialStore:
             home = Path.home()
             self.credentials_path = home / ".praisonai" / "credentials.json"
             self.legacy_credentials_path = home / ".praison" / "credentials.json"
+
+    @property
+    def is_in_memory(self) -> bool:
+        """Return True when credentials come from ``PRAISONAI_AUTH_CONTENT``.
+
+        In this mode nothing is read from or written to disk.
+        """
+        return self._memory_store is not None
 
     def _effective_read_path(self) -> Path:
         """Return the path to read credentials from.
@@ -105,8 +162,11 @@ class CredentialStore:
         """Read and parse credentials file.
 
         Reads from the canonical path when present, otherwise transparently
-        falls back to the legacy ~/.praison/credentials.json location.
+        falls back to the legacy ~/.praison/credentials.json location. In
+        zero-disk mode the in-memory env blob is returned and no file is read.
         """
+        if self._memory_store is not None:
+            return self._memory_store
         try:
             read_path = self._effective_read_path()
             if not read_path.exists():
@@ -125,7 +185,15 @@ class CredentialStore:
             return {}
     
     def _write_credentials(self, credentials: Dict[str, Dict[str, Any]]) -> None:
-        """Write credentials to file atomically with proper permissions."""
+        """Write credentials to file atomically with proper permissions.
+
+        In zero-disk mode (``PRAISONAI_AUTH_CONTENT`` set) the update is applied
+        to the in-memory store only and nothing is written to disk, so no
+        secrets are ever persisted.
+        """
+        if self._memory_store is not None:
+            self._memory_store = credentials
+            return
         # Ensure parent directory exists before writing
         self._ensure_directory_exists()
         
