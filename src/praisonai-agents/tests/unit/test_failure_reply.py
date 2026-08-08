@@ -1,5 +1,9 @@
 """Tests for the visible failure-outcome primitive (render_failure_reply)."""
 
+import dataclasses
+
+import pytest
+
 from praisonaiagents.bots import FailureReply, render_failure_reply
 from praisonaiagents.bots.failure import (
     REASON_AUTH_EXPIRED,
@@ -9,6 +13,7 @@ from praisonaiagents.bots.failure import (
     REASON_TIMEOUT,
     REASON_BUDGET_EXHAUSTED,
     REASON_DOOM_LOOP,
+    REASON_FORMAT_ERROR,
     REASON_NEEDS_HELP,
     REASON_CANCELLED,
     REASON_UNKNOWN,
@@ -101,6 +106,15 @@ def test_outcome_termination_reason_needs_help():
     assert reply.reason_code == REASON_NEEDS_HELP
 
 
+def test_outcome_invalid_output_maps_to_format_error_and_stays_retryable():
+    # AgentRunOutcome.invalid_output() is retryable (validation may pass with a
+    # different prompt); the reply must preserve that affordance.
+    outcome = AgentRunOutcome.invalid_output("schema mismatch")
+    reply = render_failure_reply(outcome)
+    assert reply.reason_code == REASON_FORMAT_ERROR
+    assert reply.retryable is True
+
+
 def test_unknown_input_degrades_to_visible_generic_reply():
     reply = render_failure_reply("some raw string")
     assert reply.reason_code == REASON_UNKNOWN
@@ -110,9 +124,5 @@ def test_unknown_input_degrades_to_visible_generic_reply():
 
 def test_reply_is_frozen():
     reply = render_failure_reply(LLMError("x", error_category="unknown"))
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         reply.text = "mutated"  # type: ignore[misc]
-    except Exception:
-        pass
-    else:
-        raise AssertionError("FailureReply should be immutable (frozen)")

@@ -123,6 +123,7 @@ _ERROR_KIND_TO_REASON = {
     "billing": REASON_BUDGET_EXHAUSTED,
     "model_not_found": REASON_MODEL_NOT_FOUND,
     "format_error": REASON_FORMAT_ERROR,
+    "validation": REASON_FORMAT_ERROR,
     "unknown": REASON_UNKNOWN,
 }
 
@@ -196,6 +197,8 @@ def _reason_from_outcome(outcome: "AgentRunOutcome") -> str:
         return REASON_TIMEOUT
     if status == "cancelled":
         return REASON_CANCELLED
+    if status == "invalid_output":
+        return REASON_FORMAT_ERROR
     return REASON_UNKNOWN
 
 
@@ -225,6 +228,12 @@ def render_failure_reply(outcome: Any) -> FailureReply:
     # zero-dependency leaf like the other bot primitives).
     is_error = isinstance(outcome, BaseException)
 
+    # Preserve an affirmative retryability signal from the source outcome (e.g.
+    # AgentRunOutcome.is_retryable() is True for invalid_output) so a
+    # reason-code that is not in the static ``_RETRYABLE_REASONS`` default does
+    # not silently drop the retry affordance the outcome already promised.
+    source_retryable = False
+
     if is_error:
         reason = _reason_from_error(outcome)  # type: ignore[arg-type]
         remediation = getattr(outcome, "remediation_hint", None)
@@ -232,6 +241,12 @@ def render_failure_reply(outcome: Any) -> FailureReply:
         reason = _reason_from_outcome(outcome)
         context = getattr(outcome, "context", None) or {}
         remediation = context.get("remediation_hint")
+        is_retryable = getattr(outcome, "is_retryable", None)
+        if callable(is_retryable):
+            try:
+                source_retryable = bool(is_retryable())
+            except Exception:
+                source_retryable = False
     else:
         reason = REASON_UNKNOWN
         remediation = None
@@ -247,7 +262,7 @@ def render_failure_reply(outcome: Any) -> FailureReply:
     return FailureReply(
         text=text,
         reason_code=reason,
-        retryable=reason in _RETRYABLE_REASONS,
+        retryable=source_retryable or reason in _RETRYABLE_REASONS,
     )
 
 

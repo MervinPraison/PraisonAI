@@ -1,5 +1,9 @@
 """Tests for the typed degraded-delivery report (adapt_presentation_with_report)."""
 
+import dataclasses
+
+import pytest
+
 from praisonaiagents.bots import (
     MessagePresentation,
     PresentationBlock,
@@ -110,15 +114,57 @@ def test_callback_too_long_reported():
     assert DEGRADE_CALLBACK_DATA_TOO_LONG in report.reasons
 
 
+def test_long_callback_with_store_not_reported_shortened():
+    # A store round-trips the value losslessly, so no callback-shortening report.
+    store = {}
+
+    class _Store:
+        def put(self, ref, value, expires_at=None):
+            store[ref] = value
+
+        def get(self, ref):
+            return store.get(ref)
+
+    long_value = "x" * 200
+    btn = PresentationButton(
+        label="pick", action=PresentationAction.reply(long_value)
+    )
+    p = MessagePresentation([PresentationBlock.make_buttons([btn])])
+    _, report = adapt_presentation_with_report(
+        p, PresentationLimits.telegram(), callback_store=_Store()
+    )
+    assert report is None or DEGRADE_CALLBACK_DATA_TOO_LONG not in report.reasons
+
+
+def test_plain_callback_not_reported_as_shortened():
+    # A short plain callback is not a reply and is not shortened; no report.
+    btn = PresentationButton(
+        label="ok", action=PresentationAction(type="callback", value="ok")
+    )
+    p = MessagePresentation([PresentationBlock.make_buttons([btn])])
+    _, report = adapt_presentation_with_report(p, PresentationLimits.telegram())
+    assert report is None or DEGRADE_CALLBACK_DATA_TOO_LONG not in report.reasons
+
+
+def test_long_select_option_value_reported_when_no_store():
+    # An oversized select option value, degraded to a button on Telegram, is
+    # hashed (lossy) without a store — the report must surface that.
+    long_value = "y" * 200
+    sel = PresentationBlock.make_select(
+        [SelectOption(label="A", value=long_value)], action_id="pick"
+    )
+    _, report = adapt_presentation_with_report(
+        MessagePresentation([sel]), PresentationLimits.telegram()
+    )
+    assert report is not None
+    assert DEGRADE_CALLBACK_DATA_TOO_LONG in report.reasons
+
+
 def test_report_is_frozen():
     tbl = PresentationBlock.make_table(["a"], [["1"]])
     _, report = adapt_presentation_with_report(
         MessagePresentation([tbl]), PresentationLimits.telegram()
     )
     assert report is not None
-    try:
-        report.reasons = []  # type: ignore[misc]
-    except Exception:
-        pass
-    else:
-        raise AssertionError("DegradedDelivery should be immutable (frozen)")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        report.reasons = ()  # type: ignore[misc]

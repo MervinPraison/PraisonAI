@@ -22,6 +22,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Tuple,
     Union,
 )
 
@@ -1109,21 +1110,47 @@ class DegradedDelivery:
             degraded.
     """
 
-    dropped: List[str]
-    reasons: List[str]
+    dropped: Tuple[str, ...]
+    reasons: Tuple[str, ...]
     fallback_text: str
+
+
+def _callback_is_lossy(value: Optional[str]) -> bool:
+    """True when an *adapted* callback value carries the lossy hash marker.
+
+    :func:`_encode_reply_callback` / :func:`_encode_select_callback` emit a
+    ``#<digest>`` payload only when the original value overflowed the channel
+    byte-cap *and* no store was available to preserve it losslessly. Detecting
+    that marker on the already-adapted value is the single source of truth for
+    "callback data too long" — so the report never disagrees with the
+    adaptation (e.g. no false positive when a store round-trips the value, and
+    no miss for a degraded select option).
+    """
+    if not value:
+        return False
+    if value.startswith(f"{REPLY_CALLBACK_PREFIX}{REPLY_HASH_MARKER}"):
+        return True
+    # Degraded select options: ``select:...:`` with no ``@<ref>`` store marker
+    # means the value was hashed (lossy). A stored ref carries CALLBACK_REF_MARKER.
+    if value.startswith("select:"):
+        tail = value.rsplit(":", 1)[-1]
+        return not tail.startswith(CALLBACK_REF_MARKER)
+    return False
 
 
 def _presentation_degradation(
     presentation: MessagePresentation,
     limits: PresentationLimits,
+    callback_store: Optional["CallbackPayloadStoreProtocol"] = None,
 ) -> Optional[DegradedDelivery]:
     """Compute the :class:`DegradedDelivery` report for adapting to ``limits``.
 
-    Pure comparison of the *input* presentation against the channel limits — it
-    mirrors the decisions :func:`adapt_presentation` makes (select->buttons,
-    web_app->url, button/option truncation, table/chart->text) so the two never
-    disagree. Returns ``None`` when nothing degrades.
+    Derives the report from the *same* conversion and selection decisions as
+    :func:`adapt_presentation` (select->buttons, priority/cap button truncation,
+    web_app->url, option truncation, table/chart->text) — inspecting only the
+    controls actually retained and reporting callback shortening only when the
+    adapter genuinely produced a lossy payload. Returns ``None`` when nothing
+    degrades.
     """
     dropped: List[str] = []
     reasons: List[str] = []
@@ -1132,30 +1159,39 @@ def _presentation_degradation(
         block_type = block.type.value if isinstance(block.type, BlockType) else block.type
 
         if block_type == BlockType.SELECT.value and not limits.supports_select:
+            # Follow the adapter: select -> buttons (encoding option callbacks
+            # exactly as adapt_presentation does), then treat as a buttons block.
             n = len(block.options or [])
             dropped.append(f"select menu ({n} options) rendered as buttons")
             reasons.append(DEGRADE_SELECT_UNSUPPORTED)
-            # The converted buttons then face the same truncation as a buttons
-            # block; account for that below by treating options as buttons.
+            block = _select_to_buttons(block, callback_store)
             block_type = BlockType.BUTTONS.value
-            button_count = n
-        elif block_type == BlockType.BUTTONS.value:
-            button_count = len(block.buttons or [])
-        else:
-            button_count = 0
 
-        if block_type == BlockType.BUTTONS.value and button_count:
+        if block_type == BlockType.BUTTONS.value and block.buttons:
+            buttons = list(block.buttons)
             rows = limits.max_button_rows if limits.max_button_rows else 1
-            total_cap = limits.max_buttons * rows if limits.max_buttons else button_count
+            total_cap = limits.max_buttons * rows if limits.max_buttons else len(buttons)
             if total_cap <= 0:
-                total_cap = button_count
-            if button_count > total_cap:
-                n = button_count - total_cap
+                total_cap = len(buttons)
+            if len(buttons) > total_cap:
+                n = len(buttons) - total_cap
                 dropped.append(f"{n} button(s) dropped (over channel cap)")
                 reasons.append(DEGRADE_BUTTONS_TRUNCATED)
-            for btn in (block.buttons or []):
+                # Only the *retained* buttons are actually rendered; mirror the
+                # priority-aware selection so we don't report a dropped
+                # button's web_app/callback degradation.
+                indexed = list(enumerate(buttons))
+                kept = sorted(
+                    indexed, key=lambda iv: (iv[1].priority, -iv[0]), reverse=True
+                )[:total_cap]
+                kept.sort(key=lambda iv: iv[0])
+                buttons = [b for _, b in kept]
+
+            for btn in buttons:
                 if btn.action is None:
                     continue
+                # Compare against the adapter's actual output for this button.
+                adapted_btn = _adapt_button(btn, limits, callback_store)
                 a_type = (
                     btn.action.type.value
                     if isinstance(btn.action.type, ActionType)
@@ -1168,11 +1204,8 @@ def _presentation_degradation(
                 ):
                     dropped.append("web-app button rendered as URL")
                     reasons.append(DEGRADE_WEB_APP_UNAVAILABLE)
-                elif (
-                    a_type in (ActionType.REPLY.value, ActionType.CALLBACK.value)
-                    and btn.action.value is not None
-                    and len(f"{REPLY_CALLBACK_PREFIX}{btn.action.value}".encode("utf-8"))
-                    > _MAX_CALLBACK_LEN
+                elif adapted_btn.action is not None and _callback_is_lossy(
+                    adapted_btn.action.value
                 ):
                     dropped.append("button callback shortened (data exceeded byte cap)")
                     reasons.append(DEGRADE_CALLBACK_DATA_TOO_LONG)
@@ -1195,7 +1228,11 @@ def _presentation_degradation(
         return None
 
     fallback_text = "(" + "; ".join(dropped) + ".)"
-    return DegradedDelivery(dropped=dropped, reasons=reasons, fallback_text=fallback_text)
+    return DegradedDelivery(
+        dropped=tuple(dropped),
+        reasons=tuple(reasons),
+        fallback_text=fallback_text,
+    )
 
 
 def adapt_presentation_with_report(
@@ -1216,7 +1253,7 @@ def adapt_presentation_with_report(
         ``(adapted_presentation, degraded_or_none)``.
     """
     adapted = adapt_presentation(presentation, limits, callback_store=callback_store)
-    report = _presentation_degradation(presentation, limits)
+    report = _presentation_degradation(presentation, limits, callback_store)
     return adapted, report
 
 
