@@ -63,18 +63,31 @@ class _FakeSuggestion:
         self.dismissed = False
         self.accepted = False
         self.expires_at = 0
+        self.principal = None
 
 
 class _FakeEngine:
+    """Test double mirroring the real ``SuggestionEngine`` principal-aware API.
+
+    ``pending``/``dismiss``/``accept`` accept an optional ``principal`` so the
+    gateway wiring (which threads ``SessionContext.unified_user_id`` through as
+    ``principal``) exercises the same call signature it does in production.
+    """
+
     def __init__(self, pending):
         self._pending = pending
         self.dismissed = []
 
-    def pending(self):
-        return self._pending
+    def pending(self, principal=None):
+        if principal is None:
+            return self._pending
+        return [s for s in self._pending if getattr(s, "principal", None) == principal]
 
-    def dismiss(self, sug_id):
+    def dismiss(self, sug_id, principal=None):
         self.dismissed.append(sug_id)
+        return True
+
+    def accept(self, sug_id, principal=None):
         return True
 
     def get_suggestion(self, sug_id):
