@@ -1579,8 +1579,10 @@ Respond with:
                 # Re-raise OS-level errors like PermissionError, OSError, etc.
                 raise
         
-        # Merge agents (avoid duplicates)
+        # Merge agents (avoid duplicates), tracking renames so step
+        # references to the new agents can be rewritten below.
         merged_agents = existing_data.get('agents', {}).copy()
+        rename_map: Dict[str, str] = {}
         for agent_id, agent_data in new_data.get('agents', {}).items():
             # Rename if conflict
             final_id = agent_id
@@ -1588,10 +1590,57 @@ Respond with:
             while final_id in merged_agents:
                 final_id = f"{agent_id}_auto_{counter}"
                 counter += 1
+            if final_id != agent_id:
+                rename_map[agent_id] = final_id
+                logger.info(
+                    "merge: renamed new agent %r to %r to avoid collision with existing entry",
+                    agent_id, final_id,
+                )
             merged_agents[final_id] = agent_data
-        
-        # Merge steps (append new steps)
-        merged_steps = existing_data.get('steps', []) + new_data.get('steps', [])
+
+        def _rewrite_agent_refs(step, *, route_target=False):
+            # Bare agent-id strings appear as route targets
+            # (``route: {label: [agent_id, ...]}``); rewrite them directly.
+            if route_target and isinstance(step, str):
+                return rename_map.get(step, step)
+            if isinstance(step, list):
+                # e.g. a route target list ``["tech_agent"]``.
+                return [_rewrite_agent_refs(s, route_target=route_target) for s in step]
+            if not isinstance(step, dict):
+                return step
+            step = dict(step)
+            # Direct agent references plus loop ``feedback_to`` targets.
+            for key in ("agent", "feedback_to"):
+                ref = step.get(key)
+                if isinstance(ref, str):
+                    step[key] = rename_map.get(ref, ref)
+            # Routing/parallel/loop payloads also carry agent refs — recurse.
+            for key in ("parallel", "route", "loop", "branches"):
+                nested = step.get(key)
+                if nested is None:
+                    continue
+                if key == "route":
+                    # ``route: {label: [agent_id, ...]}`` — values are target
+                    # lists of bare agent-id strings, not nested step dicts.
+                    if isinstance(nested, dict):
+                        step[key] = {
+                            k: _rewrite_agent_refs(v, route_target=True)
+                            for k, v in nested.items()
+                        }
+                    elif isinstance(nested, list):
+                        step[key] = _rewrite_agent_refs(nested, route_target=True)
+                elif isinstance(nested, list):
+                    step[key] = [_rewrite_agent_refs(s) for s in nested]
+                elif isinstance(nested, dict):
+                    # ``loop``/``branches`` payloads are step-shaped dicts that
+                    # themselves carry ``agent``/``feedback_to`` refs.
+                    step[key] = _rewrite_agent_refs(nested)
+            return step
+
+        # Merge steps (append new steps, rewriting renamed agent refs)
+        merged_steps = list(existing_data.get('steps', [])) + [
+            _rewrite_agent_refs(s) for s in new_data.get('steps', [])
+        ]
         
         # Create merged structure
         merged = {

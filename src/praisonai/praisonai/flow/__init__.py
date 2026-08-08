@@ -37,10 +37,10 @@ def start_flow(
     import sys
 
     env = os.environ.copy()
-    # Inject PraisonAI components path
+    # Inject PraisonAI components path (comma-separated for pydantic list parsing)
     existing = env.get("LANGFLOW_COMPONENTS_PATH", "")
     env["LANGFLOW_COMPONENTS_PATH"] = (
-        f"{COMPONENTS_DIR};{existing}" if existing else COMPONENTS_DIR
+        f"{COMPONENTS_DIR},{existing}" if existing else COMPONENTS_DIR
     )
 
     cmd = [

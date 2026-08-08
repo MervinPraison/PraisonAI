@@ -7,10 +7,12 @@ knowledge retrieval, and state management.
 
 import asyncio
 import logging
+import os
 import time
 import threading
 import uuid
 import inspect
+from collections import OrderedDict
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -81,7 +83,15 @@ class PersistenceOrchestrator:
             self._config = None
         
         self._current_session: Optional[ConversationSession] = None
-        self._session_cache: Dict[str, ConversationSession] = {}
+        # Bounded LRU cache: prevents unbounded memory growth in long-running
+        # servers/bots where each request may carry a fresh session_id.
+        self._session_cache: "OrderedDict[str, ConversationSession]" = OrderedDict()
+        try:
+            self._cache_maxsize = max(1, int(os.environ.get("PRAISONAI_SESSION_CACHE_MAX", "1024")))
+        except (TypeError, ValueError):
+            # Empty/non-numeric override must not abort persistence init;
+            # fall back to the documented default.
+            self._cache_maxsize = 1024
         self._cache_lock = threading.RLock()  # RLock allows re-entrant access
 
     def _sync(self, value: Any) -> Any:
@@ -119,14 +129,19 @@ class PersistenceOrchestrator:
     # =========================================================================
     
     def _cache_put(self, session: ConversationSession) -> None:
-        """Store session in cache with thread safety."""
+        """Store session in cache with thread safety and LRU eviction."""
         with self._cache_lock:
             self._session_cache[session.session_id] = session
+            self._session_cache.move_to_end(session.session_id)
+            while len(self._session_cache) > self._cache_maxsize:
+                self._session_cache.popitem(last=False)
     
     def _cache_get(self, session_id: str) -> Optional[ConversationSession]:
         """Get session from cache with thread safety and defensive copying."""
         with self._cache_lock:
             cached = self._session_cache.get(session_id)
+            if cached is not None:
+                self._session_cache.move_to_end(session_id)
             return deepcopy(cached) if cached is not None else None
     
     def _cache_delete(self, session_id: str) -> Optional[ConversationSession]:
