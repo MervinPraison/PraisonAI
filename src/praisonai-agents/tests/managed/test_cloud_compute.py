@@ -121,6 +121,45 @@ class TestDaytonaComputeUnit:
         assert result["exit_code"] == -1
 
 
+class TestTenkiComputeUnit:
+    def test_importable(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        assert TenkiCompute is not None
+
+    def test_provider_name(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        compute = TenkiCompute(api_key="test")
+        assert compute.provider_name == "tenki"
+
+    def test_is_available_with_key(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        compute = TenkiCompute(api_key="test-key")
+        assert compute.is_available is True
+
+    def test_is_available_without_key(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        old = os.environ.pop("TENKI_API_KEY", None)
+        try:
+            compute = TenkiCompute(api_key="")
+            assert compute.is_available is False
+        finally:
+            if old:
+                os.environ["TENKI_API_KEY"] = old
+
+    def test_protocol_methods_exist(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        compute = TenkiCompute(api_key="test")
+        for method in ["provision", "shutdown", "get_status", "execute",
+                       "upload_file", "download_file", "list_instances"]:
+            assert hasattr(compute, method), f"Missing method: {method}"
+
+    def test_execute_nonexistent_instance(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        compute = TenkiCompute(api_key="test")
+        result = asyncio.run(compute.execute("nonexistent", "echo hello"))
+        assert result["exit_code"] == -1
+
+
 class TestComputeExports:
     def test_all_adapters_from_init(self):
         from praisonai.integrations.compute import (
@@ -130,6 +169,7 @@ class TestComputeExports:
             E2BCompute,
             ModalCompute,
             FlyioCompute,
+            TenkiCompute,
         )
         assert DockerCompute is not None
         assert LocalCompute is not None
@@ -137,6 +177,7 @@ class TestComputeExports:
         assert E2BCompute is not None
         assert ModalCompute is not None
         assert FlyioCompute is not None
+        assert TenkiCompute is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -249,6 +290,90 @@ class TestModalComputeIntegration:
             idle_timeout_s=120,
         )
 
+        info = asyncio.run(compute.provision(config))
+        result = asyncio.run(compute.execute(
+            info.instance_id,
+            "python3 -c 'import requests; print(requests.__version__)'",
+        ))
+        assert result["exit_code"] == 0
+        assert result["stdout"].strip()
+
+        asyncio.run(compute.shutdown(info.instance_id))
+
+
+class TestTenkiComputeIntegration:
+    @pytest.fixture(autouse=True)
+    def skip_without_key(self):
+        if not os.environ.get("TENKI_API_KEY"):
+            pytest.skip("TENKI_API_KEY not set")
+
+    def test_provision_execute_shutdown(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        from praisonaiagents.managed.protocols import ComputeConfig, InstanceStatus
+
+        compute = TenkiCompute()
+        config = ComputeConfig(
+            idle_timeout_s=120,
+            env={"TEST_VAR": "hello_tenki"},
+        )
+
+        info = asyncio.run(compute.provision(config))
+        assert info.status == InstanceStatus.RUNNING
+        assert info.provider == "tenki"
+        assert info.instance_id.startswith("tenki_")
+
+        result = asyncio.run(compute.execute(info.instance_id, "echo $TEST_VAR"))
+        assert result["exit_code"] == 0
+        assert "hello_tenki" in result["stdout"]
+
+        result2 = asyncio.run(compute.execute(info.instance_id, "python3 -c 'print(2+2)'"))
+        assert result2["exit_code"] == 0
+        assert "4" in result2["stdout"]
+
+        status = asyncio.run(compute.get_status(info.instance_id))
+        assert status.status == InstanceStatus.RUNNING
+
+        instances = asyncio.run(compute.list_instances())
+        assert len(instances) >= 1
+
+        asyncio.run(compute.shutdown(info.instance_id))
+        status2 = asyncio.run(compute.get_status(info.instance_id))
+        assert status2.status == InstanceStatus.STOPPED
+
+    def test_file_upload_download(self):
+        import tempfile
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        from praisonaiagents.managed.protocols import ComputeConfig
+
+        compute = TenkiCompute()
+        info = asyncio.run(compute.provision(ComputeConfig(idle_timeout_s=120)))
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test content from host")
+            local_path = f.name
+
+        ok = asyncio.run(compute.upload_file(info.instance_id, local_path, "/tmp/test.txt"))
+        assert ok is True
+
+        dl_path = local_path + ".download"
+        ok2 = asyncio.run(compute.download_file(info.instance_id, "/tmp/test.txt", dl_path))
+        assert ok2 is True
+        with open(dl_path) as f:
+            assert f.read() == "test content from host"
+
+        os.unlink(local_path)
+        os.unlink(dl_path)
+        asyncio.run(compute.shutdown(info.instance_id))
+
+    def test_pip_install(self):
+        from praisonai.integrations.compute.tenki import TenkiCompute
+        from praisonaiagents.managed.protocols import ComputeConfig
+
+        compute = TenkiCompute()
+        config = ComputeConfig(
+            packages={"pip": ["requests"]},
+            idle_timeout_s=120,
+        )
         info = asyncio.run(compute.provision(config))
         result = asyncio.run(compute.execute(
             info.instance_id,

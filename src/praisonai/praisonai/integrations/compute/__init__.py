@@ -12,6 +12,7 @@ __all__ = [
     "E2BCompute",
     "ModalCompute",
     "FlyioCompute",
+    "TenkiCompute",
 ]
 
 
@@ -34,4 +35,7 @@ def __getattr__(name):
     if name == "FlyioCompute":
         from .flyio import FlyioCompute
         return FlyioCompute
+    if name == "TenkiCompute":
+        from .tenki import TenkiCompute
+        return TenkiCompute
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

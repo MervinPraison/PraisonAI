@@ -1111,7 +1111,7 @@ def ManagedAgent(
         return AnthropicManagedAgent(provider=provider, **kwargs)
     
     # Compute provider names - maintain backward compatibility by passing to LocalManagedAgent
-    elif provider in {"e2b", "modal", "flyio", "daytona", "docker"}:
+    elif provider in {"e2b", "modal", "flyio", "daytona", "docker", "tenki"}:
         warnings.warn(
             f"ManagedAgent(provider='{provider}') for compute providers is deprecated. "
             f"Use LocalAgent(compute='{provider}', config=LocalAgentConfig(...)) instead.",
