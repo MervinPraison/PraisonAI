@@ -1431,6 +1431,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve GUARDRAILS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
+        # Fail loud instead of silently ignoring policy-string guardrails. The
+        # documented `guardrails=["policy:strict", ...]` shorthand has no
+        # enforcement path wired up, so accepting it silently would run with zero
+        # enforcement — a "safe by default" violation. Checked before resolution
+        # so the clear message wins over the generic resolver's error. Direct
+        # users to the working `Agent(policy=PolicyEngine(...))` param.
+        if isinstance(guardrails, (list, tuple)):
+            from ..config.parse_utils import is_policy_string
+            _policy_strs = [g for g in guardrails if isinstance(g, str) and is_policy_string(g)]
+            if _policy_strs:
+                raise ValueError(
+                    f"Policy-string guardrails {_policy_strs} are not enforced. "
+                    "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
+                    "or pass a validator via guardrails=... / GuardrailConfig(validator=...)."
+                )
+
         # Fast path: None/False -> no guardrails (skip resolve() call)
         if guardrails is None or guardrails is False:
             _guardrails_config = None
@@ -1448,6 +1464,18 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 config_class=GuardrailConfig,
             )
         
+        # Same fail-loud guard for GuardrailConfig.policy/.policies passed
+        # directly — those fields are never consumed downstream, so silently
+        # accepting them would also run with zero enforcement.
+        if isinstance(_guardrails_config, GuardrailConfig) and (
+            _guardrails_config.policy is not None or _guardrails_config.policies
+        ):
+            raise ValueError(
+                "GuardrailConfig.policy/.policies are not enforced. "
+                "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
+                "or pass a validator via GuardrailConfig(validator=...)."
+            )
+
         if _guardrails_config is not None:
             if callable(_guardrails_config) and not isinstance(_guardrails_config, type):
                 # Callable validator function
