@@ -25,15 +25,15 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 10 | 3005 |
 | ✅ Autonomy | 3 | 7 | 2736 |
-| ✅ Bots | 7 | 31 | 13154 |
+| ✅ Bots | 7 | 31 | 13253 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 121 | 35637 |
+| ✅ CLI | 5 | 121 | 35638 |
 | ✅ Chunking | 2 | 2 | 385 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 4548 |
 | ✅ Conditions | 1 | 3 | 1179 |
-| ✅ Configuration | 3 | 8 | 3045 |
-| ✅ Context Management | 16 | 34 | 13335 |
+| ✅ Configuration | 3 | 8 | 3047 |
+| ✅ Context Management | 16 | 34 | 13388 |
 | ✅ Deep Research | 8 | 2 | 587 |
 | ✅ Display | 6 | 3 | 741 |
 | ✅ Embeddings | 6 | 23 | 2049 |
@@ -42,7 +42,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Execution | 3 | 4 | 1560 |
 | ✅ Failover | 2 | 1 | 432 |
 | ✅ Files | 2 | 7 | 2273 |
-| ✅ Flow | 1 | 3 | 777 |
+| ✅ Flow | 1 | 3 | 788 |
 | ✅ Gateway | 7 | 65 | 23919 |
 | ✅ Guardrails | 4 | 4 | 1833 |
 | ✅ Handoffs | 11 | 6 | 2563 |
