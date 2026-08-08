@@ -39,6 +39,9 @@ from .protocols import (
     # Home channel and delivery protocols
     HomeChannelRegistryProtocol,
     DeliveryResolverProtocol,
+    # Creation-time delivery-target pre-flight (Issue #3800)
+    DeliveryValidation,
+    ScheduleTargetError,
     # Agent-facing outbound messaging
     OutboundMessengerProtocol,
     DeliveryResult,
@@ -283,6 +286,8 @@ __all__ = [
     # Home channel and delivery protocols
     "HomeChannelRegistryProtocol",
     "DeliveryResolverProtocol",
+    "DeliveryValidation",
+    "ScheduleTargetError",
     # Agent-facing outbound messaging
     "OutboundMessengerProtocol",
     "DeliveryResult",

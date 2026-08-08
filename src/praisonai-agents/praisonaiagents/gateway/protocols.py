@@ -2263,6 +2263,51 @@ class HomeChannelRegistryProtocol(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class DeliveryValidation:
+    """Result of a creation-time delivery-target pre-flight (Issue #3800).
+
+    A scheduled job or agent-initiated proactive message carries a
+    ``DeliveryTarget`` whose reachability is otherwise only discovered when the
+    job *fires* — potentially hours later, where an unroutable target is
+    silently dropped or dead-target self-healed. This closed shape lets a
+    resolver answer "will this route?" the moment the send is created, so the
+    creator gets an immediate, actionable error instead of a late invisible
+    drop.
+
+    Attributes:
+        ok: Whether the target resolves to a reachable channel/route.
+        reason: On failure, a human-readable explanation of why it is
+            unroutable (empty when ``ok``).
+        hint: On failure, an actionable next step (e.g. the configured
+            channels, or a command to list them); empty when ``ok``.
+        preview: A dry-run preview of the destination (e.g.
+            ``"telegram:@alice (session main)"``) suitable for surfacing to the
+            creator before commit.
+    """
+
+    ok: bool
+    reason: str = ""
+    hint: str = ""
+    preview: str = ""
+
+
+class ScheduleTargetError(ValueError):
+    """Raised when a scheduled/agent-initiated send has an unroutable target.
+
+    Carries the structured :class:`DeliveryValidation` reason/hint so the
+    scheduler/CLI can fail fast at *creation* time with an actionable message
+    (``channel 'telegramm' is not configured. Configured: telegram, slack.``)
+    rather than accepting a target that is only discovered dead at fire time.
+    """
+
+    def __init__(self, reason: str, hint: str = ""):
+        self.reason = reason
+        self.hint = hint
+        message = f"{reason} {hint}".strip() if hint else reason
+        super().__init__(message)
+
+
 @runtime_checkable
 class DeliveryResolverProtocol(Protocol):
     """Protocol for resolving delivery routing tokens.
@@ -2291,6 +2336,35 @@ class DeliveryResolverProtocol(Protocol):
             
         Returns:
             List of concrete delivery targets
+        """
+        ...
+
+    def validate_target(
+        self, target: "DeliveryTarget"
+    ) -> "DeliveryValidation":  # pragma: no cover - optional seam
+        """Pre-flight ``target`` against the live channel/route registry.
+
+        Called at *creation* time (when a scheduled/agent-initiated send is
+        registered) so an unroutable target is rejected or warned on with an
+        actionable message, instead of being silently dropped when the job
+        fires. Optional: implementations that cannot pre-flight may omit it and
+        the scheduler falls back to a structural, registry-free check.
+
+        Returns:
+            A :class:`DeliveryValidation` (``ok`` / ``reason`` / ``hint`` /
+            ``preview``).
+        """
+        ...
+
+    def preview_target(
+        self, target: "DeliveryTarget"
+    ) -> str:  # pragma: no cover - optional seam
+        """Return a dry-run preview of where ``target`` will deliver.
+
+        A short, display-only string (e.g. ``"telegram:@alice (session
+        main)"``) so the creator sees the destination before commit. Optional;
+        callers fall back to :meth:`DeliveryTarget.preview` when a resolver does
+        not implement it.
         """
         ...
 
