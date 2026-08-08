@@ -2169,6 +2169,31 @@ class ToolExecutionMixin:
         except ImportError:
             pass  # MCP not available
         
+        # Normalize MCP transport/timeout failures (returned as bare "Error: ..."
+        # strings by MCPClient.call_tool) into the same {"error": ...} dict shape
+        # used by native tools, so they participate in retry, doom-loop detection
+        # and circuit-breaking instead of looking like a successful string result.
+        #
+        # IMPORTANT: a successful MCP tool may legitimately return text that
+        # begins with "Error: " (e.g. a linter/grep/echo tool). To avoid
+        # misclassifying valid output as a failure, we only convert MCP's own
+        # unambiguous internally-generated failure signatures, not any string
+        # that merely starts with the "Error: " prefix.
+        def _normalize_mcp_result(res):
+            if not isinstance(res, str) or not res.startswith("Error: "):
+                return res
+            message = res[len("Error: "):]
+            # MCP-internal timeout messages are unambiguous:
+            #   "MCP tool call timed out after Ns"
+            #   "MCP initialization timed out after Ns"
+            is_mcp_timeout = (
+                message.startswith("MCP tool call timed out after")
+                or message.startswith("MCP initialization timed out after")
+            )
+            if is_mcp_timeout:
+                return {"error": message, "timeout": True}
+            return res
+
         # Helper function to execute MCP tool
         def _execute_mcp_tool(mcp_instance, func_name, args):
             """Execute a tool from an MCP instance."""
@@ -2206,7 +2231,7 @@ class ToolExecutionMixin:
             logging.debug(f"Looking for MCP tool {function_name}")
             found, result = _execute_mcp_tool(self.tools, function_name, arguments)
             if found:
-                return result
+                return _normalize_mcp_result(result)
         
         # Check if tools is a list that may contain MCP instances
         if isinstance(self.tools, (list, tuple)):
@@ -2215,7 +2240,7 @@ class ToolExecutionMixin:
                     logging.debug(f"Looking for MCP tool {function_name} in MCP instance")
                     found, result = _execute_mcp_tool(tool, function_name, arguments)
                     if found:
-                        return result
+                        return _normalize_mcp_result(result)
 
         # Try to find the function in the agent's tools list first
         func = None
