@@ -5428,6 +5428,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.timeout:
             params["timeout"] = self.timeout
         if self.max_tokens:
+            # Set max_tokens here; for reasoning models this is normalized to
+            # max_completion_tokens after per-call override_params are merged.
             params["max_tokens"] = self.max_tokens
         if self.top_p:
             params["top_p"] = self.top_p
@@ -5489,7 +5491,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         ]
         for param in internal_params:
             params.pop(param, None)
-        
+
+        # Reasoning models (o1/o3/gpt-5.x) require max_completion_tokens and
+        # reject the legacy max_tokens parameter plus several sampling params.
+        # Normalize here (after override_params merge) so per-call overrides
+        # like max_tokens/temperature cannot reintroduce rejected params.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(self.model):
+            # Map max_tokens -> max_completion_tokens unless the caller already
+            # provided max_completion_tokens explicitly (which takes precedence).
+            if 'max_tokens' in params:
+                params.setdefault('max_completion_tokens', params['max_tokens'])
+                params.pop('max_tokens', None)
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
+
         if output_json or output_pydantic:
             from .model_capabilities import supports_structured_outputs
             schema_model = output_json or output_pydantic
