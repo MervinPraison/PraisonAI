@@ -13,7 +13,8 @@ il = pytest.importorskip(
 )
 
 import praisonaiagents.background.runner as _bg_runner
-from praisonaiagents.background import get_background_runner, TaskStatus
+from praisonaiagents.background import TaskStatus
+from praisonaiagents.background.runner import BackgroundRunner
 from praisonaiagents.background.task import BackgroundTask
 
 
@@ -30,23 +31,32 @@ class _CapturingConsole:
 
 
 @pytest.fixture(autouse=True)
-def _clear_shared_runner():
-    # Fully reset the process-wide singleton so these tests are isolated from
-    # any background tasks other files scheduled on the shared daemon loop
-    # (xdist ``--dist loadfile`` keeps a worker's process alive across files).
-    # Rebuilding the runner guarantees ``_handle_tasks_command`` resolves the
-    # same empty instance we seed below, rather than a polluted one.
-    _bg_runner._shared_runner = None
-    runner = get_background_runner()
-    runner._tasks.clear()
-    yield
-    _bg_runner._shared_runner = None
+def isolated_runner(monkeypatch):
+    # Under CI's ``pytest -n 2 --dist loadfile`` a worker process persists
+    # across files, so the process-wide ``BackgroundRunner`` singleton — and a
+    # live daemon loop another file left running on it — races these tests:
+    # a concurrently-mutating task (or a competing fixture rebuilding the
+    # singleton) repopulates/empties ``_tasks`` mid-test, surfacing as
+    # "No background tasks" and an uncancelled RUNNING task.
+    #
+    # Merely resetting ``_shared_runner`` (the previous approach) still shared a
+    # process-wide object other threads could touch. Instead, pin a *dedicated*
+    # runner for the duration of each test and make ``get_background_runner``
+    # return exactly it, so no other file's daemon can reach the instance
+    # ``_handle_tasks_command`` resolves. Assertions are unchanged — list,
+    # detail, and the real CANCELLED status are all still verified.
+    runner = BackgroundRunner()
+    monkeypatch.setattr(_bg_runner, "_shared_runner", runner, raising=False)
+    monkeypatch.setattr(
+        _bg_runner, "get_background_runner", lambda: runner, raising=False
+    )
+    yield runner
 
 
-def test_tasks_lists_background_tasks_in_repl(capsys):
+def test_tasks_lists_background_tasks_in_repl(capsys, isolated_runner):
     # The BackgroundHandler renders through its own rich Console (stdout),
     # so we assert against captured stdout rather than the dispatch console.
-    runner = get_background_runner()
+    runner = isolated_runner
     runner._tasks["t1"] = BackgroundTask(id="t1", name="alpha", status=TaskStatus.RUNNING)
     runner._tasks["t2"] = BackgroundTask(id="t2", name="beta", status=TaskStatus.COMPLETED)
 
@@ -57,8 +67,8 @@ def test_tasks_lists_background_tasks_in_repl(capsys):
     assert "t2" in out and "beta" in out
 
 
-def test_tasks_detail_and_cancel(capsys):
-    runner = get_background_runner()
+def test_tasks_detail_and_cancel(capsys, isolated_runner):
+    runner = isolated_runner
     task = BackgroundTask(id="job1", name="work", status=TaskStatus.RUNNING)
     runner._tasks["job1"] = task
 
