@@ -4,6 +4,7 @@ Unified Server Utilities
 Provides utilities for adding discovery endpoints to any server.
 """
 
+import asyncio
 from typing import Any, List, Optional
 
 from .discovery import (
@@ -241,7 +242,9 @@ def mount_provider_routes(
                         break
             return StreamingResponse(generate(), media_type="text/event-stream")
 
-        result = provider.invoke("chat_completions", body, stream=False)
+        # The provider call is synchronous (blocking LLM I/O); run it off the
+        # event loop so it does not stall every other in-flight request.
+        result = await asyncio.to_thread(provider.invoke, "chat_completions", body, stream=False)
         if not result.ok:
             return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
@@ -251,14 +254,14 @@ def mount_provider_routes(
         body, error_response = await _read_json_object(request)
         if error_response:
             return error_response
-        result = provider.invoke("completions", body)
+        result = await asyncio.to_thread(provider.invoke, "completions", body)
         if not result.ok:
             return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
 
     @app.get("/v1/models")
     async def models():
-        result = provider.invoke("models")
+        result = await asyncio.to_thread(provider.invoke, "models")
         if not result.ok:
             return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
@@ -268,7 +271,7 @@ def mount_provider_routes(
         body, error_response = await _read_json_object(request)
         if error_response:
             return error_response
-        result = provider.invoke("tools_invoke", body)
+        result = await asyncio.to_thread(provider.invoke, "tools_invoke", body)
         if not result.ok:
             return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data

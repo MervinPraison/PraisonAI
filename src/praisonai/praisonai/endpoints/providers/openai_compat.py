@@ -422,9 +422,13 @@ class OpenAICompatProvider(BaseProvider):
                     }
                     yield {"event": "data", "data": tool_chunk}
             
-            # Send content chunks
+            # Send content chunks. The upstream call has already completed, so
+            # this only reshapes the reply into SSE frames — emit word-by-word
+            # (whitespace preserved) rather than one frame per character to keep
+            # the frame count proportional to tokens, not string length.
             if content:
-                for i, char in enumerate(content):
+                import re
+                for piece in re.findall(r"\S+\s*|\s+", content):
                     chunk = {
                         "id": chunk_id,
                         "object": "chat.completion.chunk",
@@ -433,7 +437,7 @@ class OpenAICompatProvider(BaseProvider):
                         "choices": [
                             {
                                 "index": 0,
-                                "delta": {"content": char},
+                                "delta": {"content": piece},
                                 "finish_reason": None
                             }
                         ]

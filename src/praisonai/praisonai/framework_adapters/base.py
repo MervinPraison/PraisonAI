@@ -7,6 +7,7 @@ re-exports them and adds wrapper-specific LLM resolution via PraisonAIModel.
 
 from __future__ import annotations
 
+import logging
 import threading
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional
@@ -16,6 +17,49 @@ from praisonaiagents.frameworks.protocols import FrameworkAdapterProtocol
 
 # Backward-compatible alias used across the wrapper
 FrameworkAdapter = FrameworkAdapterProtocol
+
+logger = logging.getLogger(__name__)
+
+# Extended YAML fields each backend actually consumes. Only ``framework:
+# praisonai`` honours the full wrapper feature set (approval, guardrails,
+# autonomy, ...); the other backends read a hand-picked subset. Anything a YAML
+# declares that the target adapter does not read is silently dropped today, so
+# warn the user rather than let a safety-relevant field (e.g. ``approval``) be
+# ignored without any diagnostic.
+_AUTOGEN_SUPPORTED = {"llm", "function_calling_llm"}
+_ADAPTER_SUPPORTED_FIELDS: Dict[str, set] = {
+    "crewai": {
+        "allow_delegation", "max_iter", "max_rpm", "max_execution_time",
+        "verbose", "cache", "system_template", "prompt_template",
+        "response_template", "llm", "function_calling_llm",
+    },
+    "autogen": _AUTOGEN_SUPPORTED,
+    "autogen_v2": _AUTOGEN_SUPPORTED,
+    "autogen_v4": _AUTOGEN_SUPPORTED,
+    "ag2": _AUTOGEN_SUPPORTED,
+}
+
+# Structural keys handled by the spec builder itself — never "unsupported".
+_STRUCTURAL_FIELDS = {"tools", "tasks", "role", "goal", "backstory"}
+
+
+def warn_unsupported_fields(adapter_name: str, spec_extras: Dict[str, Any]) -> None:
+    """Warn once per agent when a backend ignores declared YAML fields.
+
+    Non-breaking: pure visibility. ``framework: praisonai`` is treated as
+    supporting everything, so no warning is emitted there.
+    """
+    if adapter_name not in _ADAPTER_SUPPORTED_FIELDS:
+        return
+    supported = _ADAPTER_SUPPORTED_FIELDS[adapter_name]
+    declared = set(spec_extras.keys())
+    unhandled = declared - supported - _STRUCTURAL_FIELDS
+    if unhandled:
+        logger.warning(
+            "framework=%r ignores YAML field(s) %s for agent %r; "
+            "these are only honoured by framework=praisonai.",
+            adapter_name, sorted(unhandled), spec_extras.get("role"),
+        )
 
 
 class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):

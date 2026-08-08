@@ -7,7 +7,7 @@ Provides lazy-loaded integration with AutoGen v0.2, AutoGen v0.4, and AG2 framew
 import logging
 import os
 from typing import Dict, List, Any, Optional, Callable
-from .base import BaseFrameworkAdapter
+from .base import BaseFrameworkAdapter, warn_unsupported_fields
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,9 @@ class AutoGenAdapter(BaseFrameworkAdapter):
 
         # Create agents from the normalized specs
         for spec in specs:
+            # Surface any extended YAML fields this backend silently drops
+            warn_unsupported_fields(self.name, spec.extras)
+
             # Create AutoGen assistant agent
             agents[spec.key] = autogen.AssistantAgent(
                 name=spec.role,
@@ -167,6 +170,14 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                 system_message=spec.backstory +
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
+
+            # Honour the adapter contract's agent_callback hook (was declared in
+            # the signature but never fired), matching CrewAIAdapter behaviour.
+            if agent_callback:
+                try:
+                    agent_callback({"agent": agents[spec.key], "spec": spec})
+                except Exception as e:
+                    logger.warning("agent_callback raised for %r: %s", spec.role, e)
             
             # Register YAML-declared tools with AutoGen v0.2's two-agent split:
             #   - the assistant advertises the schema to the LLM (register_for_llm)
