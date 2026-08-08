@@ -136,7 +136,50 @@ def test_pin_holds_when_no_drift():
     result = _run(ex._execute_one(_job(model="gpt-4o-mini")))
     assert result.status == "succeeded"
     assert agent.chats == ["do the thing"]
+    # The pin is run-scoped: the shared agent's llm is restored afterwards so
+    # the schedule never leaks its model into another (attended) turn.
     assert agent.llm == "gpt-4o-mini"
+
+
+def test_pin_is_run_scoped_and_restored_on_shared_agent():
+    # A pinned run must not permanently mutate the shared agent. The agent's
+    # llm is pinned only during the turn (captured here) and restored after.
+    seen: List[str] = []
+
+    class CapturingAgent(FakeAgent):
+        def chat(self, message, **kwargs):
+            seen.append(self.llm)  # model in effect during the turn
+            return super().chat(message, **kwargs)
+
+    agent = CapturingAgent(llm="gpt-4o")  # default differs from the pin
+    ex = _executor(agent)
+    result = _run(ex._execute_one(_job(model="openai/gpt-4o", pin_model=True)))
+    assert result.status == "succeeded"
+    assert seen == ["openai/gpt-4o"]      # pinned during the turn
+    assert agent.llm == "gpt-4o"          # restored to the original after
+
+
+def test_provider_prefix_normalisation_no_false_drift():
+    # Pin stored as "openai/gpt-4o-mini" (provider embedded); the resolved
+    # agent exposes the bare "gpt-4o-mini". These are the same model, so the
+    # normalised comparison must not report drift.
+    agent = FakeAgent(llm="gpt-4o-mini")
+    ex = _executor(agent)
+    result = _run(ex._execute_one(_job(model="openai/gpt-4o-mini")))
+    assert result.status == "succeeded"
+    assert agent.chats == ["do the thing"]
+
+
+def test_split_provider_snapshot_matches_embedded_agent():
+    # Pin stored as separate provider="openai" + model="gpt-4o-mini"; the agent
+    # exposes the embedded "openai/gpt-4o-mini". Same combo → no drift.
+    agent = FakeAgent(llm="openai/gpt-4o-mini")
+    ex = _executor(agent)
+    result = _run(
+        ex._execute_one(_job(model="gpt-4o-mini", provider="openai"))
+    )
+    assert result.status == "succeeded"
+    assert agent.chats == ["do the thing"]
 
 
 def test_no_pin_follows_default():

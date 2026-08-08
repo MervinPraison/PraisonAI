@@ -52,8 +52,8 @@ def schedule_add_cmd(
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
     command: str = typer.Option("", "--command", "--script", help="No-LLM action: run this shell command on schedule and deliver its stdout verbatim (no agent, no model turn)"),
     command_timeout: float = typer.Option(60.0, "--command-timeout", help="Max seconds the --command may run before it is killed (default 60)"),
-    model: str = typer.Option("", "--model", help="Pin this job to a specific model (e.g. 'openai/gpt-4o-mini'). Snapshotted so unattended runs stay stable and drift fails closed"),
-    pin: bool = typer.Option(True, "--pin/--no-pin", help="Pin the job's model so drift fails closed (default); --no-pin follows whatever the default becomes"),
+    model: str = typer.Option("", "--model", help="Pin this job to a specific model (e.g. 'openai/gpt-4o-mini'). Snapshotted so unattended runs stay stable and drift fails closed. Pass an explicit model to capture a snapshot"),
+    pin: bool = typer.Option(True, "--pin/--no-pin", help="Enforce the model snapshot so drift fails closed (default; only takes effect once a snapshot exists via --model). --no-pin follows whatever the default becomes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Add a job to the schedule store (with optional delivery target).
