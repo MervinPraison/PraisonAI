@@ -81,6 +81,10 @@ from .protocols import (
     ResourceSample,
     ResourcePressurePolicyProtocol,
     MemoryPressurePolicy,
+    # Gateway memory-pressure cache eviction (Issue #3804)
+    WarmSession,
+    MemoryPressureProtocol,
+    plan_pressure_evictions,
     # Gateway rate-limit admission (Issue #2532)
     RateLimitDecision,
     RateLimitPolicyProtocol,
@@ -324,6 +328,10 @@ __all__ = [
     "ResourceSample",
     "ResourcePressurePolicyProtocol",
     "MemoryPressurePolicy",
+    # Gateway memory-pressure cache eviction (Issue #3804)
+    "WarmSession",
+    "MemoryPressureProtocol",
+    "plan_pressure_evictions",
     # Gateway rate-limit admission (Issue #2532)
     "RateLimitDecision",
     "RateLimitPolicyProtocol",
