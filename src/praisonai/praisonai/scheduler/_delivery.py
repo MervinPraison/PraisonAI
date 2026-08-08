@@ -93,6 +93,88 @@ class SchedulerDelivery:
         self._target = self._resolve_origin_target(
             self._parse_target(self._deliver)
         )
+        # Creation-time pre-flight (Issue #3800): answer "where will this go?"
+        # the moment the send is configured instead of only at fire time. This
+        # is a structural, registry-free check — an unrecognised symbolic token
+        # or a token with no resolvable platform is surfaced now, with the
+        # fire-time self-heal kept as the second line of defence for targets
+        # that go dead *after* creation.
+        v = self.validate()
+        if not v.ok:
+            logger.warning(
+                "Scheduler delivery target %r is not routable: %s %s",
+                self._deliver,
+                v.reason,
+                v.hint,
+            )
+        elif v.preview:
+            logger.info("Scheduled -> %s", v.preview)
+
+    def validate(self) -> "DeliveryValidation":
+        """Pre-flight the configured delivery target at *creation* time.
+
+        Resolves the target's well-formedness without a live channel registry
+        so a typo'd or unroutable token is caught the moment the scheduled /
+        agent-initiated send is created, rather than being silently dropped
+        when the job fires hours later. Symbolic ``origin`` is accepted only
+        when a concrete origin was persisted (otherwise there is nothing to
+        deliver back to); ``all`` requires the full gateway and is flagged on
+        the lightweight path; a bare token with no resolvable platform is
+        rejected with an actionable hint. Returns a
+        :class:`~praisonaiagents.gateway.DeliveryValidation`; never raises.
+        """
+        from praisonaiagents.gateway import DeliveryValidation
+
+        if self._target is None:
+            # No delivery configured is a valid state (delivery disabled).
+            return DeliveryValidation(ok=True, preview="")
+
+        preview = self._target.preview()
+        channel = (self._target.channel or "").strip()
+        if channel:
+            return DeliveryValidation(ok=True, preview=preview)
+
+        symbolic = (self._target.deliver or self._deliver or "").strip().lower()
+        if symbolic == "origin":
+            return DeliveryValidation(
+                ok=False,
+                reason=(
+                    "'origin' target has no persisted origin to resolve "
+                    "(job was not created with an origin channel)"
+                ),
+                hint=(
+                    "Pass the job's origin, use an explicit 'platform' or "
+                    "'platform:channel_id' token, or run under the full "
+                    "BotOS gateway."
+                ),
+                preview=preview,
+            )
+        if symbolic == "all":
+            return DeliveryValidation(
+                ok=False,
+                reason=(
+                    "symbolic target 'all' cannot be resolved by the "
+                    "lightweight scheduler delivery path"
+                ),
+                hint=(
+                    "Use an explicit 'platform' or 'platform:channel_id' "
+                    "token, or run under the full BotOS gateway."
+                ),
+                preview=preview,
+            )
+        return DeliveryValidation(
+            ok=False,
+            reason=f"token '{self._deliver}' has no resolvable platform",
+            hint="Use a 'platform' or 'platform:channel_id' token.",
+            preview=preview,
+        )
+
+    @property
+    def preview(self) -> str:
+        """Dry-run preview of the configured destination (empty if disabled)."""
+        if self._target is None:
+            return ""
+        return self._target.preview()
 
     @staticmethod
     def origin_from_config(config: Optional[Dict[str, Any]]) -> Any:

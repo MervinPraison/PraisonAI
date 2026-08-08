@@ -156,6 +156,39 @@ class DeliveryTarget:
         # Bare platform name → resolve to its home channel via the router.
         return cls(channel=token, deliver=token)
 
+    def preview(self, *, session_target: str = "") -> str:
+        """Return a human-readable, dry-run preview of where this will deliver.
+
+        A pure, dependency-free description of the resolved destination so the
+        creator — user, agent, or a blueprint accept — sees "where will this
+        go?" the moment a scheduled / agent-initiated send is created, not only
+        at fire time. Symbolic tokens (``origin`` / ``all``) are surfaced as
+        such; concrete targets render as ``platform:channel_id[:thread_id]``.
+
+        Args:
+            session_target: Optional ``"main"`` / ``"isolated"`` session hint to
+                append (e.g. ``" (session main)"``), when known by the caller.
+
+        Returns:
+            A short, display-only string such as ``"telegram:@alice"`` or
+            ``"telegram:123:789 (session main)"``.
+        """
+        token = (self.deliver or "").strip()
+        symbolic = token.lower()
+        if symbolic in ("origin", "all"):
+            base = symbolic
+        elif self.channel:
+            base = self.channel
+            if self.channel_id:
+                base = f"{base}:{self.channel_id}"
+            if self.thread_id:
+                base = f"{base}:{self.thread_id}"
+        else:
+            base = token or "<unrouted>"
+        if session_target:
+            base = f"{base} (session {session_target})"
+        return base
+
 
 @dataclass
 class RunRecord:
