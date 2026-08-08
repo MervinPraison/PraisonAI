@@ -223,6 +223,78 @@ class TestLooksLikeBarePrompt(unittest.TestCase):
             self.assertFalse(dispatcher._looks_like_bare_prompt(argv, first))
 
 
+class TestLooksLikeYamlRunTarget(unittest.TestCase):
+    """``_looks_like_yaml_run_target`` gates the modern `run` YAML forwarder.
+
+    True for a ``.yaml``/``.yml`` first positional whose flags (if any) are all
+    accepted by the modern ``run`` command — so ``praisonai agents.yaml`` and
+    ``praisonai agents.yaml --continue --output json`` reach Typer `run`, while
+    a YAML invocation bearing a legacy-only flag stays on legacy (#3793).
+    """
+
+    def setUp(self):
+        dispatcher._run_option_names_cache = None
+
+    def tearDown(self):
+        dispatcher._run_option_names_cache = None
+
+    def test_flagless_yaml_is_run_target(self):
+        for token in ("agents.yaml", "agents.yml", "AGENTS.YAML"):
+            argv = [token]
+            first = dispatcher._find_first_command(argv)
+            self.assertTrue(
+                dispatcher._looks_like_yaml_run_target(argv, first),
+                f"{token!r} should route to the modern run engine",
+            )
+
+    def test_non_yaml_token_is_not_run_target(self):
+        argv = ["Build a weather agent"]
+        first = dispatcher._find_first_command(argv)
+        self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_yaml_with_run_supported_flags_is_run_target(self):
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--continue", "-c", "--output", "-o", "--session", "-s"},
+                {"--output", "-o", "--session", "-s"},
+            ),
+        ):
+            for argv in (
+                ["agents.yaml", "--continue"],
+                ["agents.yaml", "--output", "json"],
+                ["agents.yaml", "--session", "abc123"],
+                ["agents.yaml", "--continue", "--output=json"],
+            ):
+                first = dispatcher._find_first_command(argv)
+                self.assertTrue(
+                    dispatcher._looks_like_yaml_run_target(argv, first),
+                    f"{argv!r} should route to the modern run engine",
+                )
+
+    def test_yaml_with_legacy_only_flag_is_not_run_target(self):
+        with mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ):
+            argv = ["agents.yaml", "--serve"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_yaml_with_failed_discovery_and_flag_is_not_run_target(self):
+        with mock.patch.object(
+            dispatcher, "_get_run_option_names", return_value=None
+        ):
+            argv = ["agents.yaml", "--model", "x"]
+            first = dispatcher._find_first_command(argv)
+            self.assertFalse(dispatcher._looks_like_yaml_run_target(argv, first))
+
+    def test_no_positional_is_not_run_target(self):
+        self.assertFalse(dispatcher._looks_like_yaml_run_target([], None))
+
+
 class TestFlagNames(unittest.TestCase):
     """``_flag_names`` extracts option names, value-aware when told which
     options consume a following value."""
@@ -548,18 +620,58 @@ class TestMainRouting(unittest.TestCase):
         self.assertIn("legacy engine", printed)
         self.assertIn("praisonai run", printed)
 
-    def test_yaml_path_routes_to_legacy(self):
-        # Routing decision is by command-set membership, NOT by file
-        # existence — the original auto-discovery dispatcher does not
-        # touch the filesystem.
+    def test_yaml_path_routes_to_typer_run(self):
+        # A workflow YAML file now reaches the modern Typer `run` engine
+        # (session continuity, --output modes, credential gate, permissions)
+        # instead of the legacy path — forwarded as ``run agents.yaml`` (#3793).
         sys.argv = ["praisonai", "agents.yaml"]
         with mock.patch.object(
             dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
         ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
              mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
             dispatcher.main()
+        run_typer.assert_called_once_with(["run", "agents.yaml"])
+        run_legacy.assert_not_called()
+
+    def test_yaml_path_with_run_flags_routes_to_typer_run(self):
+        # A YAML workflow combined with run-supported flags (session
+        # continuity + output mode) reaches the modern engine intact (#3793).
+        sys.argv = ["praisonai", "agents.yaml", "--continue", "--output", "json"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=(
+                {"--continue", "-c", "--output", "-o"},
+                {"--output", "-o"},
+            ),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once_with(
+            ["run", "agents.yaml", "--continue", "--output", "json"]
+        )
+        run_legacy.assert_not_called()
+
+    def test_yaml_path_with_legacy_flag_routes_to_legacy_with_notice(self):
+        # A YAML workflow carrying a legacy-only flag stays on legacy, with the
+        # one-line fallback notice so the divert is never silent (#3793).
+        sys.argv = ["praisonai", "agents.yaml", "--serve"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(
+            dispatcher,
+            "_get_run_option_names",
+            return_value=({"--model", "-m"}, {"--model", "-m"}),
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy, \
+             mock.patch("builtins.print") as mock_print:
+            dispatcher.main()
         run_legacy.assert_called_once()
         run_typer.assert_not_called()
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("legacy engine", printed)
 
     def test_unknown_single_token_routes_to_typer_run(self):
         # A lone unknown token (no flags, not a YAML path) is treated as a bare
