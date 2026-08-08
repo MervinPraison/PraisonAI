@@ -12,6 +12,7 @@ il = pytest.importorskip(
     reason="interactive_legacy requires optional CLI dependencies",
 )
 
+import praisonaiagents.background as _bg_pkg
 import praisonaiagents.background.runner as _bg_runner
 from praisonaiagents.background import TaskStatus
 from praisonaiagents.background.runner import BackgroundRunner
@@ -45,10 +46,20 @@ def isolated_runner(monkeypatch):
     # return exactly it, so no other file's daemon can reach the instance
     # ``_handle_tasks_command`` resolves. Assertions are unchanged — list,
     # detail, and the real CANCELLED status are all still verified.
+    #
+    # The CLI resolves the runner via ``from praisonaiagents.background import
+    # get_background_runner`` (bound on the *package*, imported at call time by
+    # ``BackgroundHandler._get_runner``). Patching only the ``runner`` submodule
+    # therefore missed the reference the CLI actually reads, so a concurrent
+    # cross-file daemon could still swap in the shared runner. Patch the name on
+    # the package too so the CLI deterministically sees the dedicated runner.
     runner = BackgroundRunner()
     monkeypatch.setattr(_bg_runner, "_shared_runner", runner, raising=False)
     monkeypatch.setattr(
         _bg_runner, "get_background_runner", lambda: runner, raising=False
+    )
+    monkeypatch.setattr(
+        _bg_pkg, "get_background_runner", lambda: runner, raising=False
     )
     yield runner
 
