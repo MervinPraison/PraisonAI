@@ -160,6 +160,32 @@ def record_tool_call(
     if len(history) > max_size:
         del history[: len(history) - max_size]
 
+def reset_matching_history(
+    history: List[ToolCallRecord],
+    tool_name: str,
+    args: Any,
+) -> int:
+    """Drop every record for this exact ``(tool_name, args)`` pair in-place.
+
+    Used when a critical loop is *explicitly approved* to continue: simply
+    popping the just-recorded call would leave the streak one below the
+    threshold, so the very next identical call would re-trigger the gate. By
+    removing the whole matching streak, an approved legitimate repeat gets a
+    fresh window (another full ``critical_threshold`` run) before it is flagged
+    again. Records for *other* tools/args are preserved, so concurrent activity
+    on the same agent is unaffected.
+
+    Returns the number of records removed.
+    """
+    args_hash = hash_tool_call(tool_name, args)
+    before = len(history)
+    history[:] = [
+        rec for rec in history
+        if not (rec.get("tool_name") == tool_name and rec.get("args_hash") == args_hash)
+    ]
+    return before - len(history)
+
+
 def record_tool_outcome(
     history: List[ToolCallRecord],
     tool_name: str,
