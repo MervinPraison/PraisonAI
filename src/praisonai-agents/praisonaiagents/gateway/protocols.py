@@ -11,6 +11,7 @@ The ``praisonai`` wrapper provides backward-compatible shims.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from contextlib import (
@@ -3350,9 +3351,17 @@ def plan_pressure_evictions(
         rss = float(rss_mb)
     except (TypeError, ValueError):
         return []
-    if budget <= 0:
+    # Reject non-finite measurements (NaN/inf): a NaN budget or rss would slip
+    # past the ``rss <= target`` check (every comparison with NaN is False) and
+    # spuriously evict *every* warm cache — the opposite of protecting them.
+    if not math.isfinite(budget) or not math.isfinite(rss) or budget <= 0:
         return []
-    ratio = headroom_ratio if 0.0 < headroom_ratio <= 1.0 else 0.9
+    try:
+        ratio = float(headroom_ratio)
+    except (TypeError, ValueError):
+        ratio = 0.9
+    if not (math.isfinite(ratio) and 0.0 < ratio <= 1.0):
+        ratio = 0.9
     target = budget * ratio
     if rss <= target:
         return []

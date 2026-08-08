@@ -100,6 +100,28 @@ def test_bad_numbers_are_noop():
     assert plan_pressure_evictions(1000.0, "nope", warm) == []  # type: ignore[arg-type]
 
 
+def test_nonfinite_budget_or_rss_is_noop():
+    warm = [_warm("a", 1.0)]
+    nan = float("nan")
+    inf = float("inf")
+    # A NaN/inf budget or rss must never slip past the threshold and evict all.
+    assert plan_pressure_evictions(nan, 950.0, warm) == []
+    assert plan_pressure_evictions(1000.0, nan, warm) == []
+    assert plan_pressure_evictions(inf, 950.0, warm) == []
+    assert plan_pressure_evictions(1000.0, inf, warm) == []
+
+
+def test_nonfinite_or_nonnumeric_ratio_falls_back_to_default():
+    warm = [_warm("a", 1.0)]
+    # NaN / non-numeric ratios fall back to 0.9; rss 950 > 900 -> evict.
+    assert plan_pressure_evictions(
+        1000.0, 950.0, warm, headroom_ratio=float("nan")
+    ) == ["a"]
+    assert plan_pressure_evictions(
+        1000.0, 950.0, warm, headroom_ratio="nope"  # type: ignore[arg-type]
+    ) == ["a"]
+
+
 def test_stable_tiebreak_by_session_id():
     warm = [_warm("b", 50.0), _warm("a", 50.0)]
     victims = plan_pressure_evictions(1000.0, 999.0, warm)
