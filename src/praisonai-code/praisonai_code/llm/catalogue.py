@@ -208,6 +208,83 @@ def key_url_for_provider(provider: str) -> Optional[str]:
     return PROVIDER_KEY_URLS.get(provider.lower())
 
 
+# Single data catalogue mapping provider id -> credential env-var(s), a
+# representative default model, and the model-id prefix the runtime expects.
+# This is the one source of truth for first-run credential auto-detection and
+# default-model inference; adding a provider needs a row here, not code changes
+# spread across credentials.py / env.py / the setup wizard.
+#
+# The head of this dict (openai..ollama) preserves the historical ordered
+# preference so existing zero-config behaviour is unchanged; providers below it
+# are purely additive and backward compatible.
+#
+# Each row is (env_vars, default_model, prefix):
+#   env_vars       - tuple of environment variables that unlock the provider
+#   default_model  - representative model used when this provider is the first
+#                    detected credential (already provider-prefixed where the
+#                    runtime needs it, e.g. ``mistral/mistral-large-latest``)
+#   prefix         - model-id prefix that maps a model back to this provider
+#                    (empty for OpenAI, whose models are bare, e.g. ``gpt-4o``)
+PROVIDER_ENV_CATALOGUE: Dict[str, tuple] = {
+    "openai":     (("OPENAI_API_KEY",),               "gpt-4o-mini",                          ""),
+    "anthropic":  (("ANTHROPIC_API_KEY",),            "anthropic/claude-3-5-sonnet-latest",   "anthropic/"),
+    "gemini":     (("GEMINI_API_KEY",),               "gemini/gemini-1.5-flash",              "gemini/"),
+    "google":     (("GOOGLE_API_KEY",),               "google/gemini-1.5-flash",              "google/"),
+    "groq":       (("GROQ_API_KEY",),                 "groq/llama-3.3-70b-versatile",         "groq/"),
+    "cohere":     (("COHERE_API_KEY",),               "cohere/command-r",                     "cohere/"),
+    "openrouter": (("OPENROUTER_API_KEY",),           "openrouter/openai/gpt-4o-mini",        "openrouter/"),
+    "ollama":     (("OLLAMA_HOST",),                  "ollama/llama3.2",                      "ollama/"),
+    "mistral":    (("MISTRAL_API_KEY",),              "mistral/mistral-large-latest",         "mistral/"),
+    "deepseek":   (("DEEPSEEK_API_KEY",),             "deepseek/deepseek-chat",               "deepseek/"),
+    "xai":        (("XAI_API_KEY",),                  "xai/grok-2-latest",                    "xai/"),
+    "together":   (("TOGETHER_API_KEY", "TOGETHERAI_API_KEY"), "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together_ai/"),
+    "perplexity": (("PERPLEXITYAI_API_KEY",),         "perplexity/sonar",                     "perplexity/"),
+    "fireworks":  (("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"), "fireworks_ai/accounts/fireworks/models/llama-v3p3-70b-instruct", "fireworks_ai/"),
+}
+
+
+def provider_env_vars() -> tuple:
+    """Return every credential env-var declared in the catalogue (deduped)."""
+    seen: list = []
+    for env_vars, _model, _prefix in PROVIDER_ENV_CATALOGUE.values():
+        for var in env_vars:
+            if var not in seen:
+                seen.append(var)
+    return tuple(seen)
+
+
+def provider_for_model(model: str) -> Optional[str]:
+    """Return the catalogue provider id whose prefix matches ``model``.
+
+    Falls back to ``"openai"`` for bare OpenAI-style ids (``gpt-*``/``o1``/…)
+    and ``None`` when no provider can be inferred.
+    """
+    if not model:
+        return None
+    m = model.lower()
+    # Longest prefix first so e.g. ``gemini/`` wins over an empty OpenAI prefix.
+    for provider, (_env, _default, prefix) in sorted(
+        PROVIDER_ENV_CATALOGUE.items(), key=lambda kv: len(kv[1][2]), reverse=True
+    ):
+        if prefix and m.startswith(prefix):
+            return provider
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith("gemini"):
+        return "gemini"
+    if m.startswith(("gpt", "o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
+def env_vars_for_provider(provider: str) -> tuple:
+    """Return the credential env-var(s) for a provider id, or ``()``."""
+    if not provider:
+        return ()
+    row = PROVIDER_ENV_CATALOGUE.get(provider.lower())
+    return row[0] if row else ()
+
+
 class ModelCatalogue:
     """
     Model catalogue with litellm integration and caching.
