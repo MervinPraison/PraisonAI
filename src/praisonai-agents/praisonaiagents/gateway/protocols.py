@@ -2339,16 +2339,29 @@ class DeliveryResolverProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class DeliveryPreflightProtocol(Protocol):
+    """Optional creation-time pre-flight extension for delivery resolvers.
+
+    Kept separate from :class:`DeliveryResolverProtocol` so the base contract
+    stays ``resolve()``-only: an existing resolver that implements just
+    ``resolve`` still satisfies ``DeliveryResolverProtocol`` under
+    ``isinstance``/``runtime_checkable``. A resolver that can additionally
+    pre-flight or preview a target against its live registry advertises that by
+    also satisfying this protocol; callers duck-type on it and fall back to a
+    structural, registry-free check (:meth:`DeliveryTarget.preview`) otherwise.
+    """
+
     def validate_target(
         self, target: "DeliveryTarget"
-    ) -> "DeliveryValidation":  # pragma: no cover - optional seam
+    ) -> "DeliveryValidation":
         """Pre-flight ``target`` against the live channel/route registry.
 
         Called at *creation* time (when a scheduled/agent-initiated send is
         registered) so an unroutable target is rejected or warned on with an
         actionable message, instead of being silently dropped when the job
-        fires. Optional: implementations that cannot pre-flight may omit it and
-        the scheduler falls back to a structural, registry-free check.
+        fires.
 
         Returns:
             A :class:`DeliveryValidation` (``ok`` / ``reason`` / ``hint`` /
@@ -2358,13 +2371,11 @@ class DeliveryResolverProtocol(Protocol):
 
     def preview_target(
         self, target: "DeliveryTarget"
-    ) -> str:  # pragma: no cover - optional seam
+    ) -> str:
         """Return a dry-run preview of where ``target`` will deliver.
 
         A short, display-only string (e.g. ``"telegram:@alice (session
-        main)"``) so the creator sees the destination before commit. Optional;
-        callers fall back to :meth:`DeliveryTarget.preview` when a resolver does
-        not implement it.
+        main)"``) so the creator sees the destination before commit.
         """
         ...
 

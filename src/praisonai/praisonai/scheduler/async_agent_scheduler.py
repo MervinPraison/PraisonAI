@@ -141,6 +141,11 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self.max_cost = max_cost
         self.deliver = deliver or (self.config.get("deliver", "") if self.config else "")
         self._delivery = None
+        # Creation-time pre-flight (Issue #3800): build the delivery wrapper now,
+        # not lazily at fire time, so an unroutable token is surfaced the moment
+        # the scheduler is created rather than after the first run completes.
+        if self.deliver:
+            self._build_delivery()
         self._total_cost = 0.0
         
         self.is_running = False
@@ -177,18 +182,35 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             return
         try:
             if self._delivery is None:
-                from praisonai.scheduler._delivery import SchedulerDelivery
-                job_id = self.config.get("agent_id", "") if self.config else ""
-                # Pass the persisted origin (if any) so a ``deliver="origin"``
-                # target resolves to the concrete channel the job was created
-                # in — without the full gateway.
-                origin = SchedulerDelivery.origin_from_config(self.config)
-                self._delivery = SchedulerDelivery(
-                    self.deliver, job_id=job_id, origin=origin
-                )
-            self._delivery.deliver(text)
+                # Normally built eagerly at __init__ for a creation-time
+                # pre-flight; rebuild here as a fallback if that was skipped.
+                self._build_delivery()
+            if self._delivery is not None:
+                self._delivery.deliver(text)
         except Exception as e:
             logger.error(f"Scheduler delivery error: {e}")
+
+    def _build_delivery(self) -> None:
+        """Construct the delivery wrapper, running its creation-time pre-flight.
+
+        Resolves the ``deliver`` token (rewriting symbolic ``"origin"`` to the
+        persisted concrete origin) and logs a preview / actionable warning for
+        the configured destination without touching the network. Called eagerly
+        at ``__init__`` so pre-flight happens at *creation*, with a lazy
+        fallback in ``_deliver_result``. Never raises.
+        """
+        try:
+            from praisonai.scheduler._delivery import SchedulerDelivery
+            job_id = self.config.get("agent_id", "") if self.config else ""
+            # Pass the persisted origin (if any) so a ``deliver="origin"``
+            # target resolves to the concrete channel the job was created
+            # in — without the full gateway.
+            origin = SchedulerDelivery.origin_from_config(self.config)
+            self._delivery = SchedulerDelivery(
+                self.deliver, job_id=job_id, origin=origin
+            )
+        except Exception as e:
+            logger.error(f"Scheduler delivery setup error: {e}")
 
     def _ensure_async_primitives(self) -> None:
         """Create async primitives if they don't exist yet.
