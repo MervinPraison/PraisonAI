@@ -414,22 +414,36 @@ class SetupHandler(CommandHandler):
         # Map each credential env-var to the setup provider it unlocks. The
         # env-var actually present is returned (not the provider's canonical
         # one) so callers can read it back from the environment safely — e.g.
-        # GOOGLE_API_KEY and GEMINI_API_KEY both map to "google".
+        # GOOGLE_API_KEY and GEMINI_API_KEY both map to "google". Curated at the
+        # head to preserve prior behaviour; the rest is catalogue-driven so a
+        # key for any catalogued provider (Mistral, DeepSeek, xAI, …) is
+        # detected rather than forcing an interactive setup.
         env_key_to_provider = {
             "OPENAI_API_KEY": "openai",
             "ANTHROPIC_API_KEY": "anthropic",
             "GEMINI_API_KEY": "google",
             "GOOGLE_API_KEY": "google",
         }
+        try:
+            from praisonai_code.llm.catalogue import PROVIDER_ENV_CATALOGUE
+
+            for provider_id, (env_vars, _model, _prefix) in PROVIDER_ENV_CATALOGUE.items():
+                for var in env_vars:
+                    env_key_to_provider.setdefault(var, provider_id)
+        except Exception:
+            pass
+
         defaults = self._provider_defaults()
         for env_key, provider_id in env_key_to_provider.items():
             if not os.environ.get(env_key):
                 continue
-            name, _canonical_env, default_model = defaults[provider_id]
-            # Always present the refreshed setup default (clean, unprefixed)
-            # so the model shown to the user and fed to the smoke test matches
-            # _provider_defaults() rather than the older prefixed string from
-            # llm/env.py. Return the env-var that was actually found.
+            # Curated providers keep their refreshed setup default (clean,
+            # unprefixed); catalogue-only providers derive env-key/model/name
+            # from _provider_setup_info so they get a working non-interactive
+            # path too. Return the env-var that was actually found.
+            _canonical_env, default_model, name = self._provider_setup_info(
+                provider_id, defaults
+            )
             return provider_id, env_key, default_model, name
         return None
 
