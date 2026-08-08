@@ -1374,11 +1374,14 @@ Write the complete compiled report:"""
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
-                    # Skip retry for non-retryable errors (approval, permission, etc.)
+                    # Skip retry for non-retryable errors (approval, permission, etc.).
+                    # `retryable is False` covers async tool timeouts, whose executor
+                    # work cannot be cancelled — retrying would duplicate side effects.
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
                         result.get("approval_error") or
-                        result.get("circuit_open")):
+                        result.get("circuit_open") or
+                        result.get("retryable") is False):
                         return result
                     
                     # Determine error type for retry policy
@@ -1508,7 +1511,16 @@ Write the complete compiled report:"""
                         result = await asyncio.wait_for(_invoke(), timeout=tool_timeout)
                     except asyncio.TimeoutError:
                         logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                        return {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                        # Mark as non-retryable: asyncio.wait_for cannot cancel a sync
+                        # tool already running in the executor, so retrying would launch
+                        # a duplicate invocation while the original keeps executing —
+                        # duplicating DB writes / API calls / file mutations. Surface the
+                        # timeout once instead of re-running an uncancellable side effect.
+                        return {
+                            "error": f"Tool timed out after {tool_timeout}s",
+                            "timeout": True,
+                            "retryable": False,
+                        }
                 else:
                     result = await _invoke()
                 
