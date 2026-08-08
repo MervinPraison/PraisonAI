@@ -301,6 +301,49 @@ class ScheduledAgentExecutor:
                 job=job, status="failed", error=err, duration=duration,
             )
 
+        # Model pin / drift guard: an unattended job created against one model
+        # must not silently start running on whatever the default later becomes
+        # (a switch to a pricier frontier model would inflate cost and change
+        # behaviour with nobody watching). When the job carries a ``model``
+        # snapshot and ``pin_model`` is set, compare it with the resolved
+        # agent's current model; on drift, fail closed (recorded as an error
+        # and, where configured, delivered) rather than running on the new one.
+        # Jobs with no snapshot skip this entirely, preserving prior behaviour.
+        drift, _restore_pin = self._check_model_drift(job, agent)
+        if drift is not None:
+            logger.warning("Job '%s' blocked by model drift: %s", job.id, drift)
+            duration = time.time() - started
+            self._runner.mark_run(
+                job, status="failed", error=drift, duration=duration,
+            )
+            if self._on_failure:
+                self._on_failure(job, drift)
+            failed = JobResult(
+                job=job, status="failed", error=drift, duration=duration,
+            )
+            await asyncio.to_thread(self._audit_output, job, failed)
+            await self._maybe_deliver_failure(job, failed)
+            return failed
+
+        # The pin above mutates the shared agent's ``llm`` for the duration of
+        # this run only. From here every exit path — the pre-run gate skip, a
+        # run-policy block, the model turn, or a raised exception — must restore
+        # it, so the pin never leaks into another (attended) turn on the same
+        # agent. ``_run_pinned`` wraps the remainder in a single try/finally.
+        try:
+            return await self._run_pinned(job, agent, message, started)
+        finally:
+            if _restore_pin is not None:
+                _restore_pin()
+
+    async def _run_pinned(
+        self, job: "ScheduleJob", agent: Any, message: str, started: float,
+    ) -> "JobResult":
+        """Gate, policy-scan, and run the model turn for a resolved agent.
+
+        Split out from :meth:`_dispatch` so the run-scoped model pin can be
+        restored in a single ``finally`` around every exit path below.
+        """
         # Pre-run condition gate (cost/efficiency): a cheap, deterministic
         # check that decides whether the (expensive) model turn is warranted.
         # When it reports "nothing to do" the tick is recorded as ``skipped`` —
@@ -705,6 +748,123 @@ class ScheduledAgentExecutor:
             return None
         from .condition_gate import ShellConditionGate
         return ShellConditionGate()
+
+    # ── model pin / drift helpers ────────────────────────────────────
+
+    @staticmethod
+    def _split_provider_model(
+        provider: Optional[str], model: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Normalise a ``(provider, model)`` pair to separate parts.
+
+        A model string may embed its provider (e.g. ``"openai/gpt-4o"``). When
+        an explicit ``provider`` is absent and the model carries a ``/`` prefix,
+        the prefix is lifted out so a provider-qualified pin and a bare-model
+        resolution (or vice versa) compare as the same provider/model — avoiding
+        a false drift purely from representation. Only the *first* ``/`` splits
+        (model paths like ``"openai/ft:gpt-4o:org::id"`` keep their tail).
+        """
+        if not isinstance(model, str) or not model:
+            model = None
+        if not isinstance(provider, str) or not provider:
+            provider = None
+        if provider is None and model is not None and "/" in model:
+            head, _, tail = model.partition("/")
+            if head and tail:
+                provider, model = head, tail
+        return provider, model
+
+    @classmethod
+    def _agent_model(cls, agent: Any) -> Tuple[Optional[str], Optional[str]]:
+        """Best-effort normalised ``(provider, model)`` for a resolved agent.
+
+        The core ``Agent`` carries its model as ``agent.llm`` (a string that may
+        embed the provider, e.g. ``"openai/gpt-4o"``); an explicit ``provider``
+        attribute is honoured when present. Returns ``(None, None)`` when the
+        agent exposes nothing recognisable so an unreadable agent never *causes*
+        a false drift — the snapshot comparison simply cannot fire.
+        """
+        provider = getattr(agent, "provider", None)
+        model = getattr(agent, "model", None)
+        if not isinstance(model, str) or not model:
+            llm = getattr(agent, "llm", None)
+            model = llm if isinstance(llm, str) and llm else None
+        return cls._split_provider_model(provider, model)
+
+    def _check_model_drift(
+        self, job: "ScheduleJob", agent: Any
+    ) -> Tuple[Optional[str], Optional[Callable[[], None]]]:
+        """Enforce a pinned job's model snapshot.
+
+        Returns ``(drift_reason, restore)``:
+        - ``drift_reason`` is a string when a pinned job has drifted (the run
+          must fail closed), else ``None``.
+        - ``restore`` is a zero-arg callable that undoes the run-scoped pin, or
+          ``None`` when nothing was pinned. It **must** be invoked in a
+          ``finally`` after the turn so the pin never leaks into other
+          (attended) uses of the same shared agent instance.
+
+        No-op (``(None, None)``) unless the job carries a ``model`` snapshot and
+        ``pin_model`` is truthy — an unpinned or unsnapshotted job follows the
+        default exactly as before. Both sides are normalised (provider prefix
+        lifted out of the model) before comparison so equivalent representations
+        (``openai/gpt-4o`` vs ``gpt-4o``+``openai``) do not false-drift.
+        """
+        pinned_model = getattr(job, "model", None)
+        if not pinned_model or not getattr(job, "pin_model", True):
+            return None, None
+        pinned_provider, pinned_model = self._split_provider_model(
+            getattr(job, "provider", None), pinned_model
+        )
+        provider, model = self._agent_model(agent)
+        # Compare provider only when both sides carry one — a snapshot without a
+        # provider (model-only pin) must not fail closed just because the agent
+        # happens to expose a provider attribute, and vice versa.
+        provider_drift = (
+            pinned_provider is not None
+            and provider is not None
+            and provider != pinned_provider
+        )
+        model_drift = model is not None and model != pinned_model
+        if provider_drift or model_drift:
+            reason = (
+                f"model drift: pinned {pinned_provider or '?'}/{pinned_model}, "
+                f"resolver now {provider or '?'}/{model or '?'}"
+            )
+            return reason, None
+        # No drift → pin the run to the snapshot so the turn is stable even if
+        # the resolver's default later changes between this check and the call.
+        # The pin is **run-scoped**: the resolved agent is typically a shared
+        # registry instance, so we snapshot the prior ``llm`` and return a
+        # restore callable the caller invokes in ``finally`` — the pin never
+        # bleeds into another (attended) turn on the same agent.
+        pin_value = (
+            f"{pinned_provider}/{pinned_model}" if pinned_provider else pinned_model
+        )
+        try:
+            had_llm = hasattr(agent, "llm")
+            prev_llm = getattr(agent, "llm", None)
+            agent.llm = pin_value
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(
+                "Could not pin job '%s' to model %r: %s",
+                job.id, pin_value, e,
+            )
+            return None, None
+
+        def _restore() -> None:
+            try:
+                if had_llm:
+                    agent.llm = prev_llm
+                else:  # pragma: no cover - defensive
+                    delattr(agent, "llm")
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "Could not restore model after pinned job '%s': %s",
+                    job.id, e,
+                )
+
+        return None, _restore
 
     # ── run-policy helpers ───────────────────────────────────────────
 

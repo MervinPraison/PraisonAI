@@ -52,6 +52,8 @@ def schedule_add_cmd(
     condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
     command: str = typer.Option("", "--command", "--script", help="No-LLM action: run this shell command on schedule and deliver its stdout verbatim (no agent, no model turn)"),
     command_timeout: float = typer.Option(60.0, "--command-timeout", help="Max seconds the --command may run before it is killed (default 60)"),
+    model: str = typer.Option("", "--model", help="Pin this job to a specific model (e.g. 'openai/gpt-4o-mini'). Snapshotted so unattended runs stay stable and drift fails closed. Pass an explicit model to capture a snapshot"),
+    pin: bool = typer.Option(True, "--pin/--no-pin", help="Enforce the model snapshot so drift fails closed (default; only takes effect once a snapshot exists via --model). --no-pin follows whatever the default becomes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Add a job to the schedule store (with optional delivery target).
@@ -99,7 +101,11 @@ def schedule_add_cmd(
         # surface. The CLI is a trusted, human-driven surface, so set them on
         # the stored job here. A ``--command`` job runs verbatim with no agent
         # and no model turn, delivering its stdout to the delivery target.
-        if (pre_run or condition or command) and "Error" not in result:
+        # ``--model``/``--no-pin`` snapshot the model/pin policy onto the job so
+        # an unattended run stays pinned and drift fails closed. A model-free
+        # ``--command`` job takes no model turn, so pinning is skipped for it.
+        want_pin_update = bool(model) or (not pin and not command)
+        if (pre_run or condition or command or want_pin_update) and "Error" not in result:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
                 store = _get_store()
@@ -110,6 +116,10 @@ def schedule_add_cmd(
                     job.command = command or None
                     if command:
                         job.command_timeout = command_timeout
+                    if not command:
+                        if model:
+                            job.model = model
+                        job.pin_model = pin
                     store.update(job)
             except Exception as e:
                 output.print_error(f"Failed to set command/pre-run gate: {e}")
