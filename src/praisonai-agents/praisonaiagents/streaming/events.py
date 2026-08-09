@@ -38,6 +38,7 @@ class StreamEventType(Enum):
     ERROR = "error"                      # Error during streaming
     STREAM_UNAVAILABLE = "stream_unavailable"  # Streaming not available in current configuration
     RETRY = "retry"                      # Backing off before retrying a failed request (rate limit/transient)
+    MODEL_FALLBACK = "model_fallback"    # Primary model unavailable; switched to a backup (Issue #3820)
 
 
 @dataclass

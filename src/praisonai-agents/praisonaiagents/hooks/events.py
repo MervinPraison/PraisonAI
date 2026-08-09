@@ -213,6 +213,34 @@ class AfterLLMInput(HookInput):
 
 
 @dataclass
+class ModelFallbackInput(HookInput):
+    """Input for MODEL_FALLBACK hooks (primary model unavailable mid-turn).
+
+    Fired by the agent's LLM recovery loop at the exact point it swaps the
+    primary model for the next entry in the configured ``fallback_models``
+    chain, so an otherwise silent quality/cost degradation becomes an
+    observable state transition (Issue #3820). Notification only: the turn
+    continues on ``to_model``. Only the failure class is exposed
+    (``reason_category``) — provider internals stay redacted, mirroring the
+    redaction discipline of the other error-path events.
+    """
+    from_model: str = ""
+    to_model: str = ""
+    reason_category: str = ""
+    fallback_index: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "from_model": self.from_model,
+            "to_model": self.to_model,
+            "reason_category": self.reason_category,
+            "fallback_index": self.fallback_index,
+        })
+        return base
+
+
+@dataclass
 class OnErrorInput(HookInput):
     """Input for OnError hooks."""
     error_type: str = ""
