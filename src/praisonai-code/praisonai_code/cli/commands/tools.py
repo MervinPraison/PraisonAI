@@ -7,7 +7,7 @@ Provides tool management commands including:
 - Show tool information
 """
 
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import typer
 from rich.console import Console
@@ -18,11 +18,90 @@ app = typer.Typer(help="Tool management and discovery")
 console = Console()
 
 
+def _discover_mcp_tools() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Discover tools exposed by configured MCP servers, lazily and fail-soft.
+
+    Reads the same MCP server config the run path / ``praisonai mcp`` group
+    uses, connects to each enabled server through the already-guarded
+    ``MCPHandler.create_mcp_from_server`` (executable allow-list + inline-exec
+    blocking), and enumerates its tools. Tool names are server-prefixed so the
+    listing mirrors what an agent would actually call.
+
+    A server that is unreachable, slow, or misconfigured never blocks the rest
+    of the listing: it is reported as unavailable with a reason.
+
+    Returns:
+        Tuple of (tools, unavailable) where ``tools`` maps
+        ``<server>_<tool>`` -> one-line description and ``unavailable`` maps
+        ``<server>`` -> reason string. Both are empty when no MCP servers are
+        configured, so the cost is zero for the common case.
+    """
+    tools: Dict[str, str] = {}
+    unavailable: Dict[str, str] = {}
+
+    try:
+        from praisonai_code.cli.commands.run import _collect_mcp_servers_from_config
+        from praisonai_code.cli.configuration.resolver import resolve_config
+    except Exception:
+        return tools, unavailable
+
+    try:
+        config = resolve_config()
+    except Exception:
+        return tools, unavailable
+
+    try:
+        servers = _collect_mcp_servers_from_config(config)
+    except Exception:
+        return tools, unavailable
+
+    if not servers:
+        return tools, unavailable
+
+    try:
+        from praisonai_code.cli.features.mcp import MCPHandler
+    except Exception:
+        return tools, unavailable
+
+    # Suppress the handler's own status prints so discovery stays quiet; a
+    # failed connection surfaces as an unavailable row instead.
+    handler = MCPHandler()
+    handler.print_status = lambda *a, **k: None  # type: ignore[assignment]
+
+    for server in servers:
+        name = str(server.get("name") or server.get("command") or server.get("url") or "mcp")
+        try:
+            mcp = handler.create_mcp_from_server(server)
+        except Exception as e:
+            unavailable[name] = str(e) or "connection failed"
+            continue
+
+        if mcp is None:
+            unavailable[name] = "unavailable (not reachable or misconfigured)"
+            continue
+
+        try:
+            found = False
+            for tool in mcp:
+                tool_name = getattr(tool, "__name__", None)
+                if not tool_name:
+                    continue
+                doc = (getattr(tool, "__doc__", None) or "").strip()
+                tools[f"{name}_{tool_name}"] = doc.split("\n")[0] if doc else f"MCP tool from {name}"
+                found = True
+            if not found:
+                unavailable[name] = "connected but exposed no tools"
+        except Exception as e:
+            unavailable[name] = str(e) or "failed to enumerate tools"
+
+    return tools, unavailable
+
+
 @app.command("list")
 def tools_list(
     source: Optional[str] = typer.Option(
         None, "--source", "-s", 
-        help="Filter by source: builtin, local, external, registered"
+        help="Filter by source: builtin, local, external, registered, mcp"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
@@ -33,14 +112,25 @@ def tools_list(
     - Local tools.py (if present)
     - External tools (praisonai-tools package)
     - Registered/entry-point tools (core registry plugins)
+    - MCP tools (from configured MCP servers, discovered live)
     """
     from praisonai_code.tool_resolver import ToolResolver
     
     resolver = ToolResolver()
     available = resolver.list_available()
     sources = resolver.list_available_sources()
-    
-    if not available:
+
+    # MCP tools live behind a network connection, so only discover them when
+    # they are relevant to the requested view (default view or --source mcp).
+    # This keeps the common four-bucket listing free of connection cost.
+    mcp_tools: dict = {}
+    mcp_unavailable: dict = {}
+    if source in (None, "mcp"):
+        mcp_tools, mcp_unavailable = _discover_mcp_tools()
+        for name in mcp_tools:
+            sources[name] = "mcp"
+
+    if not available and not mcp_tools and not mcp_unavailable:
         console.print("[yellow]No tools available.[/yellow]")
         return
     
@@ -68,6 +158,10 @@ def tools_list(
         available = external_tools
     elif source == "registered":
         available = registered_tools
+    elif source == "mcp":
+        available = dict(mcp_tools)
+    elif source is None:
+        available = {**available, **mcp_tools}
     
     # Create table
     table = Table(title="Available Tools", show_header=True, header_style="bold cyan")
@@ -90,7 +184,21 @@ def tools_list(
     console.print(f"\n[dim]Total: {len(available)} tools[/dim]")
     
     if not source:
-        console.print(f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | External: {len(external_tools)} | Registered: {len(registered_tools)}[/dim]")
+        console.print(
+            f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | "
+            f"External: {len(external_tools)} | Registered: {len(registered_tools)} | "
+            f"MCP: {len(mcp_tools)}[/dim]"
+        )
+
+    # Surface unreachable MCP servers so a present-but-broken server is
+    # debuggable rather than silently absent (mirrors describe_unresolved UX).
+    if mcp_unavailable and source in (None, "mcp"):
+        console.print("\n[yellow]Unavailable MCP servers:[/yellow]")
+        for server_name in sorted(mcp_unavailable.keys()):
+            console.print(
+                f"  [red]• {escape(server_name)}[/red]: "
+                f"[dim]{escape(mcp_unavailable[server_name])}[/dim]"
+            )
 
 
 @app.command("search")
