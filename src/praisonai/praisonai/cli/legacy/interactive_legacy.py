@@ -1582,7 +1582,7 @@ def _handle_queue_command(self, console, args, session_state):
                 console.print(f"  {i}. ↳ {display_msg}")
             console.print("\n[dim]Use /queue clear to clear, /queue remove N to remove[/dim]")
 
-def _handle_tasks_command(self, console, args, session_state):
+def _handle_tasks_command(self, console, args, session_state, runner=None):
     """
     Handle /tasks command - inspect background tasks without leaving the session.
 
@@ -1594,6 +1594,13 @@ def _handle_tasks_command(self, console, args, session_state):
     Reuses the CLI ``BackgroundHandler`` renderer over the shared
     process-wide ``BackgroundRunner`` so it shows the same tasks as
     ``praisonai background list``.
+
+    ``runner`` is an optional dependency-injection seam: when provided, the
+    handler operates on exactly that ``BackgroundRunner`` instead of resolving
+    the process-wide singleton. This lets tests pin a dedicated runner and
+    stay deterministic under ``pytest -n`` (where a cross-file daemon can
+    otherwise mutate the shared singleton mid-assertion); it is ``None`` in all
+    production call sites, preserving existing behaviour.
     """
     import asyncio
 
@@ -1603,7 +1610,7 @@ def _handle_tasks_command(self, console, args, session_state):
         console.print(f"[yellow]Background tasks unavailable: {e}[/yellow]")
         return
 
-    handler = BackgroundHandler()
+    handler = BackgroundHandler(runner=runner)
     args = args.strip() if args else ""
 
     try:

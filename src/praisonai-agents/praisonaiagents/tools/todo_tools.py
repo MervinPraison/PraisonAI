@@ -61,6 +61,18 @@ class TodoTools:
         except OSError as e:
             logger.error(f"Failed to save todos: {e}")
             raise
+
+    def _emit_update(self, todos: List[Dict]) -> None:
+        """Publish the full ordered list so subscribed frontends can render live.
+
+        Uses the streaming progress channel that the agent already activates
+        around each tool call; a cheap no-op when nothing is listening.
+        """
+        try:
+            from ..streaming.events import emit_todo_update
+            emit_todo_update(todos)
+        except Exception as e:  # never let rendering break a mutation
+            logger.debug(f"todo update emit failed: {e}")
     
     @require_approval(risk_level="low")
     def todo_add(self, task: str, priority: str = "medium", 
@@ -89,6 +101,7 @@ class TodoTools:
             
             todos.append(new_todo)
             self._save_todos(todos)
+            self._emit_update(todos)
             
             return json.dumps({
                 "success": True,
@@ -103,7 +116,7 @@ class TodoTools:
         """List todo items with optional filtering.
         
         Args:
-            status: Filter by status (all, pending, completed, cancelled)
+            status: Filter by status (all, pending, in_progress, completed, cancelled)
             category: Filter by category
             
         Returns:
@@ -134,7 +147,9 @@ class TodoTools:
         
         Args:
             todo_id: ID of the todo to update
-            status: New status (pending, completed, cancelled)
+            status: New status (pending, in_progress, completed, cancelled).
+                Setting a todo to in_progress demotes any other in_progress
+                item to pending so exactly one item is in_progress at a time.
             task: New task description
             priority: New priority level
             
@@ -148,6 +163,11 @@ class TodoTools:
             for todo in todos:
                 if todo.get("id") == todo_id:
                     if status:
+                        # Convention: exactly one item is in_progress at a time.
+                        if status == "in_progress":
+                            for other in todos:
+                                if other is not todo and other.get("status") == "in_progress":
+                                    other["status"] = "pending"
                         todo["status"] = status
                     if task:
                         todo["task"] = task
@@ -161,6 +181,7 @@ class TodoTools:
                 return json.dumps({"success": False, "error": f"Todo {todo_id} not found"})
             
             self._save_todos(todos)
+            self._emit_update(todos)
             
             return json.dumps({
                 "success": True,
@@ -205,7 +226,7 @@ def todo_list(status: str = "all", category: str = None) -> str:
     """List todo items with optional filtering.
     
     Args:
-        status: Filter by status (all, pending, completed, cancelled)
+        status: Filter by status (all, pending, in_progress, completed, cancelled)
         category: Filter by category
         
     Returns:
@@ -221,7 +242,7 @@ def todo_update(todo_id: int, status: str = None,
     
     Args:
         todo_id: ID of the todo to update
-        status: New status (pending, completed, cancelled)
+        status: New status (pending, in_progress, completed, cancelled)
         task: New task description
         priority: New priority level
         

@@ -1519,20 +1519,40 @@ Write the complete compiled report:"""
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
 
+            # Activate the tool-progress channel so tools running under the async
+            # path can stream incremental output (emit_tool_progress) and the
+            # built-in todo tool can publish live updates (emit_todo_update),
+            # mirroring the sync execute_tool path. Zero overhead when no stream
+            # callbacks are registered — the sink stays None and the contextvar
+            # is set to None (a no-op for emitters).
+            _progress_sink = None
+            _stream_emitter = self._get_existing_stream_emitter() if hasattr(self, "_get_existing_stream_emitter") else None
+            if _stream_emitter is not None and _stream_emitter.has_callbacks:
+                def _progress_sink(_event, _emitter=_stream_emitter):  # noqa: ANN001 — StreamEvent forwarder
+                    _event.tool_call = {"name": function_name, "id": tool_call_id}
+                    _event.agent_id = self.name
+                    _emitter.emit(_event)
+
+            from ..streaming.events import tool_progress_channel
+
             try:
                 # BaseTool instances (plugin system, e.g. BrowserBaseTool) are not
                 # directly callable — dispatch to their .run() method like the sync path.
                 call_target = func.run if isinstance(func, BaseTool) else func
                 if inspect.iscoroutinefunction(call_target):
                     logging.debug(f"Executing async function: {function_name}")
-                    result = await call_target(**arguments)
+                    with tool_progress_channel(_progress_sink):
+                        result = await call_target(**arguments)
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
-                    result = await loop.run_in_executor(
-                        None, copy_context_to_callable(lambda: call_target(**arguments))
-                    )
+                    # Set the channel BEFORE copy_context_to_callable so the sink
+                    # propagates into the executor thread via contextvars.
+                    with tool_progress_channel(_progress_sink):
+                        result = await loop.run_in_executor(
+                            None, copy_context_to_callable(lambda: call_target(**arguments))
+                        )
                 
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")

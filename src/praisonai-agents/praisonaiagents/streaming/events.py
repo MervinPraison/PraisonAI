@@ -32,6 +32,7 @@ class StreamEventType(Enum):
     TOOL_CALL_START = "tool_call_start"  # Tool execution starting (complete parsed args)
     TOOL_PROGRESS = "tool_progress"      # Incremental progress/output while a tool is running
     TOOL_CALL_RESULT = "tool_call_result"  # Tool execution completed (with result)
+    TODO_UPDATED = "todo_updated"        # Todo list mutated (full ordered list in metadata["todos"])
     LAST_TOKEN = "last_token"            # Final content delta
     STREAM_END = "stream_end"            # Stream completed successfully
     ERROR = "error"                      # Error during streaming
@@ -373,6 +374,41 @@ def emit_tool_progress(
         ))
     except Exception as e:  # never break tool execution on a progress failure
         logger.debug("emit_tool_progress sink failed: %s", e)
+        return False
+    return True
+
+
+def emit_todo_update(
+    todos: List[Dict[str, Any]],
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Emit the full, ordered todo list after a mutation.
+
+    The built-in todo tool calls this on every add/update so any subscribed
+    frontend (CLI live checklist, TUI, web, Python) can render the current
+    state. Reuses the same thread-local sink as ``emit_tool_progress`` (active
+    around each tool call), so it is a cheap no-op when nothing is listening.
+
+    Args:
+        todos: The complete ordered list of todo dicts.
+        metadata: Optional extra metadata merged into the event.
+
+    Returns:
+        ``True`` if forwarded to an active sink, else ``False``.
+    """
+    sink = _tool_progress_sink.get()
+    if sink is None:
+        return False
+    md: Dict[str, Any] = dict(metadata) if metadata else {}
+    md["todos"] = todos
+    try:
+        sink(StreamEvent(
+            type=StreamEventType.TODO_UPDATED,
+            metadata=md,
+        ))
+    except Exception as e:  # never break tool execution on a progress failure
+        logger.debug("emit_todo_update sink failed: %s", e)
         return False
     return True
 

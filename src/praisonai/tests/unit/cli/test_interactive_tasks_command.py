@@ -86,7 +86,7 @@ def test_tasks_lists_background_tasks_in_repl(capsys, isolated_runner):
     runner._tasks["t1"] = BackgroundTask(id="t1", name="alpha", status=TaskStatus.RUNNING)
     runner._tasks["t2"] = BackgroundTask(id="t2", name="beta", status=TaskStatus.COMPLETED)
 
-    il._handle_tasks_command(None, _CapturingConsole(), "", {})
+    il._handle_tasks_command(None, _CapturingConsole(), "", {}, runner=runner)
 
     out = capsys.readouterr().out
     assert "t1" in out and "alpha" in out
@@ -99,11 +99,11 @@ def test_tasks_detail_and_cancel(capsys, isolated_runner):
     runner._tasks["job1"] = task
 
     # Detail renders without error and references the task id.
-    il._handle_tasks_command(None, _CapturingConsole(), "job1", {})
+    il._handle_tasks_command(None, _CapturingConsole(), "job1", {}, runner=runner)
     assert "job1" in capsys.readouterr().out
 
     # Cancel updates the task status.
-    il._handle_tasks_command(None, _CapturingConsole(), "cancel job1", {})
+    il._handle_tasks_command(None, _CapturingConsole(), "cancel job1", {}, runner=runner)
     assert runner.get_task("job1").status == TaskStatus.CANCELLED
 
 

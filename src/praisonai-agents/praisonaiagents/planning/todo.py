@@ -32,7 +32,7 @@ class TodoItem:
     Attributes:
         id: Unique identifier
         description: What needs to be done
-        status: Current status (pending, in_progress, completed)
+        status: Current status (pending, in_progress, completed, cancelled)
         dependencies: List of item IDs that must complete first
         agent: Name of the agent responsible
         priority: Priority level (low, medium, high)
@@ -40,7 +40,7 @@ class TodoItem:
     """
     description: str
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    status: Literal["pending", "in_progress", "completed"] = "pending"
+    status: Literal["pending", "in_progress", "completed", "cancelled"] = "pending"
     dependencies: List[str] = field(default_factory=list)
     agent: Optional[str] = None
     priority: Literal["low", "medium", "high"] = "medium"
