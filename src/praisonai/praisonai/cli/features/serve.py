@@ -384,6 +384,15 @@ Launch PraisonAI servers with unified discovery support.
                     tool_timeout_executor=cached._get_tool_timeout_executor(),
                     cli_config=cli_cfg,
                 )
+                # Delegate the timeout thread-pool lifecycle to the cached owner:
+                # per-request generators borrow the pool, so leak accounting and
+                # recycling must happen on the owner (whose _leaked_workers is
+                # actually watched). Wiring the wrapper factory/leak callback to
+                # the cached generator keeps a stuck sync tool from silently
+                # exhausting the shared pool across requests.
+                gen._get_tool_timeout_executor = cached._get_tool_timeout_executor
+                gen._note_leaked_worker = cached._note_leaked_worker
+                gen._timeout_owner_key = cached._timeout_owner_key
                 return await gen.agenerate_crew_and_kickoff()
             # Fallback: build a one-shot generator via the native async entrypoint.
             # framework=None lets arun honour the YAML-declared framework (or the
