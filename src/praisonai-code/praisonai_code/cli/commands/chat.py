@@ -219,17 +219,9 @@ def chat_main(
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
     
-    # Use the async TUI (non-blocking, scrollable output)
-    from praisonai_code._wrapper_bridge import wrapper_available
-
-    if not wrapper_available():
-        typer.echo(
-            "Error: chat requires the praisonai wrapper. "
-            "Install the full wrapper: pip install praisonai",
-            err=True,
-        )
-        raise typer.Exit(1)
-
+    # Use the resident async split-pane TUI (non-blocking, scrollable output).
+    # This lives in praisonai-code, so `pip install praisonai-code` alone yields
+    # a full interactive chat session with no `praisonai` wrapper required.
     from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
     # Resolve a provider-aware default when no model was given:

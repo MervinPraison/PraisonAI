@@ -293,16 +293,17 @@ def code_main(
             "plan", non_interactive=True
         )
 
-    # Import and run the terminal-native interactive mode
+    # Import and run the terminal-native interactive mode. The full interactive
+    # code session is resident in praisonai-code via the async split-pane TUI, so
+    # `pip install praisonai-code` alone yields a working `code` session. The
+    # heavier legacy dispatch (`PraisonAI._start_interactive_mode`) adds
+    # wrapper-only extras, so use it only when the wrapper is installed and fall
+    # back to the resident TUI otherwise.
     from praisonai_code._wrapper_bridge import wrapper_available
 
     if not wrapper_available():
-        typer.echo(
-            "Error: code requires the praisonai wrapper. "
-            "Install the full wrapper: pip install praisonai",
-            err=True,
-        )
-        raise typer.Exit(1)
+        _run_resident_code(prompt, args, compact=compact, session_id=session_id)
+        return
 
     from praisonai_code.cli.main import PraisonAI
     
@@ -314,6 +315,49 @@ def code_main(
     else:
         # Interactive REPL mode - use _start_interactive_mode
         praison._start_interactive_mode(args)
+
+
+def _run_resident_code(prompt, args, *, compact=False, session_id=None):
+    """Run interactive/one-shot ``code`` on the resident split-pane TUI.
+
+    Used when the ``praisonai`` wrapper is absent so the CLI-first package
+    delivers its own flagship interactive coding session with no wrapper
+    dependency. Mirrors the ``chat`` command's resident path, mapping the code
+    session's args (model/workspace/no-acp/no-lsp) onto ``AsyncTUIConfig``.
+    """
+    import os
+
+    from praisonai_code.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
+
+    model = getattr(args, "llm", None)
+    try:
+        from ..configuration.model_resolver import resolve_default_model
+
+        resolved_model = resolve_default_model(model)
+    except Exception:
+        from praisonai_code.llm.env import DEFAULT_FALLBACK_MODEL
+
+        resolved_model = model or DEFAULT_FALLBACK_MODEL
+
+    tui_config = AsyncTUIConfig(
+        model=resolved_model,
+        show_logo=not compact,
+        show_status_bar=not compact,
+        session_id=session_id,
+        workspace=os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd(),
+        debug=getattr(args, "verbose", False),
+    )
+
+    tui = AsyncTUI(config=tui_config)
+
+    if prompt:
+        response = tui.run_single(prompt)
+        if response:
+            print(response)
+        if tui.execution_failed:
+            raise typer.Exit(1)
+    else:
+        tui.run()
 
 
 def _print_result_succeeded(result) -> bool:

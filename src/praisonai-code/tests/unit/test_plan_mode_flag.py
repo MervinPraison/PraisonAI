@@ -172,7 +172,7 @@ def test_plan_exit_restores_prior_mode_async_tui():
     from praisonaiagents.permissions import PermissionMode
     from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
     from praisonaiagents.approval import get_approval_registry
-    from praisonai.cli.interactive.async_tui import AsyncTUI
+    from praisonai_code.cli.interactive.async_tui import AsyncTUI
 
     backend = InteractiveCLIApprovalBackend(non_interactive=True)
     backend.set_permission_mode(PermissionMode.ACCEPT_EDITS)
@@ -202,7 +202,7 @@ def test_async_tui_syncs_plan_mode_from_backend():
     from praisonaiagents.permissions import PermissionMode
     from praisonai_code.cli.approval_backend import InteractiveCLIApprovalBackend
     from praisonaiagents.approval import get_approval_registry
-    from praisonai.cli.interactive.async_tui import AsyncTUI
+    from praisonai_code.cli.interactive.async_tui import AsyncTUI
 
     backend = InteractiveCLIApprovalBackend(non_interactive=True)
     backend.set_permission_mode(PermissionMode.PLAN)

@@ -18,7 +18,9 @@ for f in \
   "$ROOT/cli/app.py" \
   "$ROOT/cli/commands/run.py" \
   "$ROOT/cli/commands/chat.py" \
-  "$ROOT/cli/commands/code.py"
+  "$ROOT/cli/commands/code.py" \
+  "$ROOT/cli/interactive/async_tui.py" \
+  "$ROOT/cli/interactive/core.py"
 do
   if grep -E "$HOT_PATH_RE" "$f" 2>/dev/null; then
     echo "FAIL: module-level wrapper import in $f"
