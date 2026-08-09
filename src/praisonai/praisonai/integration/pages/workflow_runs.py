@@ -1,16 +1,9 @@
-"""Optional L3 page — workflow runs table."""
+"""Backward-compatibility shim → :mod:`praisonai_bot.integration.pages.workflow_runs`."""
+import sys as _sys
 
-from __future__ import annotations
+from praisonai._bootstrap import ensure_praisonai_bot
 
-import praisonaiui as aiui
+ensure_praisonai_bot()
+import praisonai_bot.integration.pages.workflow_runs as _impl
 
-
-@aiui.page("workflow-runs", title="Workflow Runs", icon="🔄")
-async def workflow_runs_page():
-    """Dashboard page listing recent workflow runs."""
-    try:
-        from praisonai.integration.bridges.workflows_service import run_workflow
-    except ImportError:
-        return {"runs": [], "note": "Workflow bridge unavailable"}
-
-    return {"runs": [], "service": "WorkflowRunService", "status": "ready"}
+_sys.modules[__name__] = _impl

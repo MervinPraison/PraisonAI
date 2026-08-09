@@ -2,7 +2,7 @@
 
 # Import pages to register them with aiui
 try:
-    from . import bot_health
+    from . import bot_health, workflow_runs
 except ImportError:
     # Pages are optional and may not be available if aiui is not installed
     pass
