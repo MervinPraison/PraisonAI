@@ -28,6 +28,44 @@ _server_started: Dict[int, bool] = {}
 _registered_agents: Dict[int, Dict[str, str]] = {}
 _shared_apps: Dict[int, Any] = {}
 
+
+def cleanup_launch_registration(agent_id: str) -> None:
+    """Remove launch() endpoints registered for ``agent_id`` from the shared
+    HTTP state that ``Agent.launch()`` actually populates.
+
+    ``Agent.launch()`` writes routes into the module-level ``_registered_agents``
+    and ``_shared_apps`` dicts above. This tears those routes back down so a
+    closed agent's endpoint stops accepting requests and the request handler
+    closure no longer keeps the Agent object graph alive.
+    """
+    with _server_lock:
+        for port, paths in list(_registered_agents.items()):
+            stale_paths = [p for p, aid in paths.items() if aid == agent_id]
+            for p in stale_paths:
+                del paths[p]
+                app = _shared_apps.get(port)
+                if app is not None:
+                    try:
+                        # Only drop the agent-owned POST route. launch() always
+                        # registers the handler via ``.post(path)``, so filtering
+                        # on both path AND method preserves unrelated routes that
+                        # share the path with a different verb (e.g. the built-in
+                        # GET /health and GET /).
+                        app.router.routes = [
+                            r for r in app.router.routes
+                            if not (
+                                getattr(r, "path", None) == p
+                                and "POST" in (getattr(r, "methods", None) or set())
+                            )
+                        ]
+                        # Invalidate cached OpenAPI schema so removed routes
+                        # disappear from /openapi.json and /docs.
+                        app.openapi_schema = None
+                    except Exception:
+                        pass
+            if not paths:
+                _registered_agents.pop(port, None)
+
 if TYPE_CHECKING:
     pass
 
