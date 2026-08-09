@@ -28,23 +28,41 @@ class ThreatLevel(IntEnum):
 
 # ─── Detection Pattern Sets ───────────────────────────────────────────────────
 
-_INSTRUCTION_PATTERNS: List[str] = [
+# Strict instruction-override patterns: unambiguous jailbreak / override intent.
+# A single hit escalates to HIGH (block), because these phrases have no benign
+# reading in a tool input or user prompt.
+_INSTRUCTION_PATTERNS_STRICT: List[str] = [
     r"ignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|directives?|rules?|prompts?)",
     r"disregard\s+(your\s+)?(previous|prior|earlier|above|all|system|prompt|instructions?)",
     r"forget\s+(everything|all|your)\s+(you\s+)?(know|were\s+told|learned)",
-    r"(new|updated?|revised?)\s+instructions?\s*(are|:)",
-    r"you\s+are\s+now\s+",
-    r"you\s+must\s+now\s+",
     r"override\s+(your\s+)?(guidelines?|rules?|instructions?|directives?)",
     r"act\s+as\s+if\s+you\s+(have\s+no|don'?t\s+have)\s+(restrictions?|rules?|guidelines?)",
-    r"pretend\s+(you\s+are|to\s+be)\s+",
-    r"roleplay\s+as\s+",
     r"DAN\s*[\-:,]",       # "Do Anything Now" jailbreak
     r"jailbreak",
     r"your\s+true\s+self",
     r"developer\s+mode\s+enabled",
     r"unrestricted\s+mode",
 ]
+
+# Soft patterns: common in benign role-play / coaching / planning prompts
+# ("You are now analyzing…", "Pretend to be a writing coach"). On their own
+# these are only MEDIUM; they escalate to HIGH only when combined with another
+# category (e.g. an authority claim), so real attacks are still caught while
+# ordinary prompts are not blocked.
+_INSTRUCTION_PATTERNS_SOFT: List[str] = [
+    r"(new|updated?|revised?)\s+instructions?\s*(are|:)",
+    r"you\s+are\s+now\s+",
+    r"you\s+must\s+now\s+",
+    r"pretend\s+(you\s+are|to\s+be)\s+",
+    r"roleplay\s+as\s+",
+]
+
+# Back-compat: the union is still exported as the original name so any external
+# code (or extra_patterns callers) referencing _INSTRUCTION_PATTERNS keeps
+# working.
+_INSTRUCTION_PATTERNS: List[str] = (
+    _INSTRUCTION_PATTERNS_STRICT + _INSTRUCTION_PATTERNS_SOFT
+)
 
 _AUTHORITY_PATTERNS: List[str] = [
     r"i\s+am\s+(your\s+)?(creator|developer|owner|admin|administrator|operator|god|master)",
@@ -154,8 +172,24 @@ _TRUSTED_SOURCES = frozenset([
 # ─── Detection Functions ──────────────────────────────────────────────────────
 
 def detect_instruction_patterns(text: str) -> bool:
-    """Check 1: Instruction override / jailbreak patterns."""
+    """Check 1: Instruction override / jailbreak patterns (strict OR soft)."""
     for pat in _INSTRUCTION_PATTERNS:
+        if re.search(pat, text, re.IGNORECASE):
+            return True
+    return False
+
+
+def detect_instruction_strict(text: str) -> bool:
+    """Check 1a: Unambiguous instruction-override / jailbreak patterns."""
+    for pat in _INSTRUCTION_PATTERNS_STRICT:
+        if re.search(pat, text, re.IGNORECASE):
+            return True
+    return False
+
+
+def detect_instruction_soft(text: str) -> bool:
+    """Check 1b: Softer role-play / imperative patterns (benign on their own)."""
+    for pat in _INSTRUCTION_PATTERNS_SOFT:
         if re.search(pat, text, re.IGNORECASE):
             return True
     return False
@@ -256,8 +290,14 @@ def scan_text(text: str, source: str = "external") -> ScanResult:
     is_trusted = source in _TRUSTED_SOURCES
 
     triggered = []
-    if detect_instruction_patterns(normalized):
+    # Split instruction detection: strict phrases are auto-HIGH on a single hit;
+    # soft role-play / imperative phrases are benign alone (MEDIUM) and only
+    # escalate when paired with another signal. A strict hit supersedes a soft
+    # one so we never double-count instruction checks.
+    if detect_instruction_strict(normalized):
         triggered.append("instruction_override")
+    elif detect_instruction_soft(normalized):
+        triggered.append("instruction_soft")
     if detect_authority_claims(normalized):
         triggered.append("authority_claim")
     if detect_boundary_manipulation(normalized):
@@ -273,7 +313,9 @@ def scan_text(text: str, source: str = "external") -> ScanResult:
     if count == 0:
         level = ThreatLevel.LOW
     elif count == 1:
-        # Single check: HIGH for dangerous categories, MEDIUM for others
+        # Single check: HIGH for dangerous categories, MEDIUM for softer signals
+        # (soft instruction phrases, authority claims, etc.) so common benign
+        # role-play / coaching prompts are not blocked on their own.
         dangerous = {"financial_manipulation", "self_harm_instruction", "instruction_override"}
         level = ThreatLevel.HIGH if triggered[0] in dangerous else ThreatLevel.MEDIUM
     elif count == 2:
