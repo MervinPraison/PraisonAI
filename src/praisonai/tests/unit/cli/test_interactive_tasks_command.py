@@ -18,6 +18,13 @@ from praisonaiagents.background import TaskStatus
 from praisonaiagents.background.runner import BackgroundRunner
 from praisonaiagents.background.task import BackgroundTask
 
+# Keep all tests in this module on a single xdist worker. Under
+# ``--dist loadfile`` this file is already sent to one worker, but pinning an
+# explicit group makes the isolation intent explicit and also holds under
+# ``--dist loadgroup``, so a concurrently-running background daemon in another
+# worker cannot interleave with the dedicated runner these tests pin.
+pytestmark = pytest.mark.xdist_group(name="background_runner_singleton")
+
 
 class _CapturingConsole:
     def __init__(self):
@@ -61,7 +68,15 @@ def isolated_runner(monkeypatch):
     monkeypatch.setattr(
         _bg_pkg, "get_background_runner", lambda: runner, raising=False
     )
-    yield runner
+    try:
+        yield runner
+    finally:
+        # ``monkeypatch`` restores the patched names, but under a persistent
+        # ``--dist loadfile`` worker the process-wide ``_shared_runner`` it
+        # restores may be a live singleton another file left mutating. Force it
+        # back to ``None`` so the next resolver rebuilds a clean instance and no
+        # dedicated runner from this file leaks into a later module.
+        _bg_runner._shared_runner = None
 
 
 def test_tasks_lists_background_tasks_in_repl(capsys, isolated_runner):
