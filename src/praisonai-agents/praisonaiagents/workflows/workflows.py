@@ -1474,11 +1474,8 @@ class AgentFlow:
                     
                     retry_count += 1
                     if retry_count <= max_retries:
-                        # Exponential backoff: wait 2^(retry_count-1) seconds
-                        backoff_seconds = 2 ** (retry_count - 1)
-                        if verbose:
-                            print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
-                        time.sleep(backoff_seconds)
+                        # Exponential backoff (shared with _apply_step_policies)
+                        self._retry_backoff(step, retry_count, max_retries, e, verbose)
                         continue  # Retry
                     
                     if self.on_step_error:
@@ -2398,6 +2395,20 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             "variables": all_variables
         }
 
+    @staticmethod
+    def _retry_backoff(step, retry_count, max_retries, error, verbose):
+        """Sleep with exponential backoff and print retry progress.
+
+        Shared by the top-level loop and ``_apply_step_policies`` so the
+        retry-delay/print is defined exactly once. Behaviour is byte-for-byte
+        identical to the previous inline copies: backoff is ``2**(retry_count-1)``
+        seconds with the same verbose progress line.
+        """
+        backoff_seconds = 2 ** (retry_count - 1)
+        if verbose:
+            print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {error}")
+        time.sleep(backoff_seconds)
+
     def _apply_step_policies(self, step, run_body, all_variables, verbose):
         """Run a step body with retry, guardrail-retry and output_file handling.
 
@@ -2428,10 +2439,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     break
                 retry_count += 1
                 if retry_count <= max_retries:
-                    backoff_seconds = 2 ** (retry_count - 1)
-                    if verbose:
-                        print(f"🔄 {step.name} failed (attempt {retry_count}/{max_retries}), retrying in {backoff_seconds}s: {e}")
-                    time.sleep(backoff_seconds)
+                    self._retry_backoff(step, retry_count, max_retries, e, verbose)
                     continue
 
             # Guardrail check (guardrails canonical, guardrail deprecated)
