@@ -46,9 +46,17 @@ def cleanup_launch_registration(agent_id: str) -> None:
                 app = _shared_apps.get(port)
                 if app is not None:
                     try:
+                        # Only drop the agent-owned POST route. launch() always
+                        # registers the handler via ``.post(path)``, so filtering
+                        # on both path AND method preserves unrelated routes that
+                        # share the path with a different verb (e.g. the built-in
+                        # GET /health and GET /).
                         app.router.routes = [
                             r for r in app.router.routes
-                            if getattr(r, "path", None) != p
+                            if not (
+                                getattr(r, "path", None) == p
+                                and "POST" in (getattr(r, "methods", None) or set())
+                            )
                         ]
                         # Invalidate cached OpenAPI schema so removed routes
                         # disappear from /openapi.json and /docs.
