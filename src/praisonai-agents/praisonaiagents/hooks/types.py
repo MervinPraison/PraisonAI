@@ -40,6 +40,11 @@ class HookEvent(str, Enum):
     # LLM lifecycle
     BEFORE_LLM = "before_llm"
     AFTER_LLM = "after_llm"
+    # Primary model became unavailable mid-turn and the runtime transparently
+    # switched to the next entry in the configured ``fallback_models`` chain.
+    # Makes the otherwise silent quality/cost degradation observable so a
+    # gateway/plugin can react (notice, alert, metrics) — Issue #3820.
+    MODEL_FALLBACK = "model_fallback"
 
     # Prompt-cache stability (advisory): fired when a turn's cached prompt
     # prefix (model + tool schemas + system-prompt fingerprint) changes from

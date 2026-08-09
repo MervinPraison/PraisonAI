@@ -1305,6 +1305,62 @@ Your Goal: {self.goal}"""
             return None
         return self.fallback_models[fallback_index]
 
+    def _emit_model_fallback(self, from_model, to_model, reason_category, fallback_index,
+                             stream_callback=None):
+        """Surface a mid-turn model fallback as an observable state transition.
+
+        Fired at the exact point the recovery loop swaps the primary model for
+        the next entry in ``fallback_models``. Emits a ``MODEL_FALLBACK`` hook
+        (so plugins/gateways can react — notice, alert, metrics) and, when a
+        stream callback is active, a ``StreamEventType.MODEL_FALLBACK`` event so
+        the streaming/draft layer can mark the switch. Only the failure class is
+        exposed; provider internals stay redacted. Fully guarded and a cheap
+        no-op when nothing is subscribed — preserving today's behaviour plus the
+        existing log line (Issue #3820).
+        """
+        try:
+            from ..hooks.registry import get_default_registry
+            from ..hooks.types import HookEvent
+
+            registry = get_default_registry()
+            if registry.has_hooks(HookEvent.MODEL_FALLBACK):
+                from ..hooks.events import ModelFallbackInput
+                from ..hooks.runner import HookRunner
+
+                event_input = ModelFallbackInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.MODEL_FALLBACK.value,
+                    timestamp=str(time.time()),
+                    agent_name=getattr(self, 'name', None),
+                    from_model=str(from_model),
+                    to_model=str(to_model),
+                    reason_category=str(reason_category or ""),
+                    fallback_index=fallback_index,
+                )
+                HookRunner(registry).execute_sync(HookEvent.MODEL_FALLBACK, event_input)
+        except Exception:  # observability must never break the fallback path
+            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+
+        if stream_callback is not None:
+            try:
+                from ..streaming.events import StreamEvent, StreamEventType
+
+                stream_callback(StreamEvent(
+                    type=StreamEventType.MODEL_FALLBACK,
+                    metadata={
+                        "from_model": str(from_model),
+                        "to_model": str(to_model),
+                        "reason_category": str(reason_category or ""),
+                        "fallback_index": fallback_index,
+                    },
+                    agent_id=getattr(self, 'name', None),
+                    session_id=getattr(self, '_session_id', None),
+                    run_id=getattr(self, '_current_run_id', None),
+                ))
+            except Exception:
+                logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
+
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
 
@@ -1628,7 +1684,15 @@ Your Goal: {self.goal}"""
                 if next_model:
                     current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                     logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
-                    
+
+                    # Surface the otherwise-silent switch as an observable event
+                    self._emit_model_fallback(
+                        from_model=current_model,
+                        to_model=next_model,
+                        reason_category=classification.error_category,
+                        fallback_index=_fallback_index,
+                    )
+
                     # Apply backoff if suggested
                     if classification.backoff_seconds and classification.backoff_seconds > 0:
                         time.sleep(classification.backoff_seconds)
@@ -1791,7 +1855,16 @@ Your Goal: {self.goal}"""
             if next_model:
                 current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                 logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
-                
+
+                # Surface the otherwise-silent switch as an observable event
+                self._emit_model_fallback(
+                    from_model=current_model,
+                    to_model=next_model,
+                    reason_category=classification.error_category,
+                    fallback_index=_fallback_index,
+                    stream_callback=stream_callback,
+                )
+
                 # Apply backoff if suggested
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
                     await asyncio.sleep(classification.backoff_seconds)
