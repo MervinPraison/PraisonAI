@@ -150,6 +150,10 @@ class MongoDBKnowledgeAdapter:
         self,
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         **kwargs
     ) -> str:
         """
@@ -158,6 +162,9 @@ class MongoDBKnowledgeAdapter:
         Args:
             text: Content to add
             metadata: Optional metadata dictionary
+            user_id: Optional user scope for tenant isolation
+            agent_id: Optional agent scope for tenant isolation
+            run_id: Optional run scope for tenant isolation
             **kwargs: Additional parameters
             
         Returns:
@@ -180,6 +187,9 @@ class MongoDBKnowledgeAdapter:
             document = {
                 "content": text,
                 "metadata": metadata or {},
+                "user_id": user_id,
+                "agent_id": agent_id,
+                "run_id": run_id,
                 "timestamp": datetime.utcnow(),
                 "embedding": embedding
             }
@@ -196,6 +206,10 @@ class MongoDBKnowledgeAdapter:
         self,
         query: str,
         limit: int = 5,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
         """
@@ -204,6 +218,9 @@ class MongoDBKnowledgeAdapter:
         Args:
             query: Search query
             limit: Maximum number of results
+            user_id: Optional user scope for tenant isolation
+            agent_id: Optional agent scope for tenant isolation
+            run_id: Optional run scope for tenant isolation
             **kwargs: Additional search parameters
             
         Returns:
@@ -211,6 +228,15 @@ class MongoDBKnowledgeAdapter:
         """
         try:
             results = []
+
+            # Build tenant/scope filter honored by both vector and text search
+            scope_filter = {
+                k: v for k, v in {
+                    "user_id": user_id,
+                    "agent_id": agent_id,
+                    "run_id": run_id,
+                }.items() if v is not None
+            }
             
             # Try vector search first if available
             if self.use_vector_search and self.embedding_model and self._is_atlas_connection():
@@ -223,16 +249,19 @@ class MongoDBKnowledgeAdapter:
                     query_embedding = response.data[0].embedding
                     
                     # Vector search pipeline
+                    vector_search_stage = {
+                        "$vectorSearch": {
+                            "index": "default",  # Assumes default vector index name
+                            "path": "embedding",
+                            "queryVector": query_embedding,
+                            "numCandidates": limit * 10,
+                            "limit": limit
+                        }
+                    }
+                    if scope_filter:
+                        vector_search_stage["$vectorSearch"]["filter"] = scope_filter
                     pipeline = [
-                        {
-                            "$vectorSearch": {
-                                "index": "default",  # Assumes default vector index name
-                                "path": "embedding",
-                                "queryVector": query_embedding,
-                                "numCandidates": limit * 10,
-                                "limit": limit
-                            }
-                        },
+                        vector_search_stage,
                         {
                             "$project": {
                                 "_id": 1,
@@ -263,8 +292,10 @@ class MongoDBKnowledgeAdapter:
                     logger.warning(f"Vector search failed, falling back to text search: {e}")
             
             # Fallback to text search
+            text_query: Dict[str, Any] = {"$text": {"$search": query}}
+            text_query.update(scope_filter)
             text_results = self.collection.find(
-                {"$text": {"$search": query}},
+                text_query,
                 {"score": {"$meta": "textScore"}}
             ).sort([("score", {"$meta": "textScore"})]).limit(limit)
             

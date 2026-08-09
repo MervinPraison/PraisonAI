@@ -859,8 +859,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         planning_tools = None
         planning_reasoning = False
         policy = None
-        background = None
-        checkpoints = None
         output_style = None
         thinking_budget = None
         skills_dirs = None
@@ -2270,8 +2268,6 @@ Your Goal: {self.goal}
         # Agent-centric feature instances (lazy loaded for zero performance impact)
         self._auto_memory = auto_memory
         self._policy = policy
-        self._background = background
-        self._checkpoints = checkpoints
         self._output_style = output_style
         self._thinking_budget = thinking_budget
         
@@ -2544,24 +2540,6 @@ Your Goal: {self.goal}
     @policy.setter
     def policy(self, value: Optional[Any]) -> None:
         self._policy = value
-
-    @property
-    def background(self) -> Optional[bool]:
-        """BackgroundRunner instance for async task execution."""
-        return self._background
-    
-    @background.setter
-    def background(self, value: Optional[bool]) -> None:
-        self._background = value
-
-    @property
-    def checkpoints(self) -> Optional[bool]:
-        """CheckpointService instance for file-level undo/restore."""
-        return self._checkpoints
-    
-    @checkpoints.setter
-    def checkpoints(self, value: Optional[bool]) -> None:
-        self._checkpoints = value
 
     @property
     def output_style(self) -> Optional[str]:
@@ -6448,10 +6426,14 @@ Answer:"""
         """Clean up global server registry entries for this agent."""
         if getattr(self, '_agent_id', None) is None:
             return  # No ID generated, nothing registered
-            
+
         try:
-            _get_default_server_registry().cleanup_agent_registrations(self._agent_id)
-                    
+            # Tear down the routes launch() actually registered (module-level
+            # state in execution_mixin.py). ServerRegistry above is a separate,
+            # unpopulated structure and cleaning it up is a no-op.
+            from .execution_mixin import cleanup_launch_registration
+            cleanup_launch_registration(self._agent_id)
+
         except Exception as e:
             import sys
             if sys.meta_path is not None:
