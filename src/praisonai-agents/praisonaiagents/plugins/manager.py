@@ -847,16 +847,22 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             return HookResult.allow()
         yield HookEvent.BEFORE_TOOL_DEFINITIONS, before_tool_definitions_hook
 
+    _MISSING = object()
+
     def _message_payload(data):
-        return {
-            "content": getattr(data, "content", ""),
-            "platform": getattr(data, "platform", ""),
-            "sender_id": getattr(data, "sender_id", ""),
-            "channel_id": getattr(data, "channel_id", ""),
-            "channel_type": getattr(data, "channel_type", ""),
-            "message_id": getattr(data, "message_id", ""),
-            "session_id": getattr(data, "session_id", ""),
-        }
+        # Project only the identity fields the concrete input actually carries.
+        # Inbound (MessageReceivedInput) exposes the full sender/channel/message
+        # identity; outbound inputs (MessageSending/Sent/Undelivered) expose a
+        # subset. Emitting fabricated empty strings for absent fields would make
+        # per-user policy/observability plugins silently lose their scope, so we
+        # skip any field the event does not provide instead.
+        payload = {"content": getattr(data, "content", "")}
+        for key in ("platform", "sender_id", "channel_id",
+                    "channel_type", "message_id", "session_id"):
+            value = getattr(data, key, _MISSING)
+            if value is not _MISSING and value is not None:
+                payload[key] = value
+        return payload
 
     if _overrides("before_message"):
         def before_message_hook(data, _p=plugin):

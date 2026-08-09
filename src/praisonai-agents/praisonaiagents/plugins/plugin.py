@@ -308,3 +308,25 @@ class FunctionPlugin(Plugin):
         if PluginHook.AFTER_AGENT in self._hooks:
             return self._hooks[PluginHook.AFTER_AGENT](response, context)
         return response
+
+    def before_message(
+        self, message: Dict[str, Any]
+    ) -> Union[Dict[str, Any], "PluginDecision", None]:
+        if PluginHook.MESSAGE_RECEIVED in self._hooks:
+            return self._hooks[PluginHook.MESSAGE_RECEIVED](message)
+        return message
+
+    def after_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        if PluginHook.MESSAGE_SENDING in self._hooks:
+            return self._hooks[PluginHook.MESSAGE_SENDING](message)
+        return message
+
+    def message_sent(self, message: Dict[str, Any]) -> None:
+        if PluginHook.MESSAGE_SENT in self._hooks:
+            self._hooks[PluginHook.MESSAGE_SENT](message)
+        return None
+
+    def message_undelivered(self, message: Dict[str, Any]) -> None:
+        if PluginHook.MESSAGE_UNDELIVERED in self._hooks:
+            self._hooks[PluginHook.MESSAGE_UNDELIVERED](message)
+        return None
