@@ -93,6 +93,8 @@ class AsyncTUIConfig:
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
     no_rules: bool = False  # Disable auto-injection of project instruction files
     plan_mode: bool = False  # Read-only PLAN mode: deny writes/edits/shell until confirmed
+    enable_acp: bool = True  # Load ACP tools + start the ACP runtime (disable via --no-acp)
+    enable_lsp: bool = True  # Load LSP tools + start the LSP runtime (disable via --no-lsp)
 
 
 # ============================================================================
@@ -532,8 +534,8 @@ class AsyncTUI:
             
             self._runtime = create_runtime(
                 workspace=self.config.workspace or ".",
-                lsp=True,
-                acp=True,
+                lsp=self.config.enable_lsp,
+                acp=self.config.enable_acp,
                 approval="auto",  # Auto-approve for interactive mode
             )
             logger.debug("Runtime created")
@@ -567,11 +569,18 @@ class AsyncTUI:
         tools = []
         logger.debug("Starting tool loading...")
         
-        # Try to load all interactive tools (basic + ACP + LSP)
+        # Load the requested interactive tool groups. ACP/LSP are on by default
+        # but can be disabled (code --no-acp/--no-lsp) so an explicitly
+        # restricted session never exposes the disabled capability.
+        groups = ["basic"]
+        if self.config.enable_acp:
+            groups.append("acp")
+        if self.config.enable_lsp:
+            groups.append("lsp")
         try:
             from praisonai_code.cli.features.interactive_tools import get_interactive_tools
             tools = get_interactive_tools(
-                groups=["basic", "acp", "lsp"],  # All tool groups
+                groups=groups,
                 workspace=self.config.workspace,
             )
             if tools:

@@ -302,7 +302,7 @@ def code_main(
     from praisonai_code._wrapper_bridge import wrapper_available
 
     if not wrapper_available():
-        _run_resident_code(prompt, args, compact=compact, session_id=session_id)
+        _run_resident_code(prompt, args, plan=plan, session_id=session_id)
         return
 
     from praisonai_code.cli.main import PraisonAI
@@ -317,13 +317,13 @@ def code_main(
         praison._start_interactive_mode(args)
 
 
-def _run_resident_code(prompt, args, *, compact=False, session_id=None):
+def _run_resident_code(prompt, args, *, plan=False, session_id=None):
     """Run interactive/one-shot ``code`` on the resident split-pane TUI.
 
     Used when the ``praisonai`` wrapper is absent so the CLI-first package
     delivers its own flagship interactive coding session with no wrapper
     dependency. Mirrors the ``chat`` command's resident path, mapping the code
-    session's args (model/workspace/no-acp/no-lsp) onto ``AsyncTUIConfig``.
+    session's args (model/workspace/no-acp/no-lsp/--plan) onto ``AsyncTUIConfig``.
     """
     import os
 
@@ -339,13 +339,34 @@ def _run_resident_code(prompt, args, *, compact=False, session_id=None):
 
         resolved_model = model or DEFAULT_FALLBACK_MODEL
 
+    # Enforce the resolved permission policy (e.g. --plan / --agent scope) by
+    # registering it on the global approval registry the resident TUI reads.
+    # Without this the read-only PLAN contract would be silently dropped and
+    # mutating tools (write/edit/shell) would stay available. The TUI syncs its
+    # PLAN indicator from this backend at construction, so registering here is
+    # sufficient — no new AsyncTUIConfig knob is needed for approval wiring.
+    agent_approval = getattr(args, "agent_approval", None)
+    if agent_approval is not None:
+        # resolve_approval_config returns a plain backend for simple modes
+        # (e.g. --plan) and an ApprovalConfig wrapper when a profile carries
+        # a permissions map; unwrap the wrapper so the registry always holds a
+        # concrete backend the TUI can query for PLAN enforcement.
+        backend = getattr(agent_approval, "backend", agent_approval)
+        try:
+            from praisonaiagents.approval import get_approval_registry
+
+            get_approval_registry().set_backend(backend)
+        except Exception:
+            pass
+
     tui_config = AsyncTUIConfig(
         model=resolved_model,
-        show_logo=not compact,
-        show_status_bar=not compact,
         session_id=session_id,
         workspace=os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd(),
         debug=getattr(args, "verbose", False),
+        plan_mode=plan,
+        enable_acp=not getattr(args, "no_acp", False),
+        enable_lsp=not getattr(args, "no_lsp", False),
     )
 
     tui = AsyncTUI(config=tui_config)
