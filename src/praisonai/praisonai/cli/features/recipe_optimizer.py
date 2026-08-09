@@ -12,140 +12,20 @@ DRY: Reuses ContextEffectivenessJudge from replay module.
 import os
 import re
 import logging
-import base64
 from pathlib import Path
 from typing import Optional, List, Tuple, Any, Dict
 
 # DRY: Import SDK knowledge from shared modules
 from .sdk_knowledge import get_sdk_knowledge_prompt
 
+# DRY: Reuse image reading and URL crawling from the canonical judge module
+# instead of maintaining verbatim copies here.
+from praisonai.replay.judge import (
+    _read_image_for_judge as _read_image_for_optimizer,
+    _crawl_url_for_judge as _crawl_url_for_optimizer,
+)
+
 logger = logging.getLogger(__name__)
-
-
-def _read_image_for_optimizer(image_path: str, model: str = "gpt-4o-mini") -> str:
-    """
-    Read and describe an image for optimizer context.
-    
-    Uses vision LLM to describe the image content so the optimizer can
-    validate if agent outputs match the actual image.
-    
-    Args:
-        image_path: Local file path or URL to the image
-        model: Vision-capable model to use
-        
-    Returns:
-        Description of the image content
-    """
-    try:
-        import litellm
-        
-        # Prepare image content
-        if image_path.startswith(('http://', 'https://')):
-            # URL - pass directly
-            image_content = {
-                "type": "image_url",
-                "image_url": {"url": image_path}
-            }
-        elif os.path.exists(image_path):
-            # Local file - encode as base64
-            with open(image_path, 'rb') as f:
-                image_data = base64.b64encode(f.read()).decode('utf-8')
-            
-            # Detect mime type
-            ext = os.path.splitext(image_path)[1].lower()
-            mime_types = {
-                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-                '.png': 'image/png', '.gif': 'image/gif',
-                '.webp': 'image/webp', '.bmp': 'image/bmp'
-            }
-            mime_type = mime_types.get(ext, 'image/jpeg')
-            
-            image_content = {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{image_data}"}
-            }
-        else:
-            return f"[Image not found: {image_path}]"
-        
-        # Use vision model to describe the image
-        response = litellm.completion(
-            model=model,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Describe this image in detail. Include: main subject, colors, text visible, key elements, and overall composition. Be factual and specific."},
-                    image_content
-                ]
-            }],
-            max_tokens=500,
-        )
-        
-        description = response.choices[0].message.content or ""
-        return f"[IMAGE DESCRIPTION: {description}]"
-        
-    except Exception as e:
-        logger.warning(f"Failed to read image for optimizer: {e}")
-        return f"[Failed to read image: {str(e)[:100]}]"
-
-
-def _crawl_url_for_optimizer(url: str) -> str:
-    """
-    Crawl a URL to get content for optimizer context.
-    
-    Uses the web_crawl tool to extract content so the optimizer can
-    validate if agent outputs match the actual URL content.
-    
-    Args:
-        url: URL to crawl
-        
-    Returns:
-        Extracted content from the URL (truncated)
-    """
-    try:
-        # Try to use the web_crawl tool
-        from praisonaiagents.tools import web_crawl
-        
-        result = web_crawl(url)
-        
-        if isinstance(result, dict):
-            if result.get('error'):
-                return f"[URL crawl error: {result.get('error')}]"
-            content = result.get('content', '')
-            title = result.get('title', '')
-            provider = result.get('provider', 'unknown')
-            
-            # Truncate content for optimizer context
-            if len(content) > 3000:
-                content = content[:3000] + "... [truncated]"
-            
-            return f"[URL CONTENT (via {provider})]\nTitle: {title}\n\n{content}"
-        
-        return f"[URL content: {str(result)[:3000]}]"
-        
-    except ImportError:
-        # Fallback to basic HTTP fetch
-        try:
-            import urllib.request
-            
-            with urllib.request.urlopen(url, timeout=30) as response:
-                content = response.read().decode('utf-8', errors='ignore')
-            
-            # Basic HTML to text
-            content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-            content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
-            content = re.sub(r'<[^>]+>', ' ', content)
-            content = re.sub(r'\s+', ' ', content).strip()
-            
-            if len(content) > 3000:
-                content = content[:3000] + "... [truncated]"
-            
-            return f"[URL CONTENT (via urllib)]\n{content}"
-            
-        except Exception as e:
-            return f"[Failed to crawl URL: {str(e)[:100]}]"
-    except Exception as e:
-        logger.warning(f"Failed to crawl URL for optimizer: {e}")
-        return f"[Failed to crawl URL: {str(e)[:100]}]"
 
 
 # Common issue patterns and their fixes - comprehensive patterns
