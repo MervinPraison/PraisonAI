@@ -95,6 +95,26 @@ class UpstashStateStore(StateStore):
         prefix_len = len(self.prefix)
         return [k[prefix_len:] if k.startswith(self.prefix) else k for k in keys]
     
+    def scan_prefix(self, prefix: str, batch: int = 500) -> List[str]:
+        """Return keys under ``prefix`` using a cursor SCAN instead of KEYS.
+
+        Upstash's ``keys()`` maps to the blocking Redis ``KEYS`` command; SCAN
+        iterates in bounded batches so a single read never blocks the instance.
+        """
+        match = f"{self.prefix}{prefix}*"
+        prefix_len = len(self.prefix)
+        out: List[str] = []
+        cursor: Any = 0
+        while True:
+            cursor, chunk = self._client.scan(cursor, match=match, count=batch)
+            for k in chunk or []:
+                if isinstance(k, bytes):
+                    k = k.decode("utf-8", "replace")
+                out.append(k[prefix_len:] if k.startswith(self.prefix) else k)
+            if str(cursor) == "0":
+                break
+        return out
+
     def ttl(self, key: str) -> Optional[int]:
         """Get remaining TTL in seconds."""
         result = self._client.ttl(self._key(key))

@@ -290,10 +290,13 @@ Launch PraisonAI servers with unified discovery support.
             capabilities=["invoke", "health"],
         ))
 
-        # Cache a single AgentsGenerator for the app's lifetime so every request
-        # reuses one YAML parse + framework resolution + tool-timeout pool instead
-        # of rebuilding them (and a fresh 32-worker pool) per call. A lock
-        # serialises the shared per-request cli_config mutation.
+        # Cache one AgentsGenerator at startup, but only to keep its *immutable*
+        # heavy pieces warm: the resolved adapter, config_list, tool resolver and
+        # tool-timeout thread pool. Each request then builds a cheap per-request
+        # generator that borrows those pieces and carries its own cli_config, so
+        # concurrent requests never share mutable state and are not serialised
+        # behind a lock. The cached generator owns (and later shuts down) the
+        # borrowed executor; per-request generators treat it as borrowed.
         import asyncio
 
         @asynccontextmanager
@@ -317,7 +320,6 @@ Launch PraisonAI servers with unified discovery support.
                     f"runs: {e}"
                 )
             app.state.generator = gen
-            app.state.generator_lock = asyncio.Lock()
             try:
                 yield
             finally:
@@ -361,15 +363,37 @@ Launch PraisonAI servers with unified discovery support.
         path = config["path"]
         
         async def _run_query(request: Request, query: str) -> str:
-            """Run a query through the cached generator so every route shares the
-            same YAML -> agent lowering (ToolResolver, tool_timeout, approval,
-            guardrails, retry). Falls back to praisonai.arun if caching failed."""
-            gen = getattr(request.app.state, "generator", None)
-            lock = getattr(request.app.state, "generator_lock", None)
-            if gen is not None and lock is not None:
-                async with lock:
-                    gen.cli_config = {"topic": query} if query else {}
-                    return await gen.agenerate_crew_and_kickoff()
+            """Run a query on a per-request generator that borrows the cached
+            generator's warm, immutable pieces (adapter, config_list, tool
+            resolver, tool-timeout pool) while carrying its own cli_config. This
+            keeps the same YAML -> agent lowering (ToolResolver, tool_timeout,
+            approval, guardrails, retry) without sharing mutable state, so
+            concurrent requests are not serialised. Falls back to praisonai.arun
+            if the cached prep is unavailable."""
+            cached = getattr(request.app.state, "generator", None)
+            cli_cfg = {"topic": query} if query else None
+            if cached is not None:
+                from praisonai.agents_generator import AgentsGenerator
+                gen = AgentsGenerator(
+                    agent_file=cached.agent_file,
+                    framework=cached.framework,
+                    config_list=cached.config_list,
+                    adapter=cached._adapter,
+                    adapter_registry=cached._adapter_registry,
+                    tool_resolver=cached.tool_resolver,
+                    tool_timeout_executor=cached._get_tool_timeout_executor(),
+                    cli_config=cli_cfg,
+                )
+                # Delegate the timeout thread-pool lifecycle to the cached owner:
+                # per-request generators borrow the pool, so leak accounting and
+                # recycling must happen on the owner (whose _leaked_workers is
+                # actually watched). Wiring the wrapper factory/leak callback to
+                # the cached generator keeps a stuck sync tool from silently
+                # exhausting the shared pool across requests.
+                gen._get_tool_timeout_executor = cached._get_tool_timeout_executor
+                gen._note_leaked_worker = cached._note_leaked_worker
+                gen._timeout_owner_key = cached._timeout_owner_key
+                return await gen.agenerate_crew_and_kickoff()
             # Fallback: build a one-shot generator via the native async entrypoint.
             # framework=None lets arun honour the YAML-declared framework (or the
             # registry default), matching the cached generator above.
@@ -377,7 +401,7 @@ Launch PraisonAI servers with unified discovery support.
             return await praisonai.arun(
                 agent_file=config["file"],
                 framework=yaml_framework,
-                cli_config={"topic": query} if query else None,
+                cli_config=cli_cfg,
             )
 
         @app.post(path)

@@ -50,6 +50,16 @@ class StateStore(ABC):
     def keys(self, pattern: str = "*") -> List[str]:
         """List keys matching pattern."""
         raise NotImplementedError
+
+    def scan_prefix(self, prefix: str) -> List[str]:
+        """Return all keys under ``prefix`` without scanning the whole namespace.
+
+        Default implementation delegates to ``keys()`` with a prefix-scoped
+        glob so backends never fall back to an unbounded ``KEYS *``. Backends
+        that support cursor-based iteration (Redis, Valkey, Upstash) should
+        override this with a non-blocking ``SCAN``.
+        """
+        return list(self.keys(f"{prefix}*"))
     
     @abstractmethod
     def ttl(self, key: str) -> Optional[int]:
