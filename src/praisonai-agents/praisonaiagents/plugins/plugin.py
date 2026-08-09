@@ -201,6 +201,23 @@ class Plugin(ABC):
     def after_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Called after message is processed. Can modify message."""
         return message
+
+    def message_sent(self, message: Dict[str, Any]) -> None:
+        """Called after a reply is successfully delivered. Observe-only.
+
+        ``message`` carries the resolved delivery context
+        (``platform``/``sender_id``/``channel_id``/``channel_type``/
+        ``message_id``/``session_id`` alongside ``content``).
+        """
+        return None
+
+    def message_undelivered(self, message: Dict[str, Any]) -> None:
+        """Called when a reply is permanently undeliverable. Observe-only.
+
+        ``message`` carries the resolved delivery context plus ``error`` and
+        ``notice_delivered`` so a plugin can alert, escalate, or dead-letter.
+        """
+        return None
     
     def before_llm(
         self, messages: List[Dict], params: Dict[str, Any]
