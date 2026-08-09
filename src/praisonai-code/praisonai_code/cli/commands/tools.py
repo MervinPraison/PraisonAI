@@ -7,7 +7,7 @@ Provides tool management commands including:
 - Show tool information
 """
 
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import typer
 from rich.console import Console
@@ -18,11 +18,132 @@ app = typer.Typer(help="Tool management and discovery")
 console = Console()
 
 
+# Upper bound (seconds) on connecting-to + enumerating a single MCP server
+# during discovery, so an unreachable/hung server cannot stall the listing for
+# its full configured timeout. Discovery is read-only, so a short cap is safe.
+_MCP_DISCOVERY_TIMEOUT_S = 8
+
+
+def _discover_mcp_tools() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Discover tools exposed by configured MCP servers, lazily and fail-soft.
+
+    Reads the same MCP server config the run path / ``praisonai mcp`` group
+    uses, connects to each enabled server through the already-guarded
+    ``MCPHandler.create_mcp_from_server`` (executable allow-list + inline-exec
+    blocking), and enumerates its tools. Tools are listed under the *same*
+    callable name an agent would dispatch at runtime (the run path registers
+    MCP tools by their bare ``__name__``), with the server surfaced separately
+    as the source — so a name copied from this listing actually resolves.
+
+    A server that is unreachable, slow, or misconfigured never blocks the rest
+    of the listing: each server is discovered under a short timeout and, on
+    failure, reported as unavailable with a reason.
+
+    Returns:
+        Tuple of (tools, unavailable) where ``tools`` maps the runtime tool
+        name -> one-line description and ``unavailable`` maps ``<server>`` ->
+        reason string. Both are empty when no MCP servers are configured, so
+        the cost is zero for the common case.
+    """
+    tools: Dict[str, str] = {}
+    unavailable: Dict[str, str] = {}
+
+    try:
+        from praisonai_code.cli.commands.run import _collect_mcp_servers_from_config
+        from praisonai_code.cli.configuration.resolver import resolve_config
+    except Exception:
+        return tools, unavailable
+
+    try:
+        config = resolve_config()
+    except Exception:
+        return tools, unavailable
+
+    try:
+        servers = _collect_mcp_servers_from_config(config)
+    except Exception:
+        return tools, unavailable
+
+    if not servers:
+        return tools, unavailable
+
+    try:
+        from praisonai_code.cli.features.mcp import MCPHandler
+    except Exception:
+        return tools, unavailable
+
+    # Suppress the handler's own status prints so discovery stays quiet; a
+    # failed connection surfaces as an unavailable row instead.
+    handler = MCPHandler()
+    handler.print_status = lambda *a, **k: None  # type: ignore[assignment]
+
+    for server in servers:
+        name = str(server.get("name") or server.get("command") or server.get("url") or "mcp")
+        try:
+            server_tools = _discover_single_server(handler, server)
+        except Exception as e:
+            unavailable[name] = str(e) or "connection failed"
+            continue
+
+        if server_tools is None:
+            unavailable[name] = "unavailable (not reachable or misconfigured)"
+            continue
+
+        if not server_tools:
+            unavailable[name] = "connected but exposed no tools"
+            continue
+
+        for tool_name, doc in server_tools.items():
+            # If two servers expose the same tool name, disambiguate the later
+            # one so both are visible without hiding either. The first keeps the
+            # bare runtime name; ties are surfaced with the server context.
+            display = tool_name if tool_name not in tools else f"{tool_name} ({name})"
+            tools[display] = doc
+
+    return tools, unavailable
+
+
+def _discover_single_server(handler, server) -> Optional[Dict[str, str]]:
+    """Connect to one MCP server and enumerate its tools under a hard timeout.
+
+    Runs the (potentially blocking) connect + enumerate in a worker thread so a
+    slow or unreachable server cannot stall the whole listing for its full
+    configured timeout — it is abandoned after :data:`_MCP_DISCOVERY_TIMEOUT_S`.
+
+    Returns a mapping of runtime tool name -> one-line description, ``None`` if
+    the server was unreachable/misconfigured, or ``{}`` if it connected but
+    exposed no tools. Raises on timeout so the caller records a reason.
+    """
+    import concurrent.futures
+
+    def _work() -> Optional[Dict[str, str]]:
+        mcp = handler.create_mcp_from_server(server)
+        if mcp is None:
+            return None
+        found: Dict[str, str] = {}
+        for tool in mcp:
+            tool_name = getattr(tool, "__name__", None)
+            if not tool_name:
+                continue
+            doc = (getattr(tool, "__doc__", None) or "").strip()
+            found[tool_name] = doc.split("\n")[0] if doc else "MCP tool"
+        return found
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_work)
+        try:
+            return future.result(timeout=_MCP_DISCOVERY_TIMEOUT_S)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"timed out after {_MCP_DISCOVERY_TIMEOUT_S}s"
+            )
+
+
 @app.command("list")
 def tools_list(
     source: Optional[str] = typer.Option(
         None, "--source", "-s", 
-        help="Filter by source: builtin, local, external, registered"
+        help="Filter by source: builtin, local, external, registered, mcp"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed info"),
 ):
@@ -33,14 +154,25 @@ def tools_list(
     - Local tools.py (if present)
     - External tools (praisonai-tools package)
     - Registered/entry-point tools (core registry plugins)
+    - MCP tools (from configured MCP servers, discovered live)
     """
     from praisonai_code.tool_resolver import ToolResolver
     
     resolver = ToolResolver()
     available = resolver.list_available()
     sources = resolver.list_available_sources()
-    
-    if not available:
+
+    # MCP tools live behind a network connection, so only discover them when
+    # they are relevant to the requested view (default view or --source mcp).
+    # This keeps the common four-bucket listing free of connection cost.
+    mcp_tools: dict = {}
+    mcp_unavailable: dict = {}
+    if source in (None, "mcp"):
+        mcp_tools, mcp_unavailable = _discover_mcp_tools()
+        for name in mcp_tools:
+            sources[name] = "mcp"
+
+    if not available and not mcp_tools and not mcp_unavailable:
         console.print("[yellow]No tools available.[/yellow]")
         return
     
@@ -68,6 +200,10 @@ def tools_list(
         available = external_tools
     elif source == "registered":
         available = registered_tools
+    elif source == "mcp":
+        available = dict(mcp_tools)
+    elif source is None:
+        available = {**available, **mcp_tools}
     
     # Create table
     table = Table(title="Available Tools", show_header=True, header_style="bold cyan")
@@ -90,7 +226,21 @@ def tools_list(
     console.print(f"\n[dim]Total: {len(available)} tools[/dim]")
     
     if not source:
-        console.print(f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | External: {len(external_tools)} | Registered: {len(registered_tools)}[/dim]")
+        console.print(
+            f"[dim]  Built-in: {len(builtin_tools)} | Local: {len(local_tools)} | "
+            f"External: {len(external_tools)} | Registered: {len(registered_tools)} | "
+            f"MCP: {len(mcp_tools)}[/dim]"
+        )
+
+    # Surface unreachable MCP servers so a present-but-broken server is
+    # debuggable rather than silently absent (mirrors describe_unresolved UX).
+    if mcp_unavailable and source in (None, "mcp"):
+        console.print("\n[yellow]Unavailable MCP servers:[/yellow]")
+        for server_name in sorted(mcp_unavailable.keys()):
+            console.print(
+                f"  [red]• {escape(server_name)}[/red]: "
+                f"[dim]{escape(mcp_unavailable[server_name])}[/dim]"
+            )
 
 
 @app.command("search")

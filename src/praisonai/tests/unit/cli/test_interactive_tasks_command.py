@@ -39,7 +39,7 @@ class _CapturingConsole:
 
 
 @pytest.fixture(autouse=True)
-def isolated_runner(monkeypatch):
+def isolated_runner():
     # Under CI's ``pytest -n 2 --dist loadfile`` a worker process persists
     # across files, so the process-wide ``BackgroundRunner`` singleton — and a
     # live daemon loop another file left running on it — races these tests:
@@ -56,27 +56,38 @@ def isolated_runner(monkeypatch):
     #
     # The CLI resolves the runner via ``from praisonaiagents.background import
     # get_background_runner`` (bound on the *package*, imported at call time by
-    # ``BackgroundHandler._get_runner``). Patching only the ``runner`` submodule
-    # therefore missed the reference the CLI actually reads, so a concurrent
-    # cross-file daemon could still swap in the shared runner. Patch the name on
-    # the package too so the CLI deterministically sees the dedicated runner.
+    # ``_handle_tasks_command``). The package uses a lazy ``__getattr__`` so the
+    # name is *not* a real module attribute until accessed; we therefore install
+    # a concrete override on the package ``__dict__`` (which ``__getattr__`` only
+    # runs *after*), guaranteeing every ``from ... import get_background_runner``
+    # in this process returns exactly the dedicated runner below.
     runner = BackgroundRunner()
-    monkeypatch.setattr(_bg_runner, "_shared_runner", runner, raising=False)
-    monkeypatch.setattr(
-        _bg_runner, "get_background_runner", lambda: runner, raising=False
-    )
-    monkeypatch.setattr(
-        _bg_pkg, "get_background_runner", lambda: runner, raising=False
-    )
+
+    def _dedicated():
+        return runner
+
+    # Own the singleton lifecycle explicitly rather than through monkeypatch's
+    # save/restore: under a persistent ``--dist loadfile`` worker the value
+    # monkeypatch would restore may be a live singleton another file left
+    # mutating, so we snapshot and hard-reset it ourselves.
+    prev_shared = _bg_runner._shared_runner
+    prev_runner_fn = _bg_runner.get_background_runner
+    prev_pkg = _bg_pkg.__dict__.get("get_background_runner")
+    _bg_runner._shared_runner = runner
+    _bg_runner.get_background_runner = _dedicated
+    _bg_pkg.get_background_runner = _dedicated
     try:
         yield runner
     finally:
-        # ``monkeypatch`` restores the patched names, but under a persistent
-        # ``--dist loadfile`` worker the process-wide ``_shared_runner`` it
-        # restores may be a live singleton another file left mutating. Force it
-        # back to ``None`` so the next resolver rebuilds a clean instance and no
-        # dedicated runner from this file leaks into a later module.
-        _bg_runner._shared_runner = None
+        # Force the shared singleton back to ``None`` so the next resolver
+        # rebuilds a clean instance and no dedicated runner from this file leaks
+        # into a later module; restore the accessors to their prior state.
+        _bg_runner._shared_runner = None if prev_shared is runner else prev_shared
+        _bg_runner.get_background_runner = prev_runner_fn
+        if prev_pkg is None:
+            _bg_pkg.__dict__.pop("get_background_runner", None)
+        else:
+            _bg_pkg.get_background_runner = prev_pkg
 
 
 def test_tasks_lists_background_tasks_in_repl(capsys, isolated_runner):
