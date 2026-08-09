@@ -25,16 +25,15 @@ class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
         """Build a provider model object from spec and shared llm_config."""
         from ..inc import PraisonAIModel
 
-        base = llm_config[0].get("base_url") if (llm_config and len(llm_config) > 0) else None
-        key = llm_config[0].get("api_key") if (llm_config and len(llm_config) > 0) else None
+        # Delegate model-name precedence to core (single source of truth); core
+        # returns the model string and discards base/key by design, so we derive
+        # them locally and upgrade to a provider object.
+        model = super()._resolve_llm(spec, llm_config)
 
-        if isinstance(spec, str) and spec.strip():
-            model = spec.strip()
-        elif isinstance(spec, dict) and spec.get("model"):
-            model = spec["model"]
-        else:
-            import os
-            model = os.environ.get("MODEL_NAME") or self.DEFAULT_MODEL
+        base = key = None
+        if llm_config and len(llm_config) > 0:
+            base = llm_config[0].get("base_url")
+            key = llm_config[0].get("api_key")
 
         return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
 
