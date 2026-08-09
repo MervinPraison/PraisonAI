@@ -18,23 +18,32 @@ app = typer.Typer(help="Tool management and discovery")
 console = Console()
 
 
+# Upper bound (seconds) on connecting-to + enumerating a single MCP server
+# during discovery, so an unreachable/hung server cannot stall the listing for
+# its full configured timeout. Discovery is read-only, so a short cap is safe.
+_MCP_DISCOVERY_TIMEOUT_S = 8
+
+
 def _discover_mcp_tools() -> Tuple[Dict[str, str], Dict[str, str]]:
     """Discover tools exposed by configured MCP servers, lazily and fail-soft.
 
     Reads the same MCP server config the run path / ``praisonai mcp`` group
     uses, connects to each enabled server through the already-guarded
     ``MCPHandler.create_mcp_from_server`` (executable allow-list + inline-exec
-    blocking), and enumerates its tools. Tool names are server-prefixed so the
-    listing mirrors what an agent would actually call.
+    blocking), and enumerates its tools. Tools are listed under the *same*
+    callable name an agent would dispatch at runtime (the run path registers
+    MCP tools by their bare ``__name__``), with the server surfaced separately
+    as the source — so a name copied from this listing actually resolves.
 
     A server that is unreachable, slow, or misconfigured never blocks the rest
-    of the listing: it is reported as unavailable with a reason.
+    of the listing: each server is discovered under a short timeout and, on
+    failure, reported as unavailable with a reason.
 
     Returns:
-        Tuple of (tools, unavailable) where ``tools`` maps
-        ``<server>_<tool>`` -> one-line description and ``unavailable`` maps
-        ``<server>`` -> reason string. Both are empty when no MCP servers are
-        configured, so the cost is zero for the common case.
+        Tuple of (tools, unavailable) where ``tools`` maps the runtime tool
+        name -> one-line description and ``unavailable`` maps ``<server>`` ->
+        reason string. Both are empty when no MCP servers are configured, so
+        the cost is zero for the common case.
     """
     tools: Dict[str, str] = {}
     unavailable: Dict[str, str] = {}
@@ -71,30 +80,63 @@ def _discover_mcp_tools() -> Tuple[Dict[str, str], Dict[str, str]]:
     for server in servers:
         name = str(server.get("name") or server.get("command") or server.get("url") or "mcp")
         try:
-            mcp = handler.create_mcp_from_server(server)
+            server_tools = _discover_single_server(handler, server)
         except Exception as e:
             unavailable[name] = str(e) or "connection failed"
             continue
 
-        if mcp is None:
+        if server_tools is None:
             unavailable[name] = "unavailable (not reachable or misconfigured)"
             continue
 
-        try:
-            found = False
-            for tool in mcp:
-                tool_name = getattr(tool, "__name__", None)
-                if not tool_name:
-                    continue
-                doc = (getattr(tool, "__doc__", None) or "").strip()
-                tools[f"{name}_{tool_name}"] = doc.split("\n")[0] if doc else f"MCP tool from {name}"
-                found = True
-            if not found:
-                unavailable[name] = "connected but exposed no tools"
-        except Exception as e:
-            unavailable[name] = str(e) or "failed to enumerate tools"
+        if not server_tools:
+            unavailable[name] = "connected but exposed no tools"
+            continue
+
+        for tool_name, doc in server_tools.items():
+            # If two servers expose the same tool name, disambiguate the later
+            # one so both are visible without hiding either. The first keeps the
+            # bare runtime name; ties are surfaced with the server context.
+            display = tool_name if tool_name not in tools else f"{tool_name} ({name})"
+            tools[display] = doc
 
     return tools, unavailable
+
+
+def _discover_single_server(handler, server) -> Optional[Dict[str, str]]:
+    """Connect to one MCP server and enumerate its tools under a hard timeout.
+
+    Runs the (potentially blocking) connect + enumerate in a worker thread so a
+    slow or unreachable server cannot stall the whole listing for its full
+    configured timeout — it is abandoned after :data:`_MCP_DISCOVERY_TIMEOUT_S`.
+
+    Returns a mapping of runtime tool name -> one-line description, ``None`` if
+    the server was unreachable/misconfigured, or ``{}`` if it connected but
+    exposed no tools. Raises on timeout so the caller records a reason.
+    """
+    import concurrent.futures
+
+    def _work() -> Optional[Dict[str, str]]:
+        mcp = handler.create_mcp_from_server(server)
+        if mcp is None:
+            return None
+        found: Dict[str, str] = {}
+        for tool in mcp:
+            tool_name = getattr(tool, "__name__", None)
+            if not tool_name:
+                continue
+            doc = (getattr(tool, "__doc__", None) or "").strip()
+            found[tool_name] = doc.split("\n")[0] if doc else "MCP tool"
+        return found
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_work)
+        try:
+            return future.result(timeout=_MCP_DISCOVERY_TIMEOUT_S)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"timed out after {_MCP_DISCOVERY_TIMEOUT_S}s"
+            )
 
 
 @app.command("list")

@@ -48,8 +48,9 @@ def test_discover_mcp_tools_zero_cost_without_config():
     assert unavailable == {}
 
 
-def test_discover_mcp_tools_groups_and_reports_unavailable():
-    """Reachable servers list prefixed tools; unreachable ones get a reason."""
+def test_discover_mcp_tools_uses_runtime_names_and_reports_unavailable():
+    """Reachable servers list tools under their runtime callable names (matching
+    what the run path dispatches); unreachable ones get a reason."""
     import praisonai_code.cli.configuration.resolver as resolver
 
     servers = [
@@ -75,30 +76,89 @@ def test_discover_mcp_tools_groups_and_reports_unavailable():
          ):
         tools, unavailable = tools_cmd._discover_mcp_tools()
 
+    # Names match the bare runtime __name__ the agent actually calls, NOT a
+    # fabricated <server>_<tool> prefix.
     assert tools == {
-        "files_read": "Read a file",
-        "files_write": "Write a file",
+        "read": "Read a file",
+        "write": "Write a file",
     }
     assert "broken" in unavailable
 
 
+def test_discover_mcp_tools_disambiguates_duplicate_names():
+    """Two servers exposing the same tool name both stay visible."""
+    import praisonai_code.cli.configuration.resolver as resolver
+
+    servers = [
+        {"name": "a", "command": "npx"},
+        {"name": "b", "command": "npx"},
+    ]
+
+    def fake_create(self, server, timeout=30):
+        return _FakeMCP([_make_tool("read", f"Read via {server['name']}")])
+
+    with mock.patch.object(resolver, "resolve_config", return_value=object()), \
+         mock.patch(
+             "praisonai_code.cli.commands.run._collect_mcp_servers_from_config",
+             return_value=servers,
+         ), \
+         mock.patch(
+             "praisonai_code.cli.features.mcp.MCPHandler.create_mcp_from_server",
+             new=fake_create,
+         ):
+        tools, unavailable = tools_cmd._discover_mcp_tools()
+
+    assert "read" in tools
+    assert "read (b)" in tools
+    assert unavailable == {}
+
+
+def test_discover_mcp_tools_times_out_slow_server():
+    """A hung server is abandoned under the discovery timeout, not blocking."""
+    import praisonai_code.cli.configuration.resolver as resolver
+
+    servers = [{"name": "slow", "command": "npx"}]
+
+    def fake_create(self, server, timeout=30):
+        import time
+
+        time.sleep(5)
+        return _FakeMCP([_make_tool("read", "Read a file")])
+
+    with mock.patch.object(tools_cmd, "_MCP_DISCOVERY_TIMEOUT_S", 0.1), \
+         mock.patch.object(resolver, "resolve_config", return_value=object()), \
+         mock.patch(
+             "praisonai_code.cli.commands.run._collect_mcp_servers_from_config",
+             return_value=servers,
+         ), \
+         mock.patch(
+             "praisonai_code.cli.features.mcp.MCPHandler.create_mcp_from_server",
+             new=fake_create,
+         ):
+        tools, unavailable = tools_cmd._discover_mcp_tools()
+
+    assert tools == {}
+    assert "slow" in unavailable
+    assert "timed out" in unavailable["slow"]
+
+
 def test_list_default_includes_mcp_bucket_and_summary():
-    fake = ({"files_read": "Read a file"}, {})
+    fake = ({"read": "Read a file"}, {})
     with mock.patch.object(tools_cmd, "_discover_mcp_tools", return_value=fake):
         result = runner.invoke(tools_cmd.app, ["list"])
 
     assert result.exit_code == 0, result.output
-    assert "files_read" in result.output
+    assert "read" in result.output
     assert "MCP: 1" in result.output
 
 
 def test_list_source_mcp_shows_only_mcp_and_unavailable():
-    fake = ({"files_read": "Read a file"}, {"broken": "timeout"})
+    fake = ({"read": "Read a file"}, {"broken": "timeout"})
     with mock.patch.object(tools_cmd, "_discover_mcp_tools", return_value=fake):
         result = runner.invoke(tools_cmd.app, ["list", "--source", "mcp"])
 
     assert result.exit_code == 0, result.output
-    assert "files_read" in result.output
+    assert "read" in result.output
     assert "Unavailable MCP servers" in result.output
     assert "broken" in result.output
 
