@@ -1319,47 +1319,89 @@ Your Goal: {self.goal}"""
         existing log line (Issue #3820).
         """
         try:
-            from ..hooks.registry import get_default_registry
             from ..hooks.types import HookEvent
 
-            registry = get_default_registry()
-            if registry.has_hooks(HookEvent.MODEL_FALLBACK):
-                from ..hooks.events import ModelFallbackInput
-                from ..hooks.runner import HookRunner
-
-                event_input = ModelFallbackInput(
-                    session_id=getattr(self, '_session_id', 'default'),
-                    cwd=os.getcwd(),
-                    event_name=HookEvent.MODEL_FALLBACK.value,
-                    timestamp=str(time.time()),
-                    agent_name=getattr(self, 'name', None),
-                    from_model=str(from_model),
-                    to_model=str(to_model),
-                    reason_category=str(reason_category or ""),
-                    fallback_index=fallback_index,
+            runner = getattr(self, '_hook_runner', None)
+            if runner is not None and runner.registry.has_hooks(HookEvent.MODEL_FALLBACK):
+                runner.execute_sync(
+                    HookEvent.MODEL_FALLBACK,
+                    self._build_model_fallback_input(
+                        from_model, to_model, reason_category, fallback_index, HookEvent
+                    ),
                 )
-                HookRunner(registry).execute_sync(HookEvent.MODEL_FALLBACK, event_input)
         except Exception:  # observability must never break the fallback path
             logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
 
-        if stream_callback is not None:
-            try:
-                from ..streaming.events import StreamEvent, StreamEventType
+        self._emit_model_fallback_stream(
+            from_model, to_model, reason_category, fallback_index, stream_callback
+        )
 
-                stream_callback(StreamEvent(
-                    type=StreamEventType.MODEL_FALLBACK,
-                    metadata={
-                        "from_model": str(from_model),
-                        "to_model": str(to_model),
-                        "reason_category": str(reason_category or ""),
-                        "fallback_index": fallback_index,
-                    },
-                    agent_id=getattr(self, 'name', None),
-                    session_id=getattr(self, '_session_id', None),
-                    run_id=getattr(self, '_current_run_id', None),
-                ))
-            except Exception:
-                logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
+    async def _aemit_model_fallback(self, from_model, to_model, reason_category, fallback_index,
+                                    stream_callback=None):
+        """Async variant of :meth:`_emit_model_fallback` for the async recovery path.
+
+        Awaits the hook runner in the active event loop (``execute_sync`` would
+        raise inside a running loop, silently dropping ``MODEL_FALLBACK`` hooks).
+        Same guarantees: cheap no-op when nothing is subscribed and never raises
+        into the fallback path.
+        """
+        try:
+            from ..hooks.types import HookEvent
+
+            runner = getattr(self, '_hook_runner', None)
+            if runner is not None and runner.registry.has_hooks(HookEvent.MODEL_FALLBACK):
+                await runner.execute(
+                    HookEvent.MODEL_FALLBACK,
+                    self._build_model_fallback_input(
+                        from_model, to_model, reason_category, fallback_index, HookEvent
+                    ),
+                )
+        except Exception:  # observability must never break the fallback path
+            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+
+        self._emit_model_fallback_stream(
+            from_model, to_model, reason_category, fallback_index, stream_callback
+        )
+
+    def _build_model_fallback_input(self, from_model, to_model, reason_category,
+                                    fallback_index, HookEvent):
+        """Build the typed ``ModelFallbackInput`` (only the failure class is exposed)."""
+        from ..hooks.events import ModelFallbackInput
+
+        return ModelFallbackInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.MODEL_FALLBACK.value,
+            timestamp=str(time.time()),
+            agent_name=getattr(self, 'name', None),
+            from_model=str(from_model),
+            to_model=str(to_model),
+            reason_category=str(reason_category or ""),
+            fallback_index=fallback_index,
+        )
+
+    def _emit_model_fallback_stream(self, from_model, to_model, reason_category,
+                                    fallback_index, stream_callback):
+        """Emit the ``StreamEventType.MODEL_FALLBACK`` event when a callback is active."""
+        if stream_callback is None:
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+
+            stream_callback(StreamEvent(
+                type=StreamEventType.MODEL_FALLBACK,
+                metadata={
+                    "from_model": str(from_model),
+                    "to_model": str(to_model),
+                    "reason_category": str(reason_category or ""),
+                    "fallback_index": fallback_index,
+                },
+                agent_id=getattr(self, 'name', None),
+                session_id=getattr(self, '_session_id', None),
+                run_id=getattr(self, '_current_run_id', None),
+            ))
+        except Exception:
+            logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
 
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
@@ -1685,12 +1727,19 @@ Your Goal: {self.goal}"""
                     current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                     logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
 
-                    # Surface the otherwise-silent switch as an observable event
+                    # Surface the otherwise-silent switch as an observable event.
+                    # Forward the active stream callback so streaming consumers
+                    # receive the MODEL_FALLBACK event when this follows a
+                    # streaming request.
+                    _sync_stream_callback = (
+                        self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+                    )
                     self._emit_model_fallback(
                         from_model=current_model,
                         to_model=next_model,
                         reason_category=classification.error_category,
                         fallback_index=_fallback_index,
+                        stream_callback=_sync_stream_callback,
                     )
 
                     # Apply backoff if suggested
@@ -1856,13 +1905,17 @@ Your Goal: {self.goal}"""
                 current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
                 logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
 
-                # Surface the otherwise-silent switch as an observable event
-                self._emit_model_fallback(
+                # Surface the otherwise-silent switch as an observable event.
+                # Await the async emitter so MODEL_FALLBACK hooks run in the
+                # active event loop, and honour emit_events so internal calls
+                # (emit_events=False) don't leak a stream event into the public
+                # stream.
+                await self._aemit_model_fallback(
                     from_model=current_model,
                     to_model=next_model,
                     reason_category=classification.error_category,
                     fallback_index=_fallback_index,
-                    stream_callback=stream_callback,
+                    stream_callback=stream_callback if emit_events else None,
                 )
 
                 # Apply backoff if suggested
