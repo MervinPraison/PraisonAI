@@ -109,8 +109,11 @@ class TenkiCompute:
             "cpu_cores": config.cpu,
             "memory_mb": config.memory_mb,
             "env": config.env or None,
-            # Outbound is on unless the caller restricts networking.
-            "allow_outbound": (config.networking or {}).get("type") != "restricted",
+            # Tenki's outbound control is a single boolean and can't express
+            # "limited" per-host allowlists, so only "unrestricted" gets full
+            # outbound; any restrictive policy ("limited", which the managed CLI
+            # also uses for --no-networking) disables it.
+            "allow_outbound": (config.networking or {}).get("type", "unrestricted") == "unrestricted",
         }
         # metadata["tenki_image"] wins; otherwise honour an explicit
         # ComputeConfig.image. Its default is a Docker-style ref, but Tenki's
@@ -149,9 +152,11 @@ class TenkiCompute:
             except Exception:
                 # A half-provisioned sandbox is useless and still bills — tear it
                 # down and surface the failure instead of returning RUNNING.
-                self._sandboxes.pop(instance_id, None)
+                # Terminate BEFORE dropping the handle so a failed terminate keeps
+                # it tracked (for list_instances / retry) rather than leaking it.
                 try:
                     sandbox.terminate()
+                    self._sandboxes.pop(instance_id, None)
                 except Exception as cleanup_err:
                     logger.warning("[tenki_compute] cleanup after failed install: %s", cleanup_err)
                 raise
@@ -189,14 +194,17 @@ class TenkiCompute:
         Tenki can terminate a sandbox server-side (e.g. the configured idle
         timeout); without a refresh, get_status/list_instances would keep
         reporting RUNNING for a dead sandbox while execute() hits it and fails.
-        Mirrors the E2B provider's is_running() check. On a transient fetch
-        failure, report not-running rather than a false RUNNING.
+
+        A *successful* refresh returning a non-RUNNING state means it really is
+        gone. A refresh *exception* (transient outage / rate limit / auth blip)
+        is "unknown", not "terminated" — assume still running so we don't hide a
+        sandbox that may be alive and still billing.
         """
         try:
             info["sandbox"].refresh()
-            return info["sandbox"].state == "RUNNING"
         except Exception:
-            return False
+            return True
+        return info["sandbox"].state == "RUNNING"
 
     async def get_status(self, instance_id: str) -> Any:
         import asyncio
@@ -341,7 +349,8 @@ class TenkiCompute:
                 "sudo apt-get update -y && sudo apt-get install -y python3-pip; fi && "
                 f"pip3 install -q --break-system-packages {specs}"
             )
-            logger.info("[tenki_compute] installing pip: %s", pip_pkgs)
+            # Log only the count — pip specs can carry private-index URLs/tokens.
+            logger.info("[tenki_compute] installing %d pip package(s)", len(pip_pkgs))
             result = sandbox.exec("bash", "-lc", cmd, timeout=300)
             if result.exit_code != 0:
                 raise RuntimeError(
@@ -356,7 +365,7 @@ class TenkiCompute:
                 "sudo apt-get update -y && sudo apt-get install -y npm; fi && "
                 f"npm install -g {specs}"
             )
-            logger.info("[tenki_compute] installing npm: %s", npm_pkgs)
+            logger.info("[tenki_compute] installing %d npm package(s)", len(npm_pkgs))
             result = sandbox.exec("bash", "-lc", cmd, timeout=300)
             if result.exit_code != 0:
                 raise RuntimeError(
