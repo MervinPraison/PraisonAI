@@ -139,12 +139,15 @@ class TestTenkiComputeUnit:
     def test_is_available_without_key(self):
         from praisonai.integrations.compute.tenki import TenkiCompute
         old = os.environ.pop("TENKI_API_KEY", None)
+        old_tok = os.environ.pop("TENKI_AUTH_TOKEN", None)
         try:
             compute = TenkiCompute(api_key="")
             assert compute.is_available is False
         finally:
             if old:
                 os.environ["TENKI_API_KEY"] = old
+            if old_tok:
+                os.environ["TENKI_AUTH_TOKEN"] = old_tok
 
     def test_protocol_methods_exist(self):
         from praisonai.integrations.compute.tenki import TenkiCompute

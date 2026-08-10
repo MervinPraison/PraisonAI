@@ -1086,6 +1086,11 @@ class LocalManagedAgent:
             env=kwargs.get("env", self._cfg.get("env", {})),
             packages=kwargs.get("packages", self._cfg.get("packages")),
             working_dir=kwargs.get("working_dir", self._cfg.get("working_dir", "/workspace")),
+            # Forward the networking policy and provider metadata so providers
+            # that honour them (e.g. Tenki's allow_outbound / tenki_image) see
+            # the caller's request instead of always getting the defaults.
+            networking=kwargs.get("networking", self._cfg.get("networking", {"type": "unrestricted"})),
+            metadata=kwargs.get("metadata", self._cfg.get("metadata", {})),
             auto_shutdown=kwargs.get("auto_shutdown", True),
             idle_timeout_s=kwargs.get("idle_timeout_s", 300),
         )

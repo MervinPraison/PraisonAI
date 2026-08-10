@@ -4,7 +4,7 @@ Tenki Compute Provider — cloud sandbox-based compute for managed agents.
 Uses the Tenki Cloud SDK to run tools in disposable Linux microVMs.
 
 Requires: ``pip install tenki``
-Environment: ``TENKI_API_KEY`` (optionally ``TENKI_WORKSPACE_ID``)
+Environment: ``TENKI_API_KEY`` or ``TENKI_AUTH_TOKEN`` (optionally ``TENKI_WORKSPACE_ID``)
 """
 
 import base64
@@ -45,7 +45,13 @@ class TenkiCompute:
         api_key: str = "",
         workspace_id: str = "",
     ) -> None:
-        self._api_key = api_key or os.environ.get("TENKI_API_KEY", "")
+        # Match the SDK's own precedence: explicit key, then TENKI_AUTH_TOKEN,
+        # then TENKI_API_KEY — so is_available agrees with what Client() resolves.
+        self._api_key = (
+            api_key
+            or os.environ.get("TENKI_AUTH_TOKEN", "")
+            or os.environ.get("TENKI_API_KEY", "")
+        )
         self._workspace_id = workspace_id or os.environ.get("TENKI_WORKSPACE_ID", "")
         self._client = None
         self._sandboxes: Dict[str, Dict[str, Any]] = {}
