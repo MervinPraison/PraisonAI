@@ -64,8 +64,9 @@ class TestNovitaSandbox:
     @pytest.mark.asyncio
     async def test_start_not_available(self):
         sandbox = NovitaSandbox()
-        with pytest.raises(RuntimeError, match="Novita is not available"):
-            await sandbox.start()
+        with patch("praisonai_sandbox.novita.NovitaSandbox.is_available", False):
+            with pytest.raises(RuntimeError, match="Novita is not available"):
+                await sandbox.start()
 
     @pytest.mark.asyncio
     async def test_execute_python(self):
