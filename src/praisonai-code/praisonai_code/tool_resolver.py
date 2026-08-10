@@ -49,6 +49,38 @@ if TYPE_CHECKING:  # imported only for type annotations to avoid a runtime cycle
 logger = logging.getLogger(__name__)
 
 
+def extract_functions_from_loaded_module(
+    module: Any,
+    *,
+    functions_only: bool = False,
+    skip_private: bool = False,
+) -> Dict[str, Callable]:
+    """Canonical public-callable extraction walk for an already-loaded module.
+
+    Single owner of the "walk a module and collect its callables into a
+    name->callable registry" rule, shared by ``ToolResolver`` and by callers
+    that have already loaded the module through the safe loader.
+
+    Args:
+        module: A loaded module object to walk.
+        functions_only: If True, only ``inspect.isfunction`` members are
+            accepted (excludes callable class instances). Defaults to False to
+            preserve the broader ``isfunction or callable`` behaviour.
+        skip_private: If True, members whose name starts with ``_`` are skipped.
+    """
+    def _accept(name: str, obj: object) -> bool:
+        if skip_private and name.startswith('_'):
+            return False
+        if functions_only:
+            return inspect.isfunction(obj)
+        return inspect.isfunction(obj) or callable(obj)
+
+    return {
+        name: obj for name, obj in inspect.getmembers(module)
+        if _accept(name, obj)
+    }
+
+
 class _ResolveResult:
     """Internal result wrapper to distinguish cacheable vs non-cacheable failures."""
     __slots__ = ("tool", "cacheable")
@@ -1171,17 +1203,9 @@ class ToolResolver:
         if module is None:
             return {}
 
-        def _accept(name: str, obj: object) -> bool:
-            if skip_private and name.startswith('_'):
-                return False
-            if functions_only:
-                return inspect.isfunction(obj)
-            return inspect.isfunction(obj) or callable(obj)
-
-        return {
-            name: obj for name, obj in inspect.getmembers(module)
-            if _accept(name, obj)
-        }
+        return extract_functions_from_loaded_module(
+            module, functions_only=functions_only, skip_private=skip_private
+        )
 
 
     def load_classes_from_module(self, module_path: str) -> Dict[str, Callable]:
