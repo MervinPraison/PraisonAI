@@ -198,6 +198,13 @@ from .config import (
     ApiConfig,
     ChannelRouteConfig,
     MultiChannelGatewayConfig,
+    # Config version stamp + doctor-driven migration (Issue #3841)
+    GATEWAY_CONFIG_VERSION,
+    ConfigVersionError,
+    LegacyConfigRule,
+    GATEWAY_CONFIG_RULES,
+    is_config_current,
+    migrate_config_with_doctor,
     # Push config
     PushConfig,
     RedisConfig,
@@ -444,6 +451,13 @@ __all__ = [
     "ApiConfig",
     "ChannelRouteConfig",
     "MultiChannelGatewayConfig",
+    # Config version stamp + doctor-driven migration (Issue #3841)
+    "GATEWAY_CONFIG_VERSION",
+    "ConfigVersionError",
+    "LegacyConfigRule",
+    "GATEWAY_CONFIG_RULES",
+    "is_config_current",
+    "migrate_config_with_doctor",
     "PushConfig",
     "RedisConfig",
     "PresenceConfig",

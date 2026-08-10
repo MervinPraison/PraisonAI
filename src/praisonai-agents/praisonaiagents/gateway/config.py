@@ -5,7 +5,187 @@ Provides configuration dataclasses for gateway and session settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Set, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    runtime_checkable,
+)
+
+
+# ---------------------------------------------------------------------------
+# Canonical config version + doctor-driven migration (Issue #3841)
+# ---------------------------------------------------------------------------
+#
+# The gateway config carries a ``config_version`` stamp so the runtime, the
+# operator, and ``gateway doctor --fix`` can all tell whether a config predates
+# a breaking change. Migration is expressed as an ordered list of *declarative
+# rules* (a detect predicate + a fix mutation as one unit) that ``doctor --fix``
+# applies once to move an out-of-date config forward, then stamps the current
+# version. This keeps migration a one-time repair rather than a permanent
+# load-time heuristic, and gives the canonical config shape a single owner.
+GATEWAY_CONFIG_VERSION = 1
+
+
+class ConfigVersionError(ValueError):
+    """Raised when a config carries a ``config_version`` this build can't handle.
+
+    Two cases, both operator-actionable rather than silently corrupting data:
+      * the stamp is a version *newer* than :data:`GATEWAY_CONFIG_VERSION` — an
+        older binary must not downgrade / migrate a config written by a newer
+        one (that would drop keys the newer schema added), so migration refuses;
+      * the stamp is present but not a non-boolean integer — a malformed stamp
+        (``true``, ``"1"``, ``1.0``) is a mistake, not "current", so it is
+        rejected instead of being treated as version 1 via ``True == 1``.
+    """
+
+
+@dataclass
+class LegacyConfigRule:
+    """A single declarative config-migration rule.
+
+    ``detect`` returns True when the (old) shape this rule fixes is present in
+    the raw config mapping; ``fix`` returns the mutated mapping moving it toward
+    the current version; ``reason`` is an operator-facing description rendered by
+    ``gateway doctor --fix``. Rules are pure functions of the raw mapping so the
+    same set can be reasoned about, tested, and applied identically everywhere.
+    """
+
+    detect: Callable[[Dict[str, Any]], bool]
+    fix: Callable[[Dict[str, Any]], Dict[str, Any]]
+    reason: str
+
+
+def _detect_allowed_users_csv(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str)
+        for ch in channels.values()
+    )
+
+
+def _fix_allowed_users_csv(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str):
+            value = ch["allowed_users"]
+            ch["allowed_users"] = (
+                [u.strip() for u in value.split(",") if u.strip()] if value else []
+            )
+    return raw
+
+
+def _detect_missing_group_policy(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and "group_policy" not in ch
+        for ch in channels.values()
+    )
+
+
+def _fix_missing_group_policy(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and "group_policy" not in ch:
+            ch["group_policy"] = "mention_only"
+    return raw
+
+
+# Ordered set of migration rules. Each moves an older config shape toward the
+# current canonical form; ``migrate_config_with_doctor`` applies them once and
+# stamps ``config_version``. New breaking renames/retirements append a rule here
+# and bump ``GATEWAY_CONFIG_VERSION`` — the canonical shape has one owner.
+GATEWAY_CONFIG_RULES: "List[LegacyConfigRule]" = [
+    LegacyConfigRule(
+        detect=_detect_allowed_users_csv,
+        fix=_fix_allowed_users_csv,
+        reason="migrating allowed_users (string) -> list [rule: allowed_users_csv_to_list]",
+    ),
+    LegacyConfigRule(
+        detect=_detect_missing_group_policy,
+        fix=_fix_missing_group_policy,
+        reason="setting group_policy secure default 'mention_only' [rule: group_policy_default]",
+    ),
+]
+
+
+def _parse_config_version(raw: Mapping[str, Any]) -> Optional[int]:
+    """Return the config's ``config_version`` as an int, or None if unstamped.
+
+    Rejects a malformed stamp so ``config_version: true`` cannot masquerade as
+    version 1 (``True == 1``) and a string/float stamp cannot slip through.
+    """
+    if "config_version" not in raw:
+        return None
+    value = raw["config_version"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigVersionError(
+            f"Invalid gateway config_version {value!r}: expected an integer "
+            f"(current is {GATEWAY_CONFIG_VERSION}). Fix or remove the stamp."
+        )
+    return value
+
+
+def is_config_current(raw: Mapping[str, Any]) -> bool:
+    """Return whether ``raw`` already carries the current ``config_version``.
+
+    A malformed stamp (non-integer / boolean) is not "current" — it raises
+    :class:`ConfigVersionError` so operators fix it rather than having it
+    silently coerced (``True == 1``).
+    """
+    return _parse_config_version(raw) == GATEWAY_CONFIG_VERSION
+
+
+def migrate_config_with_doctor(
+    raw: Dict[str, Any],
+) -> "Tuple[Dict[str, Any], List[str]]":
+    """Apply the declarative migration rules once and stamp ``config_version``.
+
+    Returns ``(migrated, applied_reasons)``. The input is copied shallowly (and
+    per-channel dicts copied) so the caller's mapping is not mutated in place.
+    Only rules whose ``detect`` fires contribute a reason, so a config already
+    at the current shape migrates cleanly with an empty reason list while still
+    receiving the version stamp. This is the single migration executor behind
+    ``gateway doctor --fix``.
+
+    Raises :class:`ConfigVersionError` when the config was written by a *newer*
+    build (its stamp exceeds :data:`GATEWAY_CONFIG_VERSION`) or the stamp is
+    malformed — an older binary must never downgrade a newer config or drop
+    keys it does not understand.
+    """
+    source_version = _parse_config_version(raw)
+    if source_version is not None and source_version > GATEWAY_CONFIG_VERSION:
+        raise ConfigVersionError(
+            f"gateway config_version {source_version} is newer than this "
+            f"build supports ({GATEWAY_CONFIG_VERSION}). Upgrade praisonai / "
+            "praisonai-bot to a version that understands this config instead "
+            "of migrating it with an older one."
+        )
+
+    migrated: Dict[str, Any] = dict(raw)
+    channels = migrated.get("channels")
+    if isinstance(channels, dict):
+        migrated["channels"] = {
+            name: (dict(ch) if isinstance(ch, dict) else ch)
+            for name, ch in channels.items()
+        }
+
+    applied: List[str] = []
+    for rule in GATEWAY_CONFIG_RULES:
+        if rule.detect(migrated):
+            migrated = rule.fix(migrated)
+            applied.append(rule.reason)
+
+    migrated["config_version"] = GATEWAY_CONFIG_VERSION
+    return migrated, applied
 
 
 # ---------------------------------------------------------------------------
