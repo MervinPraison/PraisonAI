@@ -1547,22 +1547,10 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns True if the result was multimodal (caller should skip its
         default text-only tool message), False otherwise (no regression).
         """
-        try:
-            from ..agent.tool_execution import build_tool_result_message_pair
-            pair = build_tool_result_message_pair(
-                tool_result, tool_call_id, function_name=function_name
-            )
-            if pair:
-                tool_message, followup_message = pair
-                messages.append(tool_message)
-                if deferred_followups is not None:
-                    deferred_followups.append(followup_message)
-                else:
-                    messages.append(followup_message)
-                return True
-        except Exception as e:
-            logging.debug(f"Multimodal tool result formatting skipped: {e}")
-        return False
+        from ..agent.tool_execution import try_append_multimodal_tool_result
+        return try_append_multimodal_tool_result(
+            messages, tool_result, tool_call_id, function_name, deferred_followups
+        )
 
     def _get_tool_names_for_prompt(self, formatted_tools: Optional[List]) -> str:
         """Extract tool names from formatted tools for prompts."""

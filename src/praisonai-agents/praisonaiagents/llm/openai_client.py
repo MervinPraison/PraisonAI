@@ -51,36 +51,9 @@ def _get_openai_classes():
     return openai.OpenAI, openai.AsyncOpenAI
 
 
-def _try_append_multimodal_tool_result(
-    messages, tool_result, tool_call_id, function_name=None, deferred_followups=None
-) -> bool:
-    """Append a multimodal (image/file) tool result if present.
-
-    The ``tool`` reply is appended in-place so all tool replies for the
-    assistant turn stay consecutive (provider contract). The media-bearing
-    ``user`` follow-up is collected into ``deferred_followups`` for the caller
-    to flush after the whole batch; if no collector is supplied it is appended
-    directly. External tool text parts are fenced via ``function_name``.
-
-    Returns True if the result was multimodal (caller should skip its default
-    text-only tool message); False otherwise for the unchanged path.
-    """
-    try:
-        from ..agent.tool_execution import build_tool_result_message_pair
-        pair = build_tool_result_message_pair(
-            tool_result, tool_call_id, function_name=function_name
-        )
-        if pair:
-            tool_message, followup_message = pair
-            messages.append(tool_message)
-            if deferred_followups is not None:
-                deferred_followups.append(followup_message)
-            else:
-                messages.append(followup_message)
-            return True
-    except Exception as e:
-        logging.debug(f"Multimodal tool result formatting skipped: {e}")
-    return False
+from ..agent.tool_execution import (
+    try_append_multimodal_tool_result as _try_append_multimodal_tool_result,
+)
 
 def _get_rich_console():
     """Lazy import rich Console."""
