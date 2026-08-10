@@ -512,3 +512,49 @@ class TestConfigVersionMigration:
             assert callable(rule.detect)
             assert callable(rule.fix)
             assert isinstance(rule.reason, str) and rule.reason
+
+    def test_newer_version_is_rejected_not_downgraded(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            ConfigVersionError,
+            migrate_config_with_doctor,
+        )
+
+        raw = {"config_version": GATEWAY_CONFIG_VERSION + 1, "agents": {}}
+        with pytest.raises(ConfigVersionError):
+            migrate_config_with_doctor(raw)
+        # The input must not have been downgraded/mutated.
+        assert raw["config_version"] == GATEWAY_CONFIG_VERSION + 1
+
+    def test_boolean_config_version_is_rejected(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigVersionError,
+            is_config_current,
+            migrate_config_with_doctor,
+        )
+
+        # True == 1 must NOT be treated as version 1.
+        with pytest.raises(ConfigVersionError):
+            is_config_current({"config_version": True})
+        with pytest.raises(ConfigVersionError):
+            migrate_config_with_doctor({"config_version": True, "agents": {}})
+
+    def test_non_integer_config_version_is_rejected(self):
+        import pytest
+        from praisonaiagents.gateway.config import (
+            ConfigVersionError,
+            migrate_config_with_doctor,
+        )
+
+        for bad in ("1", 1.0, [1]):
+            with pytest.raises(ConfigVersionError):
+                migrate_config_with_doctor({"config_version": bad, "agents": {}})
+
+    def test_config_version_error_exported(self):
+        from praisonaiagents.gateway import ConfigVersionError as Exported
+        from praisonaiagents.gateway.config import ConfigVersionError
+
+        assert Exported is ConfigVersionError
+        assert issubclass(ConfigVersionError, ValueError)

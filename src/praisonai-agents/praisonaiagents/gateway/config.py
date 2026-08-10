@@ -33,6 +33,19 @@ from typing import (
 GATEWAY_CONFIG_VERSION = 1
 
 
+class ConfigVersionError(ValueError):
+    """Raised when a config carries a ``config_version`` this build can't handle.
+
+    Two cases, both operator-actionable rather than silently corrupting data:
+      * the stamp is a version *newer* than :data:`GATEWAY_CONFIG_VERSION` — an
+        older binary must not downgrade / migrate a config written by a newer
+        one (that would drop keys the newer schema added), so migration refuses;
+      * the stamp is present but not a non-boolean integer — a malformed stamp
+        (``true``, ``"1"``, ``1.0``) is a mistake, not "current", so it is
+        rejected instead of being treated as version 1 via ``True == 1``.
+    """
+
+
 @dataclass
 class LegacyConfigRule:
     """A single declarative config-migration rule.
@@ -104,9 +117,31 @@ GATEWAY_CONFIG_RULES: "List[LegacyConfigRule]" = [
 ]
 
 
+def _parse_config_version(raw: Mapping[str, Any]) -> Optional[int]:
+    """Return the config's ``config_version`` as an int, or None if unstamped.
+
+    Rejects a malformed stamp so ``config_version: true`` cannot masquerade as
+    version 1 (``True == 1``) and a string/float stamp cannot slip through.
+    """
+    if "config_version" not in raw:
+        return None
+    value = raw["config_version"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigVersionError(
+            f"Invalid gateway config_version {value!r}: expected an integer "
+            f"(current is {GATEWAY_CONFIG_VERSION}). Fix or remove the stamp."
+        )
+    return value
+
+
 def is_config_current(raw: Mapping[str, Any]) -> bool:
-    """Return whether ``raw`` already carries the current ``config_version``."""
-    return raw.get("config_version") == GATEWAY_CONFIG_VERSION
+    """Return whether ``raw`` already carries the current ``config_version``.
+
+    A malformed stamp (non-integer / boolean) is not "current" — it raises
+    :class:`ConfigVersionError` so operators fix it rather than having it
+    silently coerced (``True == 1``).
+    """
+    return _parse_config_version(raw) == GATEWAY_CONFIG_VERSION
 
 
 def migrate_config_with_doctor(
@@ -120,7 +155,21 @@ def migrate_config_with_doctor(
     at the current shape migrates cleanly with an empty reason list while still
     receiving the version stamp. This is the single migration executor behind
     ``gateway doctor --fix``.
+
+    Raises :class:`ConfigVersionError` when the config was written by a *newer*
+    build (its stamp exceeds :data:`GATEWAY_CONFIG_VERSION`) or the stamp is
+    malformed — an older binary must never downgrade a newer config or drop
+    keys it does not understand.
     """
+    source_version = _parse_config_version(raw)
+    if source_version is not None and source_version > GATEWAY_CONFIG_VERSION:
+        raise ConfigVersionError(
+            f"gateway config_version {source_version} is newer than this "
+            f"build supports ({GATEWAY_CONFIG_VERSION}). Upgrade praisonai / "
+            "praisonai-bot to a version that understands this config instead "
+            "of migrating it with an older one."
+        )
+
     migrated: Dict[str, Any] = dict(raw)
     channels = migrated.get("channels")
     if isinstance(channels, dict):

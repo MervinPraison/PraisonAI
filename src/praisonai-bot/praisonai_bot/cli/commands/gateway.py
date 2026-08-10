@@ -538,7 +538,13 @@ def _check_config_version(config_path: str):
     declarative rule fires or the ``config_version`` stamp is missing/stale.
     Returns ``(reasons, from_version, to_version)`` when a migration would run,
     else ``None`` — so ``doctor`` can surface "your config is out of date, run
-    --fix" without writing anything.
+    --fix" without writing anything. A single ``str`` error is returned when the
+    config was written by a newer build or carries a malformed stamp, so doctor
+    can warn without attempting a (downgrading) migration.
+
+    Older core installs that predate the migration API (praisonaiagents without
+    ``migrate_config_with_doctor``) make this a graceful no-op rather than
+    crashing ``doctor`` with an ``ImportError``.
     """
     import os
     import yaml
@@ -553,14 +559,22 @@ def _check_config_version(config_path: str):
     if not isinstance(cfg, dict):
         return None
 
-    from praisonaiagents.gateway.config import (
-        GATEWAY_CONFIG_VERSION,
-        is_config_current,
-        migrate_config_with_doctor,
-    )
+    try:
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            ConfigVersionError,
+            is_config_current,
+            migrate_config_with_doctor,
+        )
+    except ImportError:
+        # Core too old to know about config versioning; nothing to migrate.
+        return None
 
-    current = is_config_current(cfg)
-    _, reasons = migrate_config_with_doctor(cfg)
+    try:
+        current = is_config_current(cfg)
+        _, reasons = migrate_config_with_doctor(cfg)
+    except ConfigVersionError as exc:
+        return str(exc)
     if current and not reasons:
         return None
     from_version = cfg.get("config_version", "unstamped")
@@ -571,10 +585,17 @@ def _repair_config_version(config_path: str):
     """Migrate gateway.yaml forward once and stamp ``config_version`` (#3841).
 
     Applies the canonical declarative migration rules via the core executor and
-    rewrites the YAML in place, preserving key order. Returns the list of
-    operator-facing reasons for the applied rules (may be empty when only the
-    version stamp needed writing).
+    rewrites the YAML, preserving key order. Returns the list of operator-facing
+    reasons for the applied rules (may be empty when only the version stamp
+    needed writing).
+
+    The rewrite is atomic: the migrated YAML is serialised to a temporary file
+    in the same directory and ``os.replace``'d over the live ``gateway.yaml``, so
+    an interruption, full disk, or I/O error during ``doctor --fix`` can never
+    leave the config truncated or half-written.
     """
+    import os
+    import tempfile
     import yaml
 
     with open(config_path) as fh:
@@ -584,8 +605,24 @@ def _repair_config_version(config_path: str):
 
     migrated, reasons = migrate_config_with_doctor(cfg)
 
-    with open(config_path, "w") as fh:
-        yaml.safe_dump(migrated, fh, default_flow_style=False, sort_keys=False)
+    directory = os.path.dirname(os.path.abspath(config_path))
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".gateway.", suffix=".yaml.tmp", dir=directory
+    )
+    try:
+        with os.fdopen(fd, "w") as fh:
+            yaml.safe_dump(
+                migrated, fh, default_flow_style=False, sort_keys=False
+            )
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     return reasons
 
@@ -857,7 +894,12 @@ def gateway_doctor(
     fix: bool = typer.Option(
         False,
         "--fix",
-        help="Repair safe findings (mint a strong gateway auth token when weak/missing), then re-validate",
+        help=(
+            "Repair safe findings: mint a strong gateway auth token when "
+            "weak/missing, and migrate an out-of-date gateway.yaml forward "
+            "(applies safe config migrations and stamps config_version), "
+            "then re-validate"
+        ),
     ),
     dry_run: bool = typer.Option(
         False,
@@ -875,10 +917,14 @@ def gateway_doctor(
     ``BotSessionManager.chat`` (including ``allow_shell`` setup). It does
     **not** exercise Slack Bolt/socket handlers or @mention routing.
 
-    ``--fix`` performs the safe, idempotent repair its own retry hints promise:
+    ``--fix`` performs the safe, idempotent repairs its own retry hints promise:
     when ``gateway.auth_token`` is weak/missing it mints a strong token
     (persisted to ``~/.praisonai/.env``) and **re-validates** that the finding
-    cleared. Pair with ``--dry-run`` to preview without writing.
+    cleared, and when ``gateway.yaml`` is out of date it atomically rewrites the
+    file — applying the canonical config migrations and stamping the current
+    ``config_version``. A config written by a newer build is reported and left
+    untouched rather than downgraded. Pair with ``--dry-run`` to preview without
+    writing.
 
     Examples:
         praisonai gateway doctor
@@ -914,6 +960,13 @@ def gateway_doctor(
     # and, with ``--fix``, migrate it forward once and stamp the new version.
     config_migration = _check_config_version(config)
     config_fix_report = None
+    # A ``str`` means the config is newer than this build / malformed: warn and
+    # refuse to migrate (never downgrade a newer config with an older binary).
+    config_version_error = config_migration if isinstance(config_migration, str) else None
+    if config_version_error:
+        config_migration = None
+        if not json_output:
+            print(f"config: {config_version_error}")
     if config_migration:
         reasons, from_version, to_version = config_migration
         if fix and not dry_run:
@@ -939,6 +992,9 @@ def gateway_doctor(
             payload["gateway_auth_token"] = "weak"
         if config_migration:
             payload["config_version"] = "out-of-date"
+        if config_version_error:
+            payload["config_version"] = "unsupported"
+            payload["config_version_error"] = config_version_error
         if fix_report:
             payload["fix"] = fix_report
         if config_fix_report:
@@ -967,6 +1023,9 @@ def gateway_doctor(
         payload["gateway_auth_token"] = "weak"
     if config_migration:
         payload["config_version"] = "out-of-date"
+    if config_version_error:
+        payload["config_version"] = "unsupported"
+        payload["config_version_error"] = config_version_error
     if fix_report:
         payload["fix"] = fix_report
     if config_fix_report:

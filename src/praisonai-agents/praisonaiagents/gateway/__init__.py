@@ -198,6 +198,7 @@ from .config import (
     MultiChannelGatewayConfig,
     # Config version stamp + doctor-driven migration (Issue #3841)
     GATEWAY_CONFIG_VERSION,
+    ConfigVersionError,
     LegacyConfigRule,
     GATEWAY_CONFIG_RULES,
     is_config_current,
@@ -448,6 +449,7 @@ __all__ = [
     "MultiChannelGatewayConfig",
     # Config version stamp + doctor-driven migration (Issue #3841)
     "GATEWAY_CONFIG_VERSION",
+    "ConfigVersionError",
     "LegacyConfigRule",
     "GATEWAY_CONFIG_RULES",
     "is_config_current",
