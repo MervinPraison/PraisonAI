@@ -3,8 +3,8 @@ Tenki Compute Provider — cloud sandbox-based compute for managed agents.
 
 Uses the Tenki Cloud SDK to run tools in disposable Linux microVMs.
 
-Requires: ``pip install tenki-sandbox``
-Environment: ``TENKI_API_KEY`` (optionally ``TENKI_WORKSPACE_ID``, ``TENKI_PROJECT_ID``)
+Requires: ``pip install tenki``
+Environment: ``TENKI_API_KEY`` (optionally ``TENKI_WORKSPACE_ID``)
 """
 
 import base64
@@ -44,58 +44,39 @@ class TenkiCompute:
         self,
         api_key: str = "",
         workspace_id: str = "",
-        project_id: str = "",
     ) -> None:
         self._api_key = api_key or os.environ.get("TENKI_API_KEY", "")
         self._workspace_id = workspace_id or os.environ.get("TENKI_WORKSPACE_ID", "")
-        self._project_id = project_id or os.environ.get("TENKI_PROJECT_ID", "")
         self._client = None
         self._sandboxes: Dict[str, Dict[str, Any]] = {}
 
     def _get_client(self):
         if self._client is None:
             try:
-                from tenki_sandbox import Client
+                from tenki import Client
             except ImportError as e:
                 raise ImportError(
-                    "Tenki SDK required. Install with: pip install tenki-sandbox"
+                    "Tenki SDK required. Install with: pip install tenki"
                 ) from e
             # Falls back to TENKI_API_KEY / TENKI_AUTH_TOKEN in the environment.
             self._client = Client(auth_token=self._api_key) if self._api_key else Client()
         return self._client
 
-    def _resolve_ids(self, client) -> tuple:
-        """Resolve the workspace/project to create sandboxes under.
+    def _resolve_workspace(self, client) -> str:
+        """Resolve the workspace to create sandboxes under.
 
-        The SDK has no "current project" default like the CLI, so fall back to
-        the first workspace/project on the account.
+        The SDK has no "current workspace" default like the CLI. An explicitly
+        configured TENKI_WORKSPACE_ID is trusted (Tenki validates it at
+        create()); otherwise fall back to the first workspace on the account.
         """
-        if self._workspace_id and self._project_id:
-            return self._workspace_id, self._project_id
+        if self._workspace_id:
+            return self._workspace_id
         identity = client.who_am_i()
         workspaces = identity.workspaces
         if not workspaces:
             raise RuntimeError("No Tenki workspaces available for this API key")
-        if self._workspace_id:
-            ws = next((w for w in workspaces if w.id == self._workspace_id), None)
-            if ws is None:
-                raise RuntimeError(
-                    f"Configured TENKI_WORKSPACE_ID '{self._workspace_id}' not found for this API key"
-                )
-        else:
-            ws = workspaces[0]
-        if not ws.projects:
-            raise RuntimeError(f"No Tenki projects available in workspace {ws.id}")
-        if self._project_id:
-            proj = next((p for p in ws.projects if p.id == self._project_id), None)
-            if proj is None:
-                raise RuntimeError(
-                    f"Configured TENKI_PROJECT_ID '{self._project_id}' not found in workspace {ws.id}"
-                )
-        else:
-            proj = ws.projects[0]
-        self._workspace_id, self._project_id = ws.id, proj.id
-        return ws.id, proj.id
+        self._workspace_id = workspaces[0].id
+        return self._workspace_id
 
     @staticmethod
     def _sandbox_id(sandbox) -> str:
@@ -119,13 +100,12 @@ class TenkiCompute:
         from praisonaiagents.managed.protocols import InstanceInfo, InstanceStatus
 
         client = self._get_client()
-        workspace_id, project_id = self._resolve_ids(client)
+        workspace_id = self._resolve_workspace(client)
         instance_id = f"tenki_{uuid.uuid4().hex[:12]}"
 
         create_kwargs: Dict[str, Any] = {
             "name": instance_id,
             "workspace_id": workspace_id,
-            "project_id": project_id,
             "cpu_cores": config.cpu,
             "memory_mb": config.memory_mb,
             "env": config.env or None,
