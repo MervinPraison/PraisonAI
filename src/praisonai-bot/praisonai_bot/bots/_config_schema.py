@@ -596,6 +596,11 @@ class HealthMonitorSchema(BaseModel):
     stale_after: float = Field(120.0, gt=0)
     stuck_after: float = Field(900.0, gt=0)
     max_restarts_per_hour: int = Field(10, ge=0)
+    # Issue #3840: fleet-level crash-loop breaker thresholds (aggregate view on
+    # top of the per-channel ``max_restarts_per_hour`` budget).
+    fleet_restarts_per_hour: int = Field(40, ge=1)
+    failing_channel_fraction: float = Field(0.5, gt=0, le=1.0)
+    breaker_cooldown_s: float = Field(120.0, ge=0)
 
 
 class GatewayServerSchema(BaseModel):
