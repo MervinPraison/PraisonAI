@@ -116,6 +116,8 @@ from .protocols import (
     FatalConfigError,
     classify_exit_reason,
     RestartLoopGuard,
+    # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
+    FleetSupervisionPolicy,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -366,6 +368,8 @@ __all__ = [
     "FatalConfigError",
     "classify_exit_reason",
     "RestartLoopGuard",
+    # Fleet-level crash-loop breaker for channel supervision (Issue #3840)
+    "FleetSupervisionPolicy",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",

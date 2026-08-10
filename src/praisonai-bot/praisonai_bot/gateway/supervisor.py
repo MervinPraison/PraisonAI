@@ -69,6 +69,7 @@ class ChannelSupervisor:
         policy: Optional[BackoffPolicy] = None,
         classify_fn: Optional[Callable[[BaseException, str], bool]] = None,
         health_config: Optional[HealthMonitorConfig] = None,
+        degraded_registry: Optional[Any] = None,
     ):
         """Initialize channel supervisor.
         
@@ -76,6 +77,10 @@ class ChannelSupervisor:
             policy: Backoff policy for retries (uses default if None)
             classify_fn: Error classification function (uses is_recoverable_error if None)
             health_config: Health monitor configuration (uses defaults if None)
+            degraded_registry: Optional shared ``DegradedCapabilityRegistry`` so
+                the fleet crash-loop breaker records ONE ``gateway`` degraded
+                owner when it trips (Issue #3840). ``None`` keeps supervision
+                fully functional but silent on the aggregate degraded surface.
         """
         self._policy = policy or BackoffPolicy(max_attempts=0)  # Unlimited retries
         self._classify_fn = classify_fn or is_recoverable_error
@@ -90,6 +95,7 @@ class ChannelSupervisor:
             config=health_config,
             health_check_fn=self._get_channel_health,
             restart_fn=self._restart_channel_for_health,
+            degraded_registry=degraded_registry,
         )
         
     def get_status(self, name: str) -> ChannelStatus:

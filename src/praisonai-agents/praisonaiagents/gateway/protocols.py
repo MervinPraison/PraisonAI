@@ -4350,6 +4350,143 @@ class RestartLoopGuard:
         self._events = []
 
 
+class FleetSupervisionPolicy:
+    """Pure fleet-level crash-loop breaker for channel supervision (Issue #3840).
+
+    Per-channel restart budgets (``ChannelHealthMonitor`` /
+    ``ChannelRestartHistory`` in ``praisonai-bot``) throttle one misbehaving
+    channel, but they are blind to a *systemic* fault — a bad shared provider,
+    a network partition, an org-wide expired token — that makes *every* channel
+    restart at once. Each channel then independently stays "under budget" while
+    the fleet as a whole thrashes: a reconnect storm that floods logs, burns
+    CPU, and risks an upstream rate-limit ban with no single operator-visible
+    signal.
+
+    This is the aggregate breaker that sits *on top of* the per-channel budgets.
+    Like :class:`RestartLoopGuard` it is intentionally side-effect free (records
+    timestamps only, no I/O, no heavy deps) so the *decision* lives in core and
+    is provable in isolation; the wrapper owns the side effects (halting
+    restarts, recording one ``gateway`` degraded-owner entry).
+
+    The breaker trips when *either* aggregate signal crosses its threshold
+    within the trailing window:
+
+    * the fleet restart rate reaches ``fleet_restarts_per_hour`` restarts across
+      all channels, or
+    * the fraction of channels in a failing/parked state reaches
+      ``failing_channel_fraction``.
+
+    Once tripped it stays tripped for ``breaker_cooldown_s`` so the caller
+    applies backpressure (stops auto-restarting, backs off) instead of feeding
+    the storm; after the cooldown it re-arms automatically.
+
+    Example::
+
+        policy = FleetSupervisionPolicy(fleet_restarts_per_hour=40)
+        if policy.note_restart(now=time.monotonic()):
+            # fleet breaker tripped — stop auto-restarting, surface degraded
+            ...
+    """
+
+    def __init__(
+        self,
+        fleet_restarts_per_hour: int = 40,
+        failing_channel_fraction: float = 0.5,
+        breaker_cooldown_s: float = 120.0,
+    ):
+        if fleet_restarts_per_hour < 1:
+            raise ValueError(
+                f"fleet_restarts_per_hour must be >= 1, got {fleet_restarts_per_hour!r}"
+            )
+        if not 0.0 < failing_channel_fraction <= 1.0:
+            raise ValueError(
+                "failing_channel_fraction must be in (0.0, 1.0], got "
+                f"{failing_channel_fraction!r}"
+            )
+        if breaker_cooldown_s < 0:
+            raise ValueError(
+                f"breaker_cooldown_s must be >= 0, got {breaker_cooldown_s!r}"
+            )
+        self.fleet_restarts_per_hour = int(fleet_restarts_per_hour)
+        self.failing_channel_fraction = float(failing_channel_fraction)
+        self.breaker_cooldown_s = float(breaker_cooldown_s)
+        self._window_seconds = 3600.0  # restart-rate window is per-hour
+        self._events: "List[float]" = []
+        self._tripped_until: Optional[float] = None
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self._window_seconds
+        self._events = [t for t in self._events if t >= cutoff]
+
+    def note_restart(self, now: float) -> bool:
+        """Record a fleet restart at ``now`` and return whether the breaker is tripped.
+
+        Args:
+            now: A monotonic timestamp for this restart event.
+
+        Returns:
+            ``True`` when the aggregate restart rate has reached
+            ``fleet_restarts_per_hour`` within the trailing hour (or the breaker
+            is still within its cooldown); ``False`` otherwise.
+        """
+        # While actively cooling down, do NOT record new events: the caller has
+        # already HELD the restart, so counting held (non-)restarts would keep
+        # renewing the window and leave the breaker stuck until the full hour
+        # expires. Just report that we are still tripped.
+        if self.tripped(now):
+            return True
+        self._prune(now)
+        self._events.append(now)
+        if len(self._events) >= self.fleet_restarts_per_hour:
+            self._tripped_until = now + self.breaker_cooldown_s
+            return True
+        return False
+
+    def note_fleet_state(
+        self, failing_channels: int, total_channels: int, now: float
+    ) -> bool:
+        """Trip the breaker when too large a fraction of the fleet is failing.
+
+        A systemic fault often shows up as many channels simultaneously in a
+        failing/parked state rather than as a raw restart rate. When at least
+        ``failing_channel_fraction`` of the fleet is failing, trip and start the
+        cooldown.
+
+        Args:
+            failing_channels: Number of channels currently failing/parked.
+            total_channels: Total number of supervised channels.
+            now: A monotonic timestamp for this evaluation.
+
+        Returns:
+            ``True`` when the breaker is tripped (now or still cooling down).
+        """
+        if total_channels > 0:
+            fraction = failing_channels / total_channels
+            if fraction >= self.failing_channel_fraction:
+                self._tripped_until = now + self.breaker_cooldown_s
+                return True
+        return self.tripped(now)
+
+    def tripped(self, now: float) -> bool:
+        """Return whether the breaker is currently tripped without recording.
+
+        When the cooldown has elapsed the breaker re-arms cleanly: the accrued
+        event window is cleared so the accumulated pre-trip restarts cannot
+        immediately re-trip on the very next ``note_restart``.
+        """
+        if self._tripped_until is not None:
+            if now < self._tripped_until:
+                return True
+            self._tripped_until = None
+            self._events = []
+        return False
+
+    def reset(self) -> None:
+        """Clear recorded restart history and any active trip (clean recovery)."""
+        self._events = []
+        self._tripped_until = None
+
+
 # ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------

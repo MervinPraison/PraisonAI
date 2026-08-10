@@ -1041,8 +1041,12 @@ class WebSocketGateway:
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
         
-        # Channel supervisor for resilient bot management
-        self._channel_supervisor = ChannelSupervisor()
+        # Channel supervisor for resilient bot management. Share the gateway's
+        # degraded-capability registry so the fleet crash-loop breaker (Issue
+        # #3840) records ONE ``gateway`` degraded owner when it trips.
+        self._channel_supervisor = ChannelSupervisor(
+            degraded_registry=self._degraded_registry,
+        )
         self._health_config = None  # Will be set from config if provided
 
         # Message-flow metrics surface (served at GET /metrics). Lazily built so
@@ -8244,8 +8248,12 @@ class WebSocketGateway:
         if health_cfg and isinstance(health_cfg, dict):
             from .health_monitor import HealthMonitorConfig
             self._health_config = HealthMonitorConfig.from_dict(health_cfg)
-            # Recreate supervisor with health config
-            self._channel_supervisor = ChannelSupervisor(health_config=self._health_config)
+            # Recreate supervisor with health config, preserving the shared
+            # degraded registry so the fleet breaker still surfaces (Issue #3840).
+            self._channel_supervisor = ChannelSupervisor(
+                health_config=self._health_config,
+                degraded_registry=self._degraded_registry,
+            )
 
         # Create agents
         agents_cfg = cfg.get("agents", {})
