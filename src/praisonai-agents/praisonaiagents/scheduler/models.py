@@ -395,8 +395,10 @@ class ScheduleJob:
             if not self.pin_model:
                 d["pin_model"] = False
         # Monitor source spec. Only persist when configured so stateless jobs
-        # stay byte-for-byte unchanged; the shape is opaque to the core.
-        if self.monitor:
+        # stay byte-for-byte unchanged; the shape is opaque to the core. Use an
+        # ``is not None`` check so an explicitly configured empty mapping
+        # round-trips faithfully instead of silently reverting to stateless.
+        if self.monitor is not None:
             d["monitor"] = self.monitor
         # Atomic-claim lease metadata (set dynamically by stores that support
         # ``claim_due``). Persisted so a lease is visible across processes and

@@ -46,6 +46,15 @@ class GateResult:
     no_change: bool = False
     state_updates: Optional[Dict[str, Any]] = None
 
+    def __post_init__(self) -> None:
+        # ``no_change`` is a silent-suppress outcome and, per the field's
+        # contract, *implies* ``run=False``. Enforce the invariant so a gate
+        # that sets only ``no_change=True`` (leaving ``run`` at its default)
+        # can never let a runner fire a tick the contract defines as
+        # suppressed.
+        if self.no_change:
+            self.run = False
+
 
 @runtime_checkable
 class JobStateStoreProtocol(Protocol):
@@ -97,7 +106,14 @@ class JobConditionProtocol(Protocol):
     :class:`GateResult` whose ``no_change`` / ``state_updates`` fields let it
     suppress an unchanged source and carry a last-seen hash / watermark to the
     next tick. The ``state`` parameter is optional and keyword-only so existing
-    stateless gates (``should_run(self, job)``) satisfy the protocol unchanged.
+    stateless gates (``should_run(self, job)``) satisfy the protocol unchanged
+    under ``runtime_checkable`` (which matches on method *name*).
+
+    Caller contract: because a legacy stateless gate accepts only ``job``,
+    callers MUST NOT unconditionally pass ``state=``. Detect capability first —
+    e.g. call ``should_run(job, state=prior)`` only when the gate opts into
+    state, otherwise fall back to ``should_run(job)`` — so stateless gates keep
+    working unchanged and never raise ``TypeError``.
     """
 
     def should_run(
