@@ -168,6 +168,12 @@ _TRUSTED_SOURCES = frozenset([
     "trusted_tool", "internal", "system", "praisonai_core",
 ])
 
+# Bounds for _extract_strings: cap by total scanned bytes and cardinality
+# instead of tree depth, so nested tool inputs are still fully scanned while a
+# pathological adversarial blob cannot OOM the process.
+_EXTRACT_MAX_TOTAL_BYTES = 1_048_576  # 1 MiB per scan
+_EXTRACT_MAX_STRINGS = 10_000         # hard cap on distinct strings emitted
+
 
 # ─── Detection Functions ──────────────────────────────────────────────────────
 
@@ -407,19 +413,56 @@ class InjectionDefense:
 
         return result
 
-    def _extract_strings(self, obj: Any, depth: int = 0) -> List[str]:
-        """Recursively extract string values from a dict/list/str."""
-        if depth > 4:
-            return []
-        strings = []
-        if isinstance(obj, str):
-            strings.append(obj)
-        elif isinstance(obj, dict):
-            for v in obj.values():
-                strings.extend(self._extract_strings(v, depth + 1))
-        elif isinstance(obj, (list, tuple)):
-            for item in obj:
-                strings.extend(self._extract_strings(item, depth + 1))
+    def _extract_strings(self, obj: Any) -> List[str]:
+        """Walk ``obj`` iteratively and return every string reachable from it.
+
+        Bounded by total scanned bytes and cardinality, NOT by tree depth, so a
+        legitimately nested tool argument (a filter DSL, a JSON-schema payload,
+        a handoff routing config) is still fully scanned instead of being
+        silently dropped once nesting exceeds a fixed depth. Dict keys are
+        scanned too, since attacker-controlled keys are routed into the prompt
+        on many frameworks. Cycles are handled via a seen-set on container
+        identity, and the byte/cardinality caps fail *loud* (warning + partial
+        scan) so a pathological input can never OOM the process.
+        """
+        strings: List[str] = []
+        seen_ids: set = set()
+        stack: List[Any] = [obj]
+        total_bytes = 0
+
+        while stack:
+            item = stack.pop()
+
+            if isinstance(item, str):
+                if not item:
+                    continue
+                strings.append(item)
+                total_bytes += len(item)
+                if (
+                    total_bytes >= _EXTRACT_MAX_TOTAL_BYTES
+                    or len(strings) >= _EXTRACT_MAX_STRINGS
+                ):
+                    logger.warning(
+                        "[praisonai.security] extraction bounded: %d strings / "
+                        "%d bytes seen; remaining nested values were not scanned.",
+                        len(strings), total_bytes,
+                    )
+                    break
+                continue
+
+            oid = id(item)
+            if oid in seen_ids:
+                continue
+
+            if isinstance(item, dict):
+                seen_ids.add(oid)
+                stack.extend(item.keys())
+                stack.extend(item.values())
+            elif isinstance(item, (list, tuple, set, frozenset)):
+                seen_ids.add(oid)
+                stack.extend(item)
+            # Other types (numbers, bools, None, custom objects) are ignored.
+
         return strings
 
     def create_hook(self) -> Callable:

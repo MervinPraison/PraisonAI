@@ -533,6 +533,54 @@ class PersistenceOrchestrator:
         
         return self._sync(self.knowledge.upsert(collection, documents))
     
+    async def aretrieve_knowledge(
+        self,
+        query_embedding: List[float],
+        collection: str = "default",
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[KnowledgeDocument]:
+        """Async-safe RAG retrieval.
+
+        Every real vector backend issues a network round trip on ``search``.
+        Called from an async agent (``arun`` / a FastAPI handler), the sync
+        :meth:`retrieve_knowledge` would block the event loop for the whole
+        round trip, serialising every other concurrent request behind it. This
+        offloads the store call to a worker thread so the loop stays free, in
+        line with the async conversation hooks (``aon_message`` etc.).
+        """
+        if not self.knowledge:
+            logger.debug("No knowledge store configured")
+            return []
+
+        if inspect.iscoroutinefunction(self.knowledge.search):
+            return await self.knowledge.search(
+                collection=collection,
+                query_embedding=query_embedding,
+                limit=limit,
+                filters=filters,
+            )
+        return await asyncio.to_thread(
+            self.knowledge.search,
+            collection=collection,
+            query_embedding=query_embedding,
+            limit=limit,
+            filters=filters,
+        )
+
+    async def aadd_knowledge(
+        self,
+        documents: List[KnowledgeDocument],
+        collection: str = "default",
+    ) -> List[str]:
+        """Async-safe counterpart to :meth:`add_knowledge` (see rationale there)."""
+        if not self.knowledge:
+            raise ValueError("No knowledge store configured")
+
+        if inspect.iscoroutinefunction(self.knowledge.upsert):
+            return await self.knowledge.upsert(collection, documents)
+        return await asyncio.to_thread(self.knowledge.upsert, collection, documents)
+    
     # =========================================================================
     # State Management
     # =========================================================================
