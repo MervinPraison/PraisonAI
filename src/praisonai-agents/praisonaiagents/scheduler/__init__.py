@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from .protocols import (
         ScheduleStoreProtocol,
         JobConditionProtocol,
+        JobStateStoreProtocol,
         GateResult,
         SchedulerProviderProtocol,
     )
@@ -123,17 +124,20 @@ def __getattr__(name: str):
     if name in (
         "ScheduleStoreProtocol",
         "JobConditionProtocol",
+        "JobStateStoreProtocol",
         "GateResult",
         "SchedulerProviderProtocol",
     ):
         from .protocols import (
             ScheduleStoreProtocol,
             JobConditionProtocol,
+            JobStateStoreProtocol,
             GateResult,
             SchedulerProviderProtocol,
         )
         _module_cache["ScheduleStoreProtocol"] = ScheduleStoreProtocol
         _module_cache["JobConditionProtocol"] = JobConditionProtocol
+        _module_cache["JobStateStoreProtocol"] = JobStateStoreProtocol
         _module_cache["GateResult"] = GateResult
         _module_cache["SchedulerProviderProtocol"] = SchedulerProviderProtocol
         return _module_cache[name]
@@ -168,6 +172,7 @@ __all__ = [
     "InProcessScheduleProvider",
     "ScheduleStoreProtocol",
     "JobConditionProtocol",
+    "JobStateStoreProtocol",
     "GateResult",
     "SchedulerProviderProtocol",
     "Blueprint",
