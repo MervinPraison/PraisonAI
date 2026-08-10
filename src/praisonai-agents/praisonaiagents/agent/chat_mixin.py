@@ -3492,8 +3492,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB
-                            self._persist_message("assistant", response_text)
+                            # Persist assistant message to DB (offloaded to a
+                            # worker thread so file-locked disk I/O doesn't
+                            # block the event loop on this async turn).
+                            await self._apersist_message("assistant", response_text)
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
@@ -3510,8 +3512,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (non-reflect path)
-                            self._persist_message("assistant", response_text)
+                            # Persist assistant message to DB (non-reflect path,
+                            # offloaded to a worker thread to avoid blocking the loop)
+                            await self._apersist_message("assistant", response_text)
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -3567,8 +3570,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB
-                                        self._persist_message("assistant", response_text)
+                                        # Persist assistant message to DB (offloaded to a worker thread)
+                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
@@ -3598,8 +3601,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                         # Add to chat history and return
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB
-                                        self._persist_message("assistant", response_text)
+                                        # Persist assistant message to DB (offloaded to a worker thread)
+                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
@@ -3617,8 +3620,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                         # Add to chat history and return
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB
-                                        self._persist_message("assistant", response_text)
+                                        # Persist assistant message to DB (offloaded to a worker thread)
+                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
@@ -3667,8 +3670,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if reflection_count >= self.max_reflect:
                                         # Return original response after max reflection attempts
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB
-                                        self._persist_message("assistant", response_text)
+                                        # Persist assistant message to DB (offloaded to a worker thread)
+                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation

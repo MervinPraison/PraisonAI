@@ -435,6 +435,28 @@ class MemoryMixin:
             except Exception as e:
                 logging.warning(f"Failed to persist message to session store: {e}")
 
+    async def _apersist_message(
+        self,
+        role: str,
+        content: str,
+        tool_calls=None,
+        tool_call_id: Optional[str] = None,
+    ):
+        """Async wrapper for :meth:`_persist_message`.
+
+        The default JSON session store performs a file-locked, blocking
+        read-modify-write to disk on every turn. Calling ``_persist_message``
+        directly from ``_achat_impl`` would stall the entire event loop (other
+        agents, streaming, background tasks) for the duration of that I/O on
+        every user/assistant/tool turn. Offloading to a worker thread — the
+        same treatment ``_persist_compaction_checkpoint`` already gets — keeps
+        ``achat()`` non-blocking as documented.
+        """
+        import asyncio
+        await asyncio.to_thread(
+            self._persist_message, role, content, tool_calls, tool_call_id
+        )
+
     def _add_message_with_tool_fields(self, role, content, **tool_fields):
         """Add a message carrying tool fields, tolerating stores without them.
 

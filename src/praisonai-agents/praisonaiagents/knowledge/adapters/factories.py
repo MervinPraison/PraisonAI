@@ -359,26 +359,21 @@ class ChromaKnowledgeAdapter:
     
     def delete_all(self, *, user_id: Optional[str] = None, agent_id: Optional[str] = None,
                    run_id: Optional[str] = None, **kwargs: Any) -> bool:
-        """Delete all items matching scope from ChromaDB."""
+        """Delete all items matching scope from ChromaDB.
+
+        Enforces the same tenant-scope contract as the mem0 backend: an
+        unscoped call raises ``ScopeRequiredError`` instead of silently wiping
+        the entire (typically shared) collection.
+        """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "delete_all", backend="chroma")
         try:
-            if not any([user_id, agent_id, run_id]):
-                # Delete entire collection
-                collection_name = self.collection.name
-                self.client.delete_collection(collection_name)
-                
-                # Recreate the collection to keep adapter usable
-                self.collection = self.client.create_collection(
-                    name=collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
-                return True
-            else:
-                # Get filtered items and delete them
-                all_items = self.get_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
-                item_ids = [item.id for item in all_items.results]
-                if item_ids:
-                    self.collection.delete(ids=item_ids)
-                return True
+            # Get filtered items and delete them
+            all_items = self.get_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
+            item_ids = [item.id for item in all_items.results]
+            if item_ids:
+                self.collection.delete(ids=item_ids)
+            return True
         except Exception:
             return False
 
@@ -602,32 +597,34 @@ class SQLiteKnowledgeAdapter:
     
     def delete_all(self, *, user_id: Optional[str] = None, agent_id: Optional[str] = None,
                    run_id: Optional[str] = None, **kwargs: Any) -> bool:
-        """Delete all items matching scope from SQLite."""
+        """Delete all items matching scope from SQLite.
+
+        Enforces the same tenant-scope contract as the mem0 backend: an
+        unscoped call raises ``ScopeRequiredError`` instead of silently
+        deleting every tenant's rows from the (typically shared) store.
+        """
+        from ..protocols import require_scope
+        require_scope(user_id, agent_id, run_id, "delete_all", backend="sqlite")
         try:
             conn = self._get_conn()
-            
-            if not any([user_id, agent_id, run_id]):
-                # Delete all
-                conn.execute("DELETE FROM knowledge")
-            else:
-                # Delete with filters
-                sql = "DELETE FROM knowledge WHERE 1=1"
-                params = []
-                
-                if user_id:
-                    sql += " AND user_id = ?"
-                    params.append(user_id)
-                if agent_id:
-                    sql += " AND agent_id = ?"
-                    params.append(agent_id)
-                if run_id:
-                    sql += " AND run_id = ?"
-                    params.append(run_id)
-                
-                conn.execute(sql, params)
-            
+
+            # Delete with filters (at least one scope guaranteed by require_scope)
+            sql = "DELETE FROM knowledge WHERE 1=1"
+            params = []
+
+            if user_id:
+                sql += " AND user_id = ?"
+                params.append(user_id)
+            if agent_id:
+                sql += " AND agent_id = ?"
+                params.append(agent_id)
+            if run_id:
+                sql += " AND run_id = ?"
+                params.append(run_id)
+
+            conn.execute(sql, params)
             conn.commit()
             return True
-            
+
         except Exception:
             return False
