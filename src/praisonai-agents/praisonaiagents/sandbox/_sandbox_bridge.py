@@ -17,6 +17,7 @@ _EXTRA_HINTS = {
     "ssh": "pip install praisonai-sandbox[ssh]",
     "modal": "pip install praisonai-sandbox[modal]",
     "daytona": "pip install praisonai-sandbox[daytona]",
+    "novita": "pip install praisonai-sandbox[novita]",
 }
 
 
