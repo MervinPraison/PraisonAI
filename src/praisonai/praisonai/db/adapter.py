@@ -380,6 +380,21 @@ class PraisonAIDB:
         )
         self._conversation_store.add_message(session_id, msg)
     
+    @staticmethod
+    def _serialize_tool_call(tool_name: str, args: Any, result: Any) -> str:
+        """Serialise a tool call for persistence without dropping data.
+
+        A persistence layer's contract is preservation: the full tool result is
+        kept verbatim so an agent that resumes sees exactly what it did. Shared
+        by both the sync and async paths so they cannot drift.
+        """
+        import json
+        return json.dumps({
+            "tool": tool_name,
+            "args": args,
+            "result": str(result),
+        })
+
     def on_tool_call(
         self,
         session_id: str,
@@ -395,14 +410,8 @@ class PraisonAIDB:
         
         from ..persistence.conversation.base import ConversationMessage
         import uuid
-        import json
         
-        # Store tool call as a special message
-        tool_content = json.dumps({
-            "tool": tool_name,
-            "args": args,
-            "result": str(result)[:1000]  # Truncate large results
-        })
+        tool_content = self._serialize_tool_call(tool_name, args, result)
         
         msg = ConversationMessage(
             id=f"tool-{uuid.uuid4().hex[:12]}",
@@ -876,13 +885,8 @@ class PraisonAIDB:
                 # async path matches the sync on_tool_call behaviour.
                 from ..persistence.conversation.base import ConversationMessage
                 import uuid
-                import json
 
-                tool_content = json.dumps({
-                    "tool": tool_name,
-                    "args": arguments,
-                    "result": str(result)[:1000],
-                })
+                tool_content = self._serialize_tool_call(tool_name, arguments, result)
                 msg = ConversationMessage(
                     id=f"tool-{uuid.uuid4().hex[:12]}",
                     session_id=session_id,

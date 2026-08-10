@@ -168,6 +168,12 @@ _TRUSTED_SOURCES = frozenset([
     "trusted_tool", "internal", "system", "praisonai_core",
 ])
 
+# Bounds for _extract_strings: cap by total scanned bytes and cardinality
+# instead of tree depth, so nested tool inputs are still fully scanned while a
+# pathological adversarial blob cannot OOM the process.
+_EXTRACT_MAX_TOTAL_BYTES = 1_048_576  # 1 MiB per scan
+_EXTRACT_MAX_STRINGS = 10_000         # hard cap on distinct strings emitted
+
 
 # ─── Detection Functions ──────────────────────────────────────────────────────
 
@@ -407,20 +413,77 @@ class InjectionDefense:
 
         return result
 
-    def _extract_strings(self, obj: Any, depth: int = 0) -> List[str]:
-        """Recursively extract string values from a dict/list/str."""
-        if depth > 4:
-            return []
-        strings = []
-        if isinstance(obj, str):
-            strings.append(obj)
-        elif isinstance(obj, dict):
-            for v in obj.values():
-                strings.extend(self._extract_strings(v, depth + 1))
-        elif isinstance(obj, (list, tuple)):
-            for item in obj:
-                strings.extend(self._extract_strings(item, depth + 1))
-        return strings
+    def _extract_strings_bounded(self, obj: Any) -> "tuple[List[str], bool]":
+        """Walk ``obj`` iteratively; return (strings, truncated).
+
+        Bounded by total scanned bytes and cardinality, NOT by tree depth, so a
+        legitimately nested tool argument (a filter DSL, a JSON-schema payload,
+        a handoff routing config) is still fully scanned instead of being
+        silently dropped once nesting exceeds a fixed depth. Dict keys are
+        scanned too, since attacker-controlled keys are routed into the prompt
+        on many frameworks. Cycles are handled via a seen-set on container
+        identity, and the byte/cardinality caps fail *loud* (warning + partial
+        scan) so a pathological input can never OOM the process.
+
+        ``truncated`` is True when the byte/cardinality budget was exhausted
+        before the object was fully walked, meaning some values were NOT
+        scanned. Security callers MUST treat truncated untrusted input as
+        un-vettable and fail *closed* (block) rather than allow-on-no-match,
+        otherwise an attacker can pad benign strings ahead of an injection
+        payload so the payload is never reached (see ``create_hook``).
+        """
+        strings: List[str] = []
+        seen_ids: set = set()
+        stack: List[Any] = [obj]
+        total_bytes = 0
+        truncated = False
+
+        while stack:
+            item = stack.pop()
+
+            if isinstance(item, str):
+                if not item:
+                    continue
+                strings.append(item)
+                total_bytes += len(item)
+                if (
+                    total_bytes >= _EXTRACT_MAX_TOTAL_BYTES
+                    or len(strings) >= _EXTRACT_MAX_STRINGS
+                ):
+                    truncated = bool(stack)
+                    if truncated:
+                        logger.warning(
+                            "[praisonai.security] extraction bounded: %d strings / "
+                            "%d bytes seen; remaining nested values were not "
+                            "scanned — treating input as unsafe (fail-closed).",
+                            len(strings), total_bytes,
+                        )
+                    break
+                continue
+
+            oid = id(item)
+            if oid in seen_ids:
+                continue
+
+            if isinstance(item, dict):
+                seen_ids.add(oid)
+                stack.extend(item.keys())
+                stack.extend(item.values())
+            elif isinstance(item, (list, tuple, set, frozenset)):
+                seen_ids.add(oid)
+                stack.extend(item)
+            # Other types (numbers, bools, None, custom objects) are ignored.
+
+        return strings, truncated
+
+    def _extract_strings(self, obj: Any) -> List[str]:
+        """Back-compat shim: return only the extracted strings.
+
+        Retained so external callers referencing ``_extract_strings`` keep
+        working. The security hook uses :meth:`_extract_strings_bounded` so it
+        can also observe truncation and fail closed.
+        """
+        return self._extract_strings_bounded(obj)[0]
 
     def create_hook(self) -> Callable:
         """
@@ -441,11 +504,33 @@ class InjectionDefense:
             from praisonaiagents.hooks import HookResult
 
             # Extract all string values from tool_input dict
-            strings = defense._extract_strings(getattr(data, "tool_input", {}))
+            strings, truncated = defense._extract_strings_bounded(
+                getattr(data, "tool_input", {})
+            )
             # Also check the prompt if this is a before_agent event
             prompt = getattr(data, "prompt", "")
             if prompt:
                 strings.append(prompt)
+
+            # SECURITY: if extraction hit its byte/cardinality budget the input
+            # was NOT fully scanned. Allowing it would let an attacker pad
+            # benign strings ahead of an injection payload so the payload is
+            # never reached. A before-tool gate must fail *closed*: block the
+            # call rather than allow an un-vettable, oversized tool input.
+            if truncated:
+                logger.warning(
+                    "[praisonai.security] Blocking tool=%s agent=%s: tool input "
+                    "exceeded scan budget and could not be fully vetted.",
+                    getattr(data, "tool_name", "?"),
+                    getattr(data, "agent_name", "?"),
+                )
+                return HookResult(
+                    decision="block",
+                    reason=(
+                        "Injection defense: tool input exceeded the scan budget "
+                        "and could not be fully vetted [CRITICAL]"
+                    ),
+                )
 
             # SECURITY: never derive trust from a plain attribute on the hook
             # payload. A compromised tool wrapper or a mis-wired intermediate
