@@ -43,9 +43,12 @@ def test_policy_cooldown_rearms():
 
 
 def test_policy_trips_on_failing_fraction():
-    policy = FleetSupervisionPolicy(failing_channel_fraction=0.5)
-    assert policy.note_fleet_state(4, 8, now=0.0) is True
-    assert policy.note_fleet_state(1, 8, now=0.0) in (True, False)  # still cooling
+    policy = FleetSupervisionPolicy(failing_channel_fraction=0.5, breaker_cooldown_s=120)
+    assert policy.note_fleet_state(4, 8, now=0.0) is True  # 50% failing trips
+    # Fraction is now below the threshold, but the cooldown is still active.
+    assert policy.note_fleet_state(1, 8, now=0.0) is True
+    # After the cooldown the breaker re-arms.
+    assert policy.note_fleet_state(1, 8, now=121.0) is False
 
 
 def test_policy_rejects_bad_config():
@@ -163,5 +166,63 @@ async def test_breaker_no_registry_still_holds():
     now = _time.time()
     await mon._check_channel("a", mon._channels["a"], now)
     await mon._check_channel("b", mon._channels["b"], now)
-    # First restart trips (threshold=1); second is held. No registry -> no crash.
-    assert restarts == []  # threshold 1 means the very first restart trips
+    # threshold=1 trips on the very first check, so both channels are held.
+    # No registry is attached, so recording the degraded fact is skipped safely.
+    assert restarts == []
+
+
+@pytest.mark.asyncio
+async def test_breaker_clears_via_monitor_loop_after_cooldown(monkeypatch):
+    """After the cooldown the monitor loop clears the degraded-owner fact.
+
+    Regression guard: recovery must not depend on an external ``get_status``
+    call — a monitor sweep once the storm subsides must re-arm the breaker and
+    clear the single gateway degraded-owner fact.
+    """
+    registry = DegradedCapabilityRegistry()
+
+    async def restart_fn(name, reason):
+        pass
+
+    # High per-channel budget + a failing-fraction threshold above 1.0 reach so
+    # only the restart-rate signal trips; recovery is then driven purely by the
+    # breaker cooldown, not by stale per-channel restart cooldowns.
+    cfg = HealthMonitorConfig(
+        max_restarts_per_hour=100,
+        fleet_restarts_per_hour=2,
+        failing_channel_fraction=1.0,
+        breaker_cooldown_s=30,
+    )
+    mon = ChannelHealthMonitor(
+        config=cfg, restart_fn=restart_fn, degraded_registry=registry
+    )
+    for name in ("a", "b"):
+        mon.register_channel(name, _FakeBot())
+
+    base = 1000.0
+    monkeypatch.setattr(
+        "praisonai_bot.gateway.health_monitor.time.time", lambda: base
+    )
+    # Two fleet restarts trip the breaker (threshold=2).
+    await mon._check_all_channels()
+    assert mon._fleet_tripped is True
+    assert len(registry.list_degraded()) == 1
+
+    # Advance past both the breaker cooldown AND the per-channel post-restart
+    # cooldown so a healthy sweep re-arms the breaker and clears the fact.
+    monkeypatch.setattr(
+        "praisonai_bot.gateway.health_monitor.time.time",
+        lambda: base + 3601.0,
+    )
+
+    async def healthy(name, bot):
+        from praisonaiagents.bots.protocols import HealthResult
+
+        return HealthResult(
+            ok=True, platform="telegram", is_running=True, uptime_seconds=1.0
+        )
+
+    mon._health_check_fn = healthy
+    await mon._check_all_channels()
+    assert mon._fleet_tripped is False
+    assert registry.list_degraded() == []

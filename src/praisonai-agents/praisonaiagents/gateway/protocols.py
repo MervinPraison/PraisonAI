@@ -4429,12 +4429,18 @@ class FleetSupervisionPolicy:
             ``fleet_restarts_per_hour`` within the trailing hour (or the breaker
             is still within its cooldown); ``False`` otherwise.
         """
+        # While actively cooling down, do NOT record new events: the caller has
+        # already HELD the restart, so counting held (non-)restarts would keep
+        # renewing the window and leave the breaker stuck until the full hour
+        # expires. Just report that we are still tripped.
+        if self.tripped(now):
+            return True
         self._prune(now)
         self._events.append(now)
         if len(self._events) >= self.fleet_restarts_per_hour:
             self._tripped_until = now + self.breaker_cooldown_s
             return True
-        return self.tripped(now)
+        return False
 
     def note_fleet_state(
         self, failing_channels: int, total_channels: int, now: float
@@ -4462,11 +4468,17 @@ class FleetSupervisionPolicy:
         return self.tripped(now)
 
     def tripped(self, now: float) -> bool:
-        """Return whether the breaker is currently tripped without recording."""
+        """Return whether the breaker is currently tripped without recording.
+
+        When the cooldown has elapsed the breaker re-arms cleanly: the accrued
+        event window is cleared so the accumulated pre-trip restarts cannot
+        immediately re-trip on the very next ``note_restart``.
+        """
         if self._tripped_until is not None:
             if now < self._tripped_until:
                 return True
             self._tripped_until = None
+            self._events = []
         return False
 
     def reset(self) -> None:

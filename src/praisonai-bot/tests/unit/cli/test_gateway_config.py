@@ -475,11 +475,24 @@ def test_gateway_health_block_matches_runtime_consumer():
     for key, value in runtime_keys.items():
         assert getattr(validated, key) == value
 
+    # Issue #3840: the fleet crash-loop breaker adds three aggregate thresholds
+    # that ``HealthMonitorConfig.from_dict`` genuinely reads at runtime, so they
+    # belong in the consumed set too.
+    fleet_keys = {
+        "fleet_restarts_per_hour": 40,
+        "failing_channel_fraction": 0.5,
+        "breaker_cooldown_s": 120.0,
+    }
+    validated_fleet = HealthMonitorSchema(**{**runtime_keys, **fleet_keys})
+    for key, value in fleet_keys.items():
+        assert getattr(validated_fleet, key) == value
     # The schema's own field names must be a subset of what the runtime reads,
     # so validation can never accept a key the runtime ignores.
     consumed = {
         "enabled", "interval", "startup_grace", "stale_after",
         "stuck_after", "max_restarts_per_hour",
+        "fleet_restarts_per_hour", "failing_channel_fraction",
+        "breaker_cooldown_s",
     }
     assert set(HealthMonitorSchema.model_fields) <= consumed
     print("✓ gateway.health schema matches runtime HealthMonitorConfig keys")

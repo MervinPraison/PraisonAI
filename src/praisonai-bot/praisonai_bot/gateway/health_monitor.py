@@ -294,6 +294,24 @@ class ChannelHealthMonitor:
                 await self._check_channel(name, bot, current_time)
             except Exception as e:
                 logger.warning(f"Health check failed for channel '{name}': {e}")
+
+        # Issue #3840: evaluate the aggregate failing-channel fraction every
+        # sweep. A systemic fault can park every channel on its per-channel
+        # budget WITHOUT producing new restarts, so the restart-rate signal
+        # alone would never fire — this second signal trips the breaker when a
+        # large fraction of the fleet is failing. Also re-evaluate the breaker
+        # here (not only on a status read) so the degraded-owner fact clears on
+        # the monitor loop once the storm subsides.
+        if self._channels:
+            failing = self._count_failing_channels(current_time)
+            fraction_tripped = self._fleet_policy.note_fleet_state(
+                failing, len(self._channels), current_time
+            )
+            if fraction_tripped and not self._fleet_tripped:
+                self._trip_fleet_breaker("fleet", HealthReason.ERROR, current_time)
+
+        if self._fleet_tripped and not self._fleet_policy.tripped(current_time):
+            self._clear_fleet_breaker()
     
     async def _check_channel(self, name: str, bot: Any, current_time: float) -> None:
         """Check health of a single channel.
@@ -434,12 +452,19 @@ class ChannelHealthMonitor:
         history already tracked per channel, so the fleet-fraction signal needs
         no extra bookkeeping.
         """
+        budget = self._config.max_restarts_per_hour
         failing = 0
         for name in self._channels:
             history = self._restart_history.get(name)
             if history is None:
                 continue
-            if not history.can_restart(self._config.max_restarts_per_hour, current_time):
+            # A disabled per-channel budget (``max_restarts_per_hour == 0``)
+            # makes ``can_restart`` always False; an idle channel with no
+            # recorded restarts is healthy, not failing, so only count channels
+            # that have actually attempted restarts and exhausted their budget.
+            if budget <= 0 and not history.timestamps:
+                continue
+            if not history.can_restart(budget, current_time):
                 failing += 1
         return failing
 
