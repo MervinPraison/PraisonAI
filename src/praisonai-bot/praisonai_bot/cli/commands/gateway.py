@@ -531,6 +531,65 @@ def _persist_yaml_auth_token(config_path: str, new_token: str) -> None:
         yaml.safe_dump(cfg, fh, default_flow_style=False, sort_keys=False)
 
 
+def _check_config_version(config_path: str):
+    """Return applied-migration reasons if gateway.yaml is out of date (#3841).
+
+    Reads the raw YAML and asks the canonical core migrator whether any
+    declarative rule fires or the ``config_version`` stamp is missing/stale.
+    Returns ``(reasons, from_version, to_version)`` when a migration would run,
+    else ``None`` — so ``doctor`` can surface "your config is out of date, run
+    --fix" without writing anything.
+    """
+    import os
+    import yaml
+
+    if not os.path.exists(config_path):
+        return None
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception:  # pragma: no cover — defensive
+        return None
+    if not isinstance(cfg, dict):
+        return None
+
+    from praisonaiagents.gateway.config import (
+        GATEWAY_CONFIG_VERSION,
+        is_config_current,
+        migrate_config_with_doctor,
+    )
+
+    current = is_config_current(cfg)
+    _, reasons = migrate_config_with_doctor(cfg)
+    if current and not reasons:
+        return None
+    from_version = cfg.get("config_version", "unstamped")
+    return reasons, from_version, GATEWAY_CONFIG_VERSION
+
+
+def _repair_config_version(config_path: str):
+    """Migrate gateway.yaml forward once and stamp ``config_version`` (#3841).
+
+    Applies the canonical declarative migration rules via the core executor and
+    rewrites the YAML in place, preserving key order. Returns the list of
+    operator-facing reasons for the applied rules (may be empty when only the
+    version stamp needed writing).
+    """
+    import yaml
+
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+
+    from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+    migrated, reasons = migrate_config_with_doctor(cfg)
+
+    with open(config_path, "w") as fh:
+        yaml.safe_dump(migrated, fh, default_flow_style=False, sort_keys=False)
+
+    return reasons
+
+
 def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
     """Mint a strong gateway auth token to repair a weak/missing one.
 
@@ -850,14 +909,40 @@ def gateway_doctor(
         if fix_report and not json_output:
             print(fix_report)
 
+    # Config version stamp + declarative migration (#3841). Detect an
+    # out-of-date config (missing/stale ``config_version`` or a rule that fires)
+    # and, with ``--fix``, migrate it forward once and stamp the new version.
+    config_migration = _check_config_version(config)
+    config_fix_report = None
+    if config_migration:
+        reasons, from_version, to_version = config_migration
+        if fix and not dry_run:
+            applied = _repair_config_version(config)
+            lines = [f"config: {r}" for r in applied]
+            lines.append(f"config: config_version {from_version} -> {to_version}")
+            config_fix_report = "\n".join(lines)
+            config_migration = None
+        elif fix and dry_run:
+            lines = [f"config: would {r}" for r in reasons]
+            lines.append(
+                f"config: would stamp config_version {from_version} -> {to_version} (--dry-run)"
+            )
+            config_fix_report = "\n".join(lines)
+        if config_fix_report and not json_output:
+            print(config_fix_report)
+
     channels = _load_channels(config)
 
     if not channels:
         payload: dict = {"probes": {}}
         if gateway_secret_error:
             payload["gateway_auth_token"] = "weak"
+        if config_migration:
+            payload["config_version"] = "out-of-date"
         if fix_report:
             payload["fix"] = fix_report
+        if config_fix_report:
+            payload["config_fix"] = config_fix_report
         if json_output:
             print(json.dumps(payload, indent=2))
         else:
@@ -880,14 +965,24 @@ def gateway_doctor(
         payload["secrets"] = availability
     if gateway_secret_error:
         payload["gateway_auth_token"] = "weak"
+    if config_migration:
+        payload["config_version"] = "out-of-date"
     if fix_report:
         payload["fix"] = fix_report
+    if config_fix_report:
+        payload["config_fix"] = config_fix_report
 
     if not json_output:
         _print_secret_availability(availability)
         _render_probe_results(results, json_output=False)
         if gateway_secret_error:
             print(gateway_secret_error)
+        if config_migration:
+            print(
+                "config: out of date (config_version "
+                f"{config_migration[1]} -> {config_migration[2]}); "
+                "run 'gateway doctor --fix'"
+            )
 
     if gateway_secret_error:
         if json_output:

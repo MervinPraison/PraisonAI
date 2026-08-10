@@ -5,7 +5,138 @@ Provides configuration dataclasses for gateway and session settings.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Set, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    runtime_checkable,
+)
+
+
+# ---------------------------------------------------------------------------
+# Canonical config version + doctor-driven migration (Issue #3841)
+# ---------------------------------------------------------------------------
+#
+# The gateway config carries a ``config_version`` stamp so the runtime, the
+# operator, and ``gateway doctor --fix`` can all tell whether a config predates
+# a breaking change. Migration is expressed as an ordered list of *declarative
+# rules* (a detect predicate + a fix mutation as one unit) that ``doctor --fix``
+# applies once to move an out-of-date config forward, then stamps the current
+# version. This keeps migration a one-time repair rather than a permanent
+# load-time heuristic, and gives the canonical config shape a single owner.
+GATEWAY_CONFIG_VERSION = 1
+
+
+@dataclass
+class LegacyConfigRule:
+    """A single declarative config-migration rule.
+
+    ``detect`` returns True when the (old) shape this rule fixes is present in
+    the raw config mapping; ``fix`` returns the mutated mapping moving it toward
+    the current version; ``reason`` is an operator-facing description rendered by
+    ``gateway doctor --fix``. Rules are pure functions of the raw mapping so the
+    same set can be reasoned about, tested, and applied identically everywhere.
+    """
+
+    detect: Callable[[Dict[str, Any]], bool]
+    fix: Callable[[Dict[str, Any]], Dict[str, Any]]
+    reason: str
+
+
+def _detect_allowed_users_csv(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str)
+        for ch in channels.values()
+    )
+
+
+def _fix_allowed_users_csv(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and isinstance(ch.get("allowed_users"), str):
+            value = ch["allowed_users"]
+            ch["allowed_users"] = (
+                [u.strip() for u in value.split(",") if u.strip()] if value else []
+            )
+    return raw
+
+
+def _detect_missing_group_policy(raw: Dict[str, Any]) -> bool:
+    channels = raw.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    return any(
+        isinstance(ch, dict) and "group_policy" not in ch
+        for ch in channels.values()
+    )
+
+
+def _fix_missing_group_policy(raw: Dict[str, Any]) -> Dict[str, Any]:
+    for ch in raw.get("channels", {}).values():
+        if isinstance(ch, dict) and "group_policy" not in ch:
+            ch["group_policy"] = "mention_only"
+    return raw
+
+
+# Ordered set of migration rules. Each moves an older config shape toward the
+# current canonical form; ``migrate_config_with_doctor`` applies them once and
+# stamps ``config_version``. New breaking renames/retirements append a rule here
+# and bump ``GATEWAY_CONFIG_VERSION`` — the canonical shape has one owner.
+GATEWAY_CONFIG_RULES: "List[LegacyConfigRule]" = [
+    LegacyConfigRule(
+        detect=_detect_allowed_users_csv,
+        fix=_fix_allowed_users_csv,
+        reason="migrating allowed_users (string) -> list [rule: allowed_users_csv_to_list]",
+    ),
+    LegacyConfigRule(
+        detect=_detect_missing_group_policy,
+        fix=_fix_missing_group_policy,
+        reason="setting group_policy secure default 'mention_only' [rule: group_policy_default]",
+    ),
+]
+
+
+def is_config_current(raw: Mapping[str, Any]) -> bool:
+    """Return whether ``raw`` already carries the current ``config_version``."""
+    return raw.get("config_version") == GATEWAY_CONFIG_VERSION
+
+
+def migrate_config_with_doctor(
+    raw: Dict[str, Any],
+) -> "Tuple[Dict[str, Any], List[str]]":
+    """Apply the declarative migration rules once and stamp ``config_version``.
+
+    Returns ``(migrated, applied_reasons)``. The input is copied shallowly (and
+    per-channel dicts copied) so the caller's mapping is not mutated in place.
+    Only rules whose ``detect`` fires contribute a reason, so a config already
+    at the current shape migrates cleanly with an empty reason list while still
+    receiving the version stamp. This is the single migration executor behind
+    ``gateway doctor --fix``.
+    """
+    migrated: Dict[str, Any] = dict(raw)
+    channels = migrated.get("channels")
+    if isinstance(channels, dict):
+        migrated["channels"] = {
+            name: (dict(ch) if isinstance(ch, dict) else ch)
+            for name, ch in channels.items()
+        }
+
+    applied: List[str] = []
+    for rule in GATEWAY_CONFIG_RULES:
+        if rule.detect(migrated):
+            migrated = rule.fix(migrated)
+            applied.append(rule.reason)
+
+    migrated["config_version"] = GATEWAY_CONFIG_VERSION
+    return migrated, applied
 
 
 # ---------------------------------------------------------------------------

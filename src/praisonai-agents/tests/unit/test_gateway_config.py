@@ -437,3 +437,78 @@ class TestClassifyReload:
         assert ReloadScope.CHANNEL == "channel"
         assert ReloadScope.AGENTS == "agents"
         assert ReloadScope.FULL == "full"
+
+
+class TestConfigVersionMigration:
+    """Config version stamp + doctor-driven migration (Issue #3841)."""
+
+    def test_migrate_allowed_users_csv_and_stamp(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            migrate_config_with_doctor,
+        )
+
+        raw = {"channels": {"telegram": {"token": "x", "allowed_users": "alice,bob"}}}
+        migrated, applied = migrate_config_with_doctor(raw)
+
+        assert migrated["channels"]["telegram"]["allowed_users"] == ["alice", "bob"]
+        assert migrated["channels"]["telegram"]["group_policy"] == "mention_only"
+        assert migrated["config_version"] == GATEWAY_CONFIG_VERSION
+        assert len(applied) == 2
+
+    def test_input_is_not_mutated(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": "alice,bob"}}}
+        migrate_config_with_doctor(raw)
+        assert raw["channels"]["telegram"]["allowed_users"] == "alice,bob"
+        assert "config_version" not in raw
+
+    def test_migration_is_idempotent(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": "alice,bob"}}}
+        migrated, _ = migrate_config_with_doctor(raw)
+        again, applied2 = migrate_config_with_doctor(migrated)
+        assert applied2 == []
+        assert again["channels"]["telegram"]["allowed_users"] == ["alice", "bob"]
+
+    def test_is_config_current(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            is_config_current,
+        )
+
+        assert is_config_current({"config_version": GATEWAY_CONFIG_VERSION})
+        assert not is_config_current({})
+        assert not is_config_current({"config_version": 0})
+
+    def test_empty_allowed_users_becomes_empty_list(self):
+        from praisonaiagents.gateway.config import migrate_config_with_doctor
+
+        raw = {"channels": {"telegram": {"allowed_users": ""}}}
+        migrated, _ = migrate_config_with_doctor(raw)
+        assert migrated["channels"]["telegram"]["allowed_users"] == []
+
+    def test_no_channels_still_stamps_version(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_VERSION,
+            migrate_config_with_doctor,
+        )
+
+        migrated, applied = migrate_config_with_doctor({"agents": {}})
+        assert migrated["config_version"] == GATEWAY_CONFIG_VERSION
+        assert applied == []
+
+    def test_rules_are_declarative_units(self):
+        from praisonaiagents.gateway.config import (
+            GATEWAY_CONFIG_RULES,
+            LegacyConfigRule,
+        )
+
+        assert GATEWAY_CONFIG_RULES
+        for rule in GATEWAY_CONFIG_RULES:
+            assert isinstance(rule, LegacyConfigRule)
+            assert callable(rule.detect)
+            assert callable(rule.fix)
+            assert isinstance(rule.reason, str) and rule.reason
