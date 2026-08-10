@@ -63,6 +63,24 @@ def _fallback_supports_function_calling(model_name: str) -> bool:
     )
 
 
+def _fallback_supports_parallel_function_calling(model_name: str) -> bool:
+    """Static heuristic used only when litellm is unavailable.
+
+    Deliberately narrower than :func:`_fallback_supports_function_calling`:
+    parallel tool calls are a stricter capability than serial function calling,
+    so this only reports ``True`` for provider families known to support issuing
+    multiple tool calls in a single turn. Models that support only serial tool
+    calls conservatively return ``False``.
+    """
+    if not _fallback_supports_function_calling(model_name):
+        return False
+    name = _base_model_name(model_name)
+    return any(
+        p in name
+        for p in ("gpt-4", "gpt-5", "gpt-3.5", "o1", "o3", "o4", "gemini", "claude")
+    )
+
+
 def _fallback_supports_web_search(model_name: str) -> bool:
     """Static heuristic used only when litellm is unavailable.
 
@@ -100,16 +118,22 @@ def supports_structured_outputs(model_name: str) -> bool:
     if not model_name:
         return False
     
+    litellm = None
     try:
         litellm = _get_litellm()
         if litellm is None:
+            # litellm genuinely unavailable: use conservative static heuristic.
             return _fallback_supports_structured_outputs(model_name)
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_response_schema'):
             return litellm.supports_response_schema(model=model_name)
     except Exception:
         pass
-    
+
+    # litellm is installed but the helper is missing or raised: keep litellm
+    # authoritative (return False) rather than overriding it with the heuristic.
+    if litellm is not None:
+        return False
     return _fallback_supports_structured_outputs(model_name)
 
 
@@ -129,6 +153,7 @@ def supports_function_calling(model_name: str) -> bool:
     if not model_name:
         return False
     
+    litellm = None
     try:
         litellm = _get_litellm()
         if litellm is None:
@@ -138,7 +163,9 @@ def supports_function_calling(model_name: str) -> bool:
             return litellm.supports_function_calling(model=model_name)
     except Exception:
         pass
-    
+
+    if litellm is not None:
+        return False
     return _fallback_supports_function_calling(model_name)
 
 
@@ -158,17 +185,20 @@ def supports_parallel_function_calling(model_name: str) -> bool:
     if not model_name:
         return False
     
+    litellm = None
     try:
         litellm = _get_litellm()
         if litellm is None:
-            return _fallback_supports_function_calling(model_name)
+            return _fallback_supports_parallel_function_calling(model_name)
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_parallel_function_calling'):
             return litellm.supports_parallel_function_calling(model=model_name)
     except Exception:
         pass
-    
-    return _fallback_supports_function_calling(model_name)
+
+    if litellm is not None:
+        return False
+    return _fallback_supports_parallel_function_calling(model_name)
 
 
 def supports_streaming_with_tools(model_name: str) -> bool:
@@ -215,6 +245,7 @@ def supports_web_search(model_name: str) -> bool:
     if not model_name:
         return False
     
+    litellm = None
     try:
         litellm = _get_litellm()
         if litellm is None:
@@ -224,7 +255,9 @@ def supports_web_search(model_name: str) -> bool:
             return litellm.supports_web_search(model=model_name)
     except Exception:
         pass
-    
+
+    if litellm is not None:
+        return False
     return _fallback_supports_web_search(model_name)
 
 
@@ -253,6 +286,7 @@ def supports_prompt_caching(model_name: str) -> bool:
     if not model_name:
         return False
     
+    litellm = None
     try:
         litellm = _get_litellm()
         if litellm is None:
@@ -261,7 +295,9 @@ def supports_prompt_caching(model_name: str) -> bool:
             return litellm.utils.supports_prompt_caching(model=model_name)
     except Exception:
         pass
-    
+
+    if litellm is not None:
+        return False
     return _fallback_supports_prompt_caching(model_name)
 
 
