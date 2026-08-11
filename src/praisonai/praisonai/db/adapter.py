@@ -315,6 +315,10 @@ class PraisonAIDB:
                     name=f"Session {session_id}",
                     metadata=metadata or {},
                 ),
+                # An async-mode store returns a coroutine from create_session;
+                # resolve it here so a new session is actually persisted instead
+                # of being silently dropped as an un-awaited coroutine.
+                create_session=lambda s: self._resolve_sync(store.create_session(s)),
                 get_messages=lambda: self._resolve_sync(store.get_messages(session_id)),
             )
         )
@@ -823,12 +827,19 @@ class PraisonAIDB:
                 ]
 
         if self._state_store:
+            # Keyed by session only (not agent_name) so aon_agent_end — whose
+            # protocol signature carries just session_id — updates the SAME
+            # lifecycle record instead of leaving this one stuck at "started".
             await self._dispatch_async(
                 self._state_store,
                 "set",
                 "aset",
-                f"agent:{session_id}:{agent_name}",
-                {"status": "started", "metadata": metadata or {}},
+                f"agent:{session_id}",
+                {
+                    "agent_name": agent_name,
+                    "status": "started",
+                    "metadata": metadata or {},
+                },
             )
 
         return messages
@@ -967,12 +978,20 @@ class PraisonAIDB:
                 )
 
         if self._state_store:
+            # Update the record aon_agent_start wrote under the same key so the
+            # completion transition preserves agent_name/started_at context
+            # instead of overwriting it with a disconnected "ended" record.
+            agent_key = f"agent:{session_id}"
+            agent_data = await self._dispatch_async(
+                self._state_store, "get", "aget", agent_key
+            ) or {}
+            agent_data.update({
+                "status": "ended",
+                "ended_at": time.time(),
+                "metadata": {**agent_data.get("metadata", {}), **(metadata or {})},
+            })
             await self._dispatch_async(
-                self._state_store,
-                "set",
-                "aset",
-                f"agent:{session_id}",
-                {"status": "ended", "metadata": metadata or {}},
+                self._state_store, "set", "aset", agent_key, agent_data
             )
 
     async def aon_run_start(

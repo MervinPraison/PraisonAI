@@ -163,9 +163,12 @@ class AgentRegistry:
         logger.debug(f"Registered agent: {agent_id}")
 
     def unregister(self, agent_id: str) -> bool:
-        # Atomic: pop returns the sentinel when the key vanished under us.
+        # Atomic under the lock: test membership and pop together so a concurrent
+        # unregister can't race between the check and the delete, while still
+        # reporting removal correctly even when the stored value is falsy/None.
+        _MISSING = object()
         with self._lock:
-            removed = self._agents.pop(agent_id, None) is not None
+            removed = self._agents.pop(agent_id, _MISSING) is not _MISSING
         if removed:
             logger.debug(f"Unregistered agent: {agent_id}")
         return removed
