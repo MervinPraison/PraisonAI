@@ -307,8 +307,8 @@ class TestModalComputeIntegration:
 class TestTenkiComputeIntegration:
     @pytest.fixture(autouse=True)
     def skip_without_key(self):
-        if not os.environ.get("TENKI_API_KEY"):
-            pytest.skip("TENKI_API_KEY not set")
+        if not (os.environ.get("TENKI_API_KEY") or os.environ.get("TENKI_AUTH_TOKEN")):
+            pytest.skip("TENKI_API_KEY or TENKI_AUTH_TOKEN not set")
 
     def test_provision_execute_shutdown(self):
         from praisonai.integrations.compute.tenki import TenkiCompute
