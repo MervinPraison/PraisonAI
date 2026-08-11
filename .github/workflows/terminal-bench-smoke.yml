@@ -1,0 +1,47 @@
+name: Terminal-Bench Smoke
+
+# Manual (and optional weekly) smoke run of the `praisonai code` assistant on a
+# small verified Terminal-Bench 2.1 subset via the Harbor harness.
+# Never runs on PRs — it costs money (LLM calls) and is inherently flaky.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Harbor + PraisonAI
+        run: |
+          python -m pip install --upgrade pip
+          pip install harbor
+          pip install -e src/praisonai-agents -e src/praisonai
+
+      - name: Run Terminal-Bench 2.1 smoke subset
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PYTHONPATH: .
+        run: |
+          harbor run -c examples/terminal_bench/job_code_smoke.yaml || true
+
+      - name: Upload Harbor results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-results
+          path: |
+            runs/
+            **/results.json
+          if-no-files-found: warn
