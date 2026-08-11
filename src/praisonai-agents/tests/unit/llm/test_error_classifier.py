@@ -496,3 +496,59 @@ class TestReplaySafety:
         )
         assert decision.is_retryable is True
         assert decision.action == "retry"
+
+    def test_unknown_kind_post_dispatch_failures_are_gated_on_tool_turn(self):
+        """Post-dispatch failures that classify_error_kind maps to "unknown"
+        (connection reset, protocol error, incomplete/chunked read) must still
+        be blocked on a side-effecting turn — the gate is not limited to the
+        overloaded/idle_timeout branch. Regression for the replay-safety hole.
+        """
+        from praisonaiagents.llm.llm import LLM
+
+        class ConnectionResetError_(Exception):
+            pass
+
+        class RemoteProtocolError(Exception):
+            pass
+
+        class ChunkedEncodingError(Exception):
+            pass
+
+        class IncompleteRead(Exception):
+            pass
+
+        llm = LLM(model="fake")
+        # Bare messages with no "timeout"/"overloaded"/"503" substring →
+        # classify_error_kind() returns "unknown".
+        unknown_post_dispatch = [
+            ConnectionResetError_("Connection reset by peer"),
+            RemoteProtocolError("peer closed connection"),
+            ChunkedEncodingError("Response ended prematurely"),
+            IncompleteRead("incomplete read"),
+        ]
+        for error in unknown_post_dispatch:
+            assert llm.classify_error_kind(error) == "unknown", error
+            decision = llm.resolve_failover_decision(
+                error,
+                {"attempt": 1, "max_retries": 3, "side_effecting": True},
+            )
+            assert decision.is_retryable is False, error
+            assert decision.action == "surface_error", error
+            assert decision.reason == "provider_outcome_unknown", error
+
+    def test_unknown_kind_post_dispatch_still_retries_without_tools(self):
+        """The same post-dispatch failures may auto-retry on a tool-less turn."""
+        from praisonaiagents.llm.llm import LLM
+
+        class ConnectionResetError_(Exception):
+            pass
+
+        llm = LLM(model="fake")
+        error = ConnectionResetError_("Connection reset by peer")
+
+        decision = llm.resolve_failover_decision(
+            error,
+            {"attempt": 1, "max_retries": 3, "side_effecting": False},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"

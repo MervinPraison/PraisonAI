@@ -865,7 +865,25 @@ Respond with ONLY a valid JSON tool call in this format:
                 reason=error_kind,
                 is_retryable=False
             )
-        
+
+        # Replay-safety gate (applies to ALL retryable error kinds).
+        # A transient failure that happened AFTER the request was dispatched
+        # (read timeout, connection reset mid-response, incomplete/chunked read,
+        # remote protocol error) may already have produced output server-side and
+        # already run any side-effecting tool calls in that turn. Blindly
+        # replaying it can double-execute the turn (double billing, re-run of a
+        # side-effecting tool). These post-dispatch signals are not all captured
+        # by classify_error_kind (e.g. a bare "connection reset" falls through to
+        # "unknown"), so the gate is evaluated here — before any retry branch —
+        # rather than inside a single error-kind branch. Only block when the turn
+        # is side-effecting (exposes tools); a tool-less turn is safe to replay.
+        if attempt_state.get("side_effecting") and self._is_post_dispatch_failure(error):
+            return FailoverDecision(
+                action="surface_error",
+                reason="provider_outcome_unknown",
+                is_retryable=False
+            )
+
         # Rate limiting - extract retry delay
         if error_kind == "rate_limit":
             backoff = self._parse_retry_delay(str(error))  # Returns seconds
@@ -888,21 +906,8 @@ Respond with ONLY a valid JSON tool call in this format:
             )
         
         # Overloaded/timeout - retry with exponential backoff
+        # (Post-dispatch replay-safety is already handled by the gate above.)
         if error_kind in ["overloaded", "idle_timeout"]:
-            # Replay-safety gate: a transient failure that happened AFTER the
-            # request was dispatched (read timeout, connection reset mid-response)
-            # may have already produced output server-side and already run any
-            # side-effecting tool calls in that turn. Blindly replaying it can
-            # double-execute the turn. Only auto-retry a post-dispatch failure
-            # when the turn is side-effect-free (no tools); otherwise surface it
-            # so the host records a visible non-outcome instead of duplicating.
-            if attempt_state.get("side_effecting") and self._is_post_dispatch_failure(error):
-                return FailoverDecision(
-                    action="surface_error",
-                    reason="provider_outcome_unknown",
-                    is_retryable=False
-                )
-
             # For idle timeouts, check circuit breaker
             if error_kind == "idle_timeout":
                 breaker_hit = self._idle_timeout_breaker.record_idle_timeout()
