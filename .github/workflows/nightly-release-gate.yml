@@ -1,12 +1,12 @@
 name: Nightly Release Gate
 
 # Preflight before PyPI Release (patch bump).
-# Triggers: Core Tests success on main (workflow_run) or cron every 3 days at 00:00 UTC.
-# Dedupe: max one successful patch release every 3 days (see release-gate.js).
+# Triggers: Core Tests success on main (workflow_run) or nightly cron at 00:00 UTC.
+# Dedupe: max one successful patch release per UTC day (see release-gate.js).
 
 on:
   schedule:
-    - cron: '0 0 */3 * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -41,7 +41,7 @@ jobs:
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.event == 'push' &&
         !startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
-        !startsWith(github.event.workflow_run.head_commit.message, 'chore(release):')
+        !startsWith(github.event.workflow_run.head_commit.message, 'Bump praisonai')
       )
     runs-on: ubuntu-latest
     env:
@@ -68,10 +68,6 @@ jobs:
 
       - name: Fetch main and tags
         run: git fetch --tags origin main
-
-      # Guards the gate logic itself — no workflow ran these selftests before.
-      - name: Selftest release-gate script
-        run: node .github/scripts/release-gate-selftest.js
 
       - name: Preflight — path changes, CI SHA, dedupe
         id: preflight

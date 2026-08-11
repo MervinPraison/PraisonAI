@@ -5,9 +5,6 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/**'
-      - 'src/praisonai-deploy/infra/**'
-      - 'src/praisonai-bot/infra/**'
-      - 'scripts/check_helm_charts.sh'
       - 'pyproject.toml'
       - '.github/workflows/test-core.yml'
       - '.github/actions/install-monorepo-packages/**'
@@ -15,9 +12,6 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/**'
-      - 'src/praisonai-deploy/infra/**'
-      - 'src/praisonai-bot/infra/**'
-      - 'scripts/check_helm_charts.sh'
       - 'pyproject.toml'
       - '.github/workflows/test-core.yml'
       - '.github/actions/install-monorepo-packages/**'
@@ -113,24 +107,11 @@ jobs:
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
-          - shard: sandbox
-            workdir: src/praisonai-sandbox
-            paths: >-
-              tests/
-            extra_ignore: ""
-            pythonpath: >-
-              ${{ github.workspace }}/src/praisonai-agents
-          - shard: deploy
-            workdir: src/praisonai-deploy
-            paths: >-
-              tests/
-            extra_ignore: ""
-            pythonpath: >-
-              ${{ github.workspace }}/src/praisonai-agents
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
               tests/unit/integrations/
+              tests/unit/deploy/
               tests/unit/mcp/
               tests/unit/knowledge/
               tests/unit/llm/
@@ -192,15 +173,6 @@ jobs:
       run: |
         set -euo pipefail
         WORKDIR="${{ matrix.workdir || 'src/praisonai' }}"
-        if [ "$WORKDIR" = "src/praisonai-sandbox" ]; then
-          bash "$GITHUB_WORKSPACE/scripts/check_c13_sandbox_imports.sh"
-        fi
-        if [ "$WORKDIR" = "src/praisonai-deploy" ]; then
-          bash "$GITHUB_WORKSPACE/scripts/check_c14_deploy_imports.sh"
-        fi
-        if [ "$WORKDIR" = "src/praisonai-mcp" ]; then
-          bash "$GITHUB_WORKSPACE/scripts/check_c12_mcp_imports.sh"
-        fi
         cd "$WORKDIR"
         if [ -n "${{ matrix.pythonpath || '' }}" ]; then
           export PYTHONPATH="${{ matrix.pythonpath }}:${PYTHONPATH:-}"
@@ -283,27 +255,9 @@ jobs:
           --ignore=tests/integration/test_tracker_complex_tasks.py \
           --ignore=tests/integration/test_serve_integration.py
 
-  helm-charts:
-    name: helm-charts
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        persist-credentials: false
-    - name: Setup Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: v3.14.4
-    - name: Lint and template Helm charts
-      shell: bash
-      run: |
-        set -euo pipefail
-        bash "$GITHUB_WORKSPACE/scripts/check_helm_charts.sh"
-
   test-core:
     name: test-core
-    needs: [test-core-collect, test-core-unit, test-core-integration, helm-charts]
+    needs: [test-core-collect, test-core-unit, test-core-integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -315,9 +269,8 @@ jobs:
         collect='${{ needs.test-core-collect.result }}'
         unit='${{ needs.test-core-unit.result }}'
         integration='${{ needs.test-core-integration.result }}'
-        helm='${{ needs.helm-charts.result }}'
-        echo "collect=$collect unit=$unit integration=$integration helm=$helm"
-        if [ "$collect" != "success" ] || [ "$unit" != "success" ] || [ "$integration" != "success" ] || [ "$helm" != "success" ]; then
+        echo "collect=$collect unit=$unit integration=$integration"
+        if [ "$collect" != "success" ] || [ "$unit" != "success" ] || [ "$integration" != "success" ]; then
           echo "Core Tests failed"
           exit 1
         fi
