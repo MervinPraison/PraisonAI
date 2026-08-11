@@ -359,6 +359,14 @@ class OutboundDLQ:
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self._lock = threading.Lock()
+        # Guard flag (Issue #3862): set while a boot-time drainer is
+        # redelivering parked replies. A redelivery that fails again goes
+        # through the adapter's normal send, whose resilience wrapper would
+        # otherwise ``enqueue_outbound`` a *new* duplicate row while
+        # ``replay`` already keeps + re-attempts the original. When draining
+        # we skip that nested re-park so a single obligation stays a single
+        # row across restarts.
+        self._draining = False
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
@@ -397,7 +405,15 @@ class OutboundDLQ:
         thread_id: str = "",
         reply_to: str = "",
     ) -> int:
-        """Persist a failed outbound message. Returns its row id."""
+        """Persist a failed outbound message. Returns its row id.
+
+        Returns ``-1`` without inserting while a boot-time drainer is active
+        (``self._draining``), so a redelivery that fails again does not create
+        a duplicate row alongside the original the drainer is already
+        re-attempting (Issue #3862).
+        """
+        if self._draining:
+            return -1
         # Run synchronous SQLite operations in thread pool to avoid blocking
         import asyncio
         return await asyncio.to_thread(
@@ -521,6 +537,55 @@ class OutboundDLQ:
                 self._increment_attempts(entry.id)
 
         return success_count
+
+    async def redeliver(
+        self,
+        send: Callable[[OutboundDLQEntry], Awaitable[Any]],
+        *,
+        limit: int = 100,
+    ) -> int:
+        """Boot-time drain of parked replies through ``send`` (Issue #3862).
+
+        This is the outbound counterpart to ``InboundJournal.replay()``: the
+        reply path is already durable-by-default (permanent/exhausted failures
+        are parked here), but nothing re-drove those parked replies on start,
+        so a reply the user is waiting for sat until an operator manually
+        called :meth:`replay`. ``redeliver`` closes that gap symmetric with the
+        inbound boot sweep.
+
+        ``send(entry)`` performs the raw channel send (typically the adapter's
+        own ``send_message``); a successful redelivery deletes the entry, a
+        failure keeps it and increments ``attempts`` (bounded by the same TTL /
+        ``max_size`` invariants). The ``self._draining`` guard is held for the
+        duration so a re-failed send does not double-park.
+
+        Returns the number of successfully redelivered (deleted) entries.
+        """
+        self._draining = True
+        try:
+            return await self.replay(
+                lambda entry: self._redeliver_one(send, entry),
+                limit=limit,
+            )
+        finally:
+            self._draining = False
+
+    @staticmethod
+    async def _redeliver_one(
+        send: Callable[[OutboundDLQEntry], Awaitable[Any]],
+        entry: OutboundDLQEntry,
+    ) -> bool:
+        try:
+            await send(entry)
+            return True
+        except Exception as e:  # noqa: BLE001 — keep the entry for a later boot
+            logger.warning(
+                "Outbound crash-recovery: redelivery of parked %s reply failed "
+                "(kept for retry): %s",
+                entry.platform or "bot",
+                e,
+            )
+            return False
 
     def _list_oldest_first(self, limit: int = 100) -> List[OutboundDLQEntry]:
         """Return up to ``limit`` entries, oldest first for replay."""
