@@ -58,10 +58,19 @@ class _InMemoryConversationStore:
     plain ``list[dict]`` rather than a persisted store, so this thin adapter lets
     the *same* coherent revert engine keep files and chat history in lockstep on
     the default path — no new persistence layer, just a view over the list.
+
+    The interactive surfaces reuse a single warm ``Agent`` across turns, so the
+    agent keeps its **own** ``chat_history`` that grows independently of this
+    view. Rewinding only the view would leave the reused agent replaying the
+    undone exchange on the next turn. When an ``agent_provider`` is supplied the
+    adapter also truncates the live agent's ``chat_history`` to the same
+    turn boundary (matched by user-message count, so it is robust to interleaved
+    tool/system messages), keeping the agent's active context in lockstep too.
     """
 
-    def __init__(self, history: List[Dict]):
+    def __init__(self, history: List[Dict], agent_provider=None):
         self._history = history
+        self._agent_provider = agent_provider
 
     def get_messages(self, session_id):  # noqa: ARG002 - single-session view
         return list(self._history)
@@ -70,11 +79,48 @@ class _InMemoryConversationStore:
         if message_index < 0 or message_index >= len(self._history):
             return False
         del self._history[message_index + 1:]
+        self._sync_agent_history()
         return True
 
     def clear_messages(self, session_id):  # noqa: ARG002
         self._history.clear()
+        self._sync_agent_history()
         return True
+
+    def _sync_agent_history(self) -> None:
+        """Rewind the reused agent's ``chat_history`` to the same boundary.
+
+        Matches by the number of ``user`` messages remaining in the view so that
+        interleaved system/tool/assistant messages in the agent's own history do
+        not throw the boundary off. Best-effort and non-raising: a warm-agent
+        sync failure must never corrupt the already-restored files/history.
+        """
+        provider = self._agent_provider
+        if provider is None:
+            return
+        try:
+            agent = provider()
+            if agent is None:
+                return
+            history = getattr(agent, "chat_history", None)
+            if history is None:
+                return
+            keep_user_turns = sum(
+                1 for m in self._history
+                if isinstance(m, dict) and m.get("role") == "user"
+            )
+            new_history: List[Dict] = []
+            seen_user = 0
+            for msg in history:
+                role = msg.get("role") if isinstance(msg, dict) else None
+                if role == "user":
+                    if seen_user >= keep_user_turns:
+                        break
+                    seen_user += 1
+                new_history.append(msg)
+            agent.chat_history = new_history
+        except Exception:
+            pass
 
 
 class InteractiveREPL:
@@ -135,7 +181,10 @@ class InteractiveREPL:
             except Exception:
                 config = None
 
-            store = _InMemoryConversationStore(self._conversation_history)
+            store = _InMemoryConversationStore(
+                self._conversation_history,
+                agent_provider=lambda: self._agent,
+            )
             mgr = SessionCheckpointManager.from_config(
                 workspace_dir=(
                     os.environ.get("PRAISONAI_WORKSPACE")

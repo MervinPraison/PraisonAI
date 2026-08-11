@@ -74,6 +74,82 @@ def test_in_memory_store_adapter_rewinds_list():
     assert history == []
 
 
+class _FakeAgent:
+    """Minimal stand-in for the warm Agent whose chat_history grows per turn."""
+
+    def __init__(self, chat_history):
+        self.chat_history = chat_history
+
+
+def test_in_memory_store_rewinds_reused_agent_chat_history():
+    """The adapter also rewinds the reused agent's own chat_history boundary.
+
+    The warm agent interleaves system/tool messages the view does not track, so
+    the rewind must key off user-message count rather than a fixed offset.
+    """
+    view = [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    agent = _FakeAgent(
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "tool", "content": "grep..."},
+            {"role": "assistant", "content": "a2"},
+        ]
+    )
+    store = _InMemoryConversationStore(view, agent_provider=lambda: agent)
+
+    # Undo the last turn: keep only the first user turn in the view.
+    store.revert_to_message("sid", 1)
+    assert view == [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+    ]
+    # The agent history is rewound to the same boundary: system + first turn,
+    # with the second turn's user/tool/assistant messages dropped.
+    assert agent.chat_history == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+    ]
+
+
+def test_in_memory_store_clear_rewinds_agent_to_preamble():
+    """Clearing the view drops all user turns from the agent, keeping preamble."""
+    view = [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "a1"}]
+    agent = _FakeAgent(
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+    )
+    store = _InMemoryConversationStore(view, agent_provider=lambda: agent)
+    store.clear_messages("sid")
+    assert view == []
+    assert agent.chat_history == [{"role": "system", "content": "sys"}]
+
+
+def test_in_memory_store_agent_sync_is_best_effort():
+    """A missing/None agent (or one without chat_history) never raises."""
+    view = [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "a1"}]
+    # Provider returns None (agent not built yet).
+    store = _InMemoryConversationStore(view, agent_provider=lambda: None)
+    store.revert_to_message("sid", 0)
+    assert view == [{"role": "user", "content": "u1"}]
+    # Agent without a chat_history attribute is tolerated too.
+    store2 = _InMemoryConversationStore(
+        [{"role": "user", "content": "u1"}], agent_provider=lambda: object()
+    )
+    store2.clear_messages("sid")  # must not raise
+
+
 def test_repl_undo_restores_files_and_conversation(monkeypatch):
     """/undo on the default REPL path rolls files + conversation back together."""
     monkeypatch.setenv("PRAISONAI_CHECKPOINTS", "on")

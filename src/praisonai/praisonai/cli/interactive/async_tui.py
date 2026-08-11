@@ -294,7 +294,10 @@ class AsyncTUI:
             except Exception:
                 config = None
 
-            store = _InMemoryConversationStore(self._conversation_history)
+            store = _InMemoryConversationStore(
+                self._conversation_history,
+                agent_provider=lambda: self._agent,
+            )
             mgr = SessionCheckpointManager.from_config(
                 workspace_dir=(
                     os.environ.get("PRAISONAI_WORKSPACE")

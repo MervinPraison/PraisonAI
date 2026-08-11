@@ -778,6 +778,17 @@ def _revert_checkpoint(
     # Best-effort and only when a session was named; a failure here must not
     # undo the already-restored workspace.
     if session:
+        # File checkpoints are workspace-wide (they carry no session tag), so
+        # when several sessions share a workspace the Nth-back file checkpoint
+        # may belong to a different session than the one whose conversation we
+        # rewind. Surface that explicitly rather than implying a guaranteed
+        # per-session pairing; the interactive REPL/TUI ``/undo`` — which keeps
+        # its own captured per-turn boundaries — remains the fully coherent path.
+        output.print_info(
+            "Note: file checkpoints are workspace-wide; in a workspace shared by "
+            "multiple sessions the reverted files may not correspond exactly to "
+            f"session '{session}'. Use the interactive /undo for per-session coherence."
+        )
         try:
             from praisonaiagents.session.hierarchy import HierarchicalSessionStore
 
@@ -786,23 +797,48 @@ def _revert_checkpoint(
             store = HierarchicalSessionStore(str(get_project_sessions_dir()))
             data = store.get_extended_session(session)
             messages = list(getattr(data, "messages", []) or [])
-            # Drop the last n user/assistant exchanges (2 messages per turn) so
-            # history no longer references the edits that were just undone.
-            keep = max(0, len(messages) - 2 * n)
-            if keep >= 1:
-                # revert_to_message keeps messages[:index + 1]; target keep-1.
-                store.revert_to_message(session, keep - 1)
-                output.print_info(
-                    f"Reverted session '{session}' conversation to keep "
-                    f"{keep} message(s)."
-                )
+            # Rewind the conversation to the boundary *before* the last ``n``
+            # user turns. Counting real user messages (rather than assuming two
+            # messages per turn) keeps history coherent when a turn also
+            # persisted tool/system/assistant messages — subtracting a fixed
+            # ``2 * n`` would otherwise leave orphaned tool replies or drop an
+            # unrelated earlier turn.
+            user_indices = [
+                i for i, m in enumerate(messages)
+                if isinstance(m, dict) and m.get("role") == "user"
+            ]
+            if len(user_indices) >= n:
+                # The first user message of the last ``n`` turns marks where the
+                # undone turns begin; keep everything strictly before it.
+                boundary = user_indices[len(user_indices) - n]
+                keep = boundary  # number of messages to retain
+                if keep >= 1:
+                    # revert_to_message keeps messages[:index + 1]; target keep-1.
+                    store.revert_to_message(session, keep - 1)
+                    output.print_info(
+                        f"Reverted session '{session}' conversation to keep "
+                        f"{keep} message(s)."
+                    )
+                elif messages:
+                    # Rewinding to empty would strand a ghost first message via
+                    # revert_to_message (index 0 keeps one), so clear explicitly
+                    # when the store supports it; otherwise leave history intact.
+                    clear = getattr(store, "clear_messages", None)
+                    if callable(clear):
+                        clear(session)
+                        output.print_info(
+                            f"Reverted files and cleared session '{session}' "
+                            "conversation."
+                        )
+                    else:
+                        output.print_info(
+                            f"Reverted files; session '{session}' conversation "
+                            "left intact (too short to rewind coherently)."
+                        )
             elif messages:
-                # No index maps to an empty history via revert_to_message
-                # (index 0 keeps one message), so leave history untouched rather
-                # than corrupt it with a ghost message. File revert still stands.
                 output.print_info(
-                    f"Reverted files; session '{session}' conversation left "
-                    "intact (too short to rewind coherently)."
+                    f"Reverted files; session '{session}' conversation has "
+                    f"fewer than {n} turn(s) to rewind — left intact."
                 )
         except Exception as e:  # pragma: no cover - defensive
             if getattr(output, "is_verbose", False):
