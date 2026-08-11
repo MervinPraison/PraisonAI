@@ -208,13 +208,14 @@ class TestOutboundRedeliver:
         assert dlq.size() == 1
 
         async def failing_send(entry):
-            # Simulate the adapter's resilience wrapper trying to re-park while
-            # the drainer is active — must be suppressed by the _draining guard.
+            # Simulate the adapter's resilience wrapper trying to re-park the
+            # *same* reply mid-redelivery — must be suppressed as a duplicate.
             row = await dlq.enqueue_outbound(
-                platform="slack", channel_id=entry.channel_id,
+                platform=entry.platform, channel_id=entry.channel_id,
                 reply_text=entry.reply_text, error="still down",
+                thread_id=entry.thread_id, reply_to=entry.reply_to,
             )
-            assert row == -1  # nested park skipped during drain
+            assert row == -1  # nested park of the in-flight entry skipped
             raise ConnectionError("still down")
 
         redelivered = await dlq.redeliver(failing_send)
@@ -222,7 +223,35 @@ class TestOutboundRedeliver:
         assert dlq.size() == 1  # exactly one row retained (no duplicate)
         assert dlq.list()[0].attempts == 1
         # Guard is released after the drain completes.
-        assert dlq._draining is False
+        assert dlq._redelivering is None
+
+    @pytest.mark.asyncio
+    async def test_redeliver_persists_unrelated_concurrent_failure(self, tmp_path):
+        """A *different* reply that fails while a drain is in progress must
+        still be parked — the nested-park guard is scoped to the in-flight
+        entry only, never the whole queue (Issue #3862 durable contract)."""
+        from praisonai_bot.bots._dlq import OutboundDLQ
+
+        dlq = OutboundDLQ(path=tmp_path / "outbound.sqlite")
+        await dlq.enqueue_outbound(
+            platform="slack", channel_id="C1", reply_text="parked",
+            error="HTTP 503",
+        )
+
+        async def failing_send(entry):
+            # A genuinely-new obligation (different channel + text) exhausts its
+            # retries concurrently — it MUST persist, not be dropped.
+            row = await dlq.enqueue_outbound(
+                platform="slack", channel_id="C999", reply_text="live-new",
+                error="fresh failure",
+            )
+            assert row != -1  # new obligation persisted despite active drain
+            raise ConnectionError("still down")
+
+        await dlq.redeliver(failing_send)
+        texts = {e.reply_text for e in dlq.list()}
+        assert "parked" in texts   # original kept for retry
+        assert "live-new" in texts  # concurrent new failure NOT lost
 
     @pytest.mark.asyncio
     async def test_redeliver_noop_when_empty(self, tmp_path):

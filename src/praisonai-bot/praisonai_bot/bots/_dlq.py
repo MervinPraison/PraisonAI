@@ -41,7 +41,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, List, Optional, Union
+from typing import Any, Awaitable, Callable, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -359,16 +359,25 @@ class OutboundDLQ:
         self.max_size = int(max_size)
         self.ttl_seconds = int(ttl_seconds)
         self._lock = threading.Lock()
-        # Guard flag (Issue #3862): set while a boot-time drainer is
-        # redelivering parked replies. A redelivery that fails again goes
-        # through the adapter's normal send, whose resilience wrapper would
-        # otherwise ``enqueue_outbound`` a *new* duplicate row while
-        # ``replay`` already keeps + re-attempts the original. When draining
-        # we skip that nested re-park so a single obligation stays a single
-        # row across restarts.
-        self._draining = False
+        # Nested-park guard (Issue #3862). While a boot-time drainer redelivers
+        # a parked reply through the adapter's normal ``send_message``, a
+        # re-failure re-enters ``enqueue_outbound`` via the resilience wrapper
+        # and would create a *duplicate* row for the very reply ``replay`` is
+        # already keeping + re-attempting. We suppress **only that** nested
+        # re-park by matching the in-flight entry's identity — a *different*
+        # (genuinely new) reply that fails concurrently is still persisted, so
+        # the durable-outbound contract holds even during recovery.
+        self._redelivering: Optional[tuple[str, str, str, str]] = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+
+    @staticmethod
+    def _park_signature(
+        platform: str, channel_id: str, reply_text: str, thread_id: str, reply_to: str,
+    ) -> tuple[str, str, str, str]:
+        # error/ts are intentionally excluded: the same obligation re-parks with
+        # a fresh error string and time on each failed redelivery attempt.
+        return (platform, channel_id, reply_text, f"{thread_id}\x00{reply_to}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path))
@@ -407,12 +416,17 @@ class OutboundDLQ:
     ) -> int:
         """Persist a failed outbound message. Returns its row id.
 
-        Returns ``-1`` without inserting while a boot-time drainer is active
-        (``self._draining``), so a redelivery that fails again does not create
-        a duplicate row alongside the original the drainer is already
-        re-attempting (Issue #3862).
+        Returns ``-1`` without inserting **only** when this call is the nested
+        re-park of the exact reply a boot-time drainer is currently
+        redelivering (Issue #3862) — that reply's original row is already kept +
+        re-attempted by :meth:`redeliver`, so a second row would duplicate it.
+        Any other failed reply (a genuinely new obligation) is always persisted,
+        even concurrently with a drain, preserving the durable-outbound
+        contract.
         """
-        if self._draining:
+        if self._redelivering is not None and self._redelivering == self._park_signature(
+            platform, channel_id, reply_text, thread_id, reply_to
+        ):
             return -1
         # Run synchronous SQLite operations in thread pool to avoid blocking
         import asyncio
@@ -556,25 +570,30 @@ class OutboundDLQ:
         ``send(entry)`` performs the raw channel send (typically the adapter's
         own ``send_message``); a successful redelivery deletes the entry, a
         failure keeps it and increments ``attempts`` (bounded by the same TTL /
-        ``max_size`` invariants). The ``self._draining`` guard is held for the
-        duration so a re-failed send does not double-park.
+        ``max_size`` invariants). Only the *in-flight* entry's nested re-park is
+        suppressed (see :meth:`enqueue_outbound`) so a re-failed send does not
+        double-park **while** a genuinely-new reply that fails concurrently is
+        still persisted.
 
         Returns the number of successfully redelivered (deleted) entries.
         """
-        self._draining = True
-        try:
-            return await self.replay(
-                lambda entry: self._redeliver_one(send, entry),
-                limit=limit,
-            )
-        finally:
-            self._draining = False
+        return await self.replay(
+            lambda entry: self._redeliver_one(send, entry),
+            limit=limit,
+        )
 
-    @staticmethod
     async def _redeliver_one(
+        self,
         send: Callable[[OutboundDLQEntry], Awaitable[Any]],
         entry: OutboundDLQEntry,
     ) -> bool:
+        # Scope the nested-park suppression to *this* entry only, so a re-failed
+        # redelivery keeps its single row while unrelated concurrent failures
+        # are still persisted (Issue #3862).
+        self._redelivering = self._park_signature(
+            entry.platform, entry.channel_id, entry.reply_text,
+            entry.thread_id, entry.reply_to,
+        )
         try:
             await send(entry)
             return True
@@ -586,6 +605,8 @@ class OutboundDLQ:
                 e,
             )
             return False
+        finally:
+            self._redelivering = None
 
     def _list_oldest_first(self, limit: int = 100) -> List[OutboundDLQEntry]:
         """Return up to ``limit`` entries, oldest first for replay."""
