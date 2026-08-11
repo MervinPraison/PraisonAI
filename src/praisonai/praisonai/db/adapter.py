@@ -302,18 +302,21 @@ class PraisonAIDB:
         from ..persistence.conversation._ops import resume_or_create_session
         
         store = self._conversation_store
-        messages = resume_or_create_session(
-            store,
-            store.get_session(session_id),
-            session_id,
-            build_session=lambda: ConversationSession(
-                session_id=session_id,
-                user_id=user_id or "default",
-                agent_id=agent_name,
-                name=f"Session {session_id}",
-                metadata=metadata or {},
-            ),
-            get_messages=lambda: store.get_messages(session_id),
+        existing = self._resolve_sync(store.get_session(session_id))
+        messages = self._resolve_sync(
+            resume_or_create_session(
+                store,
+                existing,
+                session_id,
+                build_session=lambda: ConversationSession(
+                    session_id=session_id,
+                    user_id=user_id or "default",
+                    agent_id=agent_name,
+                    name=f"Session {session_id}",
+                    metadata=metadata or {},
+                ),
+                get_messages=lambda: self._resolve_sync(store.get_messages(session_id)),
+            )
         )
         
         if messages is None:
@@ -718,6 +721,34 @@ class PraisonAIDB:
     # ========================================================================
 
     @staticmethod
+    def _resolve_sync(value):
+        """Resolve a possibly-awaitable store result on the sync code path.
+
+        A store opened in ``mode="async"`` returns coroutines from its
+        ``get_session`` / ``get_messages`` methods. On the sync hooks that would
+        otherwise be handed straight into ``resume_or_create_session`` and later
+        crash with ``TypeError: 'coroutine' object is not iterable``. Here we run
+        the coroutine to completion when no event loop is active; if we are
+        already inside a running loop we cannot block, so we close the coroutine
+        and raise a clear, actionable error instead of a cryptic ``TypeError``.
+        """
+        if not inspect.isawaitable(value):
+            return value
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(value)
+        # Inside a running loop: cannot block. Close the coroutine to avoid a
+        # "coroutine was never awaited" warning and surface a clear message.
+        if inspect.iscoroutine(value):
+            value.close()
+        raise RuntimeError(
+            "PraisonAIDB sync hook called against an async-mode store from a "
+            "running event loop. Use the async surface (e.g. aon_agent_start) "
+            "or initialise the store with mode='sync'."
+        )
+
+    @staticmethod
     async def _dispatch_async(store, sync_name, async_name, *args, **kwargs):
         """Dispatch a store call in an async-safe way.
 
@@ -734,13 +765,17 @@ class PraisonAIDB:
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     async def aon_agent_start(
-        self, 
-        session_id: str, 
-        name: str, 
-        agent_id: str = "", 
-        metadata: Optional[Dict[str, Any]] = None
+        self,
+        agent_name: str,
+        session_id: str,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> List:
-        """Async version of on_agent_start - returns previous messages for resume."""
+        """Async version of on_agent_start - returns previous messages for resume.
+
+        Signature matches ``AsyncDbAdapter.on_agent_start`` so the async surface
+        stays protocol-aligned and ``user_id`` is persisted rather than dropped.
+        """
         await self._ainit_stores()
 
         messages: List = []
@@ -760,7 +795,8 @@ class PraisonAIDB:
                 session_id,
                 build_session=lambda: ConversationSession(
                     session_id=session_id,
-                    agent_id=agent_id or name,
+                    user_id=user_id or "default",
+                    agent_id=agent_name,
                     name=f"Session {session_id}",
                     metadata=metadata or {},
                 ),
@@ -791,7 +827,7 @@ class PraisonAIDB:
                 self._state_store,
                 "set",
                 "aset",
-                f"agent:{session_id}:{agent_id or name}",
+                f"agent:{session_id}:{agent_name}",
                 {"status": "started", "metadata": metadata or {}},
             )
 
@@ -906,11 +942,12 @@ class PraisonAIDB:
     async def aon_agent_end(
         self,
         session_id: str,
-        name: str,
-        agent_id: str = "",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Async version of on_agent_end."""
+        """Async version of on_agent_end.
+
+        Signature matches ``AsyncDbAdapter.on_agent_end``.
+        """
         await self._ainit_stores()
 
         if self._conversation_store:
@@ -934,7 +971,7 @@ class PraisonAIDB:
                 self._state_store,
                 "set",
                 "aset",
-                f"agent:{session_id}:{agent_id or name}",
+                f"agent:{session_id}",
                 {"status": "ended", "metadata": metadata or {}},
             )
 

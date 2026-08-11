@@ -444,31 +444,56 @@ def observability_session(
 # broken plugin never breaks a user run.
 # ---------------------------------------------------------------------------
 
+_sink_factories_lock = threading.Lock()
+_sink_factories_cache: Optional[List[Callable]] = None
+
+
 def discover_observability_sinks() -> List[Callable]:
     """Return third-party observability sink factories from entry points.
 
     Each entry point is expected to load to a callable factory. Failures are
     swallowed (logged at debug) so observability discovery never crashes a run.
+
+    The factory list is process-static, so it is memoized after the first walk:
+    ``importlib.metadata.entry_points()`` is O(installed distributions) and this
+    runs on every agent run (every request in ``praisonai serve``). Per-run sink
+    *instances* still come from calling these cached factories, so per-run
+    isolation is preserved. Use :func:`reset_observability_sink_discovery` to
+    invalidate the cache in tests or after a dynamic plugin install.
     """
-    factories: List[Callable] = []
-    try:
-        from importlib.metadata import entry_points
-
+    global _sink_factories_cache
+    if _sink_factories_cache is not None:
+        return _sink_factories_cache
+    with _sink_factories_lock:
+        if _sink_factories_cache is not None:
+            return _sink_factories_cache
+        factories: List[Callable] = []
         try:
-            eps = entry_points(group="praisonai.observability_sinks")
-        except TypeError:
-            # Python < 3.10 returns a dict-like mapping from entry_points().
-            eps = entry_points().get("praisonai.observability_sinks", [])
+            from importlib.metadata import entry_points
 
-        for ep in eps:
             try:
-                factory = ep.load()
-                if callable(factory):
-                    factories.append(factory)
-                else:
-                    logger.debug("observability sink %r is not callable; skipping", ep)
-            except Exception:  # noqa: BLE001
-                logger.debug("failed to load observability sink %r", ep, exc_info=True)
-    except Exception:  # noqa: BLE001
-        logger.debug("no third-party observability sinks discovered", exc_info=True)
-    return factories
+                eps = entry_points(group="praisonai.observability_sinks")
+            except TypeError:
+                # Python < 3.10 returns a dict-like mapping from entry_points().
+                eps = entry_points().get("praisonai.observability_sinks", [])
+
+            for ep in eps:
+                try:
+                    factory = ep.load()
+                    if callable(factory):
+                        factories.append(factory)
+                    else:
+                        logger.debug("observability sink %r is not callable; skipping", ep)
+                except Exception:  # noqa: BLE001
+                    logger.debug("failed to load observability sink %r", ep, exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.debug("no third-party observability sinks discovered", exc_info=True)
+        _sink_factories_cache = factories
+        return _sink_factories_cache
+
+
+def reset_observability_sink_discovery() -> None:
+    """Invalidate the cached sink factory list (test hook / plugin-install escape hatch)."""
+    global _sink_factories_cache
+    with _sink_factories_lock:
+        _sink_factories_cache = None
