@@ -817,6 +817,21 @@ Respond with ONLY a valid JSON tool call in this format:
         # Default fallback
         return "unknown"
     
+    def _is_post_dispatch_failure(self, error: Exception) -> bool:
+        """Whether a transient error occurred after the request was dispatched.
+
+        A post-dispatch failure (read timeout, connection reset mid-response)
+        means the provider may already have processed the request — replaying it
+        is unsafe on a side-effecting turn. A pre-dispatch failure (connect
+        timeout, connection refused, DNS/TLS failure) provably never reached the
+        provider and is always safe to replay.
+        """
+        try:
+            from .error_classifier import is_replay_unsafe
+            return is_replay_unsafe(error)
+        except Exception:  # noqa: BLE001 - classification must never break retry
+            return False
+
     def resolve_failover_decision(self, error: Exception, attempt_state: dict) -> FailoverDecision:
         """
         Resolve failover decision based on error kind and attempt state.
@@ -874,6 +889,20 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Overloaded/timeout - retry with exponential backoff
         if error_kind in ["overloaded", "idle_timeout"]:
+            # Replay-safety gate: a transient failure that happened AFTER the
+            # request was dispatched (read timeout, connection reset mid-response)
+            # may have already produced output server-side and already run any
+            # side-effecting tool calls in that turn. Blindly replaying it can
+            # double-execute the turn. Only auto-retry a post-dispatch failure
+            # when the turn is side-effect-free (no tools); otherwise surface it
+            # so the host records a visible non-outcome instead of duplicating.
+            if attempt_state.get("side_effecting") and self._is_post_dispatch_failure(error):
+                return FailoverDecision(
+                    action="surface_error",
+                    reason="provider_outcome_unknown",
+                    is_retryable=False
+                )
+
             # For idle timeouts, check circuit breaker
             if error_kind == "idle_timeout":
                 breaker_hit = self._idle_timeout_breaker.record_idle_timeout()
@@ -1021,8 +1050,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 error_str: String form of the exception.
                 kwargs: The (possibly updated) keyword arguments.
         """
+        # A turn is "side-effecting" when it exposes tools the model may call:
+        # a post-dispatch failure on such a turn could have already run a
+        # side-effecting tool, so it must not be silently replayed. A turn with
+        # no tools (pure completion) has no external side effects, so replaying a
+        # post-dispatch failure is safe (at most re-bills the completion, which
+        # the provider already dedupes far less than a double tool action).
+        side_effecting = bool(kwargs.get("tools"))
+
         # Use new typed failover decision instead of old classification
-        decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
+        decision = self.resolve_failover_decision(
+            e,
+            {
+                "attempt": attempt + 1,
+                "max_retries": self._max_retries,
+                "side_effecting": side_effecting,
+            },
+        )
 
         error_str = str(e)
 

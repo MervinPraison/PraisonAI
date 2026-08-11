@@ -392,3 +392,107 @@ class TestBackwardCompatibility:
         except (ImportError, AttributeError):
             # Skip backward compatibility test if LLM not available
             pass
+
+
+class TestReplaySafety:
+    """Replay-safety gate: distinguish pre- vs post-dispatch transient failures."""
+
+    def test_post_dispatch_failures_are_replay_unsafe(self):
+        """Read timeouts / connection resets happen after the request was sent."""
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        class ReadTimeout(Exception):
+            pass
+
+        class RemoteProtocolError(Exception):
+            pass
+
+        unsafe = [
+            ReadTimeout("The read operation timed out"),
+            RemoteProtocolError("peer closed connection"),
+            ConnectionResetError("Connection reset by peer"),
+            Exception("Request read timed out"),
+            Exception("Response ended prematurely"),
+            Exception("server disconnected"),
+        ]
+        for error in unsafe:
+            assert is_replay_unsafe(error) is True, error
+
+    def test_pre_dispatch_failures_are_replay_safe(self):
+        """DNS / connect / TLS failures provably never reached the provider."""
+        import socket
+        import ssl
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        class ConnectTimeout(Exception):
+            pass
+
+        safe = [
+            ConnectTimeout("connect timed out"),
+            ConnectionRefusedError("Connection refused"),
+            socket.gaierror("Name or service not known"),
+            ssl.SSLError("handshake failure"),
+            Exception("failed to resolve host"),
+            Exception("connection refused"),
+        ]
+        for error in safe:
+            assert is_replay_unsafe(error) is False, error
+
+    def test_ambiguous_transient_defaults_to_safe(self):
+        """A plain 5xx with no post-dispatch signal preserves auto-retry."""
+        from praisonaiagents.llm.error_classifier import is_replay_unsafe
+
+        assert is_replay_unsafe(Exception("500 internal server error")) is False
+        assert is_replay_unsafe(Exception("service unavailable")) is False
+
+    def test_side_effecting_turn_blocks_post_dispatch_retry(self):
+        """resolve_failover_decision surfaces a post-dispatch failure on a tool turn."""
+        from praisonaiagents.llm.llm import LLM
+
+        class ReadTimeout(Exception):
+            pass
+
+        llm = LLM(model="fake")
+        error = ReadTimeout("The read operation timed out")
+
+        decision = llm.resolve_failover_decision(
+            error,
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is False
+        assert decision.action == "surface_error"
+        assert decision.reason == "provider_outcome_unknown"
+
+    def test_side_effect_free_turn_still_retries_post_dispatch(self):
+        """A tool-less turn may still auto-retry a post-dispatch failure."""
+        from praisonaiagents.llm.llm import LLM
+
+        class ReadTimeout(Exception):
+            pass
+
+        llm = LLM(model="fake")
+        error = ReadTimeout("The read operation timed out")
+
+        decision = llm.resolve_failover_decision(
+            error,
+            {"attempt": 1, "max_retries": 3, "side_effecting": False},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"
+
+    def test_pre_dispatch_failure_retries_even_on_side_effecting_turn(self):
+        """A connect timeout is safe to replay regardless of tools."""
+        from praisonaiagents.llm.llm import LLM
+
+        class ConnectTimeout(Exception):
+            pass
+
+        llm = LLM(model="fake")
+        error = ConnectTimeout("connect timed out")
+
+        decision = llm.resolve_failover_decision(
+            error,
+            {"attempt": 1, "max_retries": 3, "side_effecting": True},
+        )
+        assert decision.is_retryable is True
+        assert decision.action == "retry"

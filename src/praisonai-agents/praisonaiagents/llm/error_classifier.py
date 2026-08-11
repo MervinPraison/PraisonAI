@@ -20,6 +20,7 @@ __all__ = [
     "classify_error", 
     "classify_llm_error",
     "should_retry", 
+    "is_replay_unsafe",
     "get_retry_delay",
     "extract_retry_after",
     "get_error_context",
@@ -457,6 +458,92 @@ def should_retry(category: ErrorCategory) -> bool:
         ErrorCategory.CONTEXT_LIMIT,  # Could retry with compression
         ErrorCategory.TRANSIENT,
     }
+
+
+# Signals that a transient failure happened AFTER the request was dispatched, so
+# the provider may already have produced output (and any side-effecting tool
+# calls in that turn may already have run). Replaying such a call is unsafe: it
+# risks double-executing the turn. Read timeouts, connection resets and
+# incomplete/streaming reads all occur once bytes have been sent.
+_REPLAY_UNSAFE_EXCEPTION_NAMES = frozenset({
+    "readtimeout",              # httpx.ReadTimeout / requests ReadTimeout
+    "readtimeouterror",         # urllib3 ReadTimeoutError
+    "connectionreseterror",     # stdlib socket reset mid-response
+    "chunkedencodingerror",     # response body truncated after dispatch
+    "incompleteread",           # http.client partial read after dispatch
+    "remoteprotocolerror",      # httpx: peer closed connection mid-response
+    "protocolerror",            # urllib3 protocol error mid-response
+    "apitimeouterror",          # provider SDK request timeout (post-send)
+})
+
+# Signals that a transient failure happened BEFORE the request was dispatched,
+# so the provider provably did not process it — safe to replay automatically.
+_REPLAY_SAFE_EXCEPTION_NAMES = frozenset({
+    "connecttimeout",           # TCP connect never completed
+    "connecttimeouterror",      # urllib3 connect timeout
+    "connectionrefusederror",   # nothing accepted the connection
+    "connecterror",             # httpx connect error (pre-dispatch)
+    "newconnectionerror",       # urllib3: connection never established
+    "gaierror",                 # DNS resolution failure
+    "sslerror",                 # TLS handshake failure (pre-dispatch)
+    "sslcertverificationerror",
+})
+
+_REPLAY_UNSAFE_MESSAGE_PATTERNS = (
+    r"read.?timed?.?out",
+    r"read.?timeout",
+    r"connection.?reset",
+    r"peer.?closed",
+    r"incomplete.?read",
+    r"chunked",
+    r"response.?ended.?prematurely",
+    r"server.?disconnected",
+)
+
+_REPLAY_SAFE_MESSAGE_PATTERNS = (
+    r"connect.?timed?.?out",
+    r"connection.?timed?.?out",
+    r"connection.?refused",
+    r"name.?resolution",
+    r"failed.?to.?resolve",
+    r"getaddrinfo",
+    r"ssl",
+    r"handshake",
+    r"tls",
+)
+
+
+def is_replay_unsafe(error: Exception) -> bool:
+    """Return True if replaying the request could double-execute the turn.
+
+    Distinguishes *pre-dispatch* failures (the request provably never reached
+    the provider — DNS/connect/TLS failures) which are safe to replay, from
+    *post-dispatch* failures (read timeout, connection reset mid-response) where
+    the provider may already have produced output and any side-effecting tool
+    calls may already have run. Post-dispatch failures are replay-unsafe.
+
+    Defaults to ``False`` (safe/retryable) for ambiguous transient errors so
+    existing auto-retry behaviour is preserved unless a post-dispatch signal is
+    present. Callers should only block the retry when the turn is side-effecting.
+    """
+    # 1. Exception type (walk the MRO to catch provider subclasses) — most stable.
+    for cls in type(error).__mro__:
+        name = cls.__name__.lower()
+        if name in _REPLAY_SAFE_EXCEPTION_NAMES:
+            return False
+        if name in _REPLAY_UNSAFE_EXCEPTION_NAMES:
+            return True
+
+    # 2. Message text — pre-dispatch signals win over the generic "timeout".
+    error_text = f"{type(error).__name__} {error}".lower()
+    for pattern in _REPLAY_SAFE_MESSAGE_PATTERNS:
+        if re.search(pattern, error_text):
+            return False
+    for pattern in _REPLAY_UNSAFE_MESSAGE_PATTERNS:
+        if re.search(pattern, error_text):
+            return True
+
+    return False
 
 
 def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float = 1.0) -> float:
