@@ -6102,7 +6102,37 @@ class WebSocketGateway:
             for name, bot in self._channel_bots.items():
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
+                # Issue #3862: once the channel's transport is up, redeliver any
+                # finalised reply parked by a crash mid-send on a previous run —
+                # the symmetric outbound counterpart to _replay_inbound_journal.
+                # Deferred (not awaited) so a client that isn't connected yet is
+                # given a grace period, and a failed redelivery is simply kept
+                # for the next boot rather than blocking startup.
+                self._schedule_outbound_recovery(bot)
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _schedule_outbound_recovery(self, bot: Any) -> None:
+        """Fire-and-forget the boot-time outbound reply redelivery (Issue #3862).
+
+        Waits a short grace period for the channel's transport to connect, then
+        runs :meth:`_replay_outbound_dlq` once. Best-effort: a redelivery that
+        fails (transport still down, target gone) is kept in the DLQ for the
+        next boot, exactly as before this recovery existed.
+        """
+
+        async def _run() -> None:
+            try:
+                await asyncio.sleep(5)
+                await self._replay_outbound_dlq(bot)
+            except asyncio.CancelledError:  # pragma: no cover — shutdown
+                raise
+            except Exception as exc:  # pragma: no cover — recovery is best-effort
+                logger.debug("Outbound crash-recovery task failed: %s", exc)
+
+        try:
+            asyncio.create_task(_run())
+        except RuntimeError:  # pragma: no cover — no running loop
+            pass
 
     @staticmethod
     def _warn_empty_allowlist(channel_name: str, unknown_user_policy: str) -> None:
@@ -6217,6 +6247,75 @@ class WebSocketGateway:
                 "Inbound crash-recovery: reset %d stranded journaled message(s) "
                 "to pending on start (unblocked for redelivery/resume)",
                 recovered,
+            )
+
+    @staticmethod
+    async def _replay_outbound_dlq(bot: Any) -> None:
+        """Redeliver a channel's parked replies on start (Issue #3862).
+
+        The symmetric outbound counterpart to :meth:`_replay_inbound_journal`.
+        The reply path is already durable-by-default — every permanently-failed
+        / retry-exhausted reply is parked in the adapter's ``OutboundDLQ`` at a
+        canonical per-platform path instead of being dropped — but its
+        crash-recovery method (``OutboundDLQ.replay`` / ``redeliver``) had **no
+        caller** on boot. A reply the user was waiting for therefore sat parked
+        until an operator manually replayed it, unlike the inbound journal which
+        is swept automatically on start.
+
+        This sweep redelivers those parked replies through the adapter's own
+        ``send_message`` (which keeps the platform's normal retry/backoff), with
+        a visible "recovered — this reply may be a duplicate" marker so an
+        ambiguous redelivery is never silent. A redelivery that fails again is
+        kept for the next boot, bounded by the DLQ's existing TTL / max-size /
+        attempts invariants.
+
+        Best-effort and bounded: any failure degrades to today's behaviour
+        (parked-until-manual-replay) rather than aborting channel start.
+        """
+        # The shared mixin builds its DLQ lazily on first send; open the
+        # canonical default store now so a reply parked before the last crash
+        # is visible to the sweep even if this process hasn't sent yet.
+        ensure = getattr(bot, "_ensure_outbound_resilience", None)
+        if callable(ensure):
+            try:
+                ensure()
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+        dlq = getattr(bot, "_outbound_dlq", None)
+        send_message = getattr(bot, "send_message", None)
+        if dlq is None or not callable(send_message):
+            return
+        try:
+            if dlq.size() == 0:
+                return
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug("Outbound crash-replay skipped (size probe failed): %s", exc)
+            return
+
+        _marker = "\u267b\ufe0f Recovered after restart — this reply may be a duplicate.\n\n"
+
+        async def _send(entry: Any) -> Any:
+            text = entry.reply_text
+            if not text.startswith(_marker):
+                text = _marker + text
+            return await send_message(
+                entry.channel_id,
+                text,
+                reply_to=entry.reply_to or None,
+                thread_id=entry.thread_id or None,
+            )
+
+        try:
+            redelivered = await dlq.redeliver(_send)
+        except Exception as exc:  # pragma: no cover — recovery is best-effort
+            logger.debug("Outbound crash-replay skipped: %s", exc)
+            return
+        if redelivered:
+            logger.info(
+                "Outbound crash-recovery: redelivered %d parked repl(y/ies) "
+                "on start (marked as possible duplicates)",
+                redelivered,
             )
 
     @staticmethod
@@ -7459,6 +7558,9 @@ class WebSocketGateway:
         # Start the bot using the same pattern as start_channels
         task = asyncio.create_task(self._run_bot_safe(channel_name, bot))
         self._channel_tasks[channel_name] = task
+        # Issue #3862: redeliver replies parked by a crash on the hot-reloaded
+        # channel too, so recovery isn't limited to full gateway boot.
+        self._schedule_outbound_recovery(bot)
         logger.info(f"Started channel '{channel_name}' ({channel_type})")
 
     async def reload_config(self, config_path: str) -> None:
