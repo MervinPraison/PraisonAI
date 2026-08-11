@@ -78,17 +78,29 @@ class SessionCheckpointManager:
         verbose: bool = False,
         session_store: Optional[object] = None,
         session_id: Optional[str] = None,
+        default: bool = False,
     ) -> "SessionCheckpointManager":
         """
         Build a manager from a resolved ``checkpoints`` config section.
 
-        Precedence (highest last): config ``checkpoints.auto`` -> the
-        ``PRAISONAI_CHECKPOINTS`` environment override. Defaults to disabled so
-        there is zero overhead unless a user opts in.
+        Precedence (highest last): ``default`` -> config ``checkpoints.auto``
+        -> the ``PRAISONAI_CHECKPOINTS`` environment override.
+
+        ``default`` is the value used when ``checkpoints.auto`` is *absent* from
+        config. It defaults to ``False`` so a programmatic/low-level caller pays
+        zero overhead unless it opts in, but interactive CLI surfaces pass
+        ``default=True`` so terminal runs get an automatic safety net — this is
+        the single knob that keeps the file-only ``run.py`` checkpoints and the
+        coherent turn-revert on the *same* ``checkpoints.auto`` default instead
+        of diverging.
         """
         workspace_dir = workspace_dir or os.getcwd()
         section = (config or {}).get("checkpoints", {}) if config else {}
-        enabled = bool(section.get("auto", False)) if isinstance(section, dict) else False
+        enabled = (
+            bool(section.get("auto", default))
+            if isinstance(section, dict)
+            else default
+        )
 
         env_override = os.environ.get("PRAISONAI_CHECKPOINTS")
         if env_override is not None:

@@ -44,7 +44,83 @@ DEFAULT_COMMANDS: Dict[str, str] = {
     "compact": "Toggle compact output mode",
     "multiline": "Toggle multiline input mode",
     "btw": "Ask a side question in a throwaway context (main task untouched)",
+    "undo": "Undo the last turn (files + conversation)",
+    "revert": "Revert the last N turns (files + conversation)",
 }
+
+
+class _InMemoryConversationStore:
+    """Adapt the REPL's in-memory history list to the checkpoint store surface.
+
+    ``SessionCheckpointManager`` rewinds a conversation via the small
+    ``get_messages``/``revert_to_message``/``clear_messages`` protocol (mirroring
+    the core ``HierarchicalSessionStore``). The modern REPL keeps history as a
+    plain ``list[dict]`` rather than a persisted store, so this thin adapter lets
+    the *same* coherent revert engine keep files and chat history in lockstep on
+    the default path — no new persistence layer, just a view over the list.
+
+    The interactive surfaces reuse a single warm ``Agent`` across turns, so the
+    agent keeps its **own** ``chat_history`` that grows independently of this
+    view. Rewinding only the view would leave the reused agent replaying the
+    undone exchange on the next turn. When an ``agent_provider`` is supplied the
+    adapter also truncates the live agent's ``chat_history`` to the same
+    turn boundary (matched by user-message count, so it is robust to interleaved
+    tool/system messages), keeping the agent's active context in lockstep too.
+    """
+
+    def __init__(self, history: List[Dict], agent_provider=None):
+        self._history = history
+        self._agent_provider = agent_provider
+
+    def get_messages(self, session_id):  # noqa: ARG002 - single-session view
+        return list(self._history)
+
+    def revert_to_message(self, session_id, message_index):  # noqa: ARG002
+        if message_index < 0 or message_index >= len(self._history):
+            return False
+        del self._history[message_index + 1:]
+        self._sync_agent_history()
+        return True
+
+    def clear_messages(self, session_id):  # noqa: ARG002
+        self._history.clear()
+        self._sync_agent_history()
+        return True
+
+    def _sync_agent_history(self) -> None:
+        """Rewind the reused agent's ``chat_history`` to the same boundary.
+
+        Matches by the number of ``user`` messages remaining in the view so that
+        interleaved system/tool/assistant messages in the agent's own history do
+        not throw the boundary off. Best-effort and non-raising: a warm-agent
+        sync failure must never corrupt the already-restored files/history.
+        """
+        provider = self._agent_provider
+        if provider is None:
+            return
+        try:
+            agent = provider()
+            if agent is None:
+                return
+            history = getattr(agent, "chat_history", None)
+            if history is None:
+                return
+            keep_user_turns = sum(
+                1 for m in self._history
+                if isinstance(m, dict) and m.get("role") == "user"
+            )
+            new_history: List[Dict] = []
+            seen_user = 0
+            for msg in history:
+                role = msg.get("role") if isinstance(msg, dict) else None
+                if role == "user":
+                    if seen_user >= keep_user_turns:
+                        break
+                    seen_user += 1
+                new_history.append(msg)
+            agent.chat_history = new_history
+        except Exception:
+            pass
 
 
 class InteractiveREPL:
@@ -72,9 +148,116 @@ class InteractiveREPL:
         self._total_cost = 0.0
         self._registry = None  # Unified command registry (lazy)
         self._pending_context: List[str] = []  # `!!cmd` output for next turn
+        self._checkpoints = None  # SessionCheckpointManager (lazy)
+        self._checkpoints_ready = False
         
         # Setup commands
         self.io.add_commands(DEFAULT_COMMANDS)
+
+    def _get_checkpoints(self):
+        """Lazily build the coherent turn-checkpoint manager for this session.
+
+        Binds ``SessionCheckpointManager`` to a view over the REPL's in-memory
+        conversation history so ``/undo`` and ``/revert`` roll back **files and
+        chat history together** — the same engine the legacy REPL uses, now on
+        the default path. Enabled by default for interactive runs (``default``
+        ``True``); opt out with ``checkpoints.auto: false`` or
+        ``PRAISONAI_CHECKPOINTS=off``. Degrades to ``None`` on any failure so a
+        checkpoint problem never breaks the REPL.
+        """
+        if self._checkpoints_ready:
+            return self._checkpoints
+        self._checkpoints_ready = True
+        try:
+            import os
+
+            from ..features.session_checkpoints import SessionCheckpointManager
+
+            config = None
+            try:
+                from ..configuration.resolver import resolve_config
+
+                config = resolve_config().extra
+            except Exception:
+                config = None
+
+            store = _InMemoryConversationStore(
+                self._conversation_history,
+                agent_provider=lambda: self._agent,
+            )
+            mgr = SessionCheckpointManager.from_config(
+                workspace_dir=(
+                    os.environ.get("PRAISONAI_WORKSPACE")
+                    or self.config.workspace
+                    or os.getcwd()
+                ),
+                config=config,
+                verbose=self.config.verbose,
+                session_store=store,
+                session_id=self._session_id or "repl",
+                default=True,
+            )
+            if mgr.enabled:
+                mgr.checkpoint_turn("session start")
+                self._checkpoints = mgr
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Session checkpoints unavailable: %s", exc)
+            self._checkpoints = None
+        return self._checkpoints
+
+    def _checkpoint_turn(self, label: str) -> None:
+        """Record a pre-turn checkpoint so the revert timeline exists."""
+        ckpt = self._get_checkpoints()
+        if ckpt is not None:
+            try:
+                ckpt.checkpoint_turn(label)
+            except Exception:  # pragma: no cover - never break a turn
+                pass
+
+    def _handle_undo(self) -> None:
+        """/undo — roll files + conversation back to the previous turn."""
+        ckpt = self._get_checkpoints()
+        if ckpt is None or not getattr(ckpt, "enabled", False) or not ckpt.turns:
+            self.io.tool_warning("Nothing to undo.")
+            return
+        self.io.info("Changes that will be undone (last turn):")
+        ckpt.preview(1)
+        restored = ckpt.revert(1)
+        if restored:
+            self.io.success(f"Reverted files + conversation to {restored.short_id}")
+        else:
+            self.io.tool_warning("No checkpoint to undo.")
+
+    def _handle_revert(self, args: str) -> None:
+        """/revert [n] — roll files + conversation back n turns (default 1)."""
+        ckpt = self._get_checkpoints()
+        if ckpt is None or not getattr(ckpt, "enabled", False):
+            self.io.tool_warning(
+                "Checkpointing is disabled. Enable with checkpoints.auto: true "
+                "or PRAISONAI_CHECKPOINTS=on."
+            )
+            return
+        if not ckpt.turns:
+            self.io.tool_warning("No checkpoints to revert to.")
+            return
+        n = 1
+        token = str(args).strip().lower()
+        if token and token != "last":
+            try:
+                n = int(token)
+            except ValueError:
+                self.io.tool_warning("Usage: /revert [n|last]")
+                return
+        if n < 1 or n > len(ckpt.turns):
+            self.io.tool_warning(f"Can only revert 1..{len(ckpt.turns)} turn(s).")
+            return
+        self.io.info(f"Changes that will be undone (last {n} turn(s)):")
+        ckpt.preview(n)
+        restored = ckpt.revert(n)
+        if restored:
+            self.io.success(f"Reverted files + conversation to {restored.short_id}")
+        else:
+            self.io.tool_warning("Failed to revert.")
 
     def _get_registry(self):
         """Lazily build the unified command registry (built-ins + custom).
@@ -214,6 +397,14 @@ class InteractiveREPL:
         
         elif cmd == "btw":
             self._handle_btw(args)
+            return True
+        
+        elif cmd == "undo":
+            self._handle_undo()
+            return True
+        
+        elif cmd == "revert":
+            self._handle_revert(args)
             return True
         
         else:
@@ -454,6 +645,11 @@ class InteractiveREPL:
                 if user_input.startswith("/"):
                     self._handle_command(user_input)
                     continue
+                
+                # Checkpoint files + conversation at the turn boundary before
+                # the agent may mutate the workspace, so /undo and /revert can
+                # roll both back together to this point.
+                self._checkpoint_turn(user_input[:60])
                 
                 # Show thinking indicator
                 self.io.print_assistant_start()

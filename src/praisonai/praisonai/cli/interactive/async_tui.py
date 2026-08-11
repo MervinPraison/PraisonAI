@@ -230,6 +230,8 @@ class AsyncTUI:
         self._runtime = None  # InteractiveRuntime for ACP/LSP
         self._runtime_started = False
         self._registry = None  # Unified command registry (lazy)
+        self._checkpoints = None  # SessionCheckpointManager (lazy)
+        self._checkpoints_ready = False
         self._prev_permission_mode = None  # Approval mode to restore when leaving PLAN
         # Sync PLAN indicator/toggle with a backend launched via --approval plan.
         self._sync_plan_mode_from_backend()
@@ -262,6 +264,123 @@ class AsyncTUI:
         except Exception:
             pass
     
+    def _get_checkpoints(self):
+        """Lazily build the coherent turn-checkpoint manager for this session.
+
+        Binds ``SessionCheckpointManager`` to a view over the TUI's in-memory
+        conversation history so ``/undo`` and ``/revert`` roll back **files and
+        chat history together** on the default path — the same proven engine the
+        legacy REPL uses. Enabled by default for interactive runs
+        (``default=True``); opt out with ``checkpoints.auto: false`` or
+        ``PRAISONAI_CHECKPOINTS=off``. Degrades to ``None`` on any failure so a
+        checkpoint problem never breaks the TUI.
+        """
+        if self._checkpoints_ready:
+            return self._checkpoints
+        self._checkpoints_ready = True
+        try:
+            from praisonai_code.cli.interactive.repl import (
+                _InMemoryConversationStore,
+            )
+            from praisonai.cli.features.session_checkpoints import (
+                SessionCheckpointManager,
+            )
+
+            config = None
+            try:
+                from praisonai.cli.configuration.resolver import resolve_config
+
+                config = resolve_config().extra
+            except Exception:
+                config = None
+
+            store = _InMemoryConversationStore(
+                self._conversation_history,
+                agent_provider=lambda: self._agent,
+            )
+            mgr = SessionCheckpointManager.from_config(
+                workspace_dir=(
+                    os.environ.get("PRAISONAI_WORKSPACE")
+                    or self.config.workspace
+                    or os.getcwd()
+                ),
+                config=config,
+                verbose=self.config.debug,
+                session_store=store,
+                session_id=self.session_id or "tui",
+                default=True,
+            )
+            if mgr.enabled:
+                mgr.checkpoint_turn("session start")
+                self._checkpoints = mgr
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Session checkpoints unavailable: %s", exc)
+            self._checkpoints = None
+        return self._checkpoints
+
+    def _checkpoint_turn(self, label: str) -> None:
+        """Record a pre-turn checkpoint so the revert timeline exists."""
+        ckpt = self._get_checkpoints()
+        if ckpt is not None:
+            try:
+                ckpt.checkpoint_turn(label)
+            except Exception:  # pragma: no cover - never break a turn
+                pass
+
+    def _handle_undo(self) -> None:
+        """/undo — roll files + conversation back to the previous turn."""
+        ckpt = self._get_checkpoints()
+        if ckpt is None or not getattr(ckpt, "enabled", False) or not ckpt.turns:
+            self.messages.append(ChatMessage(role="system", content="Nothing to undo."))
+            return
+        ckpt.preview(1)
+        restored = ckpt.revert(1)
+        if restored:
+            self.messages.append(ChatMessage(
+                role="system",
+                content=f"Undone last turn — files + conversation reverted to {restored.short_id}.",
+            ))
+        else:
+            self.messages.append(ChatMessage(role="system", content="No checkpoint to undo."))
+
+    def _handle_revert(self, args: str) -> None:
+        """/revert [n] — roll files + conversation back n turns (default 1)."""
+        ckpt = self._get_checkpoints()
+        if ckpt is None or not getattr(ckpt, "enabled", False):
+            self.messages.append(ChatMessage(
+                role="system",
+                content=(
+                    "Checkpointing is disabled. Enable with checkpoints.auto: true "
+                    "or PRAISONAI_CHECKPOINTS=on."
+                ),
+            ))
+            return
+        if not ckpt.turns:
+            self.messages.append(ChatMessage(role="system", content="No checkpoints to revert to."))
+            return
+        n = 1
+        token = str(args).strip().lower()
+        if token and token != "last":
+            try:
+                n = int(token)
+            except ValueError:
+                self.messages.append(ChatMessage(role="system", content="Usage: /revert [n|last]"))
+                return
+        if n < 1 or n > len(ckpt.turns):
+            self.messages.append(ChatMessage(
+                role="system", content=f"Can only revert 1..{len(ckpt.turns)} turn(s).",
+            ))
+            return
+        ckpt.preview(n)
+        restored = ckpt.revert(n)
+        if restored:
+            self.messages.append(ChatMessage(
+                role="system",
+                content=f"Reverted {n} turn(s) — files + conversation restored to {restored.short_id}.",
+            ))
+        else:
+            self.messages.append(ChatMessage(role="system", content="Failed to revert."))
+
     def _process_file_mentions(self, prompt: str) -> str:
         """Process @file mentions and include file contents."""
         import os
@@ -645,6 +764,8 @@ class AsyncTUI:
         "multiline": "Toggle multiline input mode",
         "files": "List workspace files for @ mentions",
         "queue": "Show pending prompts in queue",
+        "undo": "Undo the last turn (files + conversation)",
+        "revert": "Revert the last N turns (files + conversation)",
     }
 
     def _get_registry(self):
@@ -708,6 +829,8 @@ class AsyncTUI:
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
   /queue           Show pending prompts in queue
+  /undo            Undo the last turn (files + conversation)
+  /revert [n]      Revert the last N turns (files + conversation)
 
 Keyboard Shortcuts:
   PageUp/Down      Scroll output
@@ -1101,6 +1224,14 @@ Example: /handoff code "refactor the auth module" """
                         ))
             return True
         
+        elif cmd == "undo":
+            self._handle_undo()
+            return True
+        
+        elif cmd == "revert":
+            self._handle_revert(args)
+            return True
+        
         else:
             # Not a built-in: consult the unified command registry so custom
             # .praisonai/commands/*.md commands are first-class /name commands.
@@ -1362,6 +1493,13 @@ Example: /handoff code "refactor the auth module" """
                 prompt if skip_file_mentions
                 else self._process_file_mentions(prompt)
             )
+            
+            # Checkpoint files + conversation at the turn boundary before the
+            # agent may mutate the workspace, so /undo and /revert can roll both
+            # back together. Read-only turns (reviews) never mutate files, so
+            # skip them to keep the revert timeline meaningful.
+            if not read_only:
+                self._checkpoint_turn(prompt[:60])
             
             # Add to conversation history
             self._conversation_history.append({"role": "user", "content": prompt})

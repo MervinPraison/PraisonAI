@@ -717,6 +717,134 @@ def _restore_checkpoint(ref: str, workspace_dir: Optional[str] = None) -> None:
         raise typer.Exit(1)
 
 
+def _revert_checkpoint(
+    ref: str, *, session: Optional[str] = None, workspace_dir: Optional[str] = None
+) -> None:
+    """Revert files + conversation together to a prior turn, then exit.
+
+    Distinct from the file-only ``--restore``: this shows the diff first and,
+    when a ``--session`` is provided, also rewinds that session's conversation
+    to the same boundary so chat history and workspace stay in lockstep — the
+    same coherent-undo contract the interactive REPL/TUI ``/undo`` uses. Without
+    a session it degrades to a previewed file-only revert (nothing to keep in
+    sync).
+    """
+    import asyncio
+    import os
+
+    from praisonai_code.cli.features.checkpoints import CheckpointsHandler
+
+    output = get_output_controller()
+    workspace_dir = workspace_dir or os.getcwd()
+    handler = CheckpointsHandler(
+        workspace_dir=workspace_dir,
+        storage_dir=_checkpoints_storage_dir(),
+    )
+
+    # Resolve how many turns back to go: 'last'/'' -> 1, else an integer.
+    token = (ref or "last").strip().lower()
+    n = 1
+    if token and token not in ("last", "latest"):
+        try:
+            n = int(token)
+        except ValueError:
+            output.print_error("Usage: --revert [last|N]")
+            raise typer.Exit(1)
+        if n < 1:
+            output.print_error("--revert N must be >= 1")
+            raise typer.Exit(1)
+
+    async def _run() -> bool:
+        service = await handler._get_service()
+        checkpoints = await service.list_checkpoints(limit=100)
+        if not checkpoints or len(checkpoints) < n:
+            handler._print_error(
+                f"No checkpoint {n} turn(s) back to revert to"
+            )
+            return False
+        # checkpoints[0] is the most recent; index n-1 is the target boundary.
+        target = checkpoints[n - 1]
+        # Show the diff that will be undone before touching anything.
+        try:
+            await service.diff(target.id, None)
+        except Exception:
+            pass
+        return await handler.restore(target.id)
+
+    if not asyncio.run(_run()):
+        raise typer.Exit(1)
+
+    # Rewind the conversation to keep it in lockstep with the reverted files.
+    # Best-effort and only when a session was named; a failure here must not
+    # undo the already-restored workspace.
+    if session:
+        # File checkpoints are workspace-wide (they carry no session tag), so
+        # when several sessions share a workspace the Nth-back file checkpoint
+        # may belong to a different session than the one whose conversation we
+        # rewind. Surface that explicitly rather than implying a guaranteed
+        # per-session pairing; the interactive REPL/TUI ``/undo`` — which keeps
+        # its own captured per-turn boundaries — remains the fully coherent path.
+        output.print_info(
+            "Note: file checkpoints are workspace-wide; in a workspace shared by "
+            "multiple sessions the reverted files may not correspond exactly to "
+            f"session '{session}'. Use the interactive /undo for per-session coherence."
+        )
+        try:
+            from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+
+            from ..utils.project import get_project_sessions_dir
+
+            store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+            data = store.get_extended_session(session)
+            messages = list(getattr(data, "messages", []) or [])
+            # Rewind the conversation to the boundary *before* the last ``n``
+            # user turns. Counting real user messages (rather than assuming two
+            # messages per turn) keeps history coherent when a turn also
+            # persisted tool/system/assistant messages — subtracting a fixed
+            # ``2 * n`` would otherwise leave orphaned tool replies or drop an
+            # unrelated earlier turn.
+            user_indices = [
+                i for i, m in enumerate(messages)
+                if isinstance(m, dict) and m.get("role") == "user"
+            ]
+            if len(user_indices) >= n:
+                # The first user message of the last ``n`` turns marks where the
+                # undone turns begin; keep everything strictly before it.
+                boundary = user_indices[len(user_indices) - n]
+                keep = boundary  # number of messages to retain
+                if keep >= 1:
+                    # revert_to_message keeps messages[:index + 1]; target keep-1.
+                    store.revert_to_message(session, keep - 1)
+                    output.print_info(
+                        f"Reverted session '{session}' conversation to keep "
+                        f"{keep} message(s)."
+                    )
+                elif messages:
+                    # Rewinding to empty would strand a ghost first message via
+                    # revert_to_message (index 0 keeps one), so clear explicitly
+                    # when the store supports it; otherwise leave history intact.
+                    clear = getattr(store, "clear_messages", None)
+                    if callable(clear):
+                        clear(session)
+                        output.print_info(
+                            f"Reverted files and cleared session '{session}' "
+                            "conversation."
+                        )
+                    else:
+                        output.print_info(
+                            f"Reverted files; session '{session}' conversation "
+                            "left intact (too short to rewind coherently)."
+                        )
+            elif messages:
+                output.print_info(
+                    f"Reverted files; session '{session}' conversation has "
+                    f"fewer than {n} turn(s) to rewind — left intact."
+                )
+        except Exception as e:  # pragma: no cover - defensive
+            if getattr(output, "is_verbose", False):
+                output.print_info(f"Conversation rewind skipped: {e}")
+
+
 def _try_attach_runtime(
     prompt: str,
     *,
@@ -952,7 +1080,8 @@ def run_main(
     thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
     # Checkpoint / rewind
     no_checkpoint: bool = typer.Option(False, "--no-checkpoint", help="Disable automatic file checkpoint before the run"),
-    restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
+    restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace files only to a checkpoint id (or 'last') and exit"),
+    revert: Optional[str] = typer.Option(None, "--revert", help="Revert files + conversation together to a prior turn ('last' or N), showing the diff first, and exit", flag_value="last", is_flag=False),
     # Warm-runtime live session: tag this run so other terminals can `attach`.
     attach: Optional[str] = typer.Option(None, "--attach", help="Run on the warm runtime under this session id so other terminals can observe it via `praisonai attach <id>`"),
     # Per-run git-worktree isolation: run on a fresh branch/worktree.
@@ -989,6 +1118,13 @@ def run_main(
     # --restore last` is a pure undo that never drains a pipe it won't use.
     if restore:
         _restore_checkpoint(restore)
+        return
+
+    # Coherent rewind: roll files *and* conversation back to a prior turn and
+    # exit. Distinct from the file-only ``--restore`` above — this reuses the
+    # SessionCheckpointManager so chat history and workspace stay in lockstep.
+    if revert is not None:
+        _revert_checkpoint(revert, session=session)
         return
 
     # Merge config-declared instruction sources (layered global→project) with
