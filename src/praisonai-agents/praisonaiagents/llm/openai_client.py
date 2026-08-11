@@ -1735,7 +1735,7 @@ class OpenAIClient:
                         tool_result = {"error": str(tool_error)}
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
-                    except TypeError:
+                    except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
                     
@@ -2030,7 +2030,7 @@ class OpenAIClient:
 
                     try:
                         results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
-                    except TypeError:
+                    except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
                     

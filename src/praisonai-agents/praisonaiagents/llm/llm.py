@@ -2725,7 +2725,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                     if tool_result is not None:
                                         try:
                                             json.dumps(tool_result)
-                                        except TypeError:
+                                        except (TypeError, ValueError):
                                             logging.warning(f"Result of '{tool_result_obj.function_name}' not JSON serializable, converting to string")
                                             tool_result = {"result": str(tool_result)}
                                 tool_results.append(tool_result)
@@ -3504,7 +3504,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             if tool_result is not None:
                                 try:
                                     json.dumps(tool_result)
-                                except TypeError:
+                                except (TypeError, ValueError):
                                     logging.warning(f"Result of '{function_name}' not JSON serializable, converting to string")
                                     tool_result = {"result": str(tool_result)}
                             logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result} (call #{tool_call_count})")
