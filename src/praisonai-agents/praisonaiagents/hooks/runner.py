@@ -232,13 +232,18 @@ class HookRunner:
         except Exception as e:
             duration = (time.time() - start_time) * 1000
             logger.warning(f"Hook '{hook.name}' failed: {e}")
+            # Fail closed: a hook that raises is treated as an explicit denial
+            # rather than a silent pass-through, so security gates (e.g.
+            # BEFORE_TOOL) correctly block instead of allowing the call. This
+            # matches the fail-closed posture used by GuardrailChain.
             return HookExecutionResult(
                 hook_id=hook.id,
                 hook_name=hook.name or "unknown",
                 event=event,
                 success=False,
                 error=str(e),
-                duration_ms=duration
+                duration_ms=duration,
+                output=HookResult(decision="deny", reason=f"Hook '{hook.name}' raised: {e}")
             )
     
     async def _execute_command_hook(
@@ -283,13 +288,15 @@ class HookRunner:
                 process.kill()
                 await process.wait()
                 duration = (time.time() - start_time) * 1000
+                # Fail closed: a hook that times out is treated as a denial.
                 return HookExecutionResult(
                     hook_id=hook.id,
                     hook_name=hook.name or "unknown",
                     event=event,
                     success=False,
                     error=f"Hook timed out after {timeout}s",
-                    duration_ms=duration
+                    duration_ms=duration,
+                    output=HookResult(decision="deny", reason=f"Hook '{hook.name}' timed out after {timeout}s")
                 )
             
             duration = (time.time() - start_time) * 1000
@@ -314,13 +321,15 @@ class HookRunner:
             
         except Exception as e:
             duration = (time.time() - start_time) * 1000
+            # Fail closed: a hook that raises is treated as a denial.
             return HookExecutionResult(
                 hook_id=hook.id,
                 hook_name=hook.name or "unknown",
                 event=event,
                 success=False,
                 error=str(e),
-                duration_ms=duration
+                duration_ms=duration,
+                output=HookResult(decision="deny", reason=f"Hook '{hook.name}' raised: {e}")
             )
     
     async def _execute_function_hook(
@@ -389,23 +398,29 @@ class HookRunner:
             
         except asyncio.TimeoutError:
             duration = (time.time() - start_time) * 1000
+            # Fail closed: a hook that times out is treated as a denial so
+            # security gates (e.g. BEFORE_TOOL) block instead of allowing.
             return HookExecutionResult(
                 hook_id=hook.id,
                 hook_name=hook.name or "unknown",
                 event=event,
                 success=False,
                 error=f"Hook timed out after {timeout}s",
-                duration_ms=duration
+                duration_ms=duration,
+                output=HookResult(decision="deny", reason=f"Hook '{hook.name}' timed out after {timeout}s")
             )
         except Exception as e:
             duration = (time.time() - start_time) * 1000
+            # Fail closed: a hook that raises is treated as a denial rather than
+            # a silent pass-through, matching GuardrailChain's posture.
             return HookExecutionResult(
                 hook_id=hook.id,
                 hook_name=hook.name or "unknown",
                 event=event,
                 success=False,
                 error=str(e),
-                duration_ms=duration
+                duration_ms=duration,
+                output=HookResult(decision="deny", reason=f"Hook '{hook.name}' raised: {e}")
             )
     
     def _expand_command(self, command: str, input_data: HookInput) -> str:
